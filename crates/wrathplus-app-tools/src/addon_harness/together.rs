@@ -93,7 +93,8 @@ fn survey_together_once(root: &Path) -> Vec<(String, Vec<String>)> {
         return Vec::new();
     };
     script.set_screen_size(1024.0, 768.0);
-    script.register_addons(registry, Some(root.to_path_buf()), None, None);
+    let folder = crate::ui_script::addons::folder_reader(root.to_path_buf());
+    script.register_addons(registry, Some(folder), None, None);
     super::seat_a_session(&mut script);
     let _ = crate::ui_script::load_default_ui(&mut script);
 

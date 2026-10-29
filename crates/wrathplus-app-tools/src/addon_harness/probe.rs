@@ -69,9 +69,9 @@ pub fn probe(root: &Path, name: &str, steps: &[Step]) -> Option<ProbeOutcome> {
     };
     script.set_instruction_budget(super::ADDON_INSTRUCTION_BUDGET);
     script.set_screen_size(1024.0, 768.0);
-    // No saved-variable roots, so a probe never touches a player's saved variables; the AddOns
-    // root is passed as the survey passes it, so `LoadAddOn` resolves.
-    script.register_addons(registry, Some(root.to_path_buf()), None, None);
+    // No saved-variable roots, and the AddOns folder as the survey passes it, for `LoadAddOn`.
+    let folder = crate::ui_script::addons::folder_reader(root.to_path_buf());
+    script.register_addons(registry, Some(folder), None, None);
     super::seat_a_session(&mut script);
     let _ = crate::ui_script::load_default_ui(&mut script);
 

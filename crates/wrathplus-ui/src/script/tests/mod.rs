@@ -52,6 +52,7 @@ mod talent;
 mod taxi;
 mod texcoord_font;
 mod tooltip;
+mod tooltip_get_spell;
 mod tooltip_item;
 mod tooltip_owner;
 mod tooltip_spell;

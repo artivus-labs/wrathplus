@@ -19,6 +19,11 @@ use super::content;
 mod blizzard;
 pub(super) use blizzard::load_wrath_startup_blizzard;
 
+#[path = "addons_read.rs"]
+mod read;
+pub use read::folder_reader;
+use read::read_under;
+
 /// The VM instruction bound for one addon's load, shared with the addon harness: about 50x the
 /// corpus's heaviest (4M), so an addon that crosses it is in a runaway loop and fails alone.
 pub const LOAD_INSTRUCTION_BUDGET: u64 = 200_000_000;
@@ -290,20 +295,6 @@ fn is_lua(entry: &str) -> bool {
         .unwrap_or(entry)
         .rsplit_once('.')
         .is_some_and(|(_, ext)| ext.eq_ignore_ascii_case("lua"))
-}
-
-/// `root/rel`, refusing to escape `root`. `rel` is already resolved by
-/// [`wrathplus_ui::loader::join_ref`], so an escape shows as a leading `..`, refused with anything
-/// absolute before any filesystem call; a symlinked addon folder still works.
-fn read_under(root: &Path, rel: &str) -> Option<Vec<u8>> {
-    let rel = Path::new(rel);
-    if rel
-        .components()
-        .any(|c| !matches!(c, std::path::Component::Normal(_)))
-    {
-        return None;
-    }
-    std::fs::read(root.join(rel)).ok()
 }
 
 /// The one file namespace, install-relative, as in the reference: `0x647e60` answers a name from
@@ -816,7 +807,7 @@ pub(super) fn load_wrath_third_party(
     }
     script.register_addons(
         infos,
-        root(),
+        root().map(folder_reader),
         crate::local_state::addon_saved_account_dir(),
         identity.and_then(|(realm, character)| {
             crate::local_state::addon_saved_character_dir(realm, character)

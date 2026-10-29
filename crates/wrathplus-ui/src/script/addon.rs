@@ -12,11 +12,11 @@ use super::binding_abi::flag;
 use super::Model;
 use crate::status::Status;
 
-/// Reads a chain-sourced addon's file by its path inside the patch chain.
-pub type AddonChainReader = Box<dyn Fn(&str) -> Option<Vec<u8>>>;
+/// The host's reader of an addon's file by path, in the patch chain or `<Name>/<file>` in AddOns.
+pub type AddonReader = Box<dyn Fn(&str) -> Option<Vec<u8>>>;
 
-/// [`AddonChainReader`], shared so a load can call it without holding the model.
-pub(crate) type SharedChainReader = std::rc::Rc<dyn Fn(&str) -> Option<Vec<u8>>>;
+/// [`AddonReader`], shared so a load can call it without holding the model.
+pub(crate) type SharedReader = std::rc::Rc<dyn Fn(&str) -> Option<Vec<u8>>>;
 
 /// One addon as the AddOn API sees it, filled by the host at discovery.
 #[derive(Clone, Debug, Default)]
@@ -422,12 +422,12 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
 /// `AddOn_Load` (`0x51f240`), dependencies first; `Err` is the reason token. Synchronous inside
 /// the Lua call, as stock callers use the addon on the next line (`UIParent.lua:577`).
 fn load_addon(lua: &Lua, i: usize) -> Result<(), String> {
-    let (name, root, files, deps, already, chain, chain_reader) = {
+    let (name, folder, files, deps, already, chain, chain_reader) = {
         let model = lua.app_data_ref::<Model>().expect("model");
         let a = &model.addons[i];
         (
             a.name.clone(),
-            model.addons_root.clone(),
+            model.addons_folder.clone(),
             a.files.clone(),
             a.dependencies.clone(),
             a.loaded,
@@ -453,10 +453,10 @@ fn load_addon(lua: &Lua, i: usize) -> Result<(), String> {
         };
         Box::new(move |req: &str| reader(&format!("Interface/AddOns/{req}")))
     } else {
-        let Some(root) = root else {
+        let Some(reader) = folder else {
             return Err("MISSING".into());
         };
-        Box::new(move |req: &str| read_under(&root, req))
+        Box::new(move |req: &str| reader(req))
     };
 
     // Loaded is stamped after the gate (`0x51f2fa`), so a refusal stays retryable, and before the
@@ -521,7 +521,7 @@ fn load_addon(lua: &Lua, i: usize) -> Result<(), String> {
 
 /// Register the addon's `Bindings.xml` where the reference loads it (`0x51f400`): after the
 /// addon's files, whose functions its bindings call, and before its saved variables. A missing
-/// file is the normal case and silent; it reads through the same sandbox as the other files.
+/// file is the normal case and silent; it reads through the same reader as the other files.
 fn load_bindings(lua: &Lua, name: &str, read: &Reader) {
     let path = crate::loader::join_ref(name, "Bindings.xml");
     let Some(bytes) = read(&path) else {
@@ -670,19 +670,6 @@ fn load_failure(lua: &Lua, msg: &str) {
         .warn_host_only(msg);
 }
 
-/// Read `root/rel`, refusing a path that leaves `root`, lexically before any filesystem call;
-/// `join_ref` has already resolved the path, so an escape shows as a leading `..`.
-fn read_under(root: &std::path::Path, rel: &str) -> Option<Vec<u8>> {
-    let rel = std::path::Path::new(rel);
-    if rel
-        .components()
-        .any(|c| !matches!(c, std::path::Component::Normal(_)))
-    {
-        return None;
-    }
-    std::fs::read(root.join(rel)).ok()
-}
-
 /// Run a chunk read off disk, BOM stripped: [`crate::script::UiScript::run_chunk`] for the
 /// demand-load path, which has no `UiScript`.
 fn run_chunk(lua: &Lua, bytes: &[u8], name: &str) -> mlua::Result<()> {
@@ -745,14 +732,14 @@ fn log_error(lua: &Lua, msg: &str) {
 /// The host's side: the registry, where its files live, and what to write back.
 impl super::UiScript {
     /// Seat the reader chain-sourced addons (`AddOnInfo::chain`) are read through.
-    pub fn set_addon_chain_reader(&self, reader: AddonChainReader) {
+    pub fn set_addon_chain_reader(&self, reader: AddonReader) {
         self.model_mut().addons_chain_reader = Some(std::rc::Rc::from(reader));
     }
-    /// Replace the AddOn registry; called once at world entry, after discovery.
+    /// Replace the AddOn registry, `folder` reading the AddOns folder; once at world entry.
     pub fn register_addons(
         &mut self,
         mut addons: Vec<AddOnInfo>,
-        root: Option<PathBuf>,
+        folder: Option<AddonReader>,
         saved_account: Option<PathBuf>,
         saved_character: Option<PathBuf>,
     ) {
@@ -762,7 +749,7 @@ impl super::UiScript {
         }
         let mut model = self.model_mut();
         model.addons = addons;
-        model.addons_root = root;
+        model.addons_folder = folder.map(std::rc::Rc::from);
         model.addons_saved_account = saved_account;
         model.addons_saved_character = saved_character;
         // The reference builds the array when the server's reply lands, before world entry, so

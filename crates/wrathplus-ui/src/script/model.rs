@@ -73,10 +73,10 @@ pub(crate) struct Model {
     pub(crate) addon_enable: super::EnableHash,
     /// The hash as the host read it from the file, what `ResetDisabledAddOns` reloads (`0x48e830`).
     pub(crate) addon_enable_saved: super::EnableHash,
-    /// The AddOns folder, so `LoadAddOn` can read an addon's files from inside a Lua binding.
-    pub(crate) addons_root: Option<std::path::PathBuf>,
+    /// The host's AddOns-folder reader, so `LoadAddOn` reads a player's addon inside a Lua binding.
+    pub(crate) addons_folder: Option<super::addon::SharedReader>,
     /// The host's reader for chain-sourced addon files; without one such an addon is `MISSING`.
-    pub(crate) addons_chain_reader: Option<super::addon::SharedChainReader>,
+    pub(crate) addons_chain_reader: Option<super::addon::SharedReader>,
     /// The host's font engine, so a metric answers inside the asking call, not a frame later.
     pub(crate) measurer: Option<Box<dyn super::TextMeasure>>,
     /// Whether a texture path resolves (patch chain or loose addon file), so the path form of
@@ -1121,7 +1121,7 @@ impl Model {
             addon_info_hidden: None,
             addon_enable: Default::default(),
             addon_enable_saved: Default::default(),
-            addons_root: None,
+            addons_folder: None,
             addons_chain_reader: None,
             measurer: None,
             texture_probe: None,

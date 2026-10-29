@@ -284,7 +284,7 @@ pub(super) fn clear_content(model: &mut Model, h: FrameHandle) {
         }
     }
     if let Ok(t) = tip_mut(model, h) {
-        t.item = None;
+        (t.item, t.spell) = (None, None);
     }
     // `AddTexture`'s icons hide and their lines' indents return to the plain line anchor.
     let textures = tip_mut(model, h)

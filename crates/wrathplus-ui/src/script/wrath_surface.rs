@@ -5,6 +5,9 @@
 
 use mlua::{Lua, MultiValue, Value};
 
+#[path = "wrath_attributes.rs"]
+mod wrath_attributes;
+
 #[path = "wrath_cooldown.rs"]
 mod wrath_cooldown;
 pub(super) use wrath_cooldown::REG_COOLDOWN_METHODS;
@@ -47,6 +50,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     super::aura::wrath::install(lua)?;
     install_trusted_secure_environment(lua)?;
     install_frame_methods(lua)?;
+    wrath_attributes::install(lua)?;
     wrath_cooldown::install(lua)?;
     super::wrath_quest_poi::blob::install(lua)?;
     super::wrath_quest_poi::order::install(lua)?;
@@ -69,8 +73,7 @@ fn install_compat(lua: &Lua) -> mlua::Result<()> {
         .exec()
 }
 
-/// Wrath-era methods every frame kind shares: attributes (the state the secure templates key
-/// on), `HookScript`, and the protection queries, which answer "not protected" for every frame.
+/// Wrath-era methods every frame kind shares: `HookScript` and the "not protected" queries.
 fn install_frame_methods(lua: &Lua) -> mlua::Result<()> {
     let methods: mlua::Table = lua.named_registry_value(super::REG_FRAME_METHODS)?;
     let table = |name: &str| lua.named_registry_value::<mlua::Table>(name);
@@ -121,30 +124,7 @@ fn install_frame_methods(lua: &Lua) -> mlua::Result<()> {
             minimaps.SetPlayerTextureHeight = minimaps.SetPlayerTextureHeight or function() end
             minimaps.SetPlayerTextureWidth = minimaps.SetPlayerTextureWidth or function() end
             function methods.IgnoreDepth() end
-            local attributes = setmetatable({}, { __mode = "k" })
             local clamp = setmetatable({}, { __mode = "k" })
-            function methods.SetAttribute(self, name, value)
-                local own = attributes[self]
-                if not own then own = {} attributes[self] = own end
-                own[name] = value
-                local handler = self:GetScript("OnAttributeChanged")
-                if handler then handler(self, name, value) end
-            end
-            -- `GetAttribute(prefix, name, suffix)`, the secure templates' modified lookup
-            -- (`SecureButton_GetModifiedAttribute`): `prefix..name..suffix`, then each side
-            -- wildcarded with "*", then the bare name.
-            function methods.GetAttribute(self, prefix, name, suffix)
-                local own = attributes[self]
-                if not own then return nil end
-                if name == nil then return own[prefix] end
-                prefix, suffix = prefix or "", suffix or ""
-                local value = own[prefix .. name .. suffix]
-                if value == nil then value = own["*" .. name .. suffix] end
-                if value == nil then value = own[prefix .. name .. "*"] end
-                if value == nil then value = own["*" .. name .. "*"] end
-                if value == nil then value = own[name] end
-                return value
-            end
             function methods.HookScript(self, kind, hook)
                 local original = self:GetScript(kind)
                 if original then
@@ -414,27 +394,6 @@ mod tests {
                  hooksecurefunc('Probe', function(a) calls = calls + 10 end) \
                  return issecure() and securecall(Probe, 3) == 6 and securecall('Probe', 1) == 2 \
                     and calls == 24"
-            )
-            .unwrap());
-    }
-
-    #[test]
-    fn attributes_store_per_frame_and_fire_on_attribute_changed() {
-        let script = UiScript::new().unwrap();
-        let doc = crate::framexml::parse(
-            r#"<Ui><Button name="Unitish"><Scripts>
-                <OnAttributeChanged>SEEN = name .. "=" .. tostring(value)</OnAttributeChanged>
-            </Scripts></Button></Ui>"#,
-        )
-        .unwrap();
-        let report = crate::loader::load(&script, &doc, &|_| None);
-        assert!(report.errors.is_empty(), "{:?}", report.errors);
-        assert!(script
-            .eval::<bool>(
-                "Unitish:SetAttribute('unit', 'target') \
-                 local other = CreateFrame('Frame') \
-                 return Unitish:GetAttribute('unit') == 'target' and SEEN == 'unit=target' \
-                    and other:GetAttribute('unit') == nil and Unitish:IsProtected() == nil"
             )
             .unwrap());
     }

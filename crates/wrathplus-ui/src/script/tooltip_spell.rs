@@ -20,6 +20,10 @@ use super::tooltip::{append_line, clear_content, fire_cleared, tip_mut};
 use super::{Model, TrainerTooltip};
 use crate::widget::FrameHandle;
 
+#[path = "tooltip_spell_fill.rs"]
+mod fill;
+use fill::fill_spell;
+
 const WHITE: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
 /// The rank column's gray, `0xff808080`.
 const GRAY: [f32; 4] = [128.0 / 255.0, 128.0 / 255.0, 128.0 / 255.0, 1.0];
@@ -487,43 +491,6 @@ pub(super) fn set_spell_by_id(
     }
     fire_cleared(lua, h);
     fill_spell(lua, this, h, spell_id, fallback_name, opts, remaining)
-}
-
-/// Fill a cleared tooltip with the spell's view, or with the fallback name and a wait on the ask.
-fn fill_spell(
-    lua: &Lua,
-    this: &Table,
-    h: FrameHandle,
-    spell_id: u32,
-    fallback_name: Option<String>,
-    opts: SpellRenderOpts,
-    remaining: Option<String>,
-) -> mlua::Result<()> {
-    match spell_view_of(lua, spell_id, opts.alt_caster) {
-        Some(v) => render_spell(lua, this, &v, opts, remaining, None)?,
-        None => {
-            if let Some(name) = fallback_name.clone() {
-                append_line(lua, this, (name, WHITE), None, false)?;
-            }
-            // The fallback stands until the app answers the ask; id 0 asks nothing.
-            if spell_id != 0 {
-                let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-                let drawn = drawn_lines(&mut model, h)?;
-                model.spell_tooltip_waits.insert(
-                    h,
-                    SpellWait {
-                        spell_id,
-                        fallback_name,
-                        opts,
-                        remaining,
-                        drawn,
-                    },
-                );
-            }
-        }
-    }
-    super::tooltip::finish_content(lua, h, "OnTooltipSetSpell");
-    Ok(())
 }
 
 /// Register the spell and aura content methods on the GameTooltip method table.

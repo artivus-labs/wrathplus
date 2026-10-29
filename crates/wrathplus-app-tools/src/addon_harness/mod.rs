@@ -255,10 +255,9 @@ fn survey_one(
     // corpus addon (Enchantrix, 4M instructions), so a runaway reports in about a second.
     script.set_instruction_budget(ADDON_INSTRUCTION_BUDGET);
     script.set_screen_size(1024.0, 768.0);
-    // The AddOn API answers for the whole installed set before anything runs. The saved-variable
-    // roots are `None`, so a survey never reads or writes a player's; the AddOns root is passed, so
-    // `LoadAddOn("<folder addon>")` does not answer `MISSING`.
-    script.register_addons(registry.to_vec(), Some(root.to_path_buf()), None, None);
+    // The whole installed set, no saved-variable roots, and the folder so `LoadAddOn` resolves.
+    let folder = crate::ui_script::addons::folder_reader(root.to_path_buf());
+    script.register_addons(registry.to_vec(), Some(folder), None, None);
     seat_a_session(&mut script);
     let _ = crate::ui_script::load_default_ui(&mut script);
     // The addon's dependencies, first and recursively, as `AddOn_Load` (`0x51f240`) does in its
