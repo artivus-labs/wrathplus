@@ -2,6 +2,9 @@
 //! server clocks, reputations and the player's login-scoped stores. Registered ahead of every
 //! window plugin, so the teardown runs before the windows' own `Disconnected` listeners.
 
+mod teleport;
+use teleport::teleport;
+
 use bevy::prelude::*;
 use wrathplus_protocol::types::Character;
 use wrathplus_protocol::JumpInfo;
@@ -206,11 +209,13 @@ fn on_mover_edge(In(ev): In<SessionEvent>, mut e: Edges, b: Bridge) {
             counter,
             position,
             orientation,
+            transport,
         } => teleport(
             guid,
             counter,
             position,
             orientation,
+            transport,
             &b.self_guid,
             &mut e.teleports,
         ),
@@ -536,26 +541,6 @@ fn disconnected(
     // `SMSG_INITIAL_SPELLS` resends every running cooldown at world entry and `seed_initial`
     // appends, so the list must not outlive the session.
     cooldowns.clear_session();
-}
-
-/// `MSG_MOVE_TELEPORT_ACK`: only our own is forwarded to the controller, whose ack resumes our
-/// movement.
-fn teleport(
-    guid: u64,
-    counter: u32,
-    position: [f32; 3],
-    orientation: f32,
-    self_guid: &SelfGuid,
-    teleports: &mut MessageWriter<TeleportMessage>,
-) {
-    if self_guid.0 == Some(guid) {
-        teleports.write(TeleportMessage {
-            guid,
-            counter,
-            position,
-            orientation,
-        });
-    }
 }
 
 /// `SMSG_MOVE_KNOCK_BACK`: a ballistic launch our controller flies and acks. The reference

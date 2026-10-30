@@ -91,6 +91,7 @@ fn stale_epoch_and_retirement_refuse_pending_taxi_ack() {
             counter: 1,
             position: [5.0; 3],
             orientation: 0.0,
+            transport: None,
         },
     )
     .unwrap();

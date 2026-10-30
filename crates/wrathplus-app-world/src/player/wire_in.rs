@@ -266,7 +266,13 @@ pub(super) fn apply_server_moves(
     }
     // Same-map teleport: snap and echo the ack, without which the server freezes our movement.
     for t in teleports.read() {
-        snap_near_teleport(player, &mut cam.yaw, t, time.elapsed_secs());
+        let deck = t.transport.and_then(|tail| {
+            // Resolve by packet guid, never by the previous ride's entity (it may be stale).
+            let entity = *guid_index.0.get(&tail.guid)?;
+            let (pose, guid, _) = transports.get(entity).ok()?;
+            (guid.0 == tail.guid).then_some((entity, pose))
+        });
+        snap_near_teleport(player, &mut cam.yaw, t, time.elapsed_secs(), deck);
         // The echo is the whole handshake: the reference echoes on its next movement tick
         // (`0x60e0a0`) and sends nothing else, and vmangos relocates us only when it lands
         // (`ExecuteTeleportNear`, `MovementHandler.cpp:237`).
@@ -413,22 +419,44 @@ pub(super) fn apply_server_moves(
 }
 
 /// Apply one same-map teleport's snap (`MSG_MOVE_TELEPORT_ACK` inbound); the caller echoes it.
-fn snap_near_teleport(player: &mut Player, cam_yaw: &mut f32, t: &TeleportMessage, now: f32) {
-    // A near teleport arrives detached: vmangos takes this path only off a transport
-    // (`Player.cpp:1866-1893`), and the reference's apply (`0x6186b0`) re-parents to the packet's
-    // transport guid, zero here. A kept ride would carry us back onto the deck.
+fn snap_near_teleport(
+    player: &mut Player,
+    cam_yaw: &mut f32,
+    t: &TeleportMessage,
+    now: f32,
+    deck: Option<(Entity, &Transform)>,
+) {
+    // AC MotionTransport::TeleportTransport near-teleports passengers without removing them.
+    // Re-parent to the PACKET's transport, not an unconditional deboard or a retained old ride.
     player.ride = None;
     player.pos = wow_to_bevy(t.position);
     player.face_yaw = t.orientation;
-    *cam_yaw = t.orientation;
+    if let (Some(tail), Some((entity, pose))) = (t.transport, deck) {
+        let local_pos = wow_to_bevy([tail.pos.x, tail.pos.y, tail.pos.z]);
+        let boat_yaw = pose.rotation.to_euler(EulerRot::YXZ).0;
+        player.pos = pose.translation + pose.rotation * local_pos;
+        player.face_yaw = tail.orientation + boat_yaw;
+        player.ride = Some(super::state::PlayerRide {
+            entity,
+            guid: tail.guid,
+            local_pos,
+            boat_yaw,
+        });
+    }
+    // A missing deck cannot turn a local tail into a world position or keep a stale attachment.
+    // Fall back to the packet's explicit WORLD destination under the normal settle hold.
+    player.model_yaw = player.face_yaw;
+    *cam_yaw = player.face_yaw;
     player.move_flags = 0;
-    player.airborne_since = None; // a snap ends any jump arc (no phantom FALL_LAND)
-    player.settling = true; // hold (gravity off) until the destination loads
+    player.vel_y = 0.0;
+    player.horiz_vel = Vec3::ZERO;
+    player.airborne_since = None;
+    player.fall_far = false;
+    player.settling = player.ride.is_none();
     player.settle_since = now;
     player.settle_deadline = now + SETTLE_TIMEOUT;
-    // The destination's ground may not have streamed yet.
     player.world_stale = true;
-    // Voids any self ride: `drive_self_ride` drops it rather than mirror the stale pose over this.
+    // Invalidate any self spline that would overwrite this snap, not the transport attachment.
     player.ride_abort = true;
 }
 
@@ -711,11 +739,16 @@ mod teleport_tests {
             counter: 1,
             position: [-8_913.0, -136.0, 81.0],
             orientation: 1.25,
+            transport: None,
         };
-        snap_near_teleport(&mut player, &mut cam_yaw, &t, 10.0);
+        snap_near_teleport(&mut player, &mut cam_yaw, &t, 10.0, None);
         assert!(player.ride.is_none(), "the snap deboards");
         assert_eq!(player.pos, wow_to_bevy(t.position));
         assert_eq!((player.face_yaw, cam_yaw), (1.25, 1.25));
         assert!(player.settling && player.ride_abort && player.world_stale);
     }
 }
+
+#[cfg(test)]
+#[path = "wire_in/near_teleport_tests.rs"]
+mod near_teleport_tests;
