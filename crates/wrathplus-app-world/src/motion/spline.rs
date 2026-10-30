@@ -8,10 +8,6 @@ use bevy::prelude::*;
 use wrathplus_assets::coords::{bevy_to_wow, wow_to_bevy};
 use wrathplus_protocol::{CreateSpline, EntityKind, SplineEffect, SplineInterpolation};
 
-use crate::app_core::movement::swim_enter_depth;
-use crate::app_core::state::CollisionHeight;
-
-use crate::app_core::session::ObjectStore;
 use crate::net::NetEntity;
 
 /// A server-dictated path (`SMSG_MONSTER_MOVE`) in raw WoW coordinates, walked at constant speed
@@ -761,42 +757,10 @@ fn clamp_seat_disabled() -> bool {
     })
 }
 
-/// A stamped unit re-enters [`mark_swimming_creatures`] only when its `Transform` or its
-/// descriptors change (a `UNIT_FIELD_FLAGS` delta must re-ask); an unstamped one every frame.
-type SwimMarkGate = Or<(
-    Changed<Transform>,
-    Changed<ObjectStore>,
-    Without<SwimEvaluated>,
-)>;
-
-type SwimMarkQuery = (
-    Entity,
-    &'static NetEntity,
-    &'static Transform,
-    Option<&'static CollisionHeight>,
-    Option<&'static ObjectStore>,
-    Has<CreatureSwimming>,
-    Has<SwimEvaluated>,
-    // [`ground_derived`]'s other inputs: the mark and the clamp must walk the same population.
-    Has<Spline>,
-    Has<GroundClamped>,
-    Has<crate::app_core::session::Embodied>,
-    Has<crate::motion::RemoteMotion>,
-);
-
-/// The stamp [`mark_swimming_creatures`] leaves once a unit's room claim settles; 1.12 water is
-/// static, so it holds until the unit moves or the `ColliderEpoch` bumps.
-#[derive(Component)]
-pub(in crate::motion) struct SwimEvaluated;
-
-/// The exit band (yd) below the swim boundary: the player boundary's 1/36-yd hysteresis
-/// (`0x7ff9d0`), an absolute distance, not scaled with collision height.
-const CREATURE_SWIM_EXIT_BAND: f32 = 1.0 / 36.0;
-
 /// A server-moved body ([`ground_derived`]) past the swim boundary, which no packet carries for
 /// one. 12340 runs its depth decision `0x730d10` (from `0x73ab20`) on any unit, the one it
 /// steers or not, and starts a non-mover's swim itself (`0x721210`'s second arm, a unit on a
-/// live spline through `0x6ebf70`, labelled: unread).
+/// live spline through `0x6ebf70`, sets live SWIMMING).
 ///
 /// The decision reads `UNIT_FIELD_FLAGS` on both legs ([`crate::app_core::movement::may_swim`]): a
 /// unit without a permit walks the lakebed, where the server paths it. Depth is the liquid
@@ -833,80 +797,6 @@ impl GroundClamped {
     /// Whether the walker's swept step produced this answer rather than the idle settle.
     pub fn walking(&self) -> bool {
         self.path.is_some()
-    }
-}
-
-/// 12340's `0x730d10` decision for one creature:
-///
-/// ```text
-/// enter iff  flags ∧ depth >  0.75·h              (0.75·h < depth, strict)
-/// stay  iff  flags ∧ depth >= 0.75·h − 1/36       (the stop takes depth < 0.75·h − 1/36)
-/// ```
-///
-/// A false flag term forces a stop at any depth (the `0x721290` arm), not only a refused start.
-pub(super) fn creature_swim_state(
-    marked: bool,
-    depth: f32,
-    boundary: f32,
-    unit_flags: u32,
-) -> bool {
-    if !crate::app_core::movement::may_swim(unit_flags) {
-        return false; // both legs: without a permit a unit can neither start nor stay
-    }
-    if marked {
-        depth >= boundary - CREATURE_SWIM_EXIT_BAND
-    } else {
-        depth > boundary
-    }
-}
-
-/// Maintains [`CreatureSwimming`] on every [`ground_derived`] body from the water over its feet.
-/// Chained before [`ground_clamp_creatures`] so a fresh mark exempts the clamp the same frame.
-pub(in crate::motion) fn mark_swimming_creatures(
-    mut commands: Commands,
-    units: Query<SwimMarkQuery, SwimMarkGate>,
-    stamped: Query<Entity, With<SwimEvaluated>>,
-    world: wrathplus_world::world_point::WorldPoint,
-    epoch: Res<wrathplus_world::collision::ColliderEpoch>,
-    mut last_epoch: Local<Option<u64>>,
-) {
-    // A collider epoch change (liquid streams with the colliders) drops every stamp.
-    let now = epoch.get();
-    if last_epoch.replace(now) != Some(now) {
-        for e in &stamped {
-            commands.entity(e).remove::<SwimEvaluated>();
-        }
-    }
-    for (e, net, t, collision, store, marked, evaluated, splined, clamped, embodied, relayed) in
-        &units
-    {
-        if !ground_derived(net.kind, splined, clamped, embodied, relayed) {
-            continue; // GameObjects don't swim; a relayed player's flag arrives on the wire
-        }
-        // The unit's own room decides whose liquid answers (an interior's, not the ADT water over
-        // it). An unsettled claim may not enter swim, but a stale mark may always clear.
-        let who = wrathplus_world::world_point::Subject::Unit(e);
-        if !marked && !world.room_settled(who) {
-            continue; // unstamped, so retried until the claim lands
-        }
-        if !evaluated {
-            commands.entity(e).insert(SwimEvaluated);
-        }
-        let wow = bevy_to_wow(t.translation);
-        let depth = world
-            .water_surface_at(who, wow)
-            .map_or(f32::MIN, |s| s - wow[2]);
-        let boundary = swim_enter_depth(collision.copied().unwrap_or_default().0);
-        // Flags read 0 until the descriptor block lands; `Changed<ObjectStore>` re-asks then.
-        let flags = store.map_or(0, |s| s.0.unit_flags());
-        let swimming = creature_swim_state(marked, depth, boundary, flags);
-        if swimming != marked {
-            if swimming {
-                commands.entity(e).insert(CreatureSwimming);
-            } else {
-                commands.entity(e).remove::<CreatureSwimming>();
-            }
-        }
     }
 }
 
@@ -2077,3 +1967,19 @@ mod inside_a_hull {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "swim_cache_tests.rs"]
+mod swim_cache_tests;
+
+#[cfg(test)]
+#[path = "ac_swim_tests.rs"]
+mod ac_swim_tests;
+
+#[path = "swim_marker.rs"]
+mod swim_marker;
+#[cfg(test)]
+pub(super) use swim_marker::creature_swim_state;
+pub(super) use swim_marker::mark_swimming_creatures;
+#[cfg(test)]
+use swim_marker::{SwimEvaluated, SwimMarkGate, CREATURE_SWIM_EXIT_BAND};

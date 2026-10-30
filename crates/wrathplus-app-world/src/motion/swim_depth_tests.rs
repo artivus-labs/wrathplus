@@ -1,9 +1,7 @@
 //! A server-moved unit's swim state is the liquid over its own feet against its own collision
-//! height (12340 `0x730d10`), not a flag the spline carries. The playtest case (2026-10-26, session
-//! 174100): a playerbot orc the server walks across Razor Hill's bay at run speed, its path at a
-//! constant Z of −1.2028 over a surface at 0.0 and a seabed 8 to 16 yd down. Its feet are 1.2 yd
-//! under, short of the orc's 0.75·h line, which the player's own orc crossed only near 1.55: the
-//! client wades it, as the server walks it. A unit past the line swims; a `CANNOT_SWIM` unit never.
+//! height (12340 `0x730d10`), not a flag the spline carries. These predicate fixtures do not
+//! establish whether a server surface pose represents wading: they have no lakebed or live
+//! per-unit liquid/height evidence. A unit past the line swims; a `CANNOT_SWIM` unit never.
 
 use super::spline::creature_swim_state;
 use crate::app_core::movement::{swim_enter_depth, CANNOT_SWIM};
