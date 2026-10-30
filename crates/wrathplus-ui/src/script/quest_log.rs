@@ -74,7 +74,7 @@ pub struct QuestLogObjectiveView {
     /// See [`Self::cur`].
     pub req: u32,
     /// The line's bit in the POI incomplete mask (`0x5e2950`): creature/GameObject slot i is bit
-    /// i, item slot i bit 4 + i. `None` for the PvP line, whose branch is unread.
+    /// i, item slot i bit 4 + i, event/exploration bit 16. `None` for unsupported lines.
     pub poi_bit: Option<u8>,
 }
 

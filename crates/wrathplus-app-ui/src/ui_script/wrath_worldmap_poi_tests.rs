@@ -288,3 +288,6 @@ fn the_map_draws_nothing_on_its_first_frames_that_it_then_drops() {
         assert_eq!(*blobs, settled_blobs, "frame {i}'s blob count");
     }
 }
+
+#[path = "wrath_event_poi_tests.rs"]
+mod event_poi;
