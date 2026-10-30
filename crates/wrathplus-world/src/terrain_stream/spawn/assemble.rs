@@ -25,7 +25,7 @@ pub struct PlacementHost {
     anchors: Vec<(u16, Entity)>,
     /// The anim root, despawned with the placement but not geometry: a caller tagging what the
     /// placement draws leaves it out.
-    pub(crate) root: Entity,
+    pub root: Entity,
     /// The anim root if a sequence was armed, whose live player names the playing slot; `None` on
     /// the gseq-only tier, which reads slot 0.
     pub arm: Option<Entity>,
