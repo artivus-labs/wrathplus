@@ -75,6 +75,7 @@ pub struct MatKey {
     wmo_class: Option<WmoBatchClass>,
     /// The WMO MOMT SIDN night-glow colour, gamma RGB bytes.
     sidn: Option<[u8; 3]>,
+    wmo_unified: Option<[u8; 3]>,
     /// The WMO MOMT WINDOW flag: an interior-group batch on the brighter midpoint light.
     window: bool,
     /// A depth-prime twin ([`zfill_material`], the reference's `M2UseZFill` clone at `0x707f7d`).
@@ -84,6 +85,18 @@ pub struct MatKey {
     /// The placement owning this material when its animated loop follows the instance's sequence
     /// (the BRM lava bubbles' flipbook); `None` for the shared material.
     instance: Option<Entity>,
+}
+
+/// Preserve presence separately from RGB: a unified WMO can author black ambient.
+fn unified_ambient(rgb: Option<[u8; 3]>) -> Vec4 {
+    rgb.map_or(Vec4::ZERO, |c| {
+        Vec4::new(
+            f32::from(c[0]) / 255.0,
+            f32::from(c[1]) / 255.0,
+            f32::from(c[2]) / 255.0,
+            1.0,
+        )
+    })
 }
 
 /// The static terrain-shade selector in `sun_scale.x`, which the shader thresholds into the
@@ -147,6 +160,7 @@ pub fn model_material(
     rgb_anim: Option<&std::sync::Arc<wrathplus_formats::RgbAnim>>,
     wmo_class: Option<WmoBatchClass>,
     sidn: Option<[u8; 3]>,
+    wmo_unified: Option<[u8; 3]>,
     window: bool,
     sky_depth: bool,
     light: &Buffer,
@@ -173,6 +187,7 @@ pub fn model_material(
         rgb_anim,
         wmo_class,
         sidn,
+        wmo_unified,
         window,
         sky_depth,
         light,
@@ -205,6 +220,7 @@ pub fn model_material_stages(
     rgb_anim: Option<&std::sync::Arc<wrathplus_formats::RgbAnim>>,
     wmo_class: Option<WmoBatchClass>,
     sidn: Option<[u8; 3]>,
+    wmo_unified: Option<[u8; 3]>,
     window: bool,
     sky_depth: bool,
     light: &Buffer,
@@ -239,6 +255,7 @@ pub fn model_material_stages(
         rgb_anim: rgb_anim.map(|a| std::sync::Arc::as_ptr(a) as usize),
         wmo_class,
         sidn,
+        wmo_unified,
         window,
         zfill: false,
         sky_depth,
@@ -385,6 +402,7 @@ pub fn model_material_stages(
                         if window { 1.0 } else { 0.0 },
                     )
                 },
+                wmo_unified: unified_ambient(wmo_unified),
                 // Zero until a sampler registers this material and bakes its table slot in once.
                 anim_slots: Vec4::ZERO,
                 stage2_anim: Vec4::ZERO,
@@ -503,6 +521,7 @@ pub fn zfill_material_stages(
         rgb_anim: None,
         wmo_class: None,
         sidn: None,
+        wmo_unified: None,
         window: false,
         zfill: true,
         // No skybox batch has a twin: the sky writes no depth.
@@ -538,6 +557,7 @@ pub fn zfill_material_stages(
                 sun_scale: Vec4::new(ShadeSel::Lit.selector(), 0.0, 0.0, 0.0),
                 tint: Vec4::new(1.0, 1.0, 1.0, 0.0),
                 sidn: Vec4::ZERO,
+                wmo_unified: Vec4::ZERO,
                 anim_slots: Vec4::ZERO,
                 stage2_anim: Vec4::ZERO,
                 stage2_seed: Vec4::ZERO,

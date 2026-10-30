@@ -109,6 +109,7 @@ pub(super) fn warm_quad(colors: bool, skinned: bool) -> RenderSubmesh {
         rgb_anim: None,
         rgb_seq: None,
         wmo_batch: None,
+        wmo_unified: None,
         section: None,
     }
 }

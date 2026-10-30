@@ -134,6 +134,7 @@ impl M2BatchMaterials<'_> {
                 None,
                 None, // M2: no MOBA class, no SIDN, no WINDOW
                 None,
+                None,
                 false,
                 true, // the sky lane
                 &light,
@@ -325,11 +326,12 @@ impl M2BatchMaterials<'_> {
                 // No env map: ArmorReflect reaches a character through its held items' batches.
                 false,
                 shade,
-                0,     // a composite is one sheet, not a batch in an authored order
-                None,  // …with no texture transform
-                None,  // …and no animated M2Color tint
-                None,  // worn/held part: light selection anchors at the instance origin
-                None,  // M2 carries no MOMT SIDN colour
+                0,    // a composite is one sheet, not a batch in an authored order
+                None, // …with no texture transform
+                None, // …and no animated M2Color tint
+                None, // worn/held part: light selection anchors at the instance origin
+                None, // M2 carries no MOMT SIDN colour
+                None,
                 false, // …nor the WINDOW flag
                 false, // a character composite is never a skybox
                 &light,
@@ -436,6 +438,7 @@ impl M2BatchMaterials<'_> {
             sub.rgb_anim.as_ref(),
             sub.wmo_batch,
             sub.sidn,
+            sub.wmo_unified,
             sub.window,
             // The sky lane overrides the batch's depth state, so only `Self::skybox` builds it.
             false,

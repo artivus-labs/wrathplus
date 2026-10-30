@@ -2,14 +2,15 @@
 //! group turn `(255, 255, 255, 255)`, interior-to-interior portals whiten nothing, and there is no
 //! MOPY alpha pre-pass. A 1.12 capture of the reference's uploaded MOCV for the Northshire abbey
 //! matched the file in every vertex of group 1 and all but the fade's 10 slots of group 3; the
-//! 12340 abbey is re-authored, so the counts are not carried over.
+//! 12340 abbey is re-authored, so the counts are not carried over. These fixtures explicitly
+//! select the vanilla loader: Wrath preprocessing is tested in `wmo_unified`.
 
-use wrathplus_formats::{parse_wmo_root, wmo_group_fixed_colors, Chain};
+use wrathplus_formats::{wmo_group_fixed_colors, Chain, WmoRoot};
 
 /// (slots the fade rewrites, slot count, mean luminance before, after) for one group.
 fn fade_census(reader: &Chain, stem: &str, gi: u32) -> (usize, usize, f32, f32) {
     let root_bytes = reader.read(&format!("{stem}.wmo")).expect("read root");
-    let root = parse_wmo_root(&root_bytes).expect("parse root");
+    let root = WmoRoot::parse_vanilla(&root_bytes).expect("parse root");
     let gbytes = reader
         .read(&format!("{stem}_{gi:03}.wmo"))
         .expect("read group");
@@ -62,7 +63,7 @@ fn dire_maul_entrance_corridor_floors_are_lit() {
 
     for gi in [12, 14, 17, 27, 31] {
         let root_bytes = reader.read(&format!("{stem}.wmo")).expect("read root");
-        let root = parse_wmo_root(&root_bytes).expect("parse root");
+        let root = WmoRoot::parse_vanilla(&root_bytes).expect("parse root");
         let gbytes = reader
             .read(&format!("{stem}_{gi:03}.wmo"))
             .expect("read group");

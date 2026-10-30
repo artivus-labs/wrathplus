@@ -115,6 +115,7 @@ fn both_shader_parameter_layouts_match_rust_stage_order() {
         "sun_scale",
         "tint",
         "sidn",
+        "wmo_unified",
         "anim_slots",
         "stage2",
         "stage2_anim",
@@ -135,7 +136,7 @@ fn both_shader_parameter_layouts_match_rust_stage_order() {
             assert!(at >= last);
             last = at;
         }
-        assert_eq!(abi.matches(": vec4<f32>").count(), 10);
+        assert_eq!(abi.matches(": vec4<f32>").count(), 11);
         assert!(source.contains("@binding(101) var second_texture"));
         assert!(source.contains("@binding(102) var second_sampler"));
     }

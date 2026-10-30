@@ -1,5 +1,8 @@
 //! The render types every model source (M2 batches, WMO groups) produces, one per render batch.
 
+mod rotation;
+use rotation::slerp;
+
 use super::key_anim::SeqLoops;
 use super::mat_anim::{AlphaAnim, RgbAnim};
 use super::tex_anim::UvAnim;
@@ -198,34 +201,6 @@ impl BoneSpin {
     }
 }
 
-/// Shortest-arc slerp on plain arrays (`wrathplus-formats` carries no math crate).
-fn slerp(a: [f32; 4], b: [f32; 4], t: f32) -> [f32; 4] {
-    let mut dot = (0..4).map(|i| a[i] * b[i]).sum::<f32>();
-    let mut b = b;
-    if dot < 0.0 {
-        b = [-b[0], -b[1], -b[2], -b[3]];
-        dot = -dot;
-    }
-    let (w0, w1) = if dot > 0.9995 {
-        (1.0 - t, t) // near-parallel: lerp, then renormalise below
-    } else {
-        let theta = dot.clamp(-1.0, 1.0).acos();
-        let sin = theta.sin();
-        (((1.0 - t) * theta).sin() / sin, (t * theta).sin() / sin)
-    };
-    let mut q = [0.0f32; 4];
-    for i in 0..4 {
-        q[i] = a[i] * w0 + b[i] * w1;
-    }
-    let len = q.iter().map(|c| c * c).sum::<f32>().sqrt();
-    if len > 0.0 {
-        for c in &mut q {
-            *c /= len;
-        }
-    }
-    q
-}
-
 /// A batch on an M2 billboard bone, turned to the camera about `pivot` (WoW model space).
 #[derive(Debug, Clone)]
 pub struct Billboard {
@@ -362,6 +337,8 @@ pub struct RenderSubmesh {
     /// The tint counterpart of [`Self::uv_seq`].
     pub rgb_seq: Option<SeqLoops<[f32; 3]>>,
     pub wmo_batch: Option<WmoBatchClass>,
+    /// MOHD ambient RGB for the Wrath unified surface path (root flag 0x2).
+    pub wmo_unified: Option<[u8; 3]>,
     /// The M2 skin section drawn. Two batches on one section rasterize the same triangles (a sheen
     /// over its base); the reference draws both from one vertex array under LEQUAL, the later
     /// winning exactly (`0x70c190`), so consolidators refuse a section they cannot take whole.
@@ -436,6 +413,7 @@ impl Default for RenderSubmesh {
             rgb_anim: None,
             rgb_seq: None,
             wmo_batch: None,
+            wmo_unified: None,
             env_map: false,
             section: None,
         }

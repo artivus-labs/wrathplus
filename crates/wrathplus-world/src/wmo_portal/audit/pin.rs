@@ -12,53 +12,8 @@ use super::{
     IRONFORGE, SHADOWFANG, UNDERCITY,
 };
 
-/// The subjects `WOW_PIN_SITE` names: every [`Site`] the harness carries.
-const NAMED_SITES: &[(&str, Site)] = &[
-    ("goldshire", GOLDSHIRE),
-    ("fargodeep", FARGODEEP),
-    ("deadmines", DEADMINES),
-    ("blacksmith", BLACKSMITH),
-    ("undercity", UNDERCITY),
-    ("ironforge", IRONFORGE),
-    ("shadowfang", SHADOWFANG),
-    ("darnassus", DARNASSUS),
-];
-
-/// `WOW_PIN_SITE=<name>` picks a [`NAMED_SITES`] subject (default [`UNDERCITY`]), and
-/// `WOW_PIN_WMO`, `_MAP`, `_TILE` and `_UID` each override one field of it.
-fn site_from_env() -> Site {
-    let base = match std::env::var("WOW_PIN_SITE") {
-        Ok(name) => {
-            let key = name.trim().to_ascii_lowercase();
-            *NAMED_SITES
-                .iter()
-                .find(|(n, _)| *n == key)
-                .map(|(_, s)| s)
-                .unwrap_or_else(|| {
-                    let known: Vec<&str> = NAMED_SITES.iter().map(|(n, _)| *n).collect();
-                    panic!("WOW_PIN_SITE={name:?} is not one of {known:?}")
-                })
-        }
-        Err(_) => UNDERCITY,
-    };
-    Site {
-        wmo: Box::leak(
-            std::env::var("WOW_PIN_WMO")
-                .unwrap_or_else(|_| base.wmo.to_string())
-                .into_boxed_str(),
-        ),
-        map: Box::leak(
-            std::env::var("WOW_PIN_MAP")
-                .unwrap_or_else(|_| base.map.to_string())
-                .into_boxed_str(),
-        ),
-        tile: std::env::var("WOW_PIN_TILE").map_or(base.tile, |s| {
-            let (a, b) = s.split_once(',').expect("WOW_PIN_TILE wants tx,ty");
-            (a.trim().parse().unwrap(), b.trim().parse().unwrap())
-        }),
-        uid: std::env::var("WOW_PIN_UID").map_or(base.uid, |s| s.trim().parse().unwrap()),
-    }
-}
+mod site;
+use site::{site_from_env, xyz};
 
 /// The group census: every group's flags, portal edges and bbox in the model and world frames,
 /// aimed by the same `WOW_PIN_*` variables as the pin probe.
@@ -315,13 +270,6 @@ fn wmo_group_census() {
 #[test]
 #[ignore = "instrument: aimed by WOW_PIN_*, run by hand — cargo test -p wrathplus-world --lib wmo_portal::audit::pin -- --ignored --nocapture"]
 fn wmo_pin_probe() {
-    fn xyz(var: &str, default: [f32; 3]) -> [f32; 3] {
-        let Ok(s) = std::env::var(var) else {
-            return default;
-        };
-        let v: Vec<f32> = s.split(',').filter_map(|p| p.trim().parse().ok()).collect();
-        <[f32; 3]>::try_from(&v[..]).unwrap_or_else(|_| panic!("{var} wants x,y,z; got {s:?}"))
-    }
     let site = site_from_env();
     let subject = load_subject(site.wmo, Some(&site));
     let placed = subject
@@ -823,4 +771,52 @@ fn darnassus_pass_two_walks_on_from_the_window() {
         "Pass 2 must WALK ON from a window-admitted exterior group (0x6b3d39 -> 0x6b41c0); a \
          marking pass scores exactly zero here"
     );
+}
+
+/// Frozen cave camera: the local exterior must survive the race against buried Uldaman.
+/// This proves the installed-data classification repair, not stock-client visual parity.
+#[test]
+fn cave_camera_retains_near_exterior_over_deep_uldaman() {
+    let _data = wrathplus_formats::wow_data_or_skip!();
+    let eye = wow_to_bevy([-6034.695, -2964.7961, 407.92944]);
+    let sites = [
+        Site {
+            wmo: r"world\wmo\dungeon\md_mountaincave\md_mushroomcave.wmo",
+            map: "Azeroth",
+            tile: (37, 43),
+            uid: 53025,
+        },
+        Site {
+            wmo: r"world\wmo\dungeon\kz_uldaman\kz_uldaman_a.wmo",
+            map: "Azeroth",
+            tile: (37, 43),
+            uid: 180253,
+        },
+    ];
+    let mut hits = Vec::new();
+    for site in sites {
+        let subject = load_subject(site.wmo, Some(&site));
+        let placed = subject.placed.as_ref().unwrap();
+        let local = bevy_to_wow(placed.local_from_world.transform_point3(eye));
+        let terrain = subject.terrain_z(local);
+        let hit = super::super::camera_crossing(&subject.model, local, terrain).unwrap();
+        eprintln!("uid{} camera crossing {hit:?}", site.uid);
+        hits.push(hit);
+    }
+    assert!((hits[0].depth - 4.26).abs() < 0.03);
+    assert_eq!(hits[0].seeds.in_group, None);
+    assert!((hits[1].depth - 185.7).abs() < 0.05);
+    assert_eq!(hits[1].seeds.in_group, Some(10));
+    for order in [[0, 1], [1, 0]] {
+        let mut winner = order[0];
+        for i in order {
+            if super::super::crossing_precedes(
+                (hits[i].depth, !hits[i].portal, i as u64),
+                (hits[winner].depth, !hits[winner].portal, winner as u64),
+            ) {
+                winner = i;
+            }
+        }
+        assert_eq!(winner, 0);
+    }
 }

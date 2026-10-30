@@ -33,12 +33,12 @@ pub(super) fn load_wmo_areas(
 use wrathplus_assets::coords::{bevy_to_wow, wow_to_bevy};
 use wrathplus_assets::{AdtTile, WmoModel};
 
-use super::seed::{area_down_ray, down_ray_claim, down_ray_seeds, up_ray_claim, DownRayClaim};
+use super::seed::{camera_crossing, down_ray_claim, up_ray_claim, DownRayClaim};
 use super::{WmoPortalInstance, WmoRoom, WorldCamera, EXTERIOR, EXTERIOR_LIT};
 use crate::terrain_stream::{terrain_height_under, PropLobeLight, TerrainStreamer};
 
 /// The WMO interior the player is in: the `WMOAreaTable` keys of the group owning the nearest
-/// surface under the probe ([`down_ray_seeds`]), or `None` in the open world.
+/// surface under the probe ([`super::seed::down_ray_seeds`]), or `None` in the open world.
 #[derive(Resource, Default, Clone, Copy, PartialEq, Eq)]
 pub struct CurrentWmoInterior(pub Option<WmoInteriorKeys>);
 
@@ -97,12 +97,12 @@ pub(crate) const POSITION_PROBE_LIFT: f32 = 0.1;
 pub struct CurrentAreaInterior(pub Option<WmoInteriorKeys>);
 
 /// Track [`CurrentAreaInterior`]: per placed building, the faces-only down-ray from the player's
-/// position, first claim wins; the camera stands in before login.
+/// position, globally retaining outdoor crossings; the camera stands in before login.
 pub(super) fn track_area_interior(
     wmos: Res<Assets<WmoModel>>,
     viewer: Res<crate::view::Viewer>,
     cam: Query<&GlobalTransform, With<WorldCamera>>,
-    instances: Query<&WmoPortalInstance>,
+    instances: Query<(Entity, &WmoPortalInstance)>,
     streamer: Res<TerrainStreamer>,
     adt_tiles: Res<Assets<AdtTile>>,
     mut current: ResMut<CurrentAreaInterior>,
@@ -116,39 +116,8 @@ pub(super) fn track_area_interior(
         return;
     };
     let terrain = terrain_height_under(&streamer, &adt_tiles, eye_world);
-    let mut found = None;
-    for inst in &instances {
-        let Some(model) = wmos.get(&inst.handle) else {
-            continue;
-        };
-        if model.wmo_id == 0 {
-            continue;
-        }
-        let local_from_world = inst.world_from_local.inverse();
-        let eye_local = bevy_to_wow(local_from_world.transform_point3(eye_world));
-        if !column_in_collision_bounds(model.collision_bounds, eye_local, false) {
-            continue; // no face of this building can own the probe column
-        }
-        let terrain_local = terrain.map(|z| terrain_z_local(&local_from_world, eye_world, z));
-        // The zone-text law is `0x8` alone: a `0x40`-only street group is indoors for naming
-        // (`[node+0x90]` bit 0 is set before the `0x40` test).
-        if let Some(gi) = area_down_ray(
-            &model.group_collision_tris,
-            &model.group_collision_bounds,
-            &model.group_collision_grids,
-            &model.group_nav,
-            eye_local,
-            terrain_local,
-            EXTERIOR,
-        ) {
-            found = Some(WmoInteriorKeys {
-                wmo_id: model.wmo_id,
-                name_set: u32::from(inst.name_set),
-                group_area_id: model.group_nav.get(gi).map_or(0, |g| g.area_table_id),
-            });
-            break;
-        }
-    }
+    let found = nearest_crossing(&wmos, &instances, eye_world, terrain, ClaimRay::Faces)
+        .and_then(|hit| interior_keys(&wmos, &instances, hit));
     if current.0 != found {
         current.0 = found;
     }
@@ -177,32 +146,9 @@ pub(super) fn track_current_interior(
     // The terrain leg, sampled once for the column (`GetAreaID` races the same two probes,
     // `0x670345`): a tunnel under a hill must not claim the player on the grass above it.
     let terrain = terrain_height_under(&streamer, &adt_tiles, eye_world);
-    let mut found = None;
-    let mut found_room = None;
-    for (entity, inst) in &instances {
-        let Some(model) = wmos.get(&inst.handle) else {
-            continue;
-        };
-        if model.wmo_id == 0 {
-            continue;
-        }
-        let local_from_world = inst.world_from_local.inverse();
-        let eye_local = bevy_to_wow(local_from_world.transform_point3(eye_world));
-        let terrain_local = terrain.map(|z| terrain_z_local(&local_from_world, eye_world, z));
-        if let Some(gi) = down_ray_seeds(model, eye_local, terrain_local).in_group {
-            found = Some(WmoInteriorKeys {
-                wmo_id: model.wmo_id,
-                name_set: u32::from(inst.name_set),
-                group_area_id: model.group_nav.get(gi).map_or(0, |g| g.area_table_id),
-            });
-            // The same claim as a placement identity, the liquid query's scope key.
-            found_room = Some(WmoRoom {
-                instance: entity,
-                group: gi as u16,
-            });
-            break;
-        }
-    }
+    let hit = nearest_crossing(&wmos, &instances, eye_world, terrain, ClaimRay::Render);
+    let found = hit.and_then(|hit| interior_keys(&wmos, &instances, hit));
+    let found_room = hit.and_then(|hit| hit.room());
     if current.0 != found {
         current.0 = found;
     }
@@ -288,11 +234,115 @@ fn room_at(
     feet_world: Vec3,
     reach: f32,
 ) -> Option<WmoRoom> {
+    // Complete the normal global pass first. An outdoor crossing is not a miss, and a deep
+    // interior still owns that pass; neither is raced against a different, raised origin.
     room_cast(wmos, instances, streamer, adt_tiles, feet_world, 0.0)
         .or_else(|| room_cast(wmos, instances, streamer, adt_tiles, feet_world, reach))
+        .and_then(|hit| hit.room())
 }
 
-/// One faces-only room cast from `feet_world + rise`.
+/// A retained crossing: `None` group is a genuine outdoor hit, not a ray miss.
+#[derive(Clone, Copy)]
+struct PlacementCrossing {
+    instance: Entity,
+    group: Option<usize>,
+}
+
+impl PlacementCrossing {
+    fn room(self) -> Option<WmoRoom> {
+        self.group.map(|group| WmoRoom {
+            instance: self.instance,
+            group: group as u16,
+        })
+    }
+}
+
+#[derive(Clone, Copy)]
+enum ClaimRay {
+    Faces,
+    Render,
+}
+
+/// Evidence-backed repair of independent first-interior wins, not a newly proven build-12340
+/// cross-placement law. Keep outdoor geometry until all placements compete, as for the camera.
+/// Faces retain their 1000 yd / EXTERIOR-only law; body render retains portals and DETAIL fallback.
+fn nearest_crossing(
+    wmos: &Assets<WmoModel>,
+    instances: &Query<(Entity, &WmoPortalInstance)>,
+    probe_world: Vec3,
+    terrain: Option<f32>,
+    ray: ClaimRay,
+) -> Option<PlacementCrossing> {
+    let mut best = None;
+    let mut winner = None;
+    for (entity, inst) in instances {
+        let Some(model) = wmos.get(&inst.handle) else {
+            continue;
+        };
+        let local_from_world = inst.world_from_local.inverse();
+        let probe = bevy_to_wow(local_from_world.transform_point3(probe_world));
+        let terrain_local = terrain.map(|z| terrain_z_local(&local_from_world, probe_world, z));
+        let (depth, portal, group) = match ray {
+            ClaimRay::Faces => {
+                if !column_in_collision_bounds(model.collision_bounds, probe, false) {
+                    continue;
+                }
+                let Some(hit) = down_ray_claim(
+                    &model.group_collision_tris,
+                    &model.group_collision_bounds,
+                    &model.group_collision_grids,
+                    &model.group_nav,
+                    probe,
+                    terrain_local,
+                    EXTERIOR,
+                ) else {
+                    continue;
+                };
+                (hit.depth, false, (!hit.outdoor).then_some(hit.group))
+            }
+            ClaimRay::Render => {
+                let Some(hit) = camera_crossing(model, probe, terrain_local) else {
+                    continue;
+                };
+                (hit.depth, hit.portal, hit.seeds.in_group)
+            }
+        };
+        // MODF placements are rigid yaw transforms, as in the camera's arbitration. This does not
+        // add general tilted-placement world-vertical casting. Exact ties use the camera policy.
+        let depth = inst
+            .world_from_local
+            .transform_vector3(Vec3::Y * depth)
+            .length();
+        let key = (depth, !portal, entity.to_bits());
+        if best.is_none_or(|old| super::crossing_precedes(key, old)) {
+            best = Some(key);
+            winner = Some(PlacementCrossing {
+                instance: entity,
+                group,
+            });
+        }
+    }
+    winner
+}
+
+/// Identity is resolved only after geometry wins: missing WMOAreaTable keys cannot expose a
+/// deeper placement. Physical rooms remain valid even without a naming identity.
+fn interior_keys(
+    wmos: &Assets<WmoModel>,
+    instances: &Query<(Entity, &WmoPortalInstance)>,
+    hit: PlacementCrossing,
+) -> Option<WmoInteriorKeys> {
+    let gi = hit.group?;
+    let (_, inst) = instances.get(hit.instance).ok()?;
+    let model = wmos.get(&inst.handle)?;
+    (model.wmo_id != 0).then(|| WmoInteriorKeys {
+        wmo_id: model.wmo_id,
+        name_set: u32::from(inst.name_set),
+        group_area_id: model.group_nav.get(gi).map_or(0, |g| g.area_table_id),
+    })
+}
+
+/// One faces-only room cast from `feet_world + rise`, retaining outdoor vs miss for the retry.
 fn room_cast(
     wmos: &Assets<WmoModel>,
     instances: &Query<(Entity, &WmoPortalInstance)>,
@@ -300,38 +350,10 @@ fn room_cast(
     adt_tiles: &Assets<AdtTile>,
     feet_world: Vec3,
     rise: f32,
-) -> Option<WmoRoom> {
+) -> Option<PlacementCrossing> {
     let probe_world = feet_world + Vec3::Y * (POSITION_PROBE_LIFT + rise);
     let terrain = terrain_height_under(streamer, adt_tiles, probe_world);
-    for (entity, inst) in instances {
-        let Some(model) = wmos.get(&inst.handle) else {
-            continue;
-        };
-        if model.wmo_id == 0 {
-            continue; // as the player's own claim skips it
-        }
-        let local_from_world = inst.world_from_local.inverse();
-        let probe_local = bevy_to_wow(local_from_world.transform_point3(probe_world));
-        if !column_in_collision_bounds(model.collision_bounds, probe_local, false) {
-            continue; // no face of this building can own the probe column
-        }
-        let terrain_local = terrain.map(|z| terrain_z_local(&local_from_world, probe_world, z));
-        if let Some(gi) = area_down_ray(
-            &model.group_collision_tris,
-            &model.group_collision_bounds,
-            &model.group_collision_grids,
-            &model.group_nav,
-            probe_local,
-            terrain_local,
-            EXTERIOR,
-        ) {
-            return Some(WmoRoom {
-                instance: entity,
-                group: gi as u16,
-            });
-        }
-    }
-    None
+    nearest_crossing(wmos, instances, probe_world, terrain, ClaimRay::Faces)
 }
 
 /// Whether a world position is indoors for the unit light law: the nearest surface under it is a
@@ -645,220 +667,9 @@ pub fn terrain_z_local(local_from_world: &Affine3A, eye_world: Vec3, terrain_wow
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use wrathplus_assets::footprint_tri_bounds;
-    use wrathplus_formats::FootprintTris;
+#[path = "footprint_tests.rs"]
+mod tests;
 
-    /// A model with nothing but footprint groups, all the sample reads.
-    fn bare_model() -> WmoModel {
-        WmoModel {
-            wmo_id: 0,
-            submeshes: Vec::new(),
-            submesh_group: Vec::new(),
-            portal_vertices: Vec::new(),
-            portal_infos: Vec::new(),
-            portal_refs: Vec::new(),
-            group_nav: Vec::new(),
-            fogs: Vec::new(),
-            skybox: None,
-            group_collision_tris: Vec::new(),
-            group_camera_only_tris: Vec::new(),
-            group_collision_bounds: Vec::new(),
-            group_collision_grids: Vec::new(),
-            collision_bounds: None,
-            collision: None,
-            collision_camera: None,
-            doodads: Vec::new(),
-            doodad_sets: Vec::new(),
-            lights: Vec::new(),
-            group_bounds: Vec::new(),
-            group_footprints: Vec::new(),
-            material_ground_type: Vec::new(),
-            material_diff_color: Vec::new(),
-            group_footprint_bounds: Vec::new(),
-            group_footprint_grids: Vec::new(),
-            group_light_refs: Vec::new(),
-            group_liquids: Vec::new(),
-            wrath_liquid_states: None,
-            doodad_base: Default::default(),
-            doodad_owner: Default::default(),
-            doodad_groups: Default::default(),
-        }
-    }
-
-    /// Two single-face footprint groups: group 0 owns the floor under the probe (z = 0), group 1
-    /// sits far off in XY with a higher face (z = 5) that would shadow it through a broken cull.
-    fn two_group_footprints() -> Vec<Option<FootprintTris>> {
-        let face = |offset: [f32; 3], material: u8| FootprintTris {
-            positions: vec![
-                [offset[0], offset[1], offset[2]],
-                [offset[0] + 10.0, offset[1], offset[2]],
-                [offset[0], offset[1] + 10.0, offset[2]],
-            ],
-            indices: vec![0, 1, 2],
-            mocv: vec![[10, 20, 30]; 3],
-            mopy_flags: vec![0],
-            mopy_material: vec![material],
-        };
-        vec![
-            Some(face([-5.0, -5.0, 0.0], 1)),
-            Some(face([100.0, 100.0, 5.0], 2)),
-        ]
-    }
-
-    /// A dungeon-scale footprint group: an `n × n` grid of floor quads at a sawtooth height, so a
-    /// column's answer depends on which face wins; 64 faces or more, so `ColumnGrid` indexes it.
-    fn slab_field(n: usize) -> FootprintTris {
-        let (mut positions, mut indices, mut mocv, mut mopy_flags) =
-            (Vec::new(), Vec::new(), Vec::new(), Vec::new());
-        let mut mopy_material = Vec::new();
-        for iy in 0..n {
-            for ix in 0..n {
-                let (x, y) = (ix as f32 * 4.0, iy as f32 * 4.0);
-                // Sawtooth z: a mis-picked face changes the verdict.
-                let z = ((ix + iy) % 3) as f32 * 0.5;
-                let base = positions.len() as u16;
-                positions.extend_from_slice(&[
-                    [x, y, z],
-                    [x + 4.0, y, z],
-                    [x + 4.0, y + 4.0, z],
-                    [x, y + 4.0, z],
-                ]);
-                let shade = ((ix * 7 + iy * 13) % 200) as u8;
-                mocv.extend_from_slice(&[[shade, shade / 2, shade / 3]; 4]);
-                indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
-                mopy_flags.extend_from_slice(&[0, 0]);
-                mopy_material.extend_from_slice(&[0, 0]);
-            }
-        }
-        FootprintTris {
-            positions,
-            indices,
-            mocv,
-            mopy_flags,
-            mopy_material,
-        }
-    }
-
-    /// The material ray reads the hit face's material inside the group the arbitration chose; a
-    /// group with no face under the column is silent, the client's `-1`.
-    #[test]
-    fn material_ray_resolves_per_group_and_bounds_checks() {
-        let mut model = bare_model();
-        model.group_footprints = two_group_footprints();
-        model.group_footprint_bounds = footprint_tri_bounds(&model.group_footprints);
-        // A root MOMT: material 0 unauthored ("None"), 1 = Wood (TerrainType 4), 2 = Snow (3).
-        model.material_ground_type = vec![10, 4, 3];
-        assert_eq!(surface_terrain_sample(&model, 0, [0.0, 0.0, 2.0]), Some(4));
-        // Group 1's only face is 100 yd away: silent, never group 0's face.
-        assert_eq!(surface_terrain_sample(&model, 1, [0.0, 0.0, 2.0]), None);
-        assert_eq!(
-            surface_terrain_sample(&model, 1, [103.0, 103.0, 7.0]),
-            Some(3)
-        );
-        // A material id past the root's MOMT is silent.
-        model.material_ground_type = vec![10];
-        assert_eq!(surface_terrain_sample(&model, 0, [0.0, 0.0, 2.0]), None);
-    }
-
-    /// The column index never changes a verdict, the sawtooth's exact-z ties included.
-    #[test]
-    fn footprint_column_index_is_exact() {
-        let mut model = bare_model();
-        model.group_footprints = vec![Some(slab_field(12))];
-        model.group_footprint_bounds = footprint_tri_bounds(&model.group_footprints);
-        let grids = wrathplus_assets::footprint_tri_grids(&model.group_footprints);
-        assert!(grids[0].is_some(), "the field must actually be indexed");
-        let mut probed_hits = 0;
-        for gx in -2..=50 {
-            for gy in -2..=50 {
-                let probe = [gx as f32 * 1.1, gy as f32 * 0.9, 3.0];
-                model.group_footprint_grids = Vec::new();
-                let linear = footprint_sample(&model, probe);
-                model.group_footprint_grids = grids.clone();
-                let indexed = footprint_sample(&model, probe);
-                assert_eq!(
-                    linear, indexed,
-                    "column {probe:?}: the index changed the footprint verdict"
-                );
-                probed_hits += usize::from(linear.is_some());
-            }
-        }
-        assert!(
-            probed_hits > 500,
-            "the sweep must land on the field, got {probed_hits} hits"
-        );
-    }
-
-    /// The broad phase is a pure skip: the verdict with face bounds equals the verdict with none.
-    #[test]
-    fn footprint_bounds_cull_is_exact() {
-        let mut model = bare_model();
-        model.group_footprints = two_group_footprints();
-        // Over group 0's face; the unculled baseline first.
-        let probe = [-1.0, -1.0, 2.0];
-        let unculled = footprint_sample(&model, probe);
-        assert_eq!(unculled, Some((0, [10, 20, 30], false)));
-        model.group_footprint_bounds = footprint_tri_bounds(&model.group_footprints);
-        assert_eq!(footprint_sample(&model, probe), unculled);
-        // Between the groups: both agree on a miss.
-        model.group_footprint_bounds = Vec::new();
-        assert_eq!(footprint_sample(&model, [50.0, 50.0, 2.0]), None);
-        model.group_footprint_bounds = footprint_tri_bounds(&model.group_footprints);
-        assert_eq!(footprint_sample(&model, [50.0, 50.0, 2.0]), None);
-        // Below every face: the min-z leg and the scan agree on a miss.
-        model.group_footprint_bounds = Vec::new();
-        assert_eq!(footprint_sample(&model, [-1.0, -1.0, -1.0]), None);
-        model.group_footprint_bounds = footprint_tri_bounds(&model.group_footprints);
-        assert_eq!(footprint_sample(&model, [-1.0, -1.0, -1.0]), None);
-    }
-
-    /// The containment attach's upward retry (`0x6a908d`): after a downward miss the nearest face
-    /// above answers, with the group, MOCV and MOPY it gives from below.
-    #[test]
-    fn the_upward_retry_finds_the_floor_a_sunk_object_sits_under() {
-        let mut model = bare_model();
-        model.group_footprints = two_group_footprints();
-        model.group_footprint_bounds = footprint_tri_bounds(&model.group_footprints);
-
-        // 2 cm under group 0's face at z = 0, as a portcullis spawned below its own slab sits.
-        let sunk = [-1.0, -1.0, -0.02];
-        assert_eq!(
-            footprint_sample(&model, sunk),
-            None,
-            "the downward leg has nothing below it — this is the whole defect"
-        );
-        assert_eq!(
-            footprint_sample_above(&model, sunk),
-            Some((0, [10, 20, 30], false)),
-            "the retry finds the slab it is sunk into, and reads the same bake"
-        );
-        // From above the legs swap roles: the retry must not become a second downward scan.
-        let over = [-1.0, -1.0, 2.0];
-        assert_eq!(
-            footprint_sample(&model, over),
-            Some((0, [10, 20, 30], false))
-        );
-        assert_eq!(
-            footprint_sample_above(&model, over),
-            None,
-            "nothing above the probe, so the retry declines rather than re-finding the floor"
-        );
-        // The upward leg honours the broad phase: group 1's face (z = 5) is off this column in XY.
-        assert_eq!(footprint_sample_above(&model, [-1.0, -1.0, 1.0]), None);
-    }
-
-    /// The derived bounds cover only vertices a face references: an orphan must not inflate them.
-    #[test]
-    fn footprint_bounds_ignore_unreferenced_vertices() {
-        let mut fps = two_group_footprints();
-        if let Some(fp) = fps[0].as_mut() {
-            fp.positions.push([1000.0, 1000.0, 1000.0]); // orphan
-        }
-        let bounds = footprint_tri_bounds(&fps);
-        let (min, max) = bounds[0].expect("group 0 has faces");
-        assert!(max[0] <= 5.0 + 1e-6 && max[1] <= 5.0 + 1e-6);
-        assert_eq!(min[2], 0.0);
-    }
-}
+#[cfg(test)]
+#[path = "interior_tests.rs"]
+mod claim_tests;

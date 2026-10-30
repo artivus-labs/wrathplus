@@ -131,6 +131,7 @@ impl AssetLoader for WrathM2ModelLoader {
                     interior: false,
                     emissive: sub.emissive,
                     sidn: None,
+                    wmo_unified: None,
                     window: false,
                     additive: sub.additive,
                     env_map: sub.env_map,

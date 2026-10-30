@@ -192,6 +192,7 @@ pub fn spawn_model_entities(
             sub.rgb_anim.as_ref(),
             sub.wmo_batch,
             sub.sidn,
+            sub.wmo_unified,
             sub.window,
             false, // the world streamer never spawns a skybox
             light,
@@ -244,6 +245,7 @@ pub fn spawn_model_entities(
                 sub.rgb_anim.as_ref(),
                 sub.wmo_batch,
                 sub.sidn,
+                sub.wmo_unified,
                 sub.window,
                 false, // the world streamer never spawns a skybox
                 light,
@@ -363,6 +365,7 @@ pub fn spawn_model_entities(
                                     interior,
                                     class: sub.wmo_batch,
                                     sidn: sub.sidn,
+                                    wmo_unified: sub.wmo_unified,
                                     window: sub.window,
                                     batch_order,
                                 }),

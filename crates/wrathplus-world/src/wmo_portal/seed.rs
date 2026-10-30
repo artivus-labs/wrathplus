@@ -40,9 +40,41 @@ pub struct DownRaySeeds {
     pub(crate) across: Option<usize>,
 }
 
-/// [`down_ray_pick`] over the asset's stored pieces; `terrain_z` is in this model's local space.
-pub fn down_ray_seeds(model: &WmoModel, eye: [f32; 3], terrain_z: Option<f32>) -> DownRaySeeds {
-    down_ray_pick(
+/// A camera crossing before exterior classification collapses its flood roots. Keeping this
+/// hit lets an exterior floor compete with interiors in other placements.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct CameraCrossing {
+    pub seeds: DownRaySeeds,
+    pub depth: f32,
+    pub portal: bool,
+}
+
+impl CameraCrossing {
+    fn new(
+        group: usize,
+        across: Option<usize>,
+        depth: f32,
+        portal: bool,
+        nav: &[WmoGroupNav],
+    ) -> Self {
+        let interior = nav[group].flags & EXTERIOR == 0;
+        Self {
+            seeds: DownRaySeeds {
+                in_group: interior.then_some(group),
+                across: if interior { across } else { None },
+            },
+            depth,
+            portal,
+        }
+    }
+}
+
+pub(super) fn camera_crossing(
+    model: &WmoModel,
+    eye: [f32; 3],
+    terrain_z: Option<f32>,
+) -> Option<CameraCrossing> {
+    camera_crossing_pick(
         &model.group_collision_tris,
         &model.group_collision_grids,
         &model.group_camera_only_tris,
@@ -55,9 +87,15 @@ pub fn down_ray_seeds(model: &WmoModel, eye: [f32; 3], terrain_z: Option<f32>) -
     )
 }
 
+/// The camera down-ray over the asset's stored pieces; `terrain_z` is in this model's local space.
+pub fn down_ray_seeds(model: &WmoModel, eye: [f32; 3], terrain_z: Option<f32>) -> DownRaySeeds {
+    camera_crossing(model, eye, terrain_z).map_or(DownRaySeeds::default(), |hit| hit.seeds)
+}
+
 /// The eye's current group, by the module doc's mechanism. `terrain_z` is the terrain height under
 /// the eye in WMO model space, or `None` where there is none to hit: off the streamed tiles, or a
 /// hole cut through the ground into this interior.
+#[cfg(test)]
 pub(crate) fn down_ray_pick(
     tris: &[Vec<[[f32; 3]; 3]>],
     grids: &[Option<ColumnGrid>],
@@ -69,6 +107,31 @@ pub(crate) fn down_ray_pick(
     eye: [f32; 3],
     terrain_z: Option<f32>,
 ) -> DownRaySeeds {
+    camera_crossing_pick(
+        tris,
+        grids,
+        camera_only_tris,
+        nav,
+        portal_vertices,
+        portal_infos,
+        portal_refs,
+        eye,
+        terrain_z,
+    )
+    .map_or(DownRaySeeds::default(), |hit| hit.seeds)
+}
+
+fn camera_crossing_pick(
+    tris: &[Vec<[[f32; 3]; 3]>],
+    grids: &[Option<ColumnGrid>],
+    camera_only_tris: &[Vec<[[f32; 3]; 3]>],
+    nav: &[WmoGroupNav],
+    portal_vertices: &[[f32; 3]],
+    portal_infos: &[WmoPortalInfo],
+    portal_refs: &[WmoPortalRef],
+    eye: [f32; 3],
+    terrain_z: Option<f32>,
+) -> Option<CameraCrossing> {
     // Broad phase: the column inside the group's XY bounds, its bottom at or below the eye.
     let in_column = |g: &WmoGroupNav| {
         eye[0] >= g.bbox_min[0]
@@ -109,6 +172,7 @@ pub(crate) fn down_ray_pick(
 
     // Leg B, portal crossings, racing the face hit; a coincident portal wins the tie.
     let mut across: Option<usize> = None;
+    let mut portal = false;
     for (gi, g) in nav.iter().enumerate() {
         if !in_column(g) {
             continue;
@@ -156,6 +220,7 @@ pub(crate) fn down_ray_pick(
             }
             let other = if chosen == gi { r.group as usize } else { gi };
             best_z = z;
+            portal = true;
             best = Some(chosen);
             across = (nav.get(other).is_some() && other != chosen).then_some(other);
         }
@@ -166,7 +231,7 @@ pub(crate) fn down_ray_pick(
         // Leg C, the camera-void fallback (the module doc's deviation): only when both legs missed
         // and no terrain lies at or below the eye. Leg A's rules; one root, no `across`.
         if terrain_z.is_some_and(|tz| tz <= eye[2]) {
-            return DownRaySeeds::default();
+            return None;
         }
         let mut fb_z = f32::NEG_INFINITY;
         let mut fb: Option<usize> = None;
@@ -183,27 +248,25 @@ pub(crate) fn down_ray_pick(
                 }
             }
         }
-        let named = fb.filter(|&g| {
-            eye[2] - fb_z <= MAX_FLOOR_DROP && nav.get(g).is_some_and(|n| n.flags & EXTERIOR == 0)
-        });
-        return DownRaySeeds {
-            in_group: named,
-            across: None,
-        };
+        return fb
+            .filter(|_| eye[2] - fb_z <= MAX_FLOOR_DROP)
+            .map(|g| CameraCrossing::new(g, None, eye[2] - fb_z, false, nav));
     };
-    if eye[2] - best_z > MAX_FLOOR_DROP || nav.get(in_group).is_none_or(|g| g.flags & EXTERIOR != 0)
-    {
-        return DownRaySeeds::default();
+    if eye[2] - best_z > MAX_FLOOR_DROP {
+        return None;
     }
     // The terrain race: terrain above the eye is off the segment; terrain strictly nearer than the
     // WMO hit is open ground, outside; a tie keeps the WMO (the client's strict `<`).
     if terrain_z.is_some_and(|tz| tz <= eye[2] && tz > best_z) {
-        return DownRaySeeds::default();
+        return None;
     }
-    DownRaySeeds {
-        in_group: Some(in_group),
+    Some(CameraCrossing::new(
+        in_group,
         across,
-    }
+        eye[2] - best_z,
+        portal,
+        nav,
+    ))
 }
 
 /// The zone-text ray length, the client's `[0x8022cc]` = 1000.0; the render probe's is 1760.
@@ -220,6 +283,7 @@ const ZONE_RAY_LEN: f32 = 1000.0;
 ///
 /// The portal leg belongs to the camera's render seed alone: a doorway plane under the eye must
 /// not claim the interior. `None` is outdoors; [`down_ray_claim`] keeps an outdoor-class winner.
+#[cfg(test)]
 pub(crate) fn area_down_ray(
     tris: &[Vec<[[f32; 3]; 3]>],
     bounds: &[Option<([f32; 3], [f32; 3])>],
@@ -245,7 +309,7 @@ pub(crate) struct DownRayClaim {
     pub(crate) outdoor: bool,
 }
 
-/// [`area_down_ray`] without the outdoor collapse: the light chain tells an outdoor-class face (a
+/// The faces-only ray before outdoor collapse: the light chain tells an outdoor-class face (a
 /// deck) from open terrain.
 pub(crate) fn down_ray_claim(
     tris: &[Vec<[[f32; 3]; 3]>],
@@ -1030,100 +1094,5 @@ mod tests {
         );
     }
 
-    #[test]
-    fn camera_void_fallback_names_the_detail_floored_room() {
-        // The Deadmines pocket: an interior group floored only with DETAIL faces, which are in the
-        // camera-only set and not the walking set.
-        let pocket = nav(0, [-10.0, -10.0, 0.0], [10.0, 10.0, 12.0], 0, 0);
-        let walk: [Vec<[[f32; 3]; 3]>; 1] = [Vec::new()];
-        let detail = [quad(0.0, 10.0)];
-        // Legs A and B miss, no terrain below: Leg C names the room, a single root.
-        let s = down_ray_pick(
-            &walk,
-            &[],
-            &detail,
-            &[pocket],
-            &[],
-            &[],
-            &[],
-            [0.0, 0.0, 2.0],
-            None,
-        );
-        assert_eq!(s.in_group, Some(0));
-        assert_eq!(s.across, None);
-        // Terrain above the eye is off the segment: Leg C still fires.
-        assert_eq!(
-            down_ray_pick(
-                &walk,
-                &[],
-                &detail,
-                &[pocket],
-                &[],
-                &[],
-                &[],
-                [0.0, 0.0, 2.0],
-                Some(8.0)
-            )
-            .in_group,
-            Some(0)
-        );
-    }
-
-    #[test]
-    fn camera_void_fallback_defers_to_terrain_and_to_the_walking_leg() {
-        let pocket = nav(0, [-10.0, -10.0, 0.0], [10.0, 10.0, 12.0], 0, 0);
-        let detail = [quad(0.0, 10.0)];
-        // Any terrain at or below the eye keeps the client's outside verdict.
-        assert_eq!(
-            down_ray_pick(
-                &[Vec::new()],
-                &[],
-                &detail,
-                &[pocket],
-                &[],
-                &[],
-                &[],
-                [0.0, 0.0, 2.0],
-                Some(1.9)
-            )
-            .in_group,
-            None
-        );
-        // A walking-leg answer, even a lower floor of another group, pre-empts Leg C.
-        let hall = nav(0, [-30.0, -30.0, -5.0], [30.0, 30.0, 12.0], 0, 0);
-        let walk = [Vec::new(), quad(-5.0, 30.0)];
-        let det2: [Vec<[[f32; 3]; 3]>; 2] = [quad(0.0, 10.0), Vec::new()];
-        assert_eq!(
-            down_ray_pick(
-                &walk,
-                &[],
-                &det2,
-                &[pocket, hall],
-                &[],
-                &[],
-                &[],
-                [0.0, 0.0, 2.0],
-                None
-            )
-            .in_group,
-            Some(1)
-        );
-        // An EXTERIOR group's detail surface reads as outside, as in Leg A.
-        let ext = nav(EXTERIOR, [-10.0, -10.0, 0.0], [10.0, 10.0, 12.0], 0, 0);
-        assert_eq!(
-            down_ray_pick(
-                &[Vec::new()],
-                &[],
-                &detail,
-                &[ext],
-                &[],
-                &[],
-                &[],
-                [0.0, 0.0, 2.0],
-                None
-            )
-            .in_group,
-            None
-        );
-    }
+    mod void_tests;
 }
