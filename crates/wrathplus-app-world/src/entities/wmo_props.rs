@@ -297,6 +297,15 @@ pub(super) fn spawn_wmo_gameobject_props(
                 None,
                 None,
             );
+            if let Some(h) = &host {
+                commands.entity(h.root).insert(
+                    wrathplus_world::doodad_anim::ParentSpaceAnimBound {
+                        parent: entity,
+                        center: prop.local.transform_point(center),
+                        radius,
+                    },
+                );
+            }
             commands.entity(entity).add_children(&ents);
             // The slot's component hook returns it to the table whoever despawns the prop.
             if let (Some(slot), Some(&first)) = (interior_slot, ents.first()) {
