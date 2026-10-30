@@ -1,12 +1,6 @@
-//! `MO_TRANSPORT` timetable builder and cycle sampler: pure math in WoW coordinates, transcribing
-//! vmangos's path builder `TransportMgr::GenerateWaypoints` (`TransportMgr.cpp:105-334`), its mover
-//! `ShipTransport::Update`/`CalculateSegmentPos` (`Transport.cpp:283-380`) and its Catmull-Rom
-//! splines (`Movement/spline/spline.cpp`).
-//!
-//! The period is the reference's own ([`crate::transport_period`]); vmangos's computed periods do
-//! not match it, which is why the server overrides them from its DB (`TransportMgr.cpp:63-79`).
-//! Between stops the sample follows vmangos's accumulation; the reference's per-leg tick
-//! evaluation is not ported.
+//! AzerothCore `MO_TRANSPORT` timetable and stateless cycle sampler in WoW coordinates.
+//! `TransportMgr::GeneratePath` supplies the period and keyframe times; `MotionTransport::Update`
+//! samples `PathProgress % pathTime`. The wire progress is transport elapsed time, not uptime.
 
 use std::f32::consts::PI;
 
@@ -18,13 +12,13 @@ pub struct TransportSample {
     /// The map of `pos`, which changes as a transport crosses continents.
     pub map: u32,
     pub pos: [f32; 3],
-    /// Radians in `[0, 2π)`, `atan2(dir.y, dir.x) + π` (`Transport.cpp:347`).
+    /// Radians in `[0, 2π)`, `atan2(dir.y, dir.x) + π` (`MotionTransport::CalculateSegmentPos`).
     pub heading: f32,
     /// False while parked at a stop or on a keyframe's zero-width instant.
     pub moving: bool,
 }
 
-/// A keyframe that survives the map-change skip (`TransportMgr.cpp:128-152`), with what `sample`
+/// A keyframe that survives the map-change skip, with what `sample`
 /// needs. Stop and teleport are implicit: a non-stop window is zero-width, and a teleport's
 /// `next_dist_from_prev` is 0.
 #[derive(Debug, Clone)]
@@ -64,14 +58,13 @@ struct Leg {
 }
 
 impl Leg {
-    /// Control `i` with vmangos's virtual endpoints (`spline.cpp:262-265`): before the start
-    /// `2·c0 − c1`, past the end a duplicate of the last control, not extrapolated.
+    /// AC `SplineBase::InitCatmullRom`: orientation defaults to zero, so the leading
+    /// virtual point is one yard west; the trailing point duplicates the last control.
     fn control(&self, i: isize) -> [f32; 3] {
         let n = self.controls.len();
         if i < 0 {
-            let c0 = self.controls[0];
-            let c1 = if n > 1 { self.controls[1] } else { c0 };
-            lerp(c0, c1, -1.0)
+            let [x, y, z] = self.controls[0];
+            [x - 1.0, y, z]
         } else if (i as usize) >= n {
             self.controls[n - 1]
         } else {
@@ -109,31 +102,18 @@ impl Leg {
         for i in 1..=steps {
             let t = i as f32 / steps as f32;
             let next = self.evaluate_percent(k, t);
-            total += dist64(cur, next);
+            let dx = next[0] - cur[0];
+            let dy = next[1] - cur[1];
+            let dz = next[2] - cur[2];
+            // G3D Vector3::length returns float, before AC's double chord sum.
+            total += f64::from((dx * dx + dy * dy + dz * dz).sqrt());
             cur = next;
         }
         total
     }
 }
 
-fn lerp(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
-    [
-        a[0] + (b[0] - a[0]) * t,
-        a[1] + (b[1] - a[1]) * t,
-        a[2] + (b[2] - a[2]) * t,
-    ]
-}
-
-fn dist64(a: [f32; 3], b: [f32; 3]) -> f64 {
-    let (dx, dy, dz) = (
-        f64::from(a[0] - b[0]),
-        f64::from(a[1] - b[1]),
-        f64::from(a[2] - b[2]),
-    );
-    (dx * dx + dy * dy + dz * dz).sqrt()
-}
-
-/// vmangos's `s_catmullRomCoeffs` (`spline.cpp:61-65`) expanded as `t³ t² t 1` times the matrix:
+/// AzerothCore's `s_catmullRomCoeffs` (`spline.cpp:61-65`) expanded as `t³ t² t 1` times the matrix:
 /// the Catmull-Rom blending polynomials, τ = 0.5.
 fn catmull_rom_weights(t: f32) -> [f32; 4] {
     let (t2, t3) = (t * t, t * t * t);
@@ -189,16 +169,11 @@ fn normalize_orientation(o: f32) -> f32 {
     }
 }
 
-/// How keyframe times accumulate.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum TimeMode {
-    /// vmangos's `f32` seconds, truncated to ms per keyframe (`TransportMgr.cpp:297-325`).
-    Vmangos,
-}
-
-/// vmangos's accumulation (`TransportMgr.cpp:297-325`): add the previous frame's `TimeTo`, and at
-/// a non-stop frame subtract its own.
-fn accumulate_vmangos(raws: &[RawFrame], time_to: &[f32]) -> (Vec<u32>, Vec<u32>, Vec<u32>, u32) {
+/// AC `GeneratePath`: float seconds accumulated across frames, truncated to ms per frame.
+fn accumulate_azerothcore(
+    raws: &[RawFrame],
+    time_to: &[f32],
+) -> (Vec<u32>, Vec<u32>, Vec<u32>, u32) {
     let n = raws.len();
     let mut arrive = vec![0u32; n];
     let mut depart = vec![0u32; n];
@@ -246,19 +221,7 @@ impl TransportTimetable {
     /// `data1`/`data2` (`moveSpeed`, `accelRate`). The first and last nodes are never travelled,
     /// so fewer than 3 is `None`.
     pub fn build(nodes: &[TaxiPathNode], move_speed: f32, accel_rate: f32) -> Option<Self> {
-        // Vmangos mode, so windows and easing come from one accumulation: ClientForms windows
-        // under the trapezoid easing make a ship stick at segment ends and then leap. 20 chord
-        // steps, the client's (`spline.h:61`).
-        let mut tt =
-            Self::build_with_variant(nodes, move_speed, accel_rate, TimeMode::Vmangos, 20)?;
-        // The reference's period (`transport_period`), which vmangos's DB periods are sniffs of;
-        // `% period` on the server-uptime anchor multiplies any error by the cycle count.
-        if let Some(period) =
-            crate::transport_period::client_period_ms(nodes, move_speed, accel_rate)
-        {
-            tt.override_period(period);
-        }
-        Some(tt)
+        Self::build_native(nodes, move_speed, accel_rate)
     }
 
     /// The arrival instant of the first frame on `map_id`, scanning from the frame `from_cycle_ms`
@@ -289,55 +252,59 @@ impl TransportTimetable {
         self.frames.iter().any(|f| f.map_id == map_id)
     }
 
-    /// `TransportMgr::GenerateWaypoints` phase by phase, with a chosen time mode and chord count.
-    fn build_with_variant(
-        nodes: &[TaxiPathNode],
-        move_speed: f32,
-        accel_rate: f32,
-        mode: TimeMode,
-        arc_steps: u32,
-    ) -> Option<Self> {
+    /// AC `TransportMgr::GeneratePath`, including its spline length precision.
+    fn build_native(nodes: &[TaxiPathNode], move_speed: f32, accel_rate: f32) -> Option<Self> {
         let n_raw = nodes.len();
-        if n_raw < 3 || accel_rate <= 0.0 {
+        if n_raw < 3
+            || !move_speed.is_finite()
+            || move_speed <= 0.0
+            || !accel_rate.is_finite()
+            || accel_rate <= 0.0
+        {
             return None;
         }
 
-        // Phase A: the map-change skip (`TransportMgr.cpp:128-152`), end nodes never visited.
+        // AC skips the teleport guard and the following node before removing end guards.
         let mut raws: Vec<RawFrame> = Vec::new();
         let mut map_change = false;
-        for i in 1..n_raw - 1 {
+        for i in 0..n_raw {
             if map_change {
                 map_change = false;
                 continue;
             }
-            let (node, next) = (&nodes[i], &nodes[i + 1]);
-            if node.flags & 1 != 0 || node.map_id != next.map_id {
+            let node = &nodes[i];
+            if i + 1 < n_raw && (node.flags & 1 != 0 || node.map_id != nodes[i + 1].map_id) {
                 if let Some(last) = raws.last_mut() {
                     last.teleport = true;
                 }
                 map_change = true;
             } else {
-                // vmangos's whole-path spline derivative at t = 0 is this central difference of
-                // the raw neighbours, kept or not (`TransportMgr.cpp:120-127`).
-                let (prev, nxt) = (nodes[i - 1].pos, nodes[i + 1].pos);
+                // AzerothCore's whole-path spline derivative at t = 0 is this central difference of
+                // the raw neighbours, kept or not.
+                let prev = nodes[i.saturating_sub(1)].pos;
+                let nxt = nodes[(i + 1).min(n_raw - 1)].pos;
                 let initial_orientation =
                     normalize_orientation((nxt[1] - prev[1]).atan2(nxt[0] - prev[0]) + PI);
                 raws.push(RawFrame {
                     map_id: node.map_id,
                     pos: node.pos,
-                    // The reference tests the stop bit as a mask (`0x5f4e37`), vmangos's
-                    // `IsStopFrame` as `== 2`; the data only holds 0 and 2.
-                    is_stop: node.flags & 2 != 0,
+                    // AC KeyFrame::IsStopFrame tests equality, not a bit mask.
+                    is_stop: node.flags == 2,
                     delay_secs: node.delay as f32,
                     initial_orientation,
                     teleport: false,
                 });
             }
         }
+        // AC removes the first/last *kept* guard points after the teleport skip.
+        if raws.len() >= 2 {
+            raws.remove(0);
+            raws.pop();
+        }
         if raws.is_empty() {
             return None;
         }
-        // The last frame always teleports, even on a closed path (`GenerateWaypoints`).
+        // The last frame always teleports, even on a closed path (`GeneratePath`).
         raws.last_mut().unwrap().teleport = true;
         let n = raws.len();
 
@@ -362,12 +329,20 @@ impl TransportTimetable {
             .map(|controls| Leg { controls })
             .collect();
 
-        // Phase D: `DistFromPrev`, `NextDistFromPrev` (`TransportMgr.cpp:192-234`).
+        // Phase D: `DistFromPrev`, `NextDistFromPrev`.
         let mut dist_from_prev = vec![0.0f32; n];
-        for j in 0..n {
-            if local_index_of[j] > 0 {
-                dist_from_prev[j] =
-                    legs[leg_of[j]].seg_length(local_index_of[j] - 1, arc_steps) as f32;
+        // AC TransportSpline stores cumulative lengths in double, then narrows each difference.
+        for (leg_id, leg) in legs.iter().enumerate() {
+            let mut cumulative = 0.0f64;
+            for j in 0..n {
+                if leg_of[j] == leg_id && local_index_of[j] > 0 {
+                    let previous = cumulative;
+                    cumulative += f64::from(leg.seg_length(
+                        local_index_of[j] - 1,
+                        crate::transport_period::AC_CHORDS_PER_SEGMENT,
+                    ) as f32);
+                    dist_from_prev[j] = (cumulative - previous) as f32;
+                }
             }
         }
         let mut next_dist_from_prev = vec![0.0f32; n];
@@ -379,7 +354,7 @@ impl TransportTimetable {
             };
         }
 
-        // `firstStop`, `lastStop` (`TransportMgr.cpp:213-222`).
+        // `firstStop`, `lastStop`.
         let mut first_stop: Option<usize> = None;
         let mut last_stop: Option<usize> = None;
         for (j, r) in raws.iter().enumerate() {
@@ -390,7 +365,7 @@ impl TransportTimetable {
         }
         let (first_stop, last_stop) = (first_stop.unwrap_or(0), last_stop.unwrap_or(0));
 
-        // Phase E: `DistSinceStop`, `DistUntilStop` (`TransportMgr.cpp:237-256`).
+        // Phase E: `DistSinceStop`, `DistUntilStop`.
         let mut dist_since_stop = vec![0.0f32; n];
         let mut tmp = 0.0f32;
         for i in 0..n {
@@ -413,7 +388,7 @@ impl TransportTimetable {
             }
         }
 
-        // Phase F: `TimeTo`, the four-regime trapezoid (`TransportMgr.cpp:260-284`).
+        // Phase F: `TimeTo`, the four-regime trapezoid.
         let accel_dist = 0.5 * move_speed * move_speed / accel_rate;
         let accel_time = move_speed / accel_rate;
         let mut time_to = vec![0.0f32; n];
@@ -437,7 +412,7 @@ impl TransportTimetable {
             };
         }
 
-        // Phase G: `TimeFrom` (`TransportMgr.cpp:287-295`).
+        // Phase G: `TimeFrom`.
         let mut time_from = vec![0.0f32; n];
         let mut segment_time = 0.0f32;
         for i in 0..n {
@@ -448,10 +423,12 @@ impl TransportTimetable {
             time_from[j] = segment_time - time_to[j];
         }
 
-        // Phase H: arrivals, departures and the period, by mode; `sample` needs no arrival.
-        let (_arrive_time, departure_time, next_arrive_time, period_ms) = match mode {
-            TimeMode::Vmangos => accumulate_vmangos(&raws, &time_to),
-        };
+        // AC pathTime is the final DepartureTime, with no client/sniffed period override.
+        let (_arrive_time, departure_time, next_arrive_time, period_ms) =
+            accumulate_azerothcore(&raws, &time_to);
+        if period_ms == 0 {
+            return None;
+        }
 
         let frames: Vec<Frame> = (0..n)
             .map(|j| Frame {
@@ -481,23 +458,8 @@ impl TransportTimetable {
         })
     }
 
-    /// Pin the period as vmangos pins its DB value (`TransportMgr.cpp:63-79`): a longer one parks
-    /// the transport at its last keyframe, a shorter one cuts the final approach at the wrap.
-    fn override_period(&mut self, period_ms: u32) {
-        if period_ms == 0 || period_ms == self.period_ms {
-            return;
-        }
-        if period_ms > self.period_ms {
-            if let Some(last) = self.frames.last_mut() {
-                last.departure_time = period_ms;
-                last.next_arrive_time = period_ms;
-            }
-        }
-        self.period_ms = period_ms;
-    }
-
-    /// Position and heading at `cycle_ms` (`progress % period_ms`), as `ShipTransport::Update` and
-    /// `CalculateSegmentPos` compute them (`Transport.cpp:283-380`), with no state between calls.
+    /// Position and heading at `cycle_ms` (`progress % period_ms`), as `MotionTransport::Update` and
+    /// `CalculateSegmentPos` compute them (`MotionTransport::Update`), with no state between calls.
     pub fn sample(&self, cycle_ms: u32) -> TransportSample {
         let n = self.frames.len();
         if n == 0 {
@@ -508,7 +470,7 @@ impl TransportTimetable {
                 moving: false,
             };
         }
-        let cycle_ms = cycle_ms.min(self.period_ms.saturating_sub(1));
+        let cycle_ms = cycle_ms % self.period_ms;
 
         // The frame whose `[ArriveTime, NextArriveTime)`, stop then travel, holds `cycle_ms`.
         let idx = self
@@ -529,7 +491,7 @@ impl TransportTimetable {
         }
 
         // Moving: distance from the nearer stop under the same trapezoid as `TimeTo`
-        // (`Transport.cpp:353-380`).
+        // (`MotionTransport::CalculateSegmentPos`).
         let now = cycle_ms as f32 * 0.001;
         let since_departure = now - frame.departure_time as f32 * 0.001;
         let time_since_stop = frame.time_from + since_departure;
@@ -549,7 +511,7 @@ impl TransportTimetable {
             };
             frame.dist_until_stop - d
         };
-        let t = (dist / frame.next_dist_from_prev).clamp(0.0, 1.0);
+        let t = dist / frame.next_dist_from_prev;
 
         let leg = &self.legs[frame.leg];
         let pos = leg.evaluate_percent(frame.local_index, t);

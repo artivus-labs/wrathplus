@@ -5,6 +5,9 @@
 
 mod recorder;
 
+mod mover_event;
+pub(crate) use mover_event::mover_order_event;
+
 #[path = "wrath/transfer_authority.rs"]
 mod transfer_authority;
 
@@ -1535,6 +1538,7 @@ impl MovementAuthorityHandle {
                 counter: pending,
                 position,
                 orientation,
+                transport,
                 ..
             },
         )) = state.pending_orders.front()
@@ -1550,13 +1554,17 @@ impl MovementAuthorityHandle {
             timestamp,
         ))?;
         state.ground_pose = Some(OnFootPose {
-            flags: 0,
+            flags: if transport.is_some() {
+                wrath_ground::MOVE_ON_TRANSPORT
+            } else {
+                0
+            },
             position,
             orientation,
             fall_time: 0,
             fall: None,
             pitch: None,
-            transport: None,
+            transport,
         });
         let retired = state.pending_orders.pop_front();
         debug_assert_eq!(retired, Some(PendingAuthorityOrder::Mover(order)));
@@ -3559,83 +3567,6 @@ fn send_force_root(
     })
 }
 
-/// The shared event the controller applies for a mover order, where it models the state: every
-/// speed, water walk, feather fall, hover, can-fly, knockback and the near-teleport snap. Gravity
-/// and collision height are acknowledged without one.
-fn mover_order_event(order: &MoverOrder) -> Option<SessionEvent> {
-    use wrath_authority::{ModeOrderKind, SpeedOrderKind};
-    use wrathplus_protocol::types::{JumpInfo, MoveMode, SpeedKind};
-    Some(match *order {
-        MoverOrder::Speed {
-            kind,
-            mover_guid,
-            counter,
-            speed,
-        } => SessionEvent::ForceSpeedChange {
-            guid: mover_guid,
-            kind: match kind {
-                SpeedOrderKind::Walk => SpeedKind::Walk,
-                SpeedOrderKind::Run => SpeedKind::Run,
-                SpeedOrderKind::RunBack => SpeedKind::RunBack,
-                SpeedOrderKind::Swim => SpeedKind::Swim,
-                SpeedOrderKind::SwimBack => SpeedKind::SwimBack,
-                SpeedOrderKind::TurnRate => SpeedKind::TurnRate,
-                SpeedOrderKind::Flight => SpeedKind::Flight,
-                SpeedOrderKind::FlightBack => SpeedKind::FlightBack,
-                SpeedOrderKind::PitchRate => SpeedKind::PitchRate,
-            },
-            counter,
-            speed,
-        },
-        MoverOrder::Mode {
-            kind,
-            apply,
-            mover_guid,
-            counter,
-        } => SessionEvent::MoveMode {
-            guid: mover_guid,
-            counter,
-            mode: match kind {
-                ModeOrderKind::WaterWalk => MoveMode::WaterWalk,
-                ModeOrderKind::FeatherFall => MoveMode::FeatherFall,
-                ModeOrderKind::Hover => MoveMode::Hover,
-                ModeOrderKind::CanFly => MoveMode::CanFly,
-                ModeOrderKind::DisableGravity => return None,
-            },
-            apply,
-        },
-        MoverOrder::KnockBack {
-            mover_guid,
-            counter,
-            cos_angle,
-            sin_angle,
-            horizontal_speed,
-            vertical_speed,
-        } => SessionEvent::KnockBack {
-            guid: mover_guid,
-            counter,
-            launch: JumpInfo {
-                zspeed: vertical_speed,
-                cos_angle,
-                sin_angle,
-                xy_speed: horizontal_speed,
-            },
-        },
-        MoverOrder::TeleportNear {
-            mover_guid,
-            counter,
-            position,
-            orientation,
-        } => SessionEvent::Teleport {
-            guid: mover_guid,
-            counter,
-            position,
-            orientation,
-        },
-        MoverOrder::CollisionHeight { .. } => return None,
-    })
-}
-
 fn send_mover_ack(active: &mut WrathWriterSwap, order: MoverOrder) -> Result<UnsetAckResult> {
     let authority = active.authority.clone();
     let timestamp = active.clock.now_ms();
@@ -5322,6 +5253,7 @@ mod mover_order_tests {
             counter: 8,
             position: [50.0, 60.0, 70.0],
             orientation: 2.0,
+            transport: None,
         };
         authority.raise_mover_barrier(order).unwrap();
         assert!(matches!(
@@ -5336,6 +5268,7 @@ mod mover_order_tests {
             counter: 8,
             position: [50.0, 60.0, 70.0],
             orientation: 2.0,
+            transport: None,
         };
         authority.raise_mover_barrier(order).unwrap();
         assert!(authority.with_movement_send(|| ()).is_none());
@@ -5363,6 +5296,71 @@ mod mover_order_tests {
             }),
             WrathRoute::NativeTeleportAck
         );
+    }
+
+    #[test]
+    fn transport_near_teleport_preserves_tail_after_single_use_ack_not_before() {
+        let authority = installed(0x504);
+        let tail = wrath_ground::TransportTail {
+            guid: 42,
+            position: [1.0, 2.0, 3.0],
+            orientation: 0.4,
+            time: 456,
+        };
+        let order = MoverOrder::TeleportNear {
+            mover_guid: 0x504,
+            counter: 8,
+            position: [500.0, 600.0, 700.0],
+            orientation: 2.0,
+            transport: Some(tail),
+        };
+        authority.raise_mover_barrier(order).unwrap();
+        assert!(authority.with_movement_send(|| ()).is_none());
+        assert!(!authority
+            .send_teleport_ack(0x504, 9, 55, |_| panic!())
+            .unwrap());
+        // A failed write does not retire the order or publish its destination.
+        assert!(authority
+            .send_teleport_ack(0x504, 8, 55, |_| anyhow::bail!("synthetic write failure"))
+            .is_err());
+        assert!(authority.with_movement_send(|| ()).is_none());
+        assert!(authority
+            .send_teleport_ack(0x504, 8, 55, |body| {
+                assert_eq!(body, wrath_authority::encode_teleport_ack(0x504, 8, 55));
+                Ok(())
+            })
+            .unwrap());
+        assert!(!authority
+            .send_teleport_ack(0x504, 8, 55, |_| panic!("duplicate"))
+            .unwrap());
+        let pose = authority.shared.state.lock().unwrap().ground_pose.unwrap();
+        assert_eq!(pose.transport, Some(tail));
+        assert_eq!(pose.flags, wrath_ground::MOVE_ON_TRANSPORT);
+        assert_eq!(pose.position, [500.0, 600.0, 700.0]);
+        // A later forced-speed ACK carries the destination and transport tail together.
+        let speed = MoverOrder::Speed {
+            kind: SpeedOrderKind::Run,
+            mover_guid: 0x504,
+            counter: 9,
+            speed: 7.0,
+        };
+        authority.raise_mover_barrier(speed).unwrap();
+        authority
+            .send_mover_ack(speed, 56, |_, body| {
+                let mut input = body;
+                let guid = wrathplus_protocol::wire::read_packed_guid(&mut input).unwrap();
+                let mut framed = Vec::new();
+                wrathplus_protocol::wire::write_packed_guid(guid, &mut framed).unwrap();
+                framed.extend(&input[4..input.len() - 4]); // counter and acknowledged speed
+                let movement =
+                    wrathplus_protocol::wrath_gameplay::OutboundMovement::from_bytes(&framed)
+                        .unwrap()
+                        .movement;
+                assert_eq!(movement.transport.unwrap().guid, 42);
+                assert_eq!(movement.position.x, 500.0);
+                Ok(())
+            })
+            .unwrap();
     }
 
     #[test]

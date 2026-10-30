@@ -99,3 +99,11 @@ pub mod vehicle {
     /// The fixture vehicle we drive.
     pub const CAR: u64 = 0xF150_0000_0000_0007;
 }
+
+/// The native mover-order reader path (these orders bypass WrathEventAdapter).
+/// Decode the raw body and publish the same event as the socket reader, without a socket.
+pub fn dispatch_mover_order(app: &mut App, opcode: u16, body: &[u8]) {
+    let order = wrathplus_protocol::wrath_authority::decode_mover_order(opcode, body).unwrap();
+    let event = super::io::wrath::mover_order_event(&order).unwrap();
+    super::handlers::dispatch(app.world_mut(), vec![event]);
+}

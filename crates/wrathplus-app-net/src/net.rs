@@ -2270,6 +2270,7 @@ pub struct TeleportMessage {
     pub counter: u32,
     pub position: [f32; 3],
     pub orientation: f32,
+    pub transport: Option<wrathplus_protocol::TransportPose>,
 }
 
 /// An inbound `MSG_MOVE_*` for our own mover: always server-authored (vmangos

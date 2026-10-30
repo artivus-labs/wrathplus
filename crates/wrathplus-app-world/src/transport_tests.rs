@@ -1,6 +1,63 @@
 use super::*;
 use wrathplus_formats::ElevatorKeyframe;
 
+/// The post-WORLDPORT_ACK create from the Stormwind–Auberdine crossing: the old
+/// 234510 ms client period put this server anchor back on map 0 and hid the deck.
+#[test]
+fn auberdine_recreated_deck_stays_visible_at_the_server_progress() {
+    use crate::app_core::session::ObjectStore;
+    use wrathplus_protocol::{types::Field, ObjectFields};
+    let data = wrathplus_formats::wow_data_or_skip!();
+    let mut chain = wrathplus_formats::open_chain(&data).expect("open chain");
+    let nodes = load_taxi_path_nodes(&mut chain).expect("TaxiPathNode.dbc");
+    let mut templates = GameObjectTemplates::default();
+    let mut tuple = [0; 24];
+    tuple[0] = 967;
+    tuple[1] = 30;
+    tuple[2] = 1;
+    templates.insert(176310, 15, "The Bravery".into(), &tuple);
+    let mut app = App::new();
+    app.insert_resource(CurrentMap(1))
+        .insert_resource(templates)
+        .insert_resource(Timetables {
+            nodes: Some(nodes),
+            ..default()
+        })
+        .add_systems(Update, (arm_transports, tick_transports).chain());
+    let boat = app
+        .world_mut()
+        .spawn((
+            Guid(0x1FC0_0000_0000_0002),
+            ObjectStore(ObjectFields::from_field_slots(&[
+                (Field::ObjectEntry, 0, 176310),
+                (Field::GameobjectLevel, 0, 234433),
+            ])),
+            TransportAnchor {
+                progress_ms: 1_451_256_056,
+                at: Instant::now(),
+            },
+            Transform::default(),
+            Visibility::Hidden,
+        ))
+        .id();
+    app.update();
+    let transport = app.world().get::<Transport>(boat).unwrap();
+    assert_eq!(transport.period_ms(), 234433, "captured server period");
+    assert_eq!(
+        *app.world().get::<Visibility>(boat).unwrap(),
+        Visibility::Inherited,
+        "the recreated server anchor must not hide the destination deck"
+    );
+    let position = app.world().get::<Transform>(boat).unwrap().translation;
+    let wow = wrathplus_assets::coords::bevy_to_wow(position);
+    assert!(wow[0] > 6000.0 && wow[0] < 7000.0, "Auberdine leg: {wow:?}");
+    app.update();
+    assert_eq!(
+        *app.world().get::<Visibility>(boat).unwrap(),
+        Visibility::Inherited
+    );
+}
+
 /// The Ratchet–Booty Bay ferry's real timetable (taxi path 241): the builder can truncate a
 /// short synthetic cycle so the far continent's legs are never reached.
 fn ferry_241(chain: &mut wrathplus_formats::Chain) -> Transport {

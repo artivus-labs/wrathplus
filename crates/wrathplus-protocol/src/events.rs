@@ -215,6 +215,7 @@ pub enum SessionEvent {
         counter: u32,
         position: [f32; 3],
         orientation: f32,
+        transport: Option<crate::TransportPose>,
     },
     /// Lossless Wrath far-transfer packet plus local single-use acknowledgement capability.
     WrathTransfer {
