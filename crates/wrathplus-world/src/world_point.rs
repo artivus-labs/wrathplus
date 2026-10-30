@@ -70,6 +70,16 @@ pub fn init_world_point_resources(world: &mut bevy::prelude::World) {
     world.init_resource::<CurrentAreaInterior>();
 }
 
+/// Index synthetic liquid surfaces in a downstream headless consumer fixture. The ordinary
+/// world plugin maintains this same index in PreUpdate; no renderer or install is needed here.
+/// Like `init_world_point_resources`, this is public only for dependent crates' tests.
+pub fn index_fixture_liquids(world: &mut bevy::prelude::World) {
+    use bevy::ecs::system::RunSystemOnce;
+    world
+        .run_system_once(crate::liquid::maintain_water_index)
+        .expect("index fixture water");
+}
+
 /// The nearest wet point of one liquid sound class ([`WorldPoint::nearest_liquid_per_class`]).
 pub struct NearestLiquid {
     /// Squared distance from the query point, in WoW yards.
