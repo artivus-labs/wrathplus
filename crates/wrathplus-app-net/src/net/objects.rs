@@ -15,11 +15,13 @@ use crate::names::NameCache;
 use wrathplus_world::model_fade::DespawnFade;
 use wrathplus_world::vis_chain::VisChainOnly;
 
+mod speed;
 mod transport_seed;
 use super::{
     merge_store_fields, FieldChanged, Guid, GuidIndex, NetCommands, NetEntity, NetHandlerApp,
     ObjectStore, SelfGuid, SpeedChangeMessage, UnitSpeeds,
 };
+use speed::set_speed;
 
 /// `SMSG_GAMEOBJECT_CUSTOM_ANIM`, bridged to [`crate::go_anim`], which rejects `anim_id >= 4` and
 /// maps the rest to AnimationData 153..156; the fishing bobber's splash is `anim_id` 0.
@@ -424,7 +426,10 @@ fn object_create(
     // Warm the template cache as a GameObject streams in: only the query carries its lockId,
     // which decides use-vs-cast on a right-click.
     if matches!(kind, EntityKind::GameObject) {
-        go_templates.request(guid, net_commands);
+        // AC MotionTransport::CreateMoTrans uses the spawn counter, not entry, in its GUID.
+        if let Some(entry) = fields.object_entry() {
+            go_templates.request_entry(entry, guid, net_commands);
+        }
         // Where and how big, under `RUST_LOG=wrathplus_app::net::objects=debug`.
         debug!(
             "gameobject spawn: entry {:?} display {display_id:?} type {go_type:?} \
@@ -638,34 +643,6 @@ fn merge_fields(
         );
         commands.entity(entity).insert(ObjectStore(delta));
     }
-}
-
-/// Writes one slot of a mover's [`UnitSpeeds`]; `false` when there is none (an untracked guid,
-/// or a create with no movement block). vmangos sends a self create and a speed change back to
-/// back (`HandleMoveWorldportAckOpcode`), and wire order holds as each handler applies in turn.
-fn set_speed(
-    guid: u64,
-    kind: SpeedKind,
-    speed: f32,
-    index: &GuidIndex,
-    speeds: &mut Query<&mut UnitSpeeds>,
-) -> bool {
-    let Some(mut s) = index.0.get(&guid).and_then(|&e| speeds.get_mut(e).ok()) else {
-        return false;
-    };
-    let s = &mut s.0;
-    match kind {
-        SpeedKind::Walk => s.walk = speed,
-        SpeedKind::Run => s.run = speed,
-        SpeedKind::RunBack => s.run_back = speed,
-        SpeedKind::Swim => s.swim = speed,
-        SpeedKind::SwimBack => s.swim_back = speed,
-        SpeedKind::TurnRate => s.turn_rate = speed,
-        SpeedKind::Flight => s.flight = speed,
-        SpeedKind::FlightBack => s.flight_back = speed,
-        SpeedKind::PitchRate => s.pitch_rate = speed,
-    }
-    true
 }
 
 /// `SMSG_FORCE_*_SPEED_CHANGE`: applied to the mover's speeds, and for our own guid forwarded to

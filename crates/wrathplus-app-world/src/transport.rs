@@ -225,7 +225,12 @@ fn arm_transports(
     templates: Res<GameObjectTemplates>,
     // A re-created lift is already armed but carries a fresh seed, so it re-enters to consume it.
     pending: Query<
-        (Entity, &Guid, Option<&ElevatorSeed>),
+        (
+            Entity,
+            &Guid,
+            &crate::app_core::session::ObjectStore,
+            Option<&ElevatorSeed>,
+        ),
         (
             With<TransportAnchor>,
             Or<(Without<Transport>, With<ElevatorSeed>)>,
@@ -235,7 +240,7 @@ fn arm_transports(
     if pending.is_empty() {
         return;
     }
-    for (entity, guid, seed) in &pending {
+    for (entity, guid, store, seed) in &pending {
         // The lift arm.
         if let Some(seed) = seed {
             let Timetables {
@@ -293,7 +298,14 @@ fn arm_transports(
         }
 
         // The boat arm.
-        let Some(mo) = templates.get(guid.0).and_then(|t| t.mo_transport) else {
+        // AC MotionTransport::CreateMoTrans encodes the spawn counter in the GUID; the
+        // template identity is OBJECT_FIELD_ENTRY, independent of that counter.
+        let Some(mo) = store
+            .0
+            .object_entry()
+            .and_then(|entry| templates.get_entry(entry))
+            .and_then(|t| t.mo_transport)
+        else {
             continue; // template answer not in yet: next frame
         };
         let Timetables { nodes, built, .. } = &mut *timetables;

@@ -88,6 +88,11 @@ impl GameObjectTemplates {
         let Some(entry) = guid::entry(guid) else {
             return;
         };
+        self.request_entry(entry, guid, commands);
+    }
+
+    /// Query using OBJECT_FIELD_ENTRY; a Wrath MO_TRANSPORT guid carries a spawn counter.
+    pub fn request_entry(&self, entry: u32, guid: u64, commands: &NetCommands) {
         if self.templates.answered(entry) {
             return;
         }
@@ -148,6 +153,11 @@ impl GameObjectTemplates {
         );
     }
 
+    /// The cached template keyed by OBJECT_FIELD_ENTRY.
+    pub fn get_entry(&self, entry: u32) -> Option<&GoTemplate> {
+        self.templates.get(entry)
+    }
+
     /// The cached template for a GameObject guid.
     pub fn get(&self, guid: u64) -> Option<&GoTemplate> {
         guid::entry(guid).and_then(|e| self.templates.get(e))
@@ -187,6 +197,45 @@ mod tests {
         ));
         assert!(templates.templates.is_pending(1731));
         templates.request(guid, &commands);
+        assert!(matches!(rx.try_recv(), Err(TryRecvError::Empty)));
+    }
+
+    #[test]
+    fn boat_template_uses_descriptor_entry_not_spawn_counter() {
+        let (tx, rx) = crossbeam_channel::unbounded();
+        let commands = NetCommands(tx);
+        let mut templates = GameObjectTemplates::default();
+        // AC transports.sql: spawn 3 is entry 176244, Auberdine–Rut'theran.
+        let guid = 0x1FC0_0000_0000_0003;
+        templates.request_entry(176244, guid, &commands);
+        assert!(matches!(
+            rx.try_recv(),
+            Ok(ClientCommand::GameObjectQuery {
+                entry: 176244,
+                guid: 0x1FC0_0000_0000_0003,
+            })
+        ));
+        templates.request_entry(176244, guid, &commands);
+        assert!(matches!(rx.try_recv(), Err(TryRecvError::Empty)));
+        let mut data = [0; 24];
+        data[0] = 293;
+        data[1] = 30;
+        data[2] = 1;
+        templates.insert(176244, 15, "The Moonspray".into(), &data);
+        assert_eq!(
+            templates
+                .get_entry(176244)
+                .unwrap()
+                .mo_transport
+                .unwrap()
+                .taxi_path_id,
+            293
+        );
+        assert!(
+            templates.get_entry(3).is_none(),
+            "spawn counter is not a template"
+        );
+        templates.request_entry(176244, guid, &commands);
         assert!(matches!(rx.try_recv(), Err(TryRecvError::Empty)));
     }
 
