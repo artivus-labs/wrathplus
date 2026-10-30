@@ -567,6 +567,7 @@ impl AssetLoader for WmoModelLoader {
                     interior: sub.interior,
                     emissive: sub.emissive,
                     sidn: sub.sidn, // MOMT SIDN (0x10): the authored night-glow colour
+                    wmo_unified: sub.wmo_unified,
                     window: sub.window, // MOMT WINDOW (0x20): the interior midpoint light
                     additive: sub.additive,
                     env_map: false,

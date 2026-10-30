@@ -310,6 +310,7 @@ mod tests {
             emissive: false,
             icon_slot: false,
             sidn: None,
+            wmo_unified: None,
             window: false,
             additive: false,
             env_map: false,

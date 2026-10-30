@@ -49,6 +49,7 @@ struct ModelParams {
     tint: vec4<f32>,
     // WMO glass, 0 on M2: xyz = the MOMT SIDN (0x10) emissive (gamma /255), w = MOMT WINDOW (0x20).
     sidn: vec4<f32>,
+    wmo_unified: vec4<f32>,
     // Rows of `wow_light.matanim`, 0 = identity: x = UV scroll, y = tint, z = texture-transform
     // affine, w = the UI tile's cell clip.
     anim_slots: vec4<f32>,
@@ -57,6 +58,22 @@ struct ModelParams {
     stage2_seed: vec4<f32>,
     light_sphere: vec4<f32>,
 };
+// 12340 MapObjUDiffuse_T1 + MapObjDiffuse: half-range light, additive residual,
+// vertex clamp, then pixel Mod2x. Alpha is coverage, never a lighting lerp.
+fn wmo_unified_light(ambient: vec3<f32>, diffuse: vec3<f32>, root_ambient: vec3<f32>, residual: vec4<f32>, ndotl: f32, interior: bool, unlit: bool, window: bool, point: vec3<f32>, emission: vec3<f32>) -> vec3<f32> {
+    var a = select(ambient, root_ambient, interior);
+    var d = select(diffuse, vec3<f32>(0.0), interior);
+    if (interior && window) {
+        // 0x7ee750: midpoint of committed bytes, then saturating ambient +16.
+        let midpoint = floor((round(ambient * 255.0) + round(diffuse * 255.0)) * 0.5);
+        a = min(midpoint + vec3<f32>(16.0), vec3<f32>(255.0)) / 255.0;
+        d = midpoint / 255.0;
+    }
+    let light = clamp(a + d * clamp(ndotl, 0.0, 1.0) + point, vec3<f32>(0.0), vec3<f32>(1.0));
+    let primary = select(residual.rgb + (127.0 / 255.0) * light + emission, residual.rgb, unlit && !interior);
+    return 2.0 * clamp(primary, vec3<f32>(0.0), vec3<f32>(1.0));
+}
+
 fn second_stage_uv(uv: vec2<f32>) -> vec2<f32> {
     if (m.stage2.z > 2.0) { return uv; }
     let uv_t = uv + m.stage2_seed.xy + wow_light.matanim[u32(m.stage2_anim.x)].xy;
@@ -146,6 +163,7 @@ struct WowVsOut {
 #endif
     // The point-light sum `Σ att·sat(N·L)·colour`, per vertex like the reference FFP.
     @location(8) point_lit: vec3<f32>,
+    @location(11) unified_light: vec3<f32>,
 #ifdef WOW_MERGED_FADE
     // A merged blob's per-placement fade alpha, constant over the placement.
     @location(9) merged_fade: f32,
@@ -468,6 +486,16 @@ fn vertex(vertex: WowVertex) -> WowVsOut {
         }
         out.point_lit = point_light_sum(out.world_position.xyz, out.world_normal, anchor, reach);
     }
+    out.unified_light = vec3<f32>(0.0);
+    if (m.wmo_unified.w > 0.5) {
+        var residual = vec4<f32>(0.0, 0.0, 0.0, 1.0);
+#ifdef VERTEX_COLORS
+        residual = out.color;
+#endif
+        out.unified_light = wmo_unified_light(wow_light.light_ambient.rgb, wow_light.light_diffuse.rgb,
+            m.wmo_unified.rgb, residual, dot(normalize(out.world_normal), -normalize(wow_light.light_sun.xyz)),
+            m.model_flags.z > 0.5, m.model_flags.w > 0.5, m.sidn.w > 0.5, out.point_lit, floor(m.sidn.rgb * 255.0 * 0.5) / 255.0);
+    }
     return out;
 }
 
@@ -528,7 +556,7 @@ fn fragment(in: WowVsOut, @builtin(front_facing) is_front: bool) -> WowFragOut {
     vo.uv_b = in.uv_b;
 #endif
 #ifdef VERTEX_COLORS
-    vo.color = in.color;
+    vo.color = select(in.color, vec4<f32>(1.0), m.wmo_unified.w > 0.5);
 #endif
 #ifdef VERTEX_OUTPUT_INSTANCE_INDEX
     vo.instance_index = in.instance_index;
@@ -667,6 +695,9 @@ fn fragment(in: WowVsOut, @builtin(front_facing) is_front: bool) -> WowFragOut {
     // depth. No early return: naga's MSL backend miscompiles the dead tail ("redefinition of
     // '_tmp'").
     // A Mod2x stage can reach alpha 2; saturated as 3.3.5a's 8-bit framebuffer saturates it.
+#ifdef VERTEX_COLORS
+    if (m.wmo_unified.w > 0.5) { base_color.a *= in.color.a; }
+#endif
     let faded_alpha = clamp(base_color.a * obj_fade, 0.0, 1.0);
     let base = alpha_discard(pbr_input.material, base_color);
 
@@ -893,6 +924,9 @@ fn fragment(in: WowVsOut, @builtin(front_facing) is_front: bool) -> WowFragOut {
         unlit_rgb = unlit_tex * clamp(unlit_sum, vec3<f32>(0.0), vec3<f32>(1.0));
     }
     var rgb = select(lit_rgb, unlit_rgb, is_emissive) + stage_add;
+    if (is_wmo && m.wmo_unified.w > 0.5) {
+        rgb = base.rgb * in.unified_light;
+    }
     // An M2 Mod or Mod2x batch draws the bare texel: the reference zeroes its tint·M2Color term and
     // forces the primary colour to the blend identity (`0x70c507`/`0x70c5b8`), so neither the
     // animated M2Color nor the body tint reaches it. Its alpha still does, through the lerp below.

@@ -120,7 +120,7 @@ fn wow_shadowcaster_gpu_smoke() {
         usage: BufferUsages::STORAGE,
     });
     let mut mesh_layouts = MeshVertexBufferLayouts::default();
-    for (case, alpha_mode, alpha, markers, rig, casts) in [
+    for (case, alpha_mode, alpha, markers, rig, casts, wmo, unified, vertex_alpha) in [
         ("opaque", AlphaMode::Opaque, 1., 0., false, true),
         ("mask pass", AlphaMode::Mask(0.5), 1., 0., false, true),
         ("mask discard", AlphaMode::Mask(0.5), 0., 0., false, false),
@@ -133,7 +133,69 @@ fn wow_shadowcaster_gpu_smoke() {
             false,
         ),
         ("custom rig identity", AlphaMode::Opaque, 1., 0., true, true),
-    ] {
+    ]
+    .into_iter()
+    .map(|(case, mode, alpha, markers, rig, casts)| {
+        (case, mode, alpha, markers, rig, casts, false, false, 1.)
+    })
+    .chain([
+        // Texture/base alpha=1: only the production vertex coverage law can discard these.
+        (
+            "unified WMO vertex cutout discard",
+            AlphaMode::Mask(224. / 255.),
+            1.,
+            0.,
+            false,
+            false,
+            true,
+            true,
+            0.5,
+        ),
+        (
+            "unified WMO vertex cutout pass",
+            AlphaMode::Mask(224. / 255.),
+            1.,
+            0.,
+            false,
+            true,
+            true,
+            true,
+            0.9,
+        ),
+        (
+            "unified WMO alpha applied once",
+            AlphaMode::Mask(224. / 255.),
+            1.,
+            0.,
+            false,
+            true,
+            true,
+            true,
+            0.94,
+        ),
+        (
+            "classic WMO ignores vertex alpha",
+            AlphaMode::Mask(224. / 255.),
+            1.,
+            0.,
+            false,
+            true,
+            true,
+            false,
+            0.,
+        ),
+        (
+            "M2 keeps vertex coverage",
+            AlphaMode::Mask(224. / 255.),
+            1.,
+            0.,
+            false,
+            false,
+            false,
+            false,
+            0.5,
+        ),
+    ]) {
         eprintln!("shadow smoke: begin {case}");
         let material = WowModelMaterial {
             base: StandardMaterial {
@@ -144,10 +206,11 @@ fn wow_shadowcaster_gpu_smoke() {
             },
             extension: WowModelExt {
                 clutter_fade: Vec4::new(0., 0., markers, 0.),
-                model_flags: Vec4::ZERO,
+                model_flags: Vec4::new(if wmo { 1. } else { 0. }, 0., 0., 0.),
                 sun_scale: Vec4::ZERO,
                 tint: Vec4::ONE,
                 sidn: Vec4::ZERO,
+                wmo_unified: Vec4::new(0., 0., 0., if unified { 1. } else { 0. }),
                 anim_slots: Vec4::ZERO,
                 stage2: Vec4::ZERO,
                 stage2_anim: Vec4::ZERO,
@@ -167,6 +230,7 @@ fn wow_shadowcaster_gpu_smoke() {
             vec![[-1., -1., 0.5], [3., -1., 0.5], [-1., 3., 0.5]],
         );
         mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, vec![[0.5f32, 0.5]; 3]);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, vec![[1., 1., 1., vertex_alpha]; 3]);
         if rig {
             mesh.insert_attribute(
                 wrathplus_assets::ATTRIBUTE_WOW_JOINT_INDEX,

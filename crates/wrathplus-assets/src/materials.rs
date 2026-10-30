@@ -125,6 +125,9 @@ pub struct WowModelExt {
     /// WINDOW flag, the brighter interior light (`0x6d37e0`, ambient +16/255).
     #[uniform(100)]
     pub sidn: Vec4,
+    /// MOHD unified ambient: gamma RGB / 255, w = enabled (including black); zero otherwise.
+    #[uniform(100)]
+    pub wmo_unified: Vec4,
     /// Rows of the shared light buffer's `matanim` region, `0` = identity: `x` = UV scroll, `y` =
     /// tint, `z` = the texture-transform affine, `w` = the UI tile's cell clip.
     #[uniform(100)]

@@ -123,3 +123,63 @@ fn far_twin_keeps_the_source_identity_one_rung_down() {
     let all = src | super::FAR_SIDE_MARKER | 0x0f;
     assert_eq!(f32::from(all) as u16, all);
 }
+
+#[test]
+fn unified_fallback_ambient_preserves_presence_and_gamma_rgb() {
+    use bevy::prelude::Vec4;
+    assert_eq!(super::unified_ambient(None), Vec4::ZERO);
+    assert_eq!(super::unified_ambient(Some([0; 3])), Vec4::W);
+    assert_eq!(super::unified_ambient(Some([255; 3])), Vec4::ONE);
+    assert_eq!(
+        super::unified_ambient(Some([17, 91, 203])),
+        Vec4::new(17.0 / 255.0, 91.0 / 255.0, 203.0 / 255.0, 1.0)
+    );
+}
+
+#[test]
+fn unified_fallback_material_key_distinguishes_none_black_and_rgb() {
+    use super::*;
+    let key = |wmo_unified| MatKey {
+        light: bevy::render::render_resource::BufferId::new(),
+        texture: None,
+        texture2: None,
+        stage2: [0; 4],
+        stage2_owner: 0,
+        light_sphere: [0; 4],
+        blend: ModelBlend::Opaque,
+        two_sided: false,
+        is_wmo: true,
+        is_interior: true,
+        is_emissive: false,
+        is_additive: false,
+        fade_variant: false,
+        no_depth_write: false,
+        no_depth_test: false,
+        fog_policy: FogPolicy::Scene,
+        env_map: false,
+        shade: ShadeSel::Matte,
+        batch_order: 0,
+        uv_anim: None,
+        rgb_anim: None,
+        wmo_class: Some(WmoBatchClass::Int),
+        sidn: Some([10, 20, 30]),
+        wmo_unified,
+        window: true,
+        zfill: false,
+        sky_depth: false,
+        instance: None,
+    };
+    let plain = key(None);
+    let mut black = key(Some([0; 3]));
+    let mut colored = key(Some([17, 91, 203]));
+    // All other key fields, including buffer identity, agree.
+    black.light = plain.light;
+    colored.light = plain.light;
+    assert!(plain != black);
+    assert!(black != colored);
+    let mut cache = MaterialCache::default();
+    let plain_handle = Handle::default();
+    cache.insert(plain, plain_handle);
+    assert!(cache.fetch(&black).is_none());
+    assert!(cache.fetch(&colored).is_none());
+}

@@ -30,6 +30,7 @@ struct ModelParams {
     tint: vec4<f32>,
     // WMO glass, 0 on M2: xyz = the MOMT SIDN (0x10) emissive (gamma /255), w = MOMT WINDOW (0x20).
     sidn: vec4<f32>,
+    wmo_unified: vec4<f32>,
     // Rows of `wow_light.matanim`, 0 = identity: x = UV scroll, y = tint, z = texture-transform
     // affine, w = the UI tile's cell clip.
     anim_slots: vec4<f32>,
@@ -303,8 +304,8 @@ fn fragment(in: VertexOutput) -> ShadowOutput {
     if (m.stage2.x > 0.5 && m.stage2.z > 2.0) { discard; }
     var alpha = pbr_bindings::material.base_color.a;
 #ifdef VERTEX_COLORS
-    // MOCV.a is lighting data (often zero), NOT WMO coverage; never divide it back out.
-    if (m.model_flags.x <= 0.5) { alpha *= in.color.a; }
+    // Classic MOCV.a is lighting; ordinary unified MOCV.a is coverage, as in forward.
+    if (m.model_flags.x <= 0.5 || m.wmo_unified.w > 0.5) { alpha *= in.color.a; }
 #endif
 #ifdef VERTEX_UVS
 #ifdef STANDARD_MATERIAL_BASE_COLOR_UV_B

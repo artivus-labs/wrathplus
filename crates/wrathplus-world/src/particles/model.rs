@@ -93,6 +93,7 @@ pub(super) fn update_model_particles(
                         None, // the over-life tint owns the colour, never the M2Color loop
                         None,
                         None,
+                        None,
                         false,
                         false, // an effect model is never a skybox
                         &light.0,

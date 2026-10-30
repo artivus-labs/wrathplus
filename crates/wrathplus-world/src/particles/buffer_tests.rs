@@ -153,10 +153,21 @@ mod write_order {
         assert_eq!(quads.verts.len(), 4);
     }
 
-    /// Without it, the write precedes the clear and the debug assert fires.
+    /// Without the edge, debug builds diagnose the write before the frame clear.
+    #[cfg(debug_assertions)]
     #[test]
     #[should_panic(expected = "effect-stream write before `begin_effect_frame`")]
     fn without_the_edge_the_tripwire_names_it() {
         let _ = run(false);
+    }
+
+    /// Optimized builds omit the tripwire, but the missing edge still erases the draw.
+    #[cfg(not(debug_assertions))]
+    #[test]
+    fn without_the_edge_the_clear_erases_the_draw() {
+        let app = run(false);
+        let quads = app.world().resource::<EffectQuads>();
+        assert!(quads.draws.is_empty(), "the late clear erases the draw");
+        assert!(quads.verts.is_empty(), "the late clear erases its vertices");
     }
 }

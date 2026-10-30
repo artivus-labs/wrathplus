@@ -179,3 +179,6 @@ pub mod material_specialization;
 
 #[cfg(test)]
 mod shadow_gpu_smoke;
+
+#[cfg(test)]
+mod wmo_unified_gpu_tests;

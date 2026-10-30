@@ -60,6 +60,8 @@ pub struct ModelSubmesh {
     pub icon_slot: bool,
     /// The WMO MOMT SIDN night-glow colour, ramped by the night fraction.
     pub sidn: Option<[u8; 3]>,
+    /// MOHD ambient RGB when the WMO uses unified render lighting.
+    pub wmo_unified: Option<[u8; 3]>,
     /// WMO MOMT WINDOW: an interior batch lit by the Direct/Ambient midpoint.
     pub window: bool,
     /// Blends additively (M2 glow cards and coronae).

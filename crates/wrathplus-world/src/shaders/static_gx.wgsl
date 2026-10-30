@@ -67,12 +67,29 @@ const WORD_WINDOW: u32 = 67108864u;    // 1 << 26: sidn.w, the WINDOW midpoint l
 const WORD_HAS_VC: u32 = 134217728u;   // 1 << 27: the batch authors vertex colours
 // INTERIOR without WMO is an interior M2 prop, the entity shader's `interior_prop =
 // flags.z && !flags.x`: probe lighting, interior fog, no point lights.
+const WORD_UNIFIED: u32 = 536870912u; // 1 << 29
 const WORD_MATTE: u32 = 268435456u;    // 1 << 28: ShadeSel::Matte, fixed intensity 1.0
 
 // The alpha-test cutout reference 224/255, as wow_model.wgsl's VANILLA_ALPHA_KEY.
 const VANILLA_ALPHA_KEY: f32 = 0.8784314;
 
 // ---- mirrored law (wow_model.wgsl) ----
+
+// 12340 MapObjUDiffuse_T1 + MapObjDiffuse: half-range light, additive residual,
+// vertex clamp, then pixel Mod2x. Alpha is coverage, never a lighting lerp.
+fn wmo_unified_light(ambient: vec3<f32>, diffuse: vec3<f32>, root_ambient: vec3<f32>, residual: vec4<f32>, ndotl: f32, interior: bool, unlit: bool, window: bool, point: vec3<f32>, emission: vec3<f32>) -> vec3<f32> {
+    var a = select(ambient, root_ambient, interior);
+    var d = select(diffuse, vec3<f32>(0.0), interior);
+    if (interior && window) {
+        // 0x7ee750: midpoint of committed bytes, then saturating ambient +16.
+        let midpoint = floor((round(ambient * 255.0) + round(diffuse * 255.0)) * 0.5);
+        a = min(midpoint + vec3<f32>(16.0), vec3<f32>(255.0)) / 255.0;
+        d = midpoint / 255.0;
+    }
+    let light = clamp(a + d * clamp(ndotl, 0.0, 1.0) + point, vec3<f32>(0.0), vec3<f32>(1.0));
+    let primary = select(residual.rgb + (127.0 / 255.0) * light + emission, residual.rgb, unlit && !interior);
+    return 2.0 * clamp(primary, vec3<f32>(0.0), vec3<f32>(1.0));
+}
 
 fn wow_normalize(v: vec3<f32>) -> vec3<f32> {
     let l2 = dot(v, v);
@@ -134,6 +151,7 @@ struct GxVsOut {
     @location(3) @interpolate(flat) word: u32,
     @location(4) point_lit: vec3<f32>,
     @location(5) color: vec4<f32>,
+    @location(6) unified_light: vec3<f32>,
 }
 
 @vertex
@@ -149,6 +167,7 @@ fn vertex(v: GxVertex) -> GxVsOut {
         out.word = v.word;
         out.point_lit = vec3<f32>(0.0);
         out.color = vec4<f32>(1.0);
+        out.unified_light = vec3<f32>(0.0);
         return out;
     }
     // Camera-relative for f32 precision: the recentred vertex plus (cell origin - camera).
@@ -174,6 +193,17 @@ fn vertex(v: GxVertex) -> GxVsOut {
         out.point_lit = vec3<f32>(0.0);
     } else {
         out.point_lit = point_light_sum(world, v.normal, v.anchor);
+    }
+    out.unified_light = vec3<f32>(0.0);
+    if ((v.word & WORD_UNIFIED) != 0u) {
+        let rec = recs[v.word & 0xffffu];
+        let root = vec3<f32>(f32(rec.z >> 24u), f32((rec.w >> 16u) & 255u), f32(rec.w >> 24u)) / 255.0;
+        let sidn = vec3<f32>(f32(rec.z & 255u), f32((rec.z >> 8u) & 255u), f32((rec.z >> 16u) & 255u));
+        let residual = select(vec4<f32>(0.0, 0.0, 0.0, 1.0), v.color, (v.word & WORD_HAS_VC) != 0u);
+        out.unified_light = wmo_unified_light(wow_light.light_ambient.rgb, wow_light.light_diffuse.rgb,
+            root, residual, dot(wow_normalize(v.normal), -normalize(wow_light.light_sun.xyz)),
+            (v.word & WORD_INTERIOR) != 0u, (v.word & WORD_UNLIT) != 0u, (v.word & WORD_WINDOW) != 0u,
+            out.point_lit, floor(sidn * 0.5) / 255.0);
     }
     return out;
 }
@@ -215,6 +245,9 @@ fn camera_base(in: GxVsOut) -> vec4<f32> {
         }
     }
 #ifdef GX_CUTOUT
+    if ((in.word & (WORD_UNIFIED | WORD_HAS_VC)) == (WORD_UNIFIED | WORD_HAS_VC)) {
+        base.a *= in.color.a; // native MapObjDiffuse coverage, exactly once
+    }
     if (base.a < VANILLA_ALPHA_KEY) {
         discard;
     }
@@ -320,6 +353,9 @@ fn fragment(in: GxVsOut) -> @location(0) vec4<f32> {
                 vec3<f32>(1.0),
             );
         }
+        if ((in.word & WORD_UNIFIED) != 0u) {
+            rgb = base.rgb * in.unified_light;
+        }
     } else if ((in.word & WORD_INTERIOR) != 0u) {
         // ---- interior M2 props: wow_model.wgsl's interior-prop branch ----
         // The spawn-folded SH probe (MODD ambient, fixed-axis diffuse, the group's MOLR lobes)
@@ -379,7 +415,7 @@ fn fragment(in: GxVsOut) -> @location(0) vec4<f32> {
         rgb = folded * primary;
     }
     // Unlit (M2 UNLIT 0x01, WMO UNLIT on an exterior group): texture × vertex colour, no light.
-    if ((in.word & WORD_UNLIT) != 0u) {
+    if ((in.word & WORD_UNLIT) != 0u && (in.word & WORD_UNIFIED) == 0u) {
         rgb = folded;
     }
     // Planar eye-Z fog; other fog modes belong to blends never admitted here. The interior triple

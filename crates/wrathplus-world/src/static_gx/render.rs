@@ -49,6 +49,7 @@ pub(crate) struct GxItemDraw {
     pub order: u16,
     /// The MOMT SIDN night-glow colour (gamma bytes; zero on cell items).
     pub sidn: [u8; 3],
+    pub wmo_unified: Option<[u8; 3]>,
     /// The interior prop's SH-probe slot, record column w bits 1..=13; 0 elsewhere.
     pub slot: u16,
 }
@@ -128,6 +129,22 @@ mod gpu_smoke;
 /// Record column w, bit 14: the item's interior fog lane, read by `static_gx.wgsl`. Bit 0 is the
 /// kill bit and bits 1..=13 the probe slot.
 const RECORD_FOG_BIT: u32 = 1 << 14;
+
+/// Record ABI: z low 24 = SIDN, z high 8 = unified R; w bit 0 = kill, bits 1..=13
+/// = probe, bit 14 = fog, bit 15 reserved, bits 16..=23 = unified G, 24..=31 = unified B.
+/// Presence is the vertex WORD_UNIFIED bit, so Some(black) differs from None.
+fn item_record(item: &GxItemDraw, layer: u16, kill: u32) -> [u32; 4] {
+    let [r, g, b] = item.wmo_unified.unwrap_or([0; 3]);
+    [
+        u32::from(layer),
+        u32::from(item.order),
+        u32::from(item.sidn[0])
+            | (u32::from(item.sidn[1]) << 8)
+            | (u32::from(item.sidn[2]) << 16)
+            | (u32::from(r) << 24),
+        kill | (u32::from(item.slot) << 1) | (u32::from(g) << 16) | (u32::from(b) << 24),
+    ]
+}
 
 /// One coalesced draw run of adjacent live items sharing bind-group slot, pipeline bucket and
 /// selection key; a killed item is never in one.
@@ -533,23 +550,12 @@ fn assemble_region(
             }
         });
     }
-    // The per-item record table, indexed by the word's low bits: [layer, batch-order nudge, SIDN,
-    // flags]. Flags: bit 0 the kill bit, re-synced by revision (hence COPY_DST); bits 1..=13 the
-    // probe slot, 13 bits being `MAX_PROP_PROBES` exactly.
+    // Four words per item; unified RGB shares the unused upper bytes with SIDN and flags.
     let records: Vec<[u32; 4]> = draw
         .draws
         .iter()
         .enumerate()
-        .map(|(i, item)| {
-            [
-                u32::from(item_class_layer[i].1),
-                u32::from(item.order),
-                u32::from(item.sidn[0])
-                    | (u32::from(item.sidn[1]) << 8)
-                    | (u32::from(item.sidn[2]) << 16),
-                kill_bit(&draw.killed, i) | (u32::from(item.slot) << 1),
-            ]
-        })
+        .map(|(i, item)| item_record(item, item_class_layer[i].1, kill_bit(&draw.killed, i)))
         .collect();
     let record_table = render_device.create_buffer_with_data(&BufferInitDescriptor {
         label: Some("static_gx_records"),
@@ -891,45 +897,5 @@ pub(super) fn publish_gx_world(gx: Res<super::StaticGx>, mut out: ResMut<GxWorld
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn item(index_range: Range<u32>, cutout: bool) -> GxItemDraw {
-        GxItemDraw {
-            index_range,
-            texture: None,
-            cutout,
-            two_sided: false,
-            vertex_range: 0..0,
-            group: None,
-            order: 0,
-            sidn: [0; 3],
-            slot: 0,
-        }
-    }
-
-    #[test]
-    fn runs_fuse_live_items_and_split_at_kills() {
-        let draws = vec![
-            item(0..3, false),
-            item(3..6, false),
-            item(6..9, false),
-            item(9..12, true), // bucket change
-            item(12..15, true),
-        ];
-        let slots = vec![0, 0, 0, 0, 1]; // the last item binds another pool class
-        let runs = build_runs(&draws, &slots, &[]);
-        assert_eq!(runs.len(), 3, "opaque span fused; cutout split by slot");
-        assert_eq!(runs[0].index_range, 0..9);
-        assert_eq!(runs[1].index_range, 9..12);
-        assert!(runs[1].cutout);
-        assert_eq!(runs[2].slot, 1);
-        // Kill the middle opaque item: the fused run splits around it.
-        let runs = build_runs(&draws, &slots, &[0b010u64]);
-        assert_eq!(runs.len(), 4);
-        assert_eq!(runs[0].index_range, 0..3);
-        assert_eq!(runs[1].index_range, 6..9);
-        // Kill everything: nothing is submitted.
-        assert!(build_runs(&draws, &slots, &[0b11111u64]).is_empty());
-    }
-}
+#[path = "render_tests.rs"]
+mod tests;
