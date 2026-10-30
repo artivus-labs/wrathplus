@@ -359,6 +359,9 @@ pub fn feed_trainer(
     // A spell subject's view must be in the store before the detail icon is hovered.
     let mut fresh_tooltip_subjects = TrainerTooltipSubjects::default();
     for service in fresh.iter().flat_map(|state| &state.services) {
+        if let TrainerTooltip::Recipe { spell_id, .. } = service.tooltip {
+            fresh_tooltip_subjects.player.push(spell_id);
+        }
         if let TrainerTooltip::Spell {
             spell_id,
             alt_caster,
@@ -471,3 +474,6 @@ fn rederive_edge(edge: &FieldChanged) -> bool {
 mod tests;
 #[cfg(test)]
 mod wrath_tests;
+
+#[cfg(test)]
+mod tooltip_tests;

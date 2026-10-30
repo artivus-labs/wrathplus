@@ -393,7 +393,7 @@ pub(super) fn feed_random_properties(
 /// misses, as the reference reads one item cache synchronously; a read of an unresolved id records
 /// a miss, which queries it here.
 #[allow(clippy::type_complexity)] // one Bevy system at the 16-parameter cap
-pub(super) fn feed_item_stats(
+pub(crate) fn feed_item_stats(
     script: Option<NonSendMut<UiScript>>,
     mut items: ResMut<Items>,
     commands: Res<NetCommands>,

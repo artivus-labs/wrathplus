@@ -783,10 +783,6 @@ pub(super) fn install_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
         })?,
     )?;
 
-    // GameTooltip:SetTrainerService(index): the trainer detail icon's hover
-    // (`Blizzard_TrainerUI.xml:452`); list rows have no tooltip. `0x5338b0` writes no line itself
-    // and hands a shared builder the subject the app resolved (`TrainerService::tooltip`). `index`
-    // is a visible row, headers included; a header is a no-op.
     m.set(
         "SetTrainerService",
         lua.create_function(|lua, (this, index): (Table, usize)| {
@@ -798,6 +794,10 @@ pub(super) fn install_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
                 }
             };
             match subject {
+                TrainerTooltip::Recipe { spell_id, item_id } => {
+                    set_spell_by_id(lua, &this, spell_id, None, SpellRenderOpts::default(), None)?;
+                    super::tooltip_item::append_recipe(lua, &this, item_id)
+                }
                 // The item builder (`0x52b650`), with no fallback name: id 0 or a template in
                 // flight renders empty, the builder's own early-out.
                 TrainerTooltip::Item(item_id) => {
