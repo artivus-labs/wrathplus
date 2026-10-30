@@ -92,7 +92,8 @@ fn feed_quest_pois(
     }
     let view = pois.view(&logged);
     let (last, reset) = last.get_reset(&script);
-    if reset || last.as_ref() != Some(&view) {
+    let changed = reset || last.as_ref() != Some(&view);
+    if changed {
         *last = Some(view.clone());
         script.set_wrath_quest_pois(view);
     }
@@ -110,7 +111,10 @@ fn feed_quest_pois(
         script.set_wrath_quest_player_position(now.player);
         *last_context = Some(now);
     }
-    if std::mem::take(&mut pois.fresh) {
+    // Stock WatchFrame.lua:272 rebuilds CURRENT_MAP_QUESTS on this event. Publishing cached
+    // POIs into a replacement VM needs the same invalidation as a newly received reply.
+    let fresh = std::mem::take(&mut pois.fresh);
+    if changed || fresh {
         script.fire_event("QUEST_POI_UPDATE", vec![]);
     }
 }

@@ -86,7 +86,8 @@ pub(crate) fn event_objective(
             finished: slot_state & wrathplus_protocol::types::quest_slot_state::COMPLETE != 0,
             cur: 0,
             req: 0,
-            poi_bit: None,
+            // Wrath's event/exploration POI uses objective 16 (AC quest_poi), not a row index.
+            poi_bit: Some(16),
         });
     }
     lines
