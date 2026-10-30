@@ -1,14 +1,5 @@
-//! The engine item-tooltip renderer: every item hover renders through one line law, as 8 of the
-//! reference's 9 `Set*Item` bindings share the builder `0x52b650`. The methods register into the
-//! GameTooltip kind table beside the widget verbs ([`super::tooltip`]). Every family's order,
-//! gate and colour is the reference's, and every sentence is a key resolved off the player's own
-//! `GlobalStrings.lua` at render time. Red (`0xc0d390`, `0xffff2020`) marks unmet requirements,
-//! LOCKED, broken durability and "Already known"; the name never recolors.
-//!
-//! Stock FrameXML seats the shopping plates (`MerchantFrame.xml:63-80`,
-//! `Blizzard_AuctionUI.lua:1078`). There is no hover compare: `SHOW_COMPARE_TOOLTIP` has no fire
-//! site (`0x49211a` and `0x49630d` never produce event 377), so `PaperDollFrame.lua`'s listener
-//! for it is dead code.
+//! Shared item-tooltip line law, with localized strings and unmet requirements in red.
+//! Stock FrameXML seats the shopping plates; item hovers use the template cache.
 
 use mlua::{Lua, MultiValue, Table, Value};
 
@@ -141,9 +132,16 @@ pub(super) fn hyperlink_item_fields(link: &str) -> Option<(u32, u32, u32)> {
     (item_id != 0).then_some((item_id, enchant_id, random_property_id))
 }
 
+/// Append a recipe product without clearing its spell/reagent head (`0x62526a`).
+pub(super) fn append_recipe(lua: &Lua, this: &Table, item: u32) -> mlua::Result<()> {
+    if let Some(view) = view_of(lua, item) {
+        render_view(lua, this, &view, BuilderFlags::default(), None)?;
+    }
+    Ok(())
+}
+
 /// The id-keyed render; on a miss, the ask and a name-only line, as `SetBagItem`'s miss path. The
-/// engine's own item hovers reach it from Rust (the action bar's, `SetTrainerService`): the
-/// `Set*Item` bindings all name a container, so no Lua method takes an id.
+/// engine's own item hovers reach it from Rust.
 pub(super) fn render_by_id(
     lua: &Lua,
     this: &Table,

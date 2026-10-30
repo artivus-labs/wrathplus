@@ -75,6 +75,14 @@ pub(super) fn service_tooltip(wire_spell: u32, spells: &SpellCatalog) -> Trainer
             alt_caster: effect == SPELL_EFFECT_LEARN_PET_SPELL,
         };
     }
+    // 12340's spell builder `0x6239ae`/`0x62526a` appends the product of a direct trade recipe.
+    let item_id = wire.effect_item_type[0];
+    if wire.attributes & SPELL_ATTR_IS_TRADESKILL != 0 && creates_item(wire) && item_id != 0 {
+        return TrainerTooltip::Recipe {
+            spell_id: wire_spell,
+            item_id,
+        };
+    }
     wire_only
 }
 

@@ -27,7 +27,7 @@ pub mod currency;
 mod drain;
 mod equip_error;
 pub mod feed;
-mod heirloom;
+pub(crate) mod heirloom;
 pub mod net;
 mod owned;
 pub(crate) use owned::{owned_category_count, owned_entry_count};

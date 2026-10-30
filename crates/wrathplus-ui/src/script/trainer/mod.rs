@@ -67,11 +67,11 @@ pub struct TrainerAbilityReq {
 }
 
 /// What `GameTooltip:SetTrainerService` (`0x5338b0`) describes for a row, resolved by the app; the
-/// reference only picks the spell builder `0x52e610` or the item builder `0x52b650`. Not derivable
-/// from [`TrainerService::texture`]: the icon (`0x4d8f50`) gates on the trainer type and shows the
-/// wire spell, while the tooltip describes the taught one.
+/// subject is independent of the icon: wrappers describe the taught spell.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TrainerTooltip {
+    /// Direct trade recipe: spell/reagents followed by the crafted item (12340 `0x62526a`).
+    Recipe { spell_id: u32, item_id: u32 },
     /// The item builder on this item id, for a taught spell with `SPELL_ATTR_IS_TRADESKILL`; 0 or
     /// an uncached template renders empty, as the reference's builder does on a cache miss.
     Item(u32),
