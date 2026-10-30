@@ -687,17 +687,16 @@ fn resolve_slot(
                 fields.item_flags().unwrap_or(0),
                 // `0x5da2c0`: soulbound, or carrying a binding enchant, off the raw descriptor.
                 crate::items::already_bound(fields, rolls.enchants),
-                // The roll behind the name's suffix; its enchants are already in slots 2..6.
+                // The roll behind the name's suffix; Wrath property enchants live in slots 7..11.
                 fields.item_random_properties_id(),
-                // All seven enchant slots with charges and countdowns: our own items stream whole,
-                // where others' carry two slots.
+                // Wrath Item.h: 12 slots include property enchants at 7..11, after sockets.
                 crate::items::enchant_lines(
-                    (0..7).map(|s| {
+                    (0..12).map(|s| {
                         (
                             s,
                             fields.item_enchant(s).unwrap_or(0),
                             fields.item_enchant_charges(s),
-                            enchant_ms[usize::from(s)],
+                            enchant_ms.get(usize::from(s)).copied().flatten(),
                         )
                     }),
                     rolls.enchants,

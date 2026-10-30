@@ -195,3 +195,191 @@ fn a_lift_is_visible_on_whatever_map_the_viewer_is_on() {
         Some(wrathplus_assets::coords::wow_to_bevy([10.0, 20.0, 30.0])),
     );
 }
+
+/// AC transports.sql spawn 3 is The Moonspray, not template 3. Exercise the real
+/// arming/tick systems with the installed taxi DBC and the descriptor identity.
+#[test]
+fn auberdine_boat_arms_from_descriptor_entry_and_unhides_on_map_one() {
+    use crate::app_core::session::ObjectStore;
+    use wrathplus_protocol::{types::Field, ObjectFields};
+    let data = wrathplus_formats::wow_data_or_skip!();
+    let mut chain = wrathplus_formats::open_chain(&data).expect("open chain");
+    let nodes = load_taxi_path_nodes(&mut chain).expect("TaxiPathNode.dbc");
+    let path = nodes.path(293).expect("Auberdine–Rut'theran path 293");
+    assert!(path.iter().all(|node| node.map_id == 1));
+    let mut templates = GameObjectTemplates::default();
+    let mut tuple = [0; 24];
+    tuple[0] = 293;
+    tuple[1] = 30;
+    tuple[2] = 1;
+    templates.insert(176244, 15, "The Moonspray".into(), &tuple);
+    let mut app = App::new();
+    app.insert_resource(CurrentMap(1))
+        .insert_resource(templates)
+        .insert_resource(Timetables {
+            nodes: Some(nodes),
+            ..default()
+        })
+        .add_systems(Update, (arm_transports, tick_transports).chain());
+    let boat = app
+        .world_mut()
+        .spawn((
+            Guid(0x1FC0_0000_0000_0003),
+            ObjectStore(ObjectFields::from_field_slots(&[(
+                Field::ObjectEntry,
+                0,
+                176244,
+            )])),
+            TransportAnchor {
+                progress_ms: 0,
+                at: Instant::now(),
+            },
+            Transform::default(),
+            Visibility::Hidden,
+        ))
+        .id();
+    app.update();
+    assert!(
+        app.world().get::<Transport>(boat).is_some(),
+        "descriptor template must arm the boat"
+    );
+    assert_eq!(
+        *app.world().get::<Visibility>(boat).unwrap(),
+        Visibility::Inherited
+    );
+    let transport = app.world().get::<Transport>(boat).unwrap();
+    assert!(transport.touches_map(1));
+    assert!(!transport.touches_map(0));
+    let pos = app.world().get::<Transform>(boat).unwrap().translation;
+    assert!(
+        pos.is_finite() && pos.length() > 1000.0,
+        "real DBC pose, not origin"
+    );
+    app.update();
+    assert_eq!(
+        *app.world().get::<Visibility>(boat).unwrap(),
+        Visibility::Inherited
+    );
+}
+
+/// AC transports.sql/gameobject_template.sql identities, independently of spawn counters.
+/// Installed DBCs exercise the production arm and tick on every continent each route visits.
+#[test]
+fn horde_airships_arm_by_descriptor_and_tick_each_map() {
+    use crate::app_core::session::ObjectStore;
+    use wrathplus_protocol::{types::Field, ObjectFields};
+    let data = wrathplus_formats::wow_data_or_skip!();
+    let mut chain = wrathplus_formats::open_chain(&data).expect("open chain");
+    let catalog = wrathplus_formats::load_gameobject_catalog(&mut chain).expect("GO displays");
+    type Route<'a> = (u64, u32, u32, u32, i32, &'a [u32]);
+    let routes: &[Route<'_>] = &[
+        (1, 176495, 301, 3031, 30, &[0]),
+        (5, 175080, 285, 3031, 30, &[0, 1]),
+        (6, 164871, 302, 3031, 30, &[0, 1]),
+        (11, 181689, 737, 7546, 30, &[0, 571]),
+        (12, 186238, 712, 7546, 30, &[1, 571]),
+        (20, 190549, 1221, 3031, 30, &[1]),
+        (18, 192241, 1095, 8253, 2, &[571]),
+    ];
+    for &(counter, entry, path, display, speed, maps) in routes {
+        let model = catalog.model_path(display).expect("airship display model");
+        assert!(model.to_ascii_lowercase().ends_with(".wmo"), "{model}");
+        let nodes = load_taxi_path_nodes(&mut chain).expect("TaxiPathNode.dbc");
+        let raw = nodes
+            .path(path)
+            .unwrap_or_else(|| panic!("entry {entry} path {path}"));
+        let mut actual_maps: Vec<_> = raw.iter().map(|n| n.map_id).collect();
+        actual_maps.sort_unstable();
+        actual_maps.dedup();
+        assert_eq!(actual_maps, maps, "entry {entry} installed node maps");
+        let mut templates = GameObjectTemplates::default();
+        let mut tuple = [0; 24];
+        tuple[0] = path as i32;
+        tuple[1] = speed;
+        tuple[2] = 1;
+        templates.insert(entry, 15, format!("airship {entry}"), &tuple);
+        let mut app = App::new();
+        app.insert_resource(CurrentMap(maps[0]))
+            .insert_resource(templates)
+            .insert_resource(Timetables {
+                nodes: Some(nodes),
+                ..default()
+            })
+            .add_systems(Update, (arm_transports, tick_transports).chain());
+        let ship = app
+            .world_mut()
+            .spawn((
+                Guid(0x1FC0_0000_0000_0000 | counter),
+                ObjectStore(ObjectFields::from_field_slots(&[(
+                    Field::ObjectEntry,
+                    0,
+                    entry,
+                )])),
+                TransportAnchor {
+                    progress_ms: 0,
+                    at: Instant::now(),
+                },
+                Transform::default(),
+                Visibility::Hidden,
+            ))
+            .id();
+        app.update();
+        assert!(
+            app.world().get::<Transport>(ship).is_some(),
+            "entry {entry} arms"
+        );
+        for &map in maps {
+            let transport = app.world().get::<Transport>(ship).unwrap();
+            assert!(transport.touches_map(map), "entry {entry} visits {map}");
+            let cycle = (0..transport.period_ms())
+                .step_by(500)
+                .find(|&ms| transport.sample(ms, map).map == map)
+                .expect("built timetable reaches every installed map");
+            // A real seam seek must change a disagreeing clock, but not an agreeing one.
+            let mut anchor = TransportAnchor {
+                progress_ms: cycle,
+                at: Instant::now(),
+            };
+            let (sample, moved) = transport.reseek_to_map(&mut anchor, map).unwrap();
+            assert_eq!(sample.map, map);
+            assert_eq!(moved, None);
+            assert_eq!(anchor.progress_ms, cycle);
+            if maps.len() > 1 {
+                let other = *maps.iter().find(|&&m| m != map).unwrap();
+                let (sample, moved) = transport.reseek_to_map(&mut anchor, other).unwrap();
+                assert_eq!(sample.map, other);
+                assert!(moved.is_some());
+            }
+            let before = anchor.progress_ms;
+            assert!(transport.reseek_to_map(&mut anchor, 4242).is_none());
+            assert_eq!(anchor.progress_ms, before);
+            app.world_mut().insert_resource(CurrentMap(map));
+            *app.world_mut().get_mut::<TransportAnchor>(ship).unwrap() = TransportAnchor {
+                progress_ms: cycle,
+                at: Instant::now(),
+            };
+            app.update();
+            assert_eq!(
+                app.world().get::<Visibility>(ship),
+                Some(&Visibility::Inherited)
+            );
+            let pose = *app.world().get::<Transform>(ship).unwrap();
+            assert!(pose.translation.is_finite() && pose.translation.length() > 100.0);
+            assert!(pose.rotation.is_finite());
+            // Off-map ticking hides without writing an unrelated continent's pose.
+            app.world_mut().insert_resource(CurrentMap(4242));
+            app.update();
+            assert_eq!(
+                app.world().get::<Visibility>(ship),
+                Some(&Visibility::Hidden)
+            );
+            assert_eq!(*app.world().get::<Transform>(ship).unwrap(), pose);
+            app.world_mut().insert_resource(CurrentMap(map));
+            app.update();
+            assert_eq!(
+                app.world().get::<Visibility>(ship),
+                Some(&Visibility::Inherited)
+            );
+        }
+    }
+}
