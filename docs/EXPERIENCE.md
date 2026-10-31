@@ -8,9 +8,10 @@ the profile; invalid values stop boot rather than silently selecting a different
 ## Plus: player setup
 
 Close the client and edit `config.toml` in your local settings folder. This is
-`$BENILLA_HOME/config.toml` when `BENILLA_HOME` is set; otherwise use `benilla-config/config.toml`
-beside the shipped executable (development builds use the main project's `benilla-config/`).
-Keep any existing `[cvars]` settings and add or update these tables, rather than duplicating them:
+`$BENILLA_HOME/config.toml` when `BENILLA_HOME` is set; otherwise use `wrathplus-config/config.toml`
+beside the shipped executable (development builds use the main project's `wrathplus-config/`).
+If `benilla-config/` exists at that root, use it instead, even if both names exist; nothing is
+automatically moved or merged. Keep any existing `[cvars]` settings and add or update these tables, rather than duplicating them:
 
 ```toml
 [experience]

@@ -64,8 +64,9 @@ broaden verbosity to compensate.
 
 ## Persistent paths and contracts that stay
 
-Keep the `benilla-config/` default directory, `config.toml`, macros, bindings, saved variables,
-mod-pack paths and schemas. `BENILLA_HOME` retains its exact current semantics, including an
+Use `wrathplus-config/` for fresh homes; existing `benilla-config/` homes remain selected
+without mutation, even if both names exist. See [local-state compatibility](CLIENT-SETUP.md#local-state-directory-compatibility).
+Keep `config.toml`, macros, bindings, saved variables, mod-pack paths and schemas. `BENILLA_HOME` retains its exact current semantics, including an
 explicit empty value. Preserve shared-primary-checkout state resolution for dev worktrees and
 executable-adjacent state for player builds. No automatic copy, merge, deletion, or reset.
 

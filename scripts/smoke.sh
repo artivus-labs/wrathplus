@@ -173,7 +173,7 @@ if [ -n "$install_root" ]; then
         else
             echo "SMOKE FAILED: the run WROTE TO THE INSTALL — benilla never does."
             echo "  Every file benilla persists goes through \`crate::local_state\` into"
-            echo "  \`benilla-config/\` beside the binary."
+            echo "  \`wrathplus-config/\` (or the existing legacy home) beside the binary."
         fi
         [ -n "$appeared" ] && { echo "  added:"; printf '%s\n' "$appeared" | sed 's/^/    /'; }
         [ -n "$vanished" ] && { echo "  removed:"; printf '%s\n' "$vanished" | sed 's/^/    /'; }

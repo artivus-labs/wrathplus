@@ -21,6 +21,8 @@
 # release build puts it beside the binary — which is why it is not called `benilla/`: that name
 # collides with the binary of the same name. Machine-local by definition — `crate::local_state`
 # is the only thing in the tree that may write it.
+/wrathplus-config
+# Existing homes remain in use until an explicit, stopped-client rename.
 /benilla-config
 
 # The account a scripted run from this checkout logs in as (scripts/probe-identity.sh and the
