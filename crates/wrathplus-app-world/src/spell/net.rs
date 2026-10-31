@@ -2254,6 +2254,12 @@ mod tests {
                 .any(|c| matches!(c, crate::net::ClientCommand::CancelAutoRepeat)),
             "the cancel acks the server (CMSG_CANCEL_AUTO_REPEAT_SPELL, the 0x6ea0c6 send)"
         );
+        // A delayed failure after a local target clear sees the same inactive repeat state.
+        fire_fail(&mut app, reason::FLEEING);
+        assert!(
+            rx.try_recv().is_err(),
+            "duplicate failure must not cancel again"
+        );
     }
 
     /// `SMSG_REMOVED_SPELL` shrinks the book and dirties the feeds only on a real removal: a talent

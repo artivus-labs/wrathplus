@@ -1581,6 +1581,14 @@ pub(super) fn clear(
         // `SetSelection 0x493540`'s own `0x493a08 call 0x5ecac0`, the real StopAttack, which
         // also un-queues a pending on-next-swing strike.
         seam.stop(engaged);
+        // 12340 `0x524bf0`'s zero selection and `0x71ee70`'s selected death stop repeat
+        // through `0x807560(1)`; a nonzero living target switch does not take this path.
+        crate::creature_anim::cancel_auto_repeat_local(
+            seam.me.single().ok(),
+            &mut seam.auto_repeat,
+            &mut seam.ecs,
+            &seam.net,
+        );
     }
 }
 
@@ -1868,6 +1876,8 @@ mod tests {
     use crate::app_core::session::ObjectStore;
     use crate::net::{ClientCommand, NetCommands};
     use bevy::ecs::system::RunSystemOnce;
+
+    mod repeat;
 
     pub(super) const F_HEALTH: u16 = Field::UnitHealth.index();
     pub(super) const F_MAXHEALTH: u16 = Field::UnitMaxHealth.index();

@@ -244,3 +244,168 @@ fn repeat_cancel_observes_queued_start_and_later_rearm_in_command_order() {
         "a later START must survive the earlier cancel, even for the same spell"
     );
 }
+
+fn target_fixture(
+    spell_id: u32,
+) -> (
+    App,
+    Entity,
+    Entity,
+    crossbeam_channel::Receiver<ClientCommand>,
+) {
+    use crate::target::{ring, CombatFlash, Selection};
+    let (mut app, unit) = fixture(0, spell_id);
+    let (tx, rx) = crossbeam_channel::unbounded();
+    app.insert_resource(NetCommands(tx));
+    app.init_resource::<crate::spell::QueuedMeleeSpell>()
+        .init_resource::<crate::app_core::loot::LootState>()
+        .init_resource::<crate::app_core::state::LootLatch>()
+        .init_resource::<crate::app_core::group::GroupState>()
+        .init_resource::<CombatFlash>()
+        .init_resource::<ring::RingState>();
+    let target = app
+        .world_mut()
+        .spawn((crate::net::Guid(2), Transform::default(), target_health(1)))
+        .id();
+    app.insert_resource(Selection {
+        target: Some(target),
+        guid: Some(2),
+        last: None,
+    });
+    app.add_systems(Update, ring::update_ring.before(drive_animations));
+    app.update(); // observe the living target before its actual health edge
+    (app, unit, target, rx)
+}
+
+fn target_health(health: u32) -> crate::app_core::session::ObjectStore {
+    crate::app_core::session::ObjectStore(wrathplus_protocol::ObjectFields::from_fields(&[
+        (wrathplus_protocol::types::Field::UnitHealth, health),
+        (wrathplus_protocol::types::Field::UnitMaxHealth, 1),
+    ]))
+}
+
+#[test]
+fn repeat_target_death_clears_selection_and_hold_without_server_cancel_or_failure() {
+    for spell_id in [REPEAT, 133] {
+        let (mut app, unit, target, rx) = target_fixture(spell_id);
+        app.world_mut().entity_mut(target).insert(target_health(0));
+        app.update();
+        assert_eq!(
+            app.world().resource::<crate::target::Selection>().guid,
+            None
+        );
+        assert_eq!(
+            app.world().resource::<crate::target::Selection>().last,
+            Some(2)
+        );
+        assert_eq!(
+            app.world().resource::<crate::spell::AutoRepeatActive>().0,
+            None
+        );
+        assert!(app.world().get::<AutoRepeatArmed>(unit).is_none());
+        assert!(app.world().get::<RangedHold>(unit).is_none());
+        assert!(app.world().get::<NockedAmmo>(unit).is_none());
+        assert!(app.world().get::<NockLatch>(unit).is_none());
+        let commands: Vec<_> = rx.try_iter().collect();
+        assert!(matches!(
+            commands.as_slice(),
+            [
+                ClientCommand::SetSelection { guid: 0 },
+                ClientCommand::CancelAutoRepeat
+            ]
+        ));
+        if spell_id == REPEAT {
+            assert!(app.world().get::<CastHold>(unit).is_none());
+            advance(&mut app, 200);
+            app.update();
+            assert_eq!(
+                app.world().get::<RigPose>(unit).unwrap().locals[1].translation,
+                Vec3::Y
+            );
+        } else {
+            assert_eq!(app.world().get::<CastHold>(unit).unwrap().spell_id, 133);
+            assert!(app.world().resource::<Messages<SpellKitSound>>().is_empty());
+        }
+        cancel(&mut app, unit); // a duplicate/later failure cleanup must not send again
+        app.update();
+        assert!(rx.try_recv().is_err());
+    }
+}
+
+#[test]
+fn repeat_target_living_switch_and_unrelated_death_do_not_cancel() {
+    let (mut app, unit, old, rx) = target_fixture(REPEAT);
+    let next = app
+        .world_mut()
+        .spawn((crate::net::Guid(3), Transform::default(), target_health(1)))
+        .id();
+    // Ring consumes the new, living selection, not the outgoing target's later death.
+    *app.world_mut().resource_mut::<crate::target::Selection>() = crate::target::Selection {
+        target: Some(next),
+        guid: Some(3),
+        last: Some(2),
+    };
+    app.world_mut().entity_mut(old).insert(target_health(0));
+    for _ in 0..4 {
+        advance(&mut app, 1000);
+    }
+    assert_eq!(
+        app.world().resource::<crate::spell::AutoRepeatActive>().0,
+        Some(REPEAT)
+    );
+    assert!(app.world().get::<CastHold>(unit).is_some());
+    assert!(app.world().get::<AutoRepeatArmed>(unit).is_some());
+    assert_eq!(
+        app.world().resource::<crate::target::Selection>().guid,
+        Some(3)
+    );
+    assert!(rx.try_recv().is_err());
+}
+
+#[test]
+fn repeat_cancel_selected_despawn_clears_without_melee_and_preserves_last_target() {
+    for engaged in [false, true] {
+        let (mut app, unit, target, rx) = target_fixture(REPEAT);
+        if engaged {
+            app.world_mut().entity_mut(unit).insert(Engaged(2));
+        }
+        app.world_mut()
+            .resource_mut::<crate::target::Selection>()
+            .last = Some(9);
+        app.world_mut().despawn(target);
+        app.update();
+        let selection = app.world().resource::<crate::target::Selection>();
+        assert_eq!(
+            (selection.target, selection.guid, selection.last),
+            (None, None, Some(9))
+        );
+        assert_eq!(
+            app.world().resource::<crate::spell::AutoRepeatActive>().0,
+            None
+        );
+        assert!(app.world().get::<CastHold>(unit).is_none());
+        assert!(app.world().get::<AutoRepeatArmed>(unit).is_none());
+        assert!(app.world().get::<RangedHold>(unit).is_none());
+        assert!(app.world().get::<NockedAmmo>(unit).is_none());
+        assert!(app.world().get::<NockLatch>(unit).is_none());
+        let sent: Vec<_> = rx
+            .try_iter()
+            .map(|c| match c {
+                ClientCommand::SetSelection { guid: 0 } => "clear",
+                ClientCommand::AttackStop => "stop",
+                ClientCommand::CancelAutoRepeat => "cancel",
+                _ => "unexpected",
+            })
+            .collect();
+        assert_eq!(
+            sent,
+            if engaged {
+                vec!["clear", "stop", "cancel"]
+            } else {
+                vec!["clear", "cancel"]
+            }
+        );
+        app.update();
+        assert!(rx.try_recv().is_err(), "despawn cleanup must be idempotent");
+    }
+}

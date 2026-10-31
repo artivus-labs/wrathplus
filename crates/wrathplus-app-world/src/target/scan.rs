@@ -860,10 +860,10 @@ pub(super) fn auto_acquire_attacker(
 
 #[cfg(test)]
 mod tests {
+    mod repeat;
     use super::*;
     use crate::net::NetCommands;
     use wrathplus_protocol::types::Field;
-
     /// One `commit` through a one-shot system, returning its outcome.
     fn go(
         world: &mut World,
