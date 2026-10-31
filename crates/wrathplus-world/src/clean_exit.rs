@@ -43,7 +43,13 @@ fn exiting(app_world: &World) -> bool {
 /// Bevy's `renderer_extract`, plus the reclaim on an exiting frame. Waits for the render world
 /// while running the main thread's tasks, as Bevy's does.
 pub fn extract_or_reclaim(app_world: &mut World, _world: &mut World) {
+    // winit can run another update after requesting exit. A reclaimed pipeline has no next
+    // render world to receive; removing the channels makes that terminal state persistent.
+    if !app_world.contains_resource::<RenderAppChannels>() {
+        return;
+    }
     let exit = exiting(app_world);
+    let mut retired = exit;
     app_world.resource_scope(|world, executor: Mut<MainThreadExecutor>| {
         world.resource_scope(|world, mut channels: Mut<RenderAppChannels>| {
             let received = ComputeTaskPool::get()
@@ -61,11 +67,16 @@ pub fn extract_or_reclaim(app_world: &mut World, _world: &mut World) {
                 Some(render_app) => drop(render_app),
                 // The render thread panicked.
                 None => {
+                    retired = true;
                     world.write_message(AppExit::error());
                 }
             }
         });
     });
+    if retired {
+        // Drop the sender too: the render thread can now leave its receive loop.
+        app_world.remove_resource::<RenderAppChannels>();
+    }
 }
 
 #[cfg(test)]
@@ -107,7 +118,7 @@ mod tests {
             main.insert_resource(RenderAppChannels::new(to_render, to_app));
 
             // The render thread, as `PipelinedRenderingPlugin::cleanup` runs it.
-            std::thread::spawn(move || loop {
+            let render_thread = std::thread::spawn(move || loop {
                 let Ok(mut app) = render_rx.recv_blocking() else {
                     break;
                 };
@@ -123,7 +134,13 @@ mod tests {
             }
             main.write_message(AppExit::Success);
             extract_or_reclaim(&mut main, &mut scratch);
+            assert!(!main.contains_resource::<RenderAppChannels>());
+            main.resource_mut::<Messages<AppExit>>().clear();
+            // macOS may schedule another update after the runner requests exit. The render
+            // world was already reclaimed: there is no next frame to receive.
+            extract_or_reclaim(&mut main, &mut scratch);
             drop(main);
+            render_thread.join().expect("render thread stopped");
             done.send(()).unwrap();
         });
         assert!(
