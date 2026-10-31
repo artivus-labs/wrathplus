@@ -18,6 +18,11 @@ pub(super) fn resolved(path: &Path) -> Result<PathBuf> {
     let mut result = PathBuf::new();
     for component in absolute.components() {
         match component {
+            // A Windows prefix (e.g. a verbatim drive) is not queryable until its root is appended.
+            Component::Prefix(prefix) => {
+                result.push(prefix.as_os_str());
+                continue;
+            }
             Component::ParentDir => return Err("Paths must not contain '..'".into()),
             Component::CurDir => continue,
             other => result.push(other.as_os_str()),
@@ -102,4 +107,46 @@ pub(super) fn checked_config(config: &Config) -> Result<Config> {
         writable(&config, &path)?;
     }
     Ok(config)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn canonical_roots_and_missing_suffixes_resolve_without_creating_outputs() {
+        let fixture = crate::setup::tests::Fixture::new();
+        let root = fs::canonicalize(&fixture.config.repo).unwrap();
+        assert_eq!(resolved(&root).unwrap(), root);
+        let volume_root = root.ancestors().last().unwrap();
+        assert_eq!(
+            resolved(volume_root).unwrap(),
+            fs::canonicalize(volume_root).unwrap()
+        );
+        let missing = root.join("missing/nested");
+        assert_eq!(resolved(&missing).unwrap(), missing);
+        assert!(!root.join("missing").exists());
+        // PathBuf::push normalizes '..' for verbatim Windows paths; preserve raw input.
+        let mut traversal = root.as_os_str().to_os_string();
+        let separator = std::path::MAIN_SEPARATOR;
+        traversal.push(format!("{separator}missing{separator}..{separator}escape"));
+        assert!(resolved(Path::new(&traversal)).is_err());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn verbatim_drive_root_is_checked_before_descendants() {
+        use std::path::Prefix;
+        let fixture = crate::setup::tests::Fixture::new();
+        let root = fs::canonicalize(&fixture.config.repo).unwrap();
+        assert!(
+            matches!(root.components().next(), Some(Component::Prefix(p))
+            if matches!(p.kind(), Prefix::VerbatimDisk(_)))
+        );
+        let config = checked_config(&fixture.config).unwrap();
+        assert_eq!(config.repo, root);
+        assert!(writable(&config, &config.data.join("missing/output")).is_err());
+        assert!(writable(&config, config.data.parent().unwrap()).is_err());
+        assert!(!config.data.join("missing").exists());
+    }
 }
