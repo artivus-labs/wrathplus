@@ -1,5 +1,6 @@
 //! Native client setup and launcher; client addon source registration; server/profile management remain previews.
 mod addons;
+mod branding;
 mod build_feedback;
 mod cli;
 mod client_actions;
@@ -343,6 +344,7 @@ fn main() -> iced::Result {
         return Ok(());
     }
     let initial = options.config;
+    branding::prepare();
     let icon = ::image::load_from_memory(include_bytes!(
         "../../../packaging/icon/wrathplus-icon-256.png"
     ))
@@ -368,19 +370,22 @@ fn main() -> iced::Result {
         Manager::view,
     )
     .subscription(|_: &Manager| {
-        iced::Subscription::run(|| {
-            iced::futures::stream::unfold((), |()| async {
-                let (sender, receiver) = iced::futures::channel::oneshot::channel();
-                std::thread::spawn(move || {
-                    std::thread::sleep(std::time::Duration::from_secs(1));
-                    let _ = sender.send(());
-                });
-                let _ = receiver.await;
-                Some((Message::Poll, ()))
-            })
-        })
+        iced::Subscription::batch([
+            iced::window::open_events().map(|_| Message::Poll),
+            iced::Subscription::run(|| {
+                iced::futures::stream::unfold((), |()| async {
+                    let (sender, receiver) = iced::futures::channel::oneshot::channel();
+                    std::thread::spawn(move || {
+                        std::thread::sleep(std::time::Duration::from_secs(1));
+                        let _ = sender.send(());
+                    });
+                    let _ = receiver.await;
+                    Some((Message::Poll, ()))
+                })
+            }),
+        ])
     })
-    .title("WrathPlus Manager")
+    .title(branding::NAME)
     .theme(|_: &Manager| {
         Theme::custom(
             "WrathPlus",
