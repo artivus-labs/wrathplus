@@ -10,9 +10,15 @@ use serde::{Deserialize, Serialize};
 use wrathplus_mpq::Archive;
 
 mod assets;
+mod state_access;
+pub(crate) use state_access::{check_output, with_stopped_state, write_state};
 mod discovery;
+mod locks;
 mod login;
 pub(crate) use discovery::discover;
+#[cfg(test)]
+use locks::running_path;
+use locks::{operation_lock, require_stopped, running_paths, OperationLock};
 mod paths;
 mod process;
 pub(crate) use assets::validate;
@@ -50,8 +56,14 @@ impl Config {
         }
     }
 
+    /// Same non-moving legacy fallback as the client. Manager deliberately ignores inherited
+    /// BENILLA_HOME and pins this checkout's selected home when launching.
+    pub(crate) fn state_root(&self) -> PathBuf {
+        wrathplus_formats::default_state_home(&self.repo)
+    }
+
     pub(crate) fn state_path(&self) -> PathBuf {
-        self.repo.join("benilla-config/manager.json")
+        self.state_root().join("manager.json")
     }
 
     pub(crate) fn binary_path(&self) -> PathBuf {
@@ -164,35 +176,6 @@ pub(crate) fn available(config: &Config) -> bool {
     })
 }
 
-struct OperationLock(PathBuf);
-impl Drop for OperationLock {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.0);
-    }
-}
-fn operation_lock(config: &Config) -> Result<OperationLock> {
-    let dir = ensure_dir(config, &config.target.join("manager"))?;
-    let path = writable(config, &dir.join("operation.lock"))?;
-    let mut file = OpenOptions::new().write(true).create_new(true).open(&path)
-        .map_err(|e| io_error("Manager operation locked (after a crash, confirm no setup is running before removing operation.lock)", e))?;
-    let guard = OperationLock(path);
-    writeln!(file, "{}", std::process::id()).map_err(|e| io_error("write operation lock", e))?;
-    Ok(guard)
-}
-fn running_path(config: &Config) -> PathBuf {
-    config.target.join("manager/running.lock")
-}
-fn require_stopped(config: &Config) -> Result<()> {
-    let path = writable(config, &running_path(config))?;
-    if path
-        .try_exists()
-        .map_err(|e| io_error("inspect running marker", e))?
-    {
-        return Err(format!("Managed client is running or not yet reaped. After confirming it has stopped, remove stale {}", path.display()));
-    }
-    Ok(())
-}
-
 fn sanitize(command: &mut Command) {
     for (key, _) in env::vars_os() {
         let upper = key.to_string_lossy().to_ascii_uppercase();
@@ -247,7 +230,7 @@ pub(crate) fn build_with_log(config: &Config, log_ready: impl FnOnce(PathBuf)) -
     let config = &validated.config;
     let _lock = operation_lock(config)?;
     require_stopped(config)?;
-    let state_root = ensure_dir(config, &config.repo.join("benilla-config"))?;
+    let state_root = ensure_dir(config, &config.state_root())?;
     let log_path = writable(config, &stage_path(&state_root.join("manager-build.log")))?;
     let log = OpenOptions::new()
         .write(true)
@@ -371,14 +354,23 @@ pub(crate) fn launch(config: &Config) -> Result<Child> {
         return Err("No playable build found; build the client first".into());
     }
     save_config(&config, &config.state_path())?;
-    let state_root = ensure_dir(&config, &config.repo.join("benilla-config"))?;
+    let state_root = ensure_dir(&config, &config.state_root())?;
     let log_path = writable(&config, &stage_path(&state_root.join("manager-client.log")))?;
-    let marker = writable(&config, &running_path(&config))?;
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&marker)
-        .map_err(|e| io_error("create running marker", e))?;
+    let mut markers = OperationLock(Vec::new());
+    let mut files = Vec::new();
+    for marker in running_paths(&config) {
+        let marker = writable(&config, &marker)?;
+        if markers.0.contains(&marker) {
+            continue;
+        }
+        let file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&marker)
+            .map_err(|e| io_error("create running marker", e))?;
+        markers.0.push(marker);
+        files.push(file);
+    }
     let result = (|| {
         let log = OpenOptions::new()
             .write(true)
@@ -400,13 +392,13 @@ pub(crate) fn launch(config: &Config) -> Result<Child> {
     match result {
         Ok(child) => {
             // The already-created marker fences replacement even if recording the PID fails.
-            let _ = writeln!(file, "{}", child.id());
+            for mut file in files {
+                let _ = writeln!(file, "{}", child.id());
+            }
+            markers.0.clear();
             Ok(child)
         }
-        Err(error) => {
-            let _ = fs::remove_file(marker);
-            Err(error)
-        }
+        Err(error) => Err(error),
     }
 }
 
@@ -422,15 +414,26 @@ pub(crate) fn reap(config: &Config, child: &mut Child) -> Result<bool> {
     }
     let config = checked_config(config)?;
     let _lock = operation_lock(&config)?;
-    let marker = writable(&config, &running_path(&config))?;
-    let contents = fs::read_to_string(&marker).map_err(|e| io_error("read running marker", e))?;
-    if contents.trim() != child.id().to_string() {
-        return Err("Running marker belongs to another child; refusing to remove it".into());
+    let mut markers = running_paths(&config)
+        .iter()
+        .map(|path| writable(&config, path))
+        .collect::<Result<Vec<_>>>()?;
+    markers.sort();
+    markers.dedup();
+    // Verify every marker before releasing either resource.
+    for marker in &markers {
+        let contents =
+            fs::read_to_string(marker).map_err(|e| io_error("read running marker", e))?;
+        if contents.trim() != child.id().to_string() {
+            return Err("Running marker belongs to another child; refusing to remove it".into());
+        }
     }
-    fs::remove_file(marker).map_err(|e| io_error("release running marker", e))?;
+    for marker in markers {
+        fs::remove_file(marker).map_err(|e| io_error("release running marker", e))?;
+    }
     Ok(true)
 }
 
 #[cfg(test)]
 #[path = "setup_tests.rs"]
-mod tests;
+pub(crate) mod tests;

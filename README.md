@@ -135,9 +135,10 @@ Flags skip steps, each only its own: `--account <name>` with `--password-env <VA
 `--character <name>` and `--enter-world`; `WOW_USER`, `WOW_PASS`, `WOW_REALM` and `WOW_CHAR`
 (pick and enter) map onto the same steps. See `crates/wrathplus-app/src/launch_plan.rs`.
 
-Settings, screenshots and addons live in `benilla-config/` at the repo root; addons go in
-`benilla-config/AddOns/`. [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) has the rest, from the
-player build to the tests.
+Settings, screenshots and addons live in `wrathplus-config/` at the repo root; addons go in
+`wrathplus-config/AddOns/`. Existing `benilla-config/` homes remain in use without moving
+state; see [local-state compatibility](docs/CLIENT-SETUP.md#local-state-directory-compatibility).
+[`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) has the rest, from the player build to the tests.
 
 ---
 

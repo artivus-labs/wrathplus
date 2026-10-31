@@ -1,4 +1,5 @@
-//! Native client setup and launcher; server and addon management remain previews.
+//! Native client setup and launcher; client addon source registration; server/profile management remain previews.
+mod addons;
 mod build_feedback;
 mod cli;
 mod client_actions;
@@ -76,6 +77,11 @@ enum Message {
     Search(String),
     AddonScope(AddonScope),
     Addon(usize, bool),
+    RefreshAddons,
+    AddonPath(String),
+    AddAddonPath,
+    BrowseAddons,
+    AddonFolderChosen(Option<std::path::PathBuf>),
     Notice(&'static str),
     Locale(String),
     BuildDirectory(String),
@@ -104,7 +110,9 @@ struct Manager {
     repo: String,
     search: String,
     addon_scope: AddonScope,
-    addons: [bool; 3],
+    addon_settings: addons::Settings,
+    addon_entries: Vec<addons::Entry>,
+    addon_path: String,
     notice: String,
     events: Vec<String>,
     config: setup::Config,
@@ -133,9 +141,11 @@ impl Default for Manager {
             repo: String::new(),
             search: String::new(),
             addon_scope: AddonScope::Client,
-            addons: [true, false, true],
+            addon_settings: addons::Settings::default(),
+            addon_entries: Vec::new(),
+            addon_path: String::new(),
             notice: "Choose your legally obtained 3.3.5a assets to set up the client.".into(),
-            events: vec!["Manager opened. Server and addon controls remain previews.".into()],
+            events: vec!["Manager opened. Server and profiles remain previews.".into()],
             config: setup::Config::defaults(),
             locale: "enUS".into(),
             validated: false,
@@ -205,7 +215,7 @@ impl Manager {
         let sidebar = container(
             column![
                 svg(svg::Handle::from_memory(
-                    include_bytes!("../../../measure/logo/wrathplus-logo.svg").as_slice()
+                    include_bytes!("../assets/wrathplus-logo.svg").as_slice()
                 ))
                 .width(190)
                 .height(94),
@@ -254,7 +264,7 @@ impl Manager {
         };
         let content = column![
             header,
-            text("Client setup is live · Server, addons and profiles are previews")
+            text("Client and addon setup are live · Server and profiles are previews")
                 .size(11)
                 .color(style::GOLD),
             scrollable(body).height(Fill),
@@ -351,6 +361,7 @@ fn main() -> iced::Result {
             manager.assets = manager.config.data.to_string_lossy().into_owned();
             manager.locale = manager.config.locale.clone();
             manager.host = manager.config.server.clone();
+            manager.refresh_addons();
             manager
         },
         Manager::update,

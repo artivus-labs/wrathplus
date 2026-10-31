@@ -1,5 +1,5 @@
 use super::{style, AddonScope, Manager, Message, Page};
-use iced::widget::{button, checkbox, column, container, row, text, text_input, Column};
+use iced::widget::{button, column, container, row, text, text_input, Column};
 use iced::{Element, Fill};
 
 fn card<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
@@ -193,101 +193,6 @@ impl Manager {
                     .spacing(8),
                 ]
                 .spacing(14)
-            ),
-        ]
-        .spacing(14)
-        .into()
-    }
-
-    pub(super) fn packages(&self) -> Element<'_, Message> {
-        let mut tabs = iced::widget::Row::new().spacing(8);
-        for scope in AddonScope::ALL {
-            tabs = tabs.push(
-                button(text(scope.label()))
-                    .padding([8, 12])
-                    .style(move |theme, status| {
-                        style::nav(theme, status, self.addon_scope == scope)
-                    })
-                    .on_press(Message::AddonScope(scope)),
-            );
-        }
-        let samples = [
-            (
-                "Readable UI",
-                AddonScope::Client,
-                "Client addon · no server module required",
-            ),
-            (
-                "Playerbots",
-                AddonScope::Server,
-                "AzerothCore module · compatible core build required",
-            ),
-            (
-                "MultiBot UI + Playerbots",
-                AddonScope::Both,
-                "Requires MultiBot client addon AND Playerbots server module",
-            ),
-        ];
-        let mut list = Column::new().spacing(10);
-        for (index, (name, scope, detail)) in samples.into_iter().enumerate() {
-            if scope != self.addon_scope
-                || !name.to_lowercase().contains(&self.search.to_lowercase())
-            {
-                continue;
-            }
-            list = list.push(card(
-                row![
-                    checkbox(self.addons[index]).on_toggle(move |v| Message::Addon(index, v)),
-                    column![
-                        text(name).size(17),
-                        text(detail).size(12).color(style::MUTED),
-                        text("Sample package · compatibility not checked")
-                            .size(11)
-                            .color(style::GOLD)
-                    ]
-                    .spacing(6)
-                    .width(Fill),
-                    action(
-                        "Details",
-                        "package requirements and provenance are not connected."
-                    )
-                ]
-                .spacing(14)
-                .align_y(iced::Center),
-            ));
-        }
-        column![
-            tabs,
-            text(match self.addon_scope {
-                AddonScope::Client => "Client addons",
-                AddonScope::Server => "AzerothCore modules · build / migration workflow",
-                AddonScope::Both => "Coupled packages · both sides required",
-            })
-            .size(13)
-            .color(style::MUTED),
-            row![
-                text_input("Search sample packages…", &self.search)
-                    .on_input(Message::Search)
-                    .padding(10),
-                action("Import…", "package import is not connected.")
-            ]
-            .spacing(10),
-            list,
-            card(
-                column![
-                    text("Repository").size(17),
-                    row![
-                        text_input("https://github.com/owner/repository", &self.repo)
-                            .on_input(Message::Repo)
-                            .padding(10),
-                        action(
-                            "Inspect",
-                            "repository inspection is not connected; no network request sent."
-                        )
-                    ]
-                    .spacing(10)
-                ]
-                .spacing(12)
             ),
         ]
         .spacing(14)

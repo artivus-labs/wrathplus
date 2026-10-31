@@ -96,7 +96,7 @@ pub(super) fn checked_config(config: &Config) -> Result<Config> {
     for path in [
         config.state_path(),
         config.binary_path(),
-        config.repo.join("benilla-config"),
+        config.state_root(),
         config.target.join("manager"),
     ] {
         writable(&config, &path)?;

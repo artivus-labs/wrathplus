@@ -11,6 +11,8 @@ rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "a
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+wrathplus-ui = { path = "../wrathplus-ui" }
+wrathplus-formats = { path = "../wrathplus-formats", default-features = false }
 wrathplus-mpq = { path = "../wrathplus-mpq" }
 
 [lints]

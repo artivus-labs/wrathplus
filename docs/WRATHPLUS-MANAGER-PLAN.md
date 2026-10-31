@@ -1,6 +1,6 @@
 # WrathPlus Manager — proposed design
 
-Architecture plan: the native Iced shell and client setup slice are implemented separately in `crates/wrathplus-manager`; see [Client setup](CLIENT-SETUP.md) for the supported workflow. Server/container bootstrap, addon/module management and multi-profile operations remain proposed, not implemented. This plan describes the wider destination, not a claim that those controls are operational.
+Architecture plan: the native Iced shell and client setup slice are implemented separately in `crates/wrathplus-manager`; see [Client setup](CLIENT-SETUP.md) for the supported workflow. Client addon discovery and custom-folder registration are implemented via managed local-state links (see Client setup). Server/container bootstrap, server module management and multi-profile operations remain proposed, not implemented. This plan describes the wider destination, not a claim that those controls are operational.
 
 ## 1. Product boundary
 

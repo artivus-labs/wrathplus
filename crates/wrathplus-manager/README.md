@@ -18,10 +18,11 @@ No original game files are supplied or downloaded. Assets remain read-only. Buil
 thread and retain compiler logs; failed builds preserve the previous managed executable. Launch
 uses explicit data/locale/server settings, not stored account credentials or unattended probes.
 
-**Server, Addons, Profiles, Settings and combined launch remain preview controls/sample data.**
+**Server, Profiles, Settings and combined launch remain preview controls/sample data.**
 They do not query Docker, fetch modules, manage services, migrate databases or alter the realm.
-The UI labels this boundary; profile selection and addon toggles are still in-memory examples.
+The UI labels this boundary; profile selection is still a preview. Client addons have real TOC discovery, custom source folders and managed read-only links; see docs/CLIENT-SETUP.md.
 
 The GUI uses Iced's tiny-skia software renderer, independent of Bevy/wgpu. Paste the asset folder
-path or use the native **Browse…** folder picker. Existing checkout builds are detected without\nrecompiling; validated asset settings are restored on restart. macOS checks do not establish Linux
+path or use the native **Browse…** folder picker. Existing checkout builds are detected without
+recompiling; validated asset settings are restored on restart. macOS checks do not establish Linux
 or Windows qualification. Branding is original artwork embedded at build time.

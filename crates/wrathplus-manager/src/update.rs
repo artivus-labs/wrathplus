@@ -177,6 +177,7 @@ impl Manager {
                 self.preflight = None;
                 self.validated = false;
                 self.sync_config();
+                self.refresh_addons();
             }
             Message::Host(value) => {
                 self.host = value;
@@ -185,6 +186,9 @@ impl Manager {
             Message::Repo(value) => {
                 self.repo = value;
                 self.config.repo = self.repo.clone().into();
+                self.addon_settings = addons::Settings::default();
+                self.addon_entries.clear();
+                self.refresh_addons();
                 self.preflight = None;
                 self.validated = false;
             }
@@ -193,9 +197,29 @@ impl Manager {
                 self.page = Page::Addons;
                 self.addon_scope = value;
             }
-            Message::Addon(index, value) => {
-                if let Some(enabled) = self.addons.get_mut(index) {
-                    *enabled = value;
+            Message::Addon(index, value) => self.toggle_addon(index, value),
+            Message::RefreshAddons => self.refresh_addons(),
+            Message::AddonPath(value) => self.addon_path = value,
+            Message::AddAddonPath => self.add_addon_folder(),
+            Message::BrowseAddons if !self.choosing && self.addon_editable() => {
+                self.choosing = true;
+                return iced::Task::perform(
+                    async {
+                        rfd::AsyncFileDialog::new()
+                            .set_title("Select addon or AddOns folder")
+                            .pick_folder()
+                            .await
+                            .map(|h| h.path().to_owned())
+                    },
+                    Message::AddonFolderChosen,
+                );
+            }
+            Message::BrowseAddons => {}
+            Message::AddonFolderChosen(path) => {
+                self.choosing = false;
+                if let Some(path) = path {
+                    self.addon_path = path.to_string_lossy().into_owned();
+                    self.add_addon_folder();
                 }
             }
             Message::Notice(value) => {

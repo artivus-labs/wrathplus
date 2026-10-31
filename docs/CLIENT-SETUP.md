@@ -233,4 +233,74 @@ Manager always uses fill-only mode: you still press **Login** and choose a chara
 Server, assets and locale come from Manager settings. GM/god mode are off, and the
 window remains an ordinary attended window. Probe/unattended options and the old
 launcher's temporary diagnostic capture suite are not imported. Manager continues
-using its own `benilla-config` home; it does not migrate the old script's game settings.
+using its checkout-local home selected below; it does not migrate the old script's game settings.
+
+## Local-state directory compatibility
+
+Fresh installations use `wrathplus-config/`, with addons in `wrathplus-config/AddOns/`.
+The runtime selects the primary checkout for development builds (shared across linked
+worktrees), or the executable directory for player builds. At that root an existing
+`benilla-config` entry takes precedence, **even when both names exist**. The entire selected
+home is used for reads and writes: CVars, account/realmlist login state, macros, bindings,
+addon enable state, SavedVariables, AddOns, screenshots/logs, `manager.json` and
+`manager-addons.json`. There is no per-file fallback or automatic copy, merge, move or deletion.
+An invalid/unreadable legacy entry fails normally rather than silently selecting a fresh home.
+
+Manager uses the same naming rule under its selected checkout, including when restoring old
+`manager.json` at startup, and explicitly passes that selected home as `BENILLA_HOME` to the
+game. Inherited `BENILLA_HOME` is intentionally not imported by Manager. Direct client launches
+still honor an explicit `BENILLA_HOME` exactly (including an empty value); no `WRATHPLUS_HOME`
+alias is introduced. `WOW_CAPTURE` continues to disable all client player-state access.
+Private `.azerothbench-test.env` login prefill remains at the checkout root and is unchanged.
+
+To adopt the new name for existing state, first stop **all clients and Managers** using the
+home, back it up, then manually rename the **whole** `benilla-config` directory to
+`wrathplus-config`, only if the destination does not exist. If both exist, retain both and
+resolve them offline with backups; do not overwrite or merge blindly. Update any explicit
+`BENILLA_HOME` paths or custom addon source paths pointing inside the renamed directory.
+External managed addon symlink targets and JSON schemas are unchanged. No migration is
+performed while a client may be running; this change itself touches no real state directory.
+
+## Addons and custom source folders
+
+The **Addons → Client only** page scans real TOCs from the local state's `AddOns`,
+the selected asset installation's `Interface/AddOns`, the checkout's authored `addons`,
+and custom sources. **Browse…** or **Add source** accepts either an individual addon
+folder or an AddOns collection. A folder with a single differently named TOC is mapped
+using that TOC's logical addon name (e.g. `MultiBot-Chatless/MultiBot.toc` → `MultiBot`).
+
+The list shows version, Interface, startup/load-on-demand, declared required/optional
+addon dependencies, saved-variable names and missing manifest entries. `.pub`-only
+Blizzard directories are not third-party packages; their code comes from the archives.
+Only Interface 30300 packages with complete manifest entries can be added here.
+
+**Add to client** registers a managed directory link under `wrathplus-config/AddOns`
+(or the existing legacy home described above).
+It neither copies source files nor writes into the original installation. This preserves
+one namespace for Lua/XML, sibling dependencies, textures, fonts and demand loading.
+Custom source registrations live in ignored `<selected home>/manager-addons.json`, separate
+from game settings; profile selection itself remains a preview. On Windows, directory
+links require Developer Mode or symlink permission; failure is explicit, not a silent copy.
+
+Apply changes while the managed client is stopped. Duplicate logical identities and
+unmanaged destination folders are refused. Unchecking removes only the managed link;
+source files and SavedVariables are preserved. Unavailable saved registrations remain
+removable. Existing local addons remain in place. Per-character enable/disable remains
+in the client's character-select **AddOns** screen; registration is not an override of
+that state. Dependencies must also be registered; discovery does not install them.
+
+Addons execute Lua code: select only trusted sources. **Discovered/registered does not
+mean compatible or successfully executed.** Runtime load errors are in the client log.
+Manager does not connect to the realm to certify server modules or exercise addon UI.
+
+### Current local inventory and requirements
+
+| Addon | Requirements |
+| --- | --- |
+| MultiBot 4.0 (installed Chatless variant) | Interface 30300; embedded Ace libraries; `mod-playerbots` for playerbot features and `mod-multibot-bridge` for bridge features. No external TOC addon dependencies. Account and character SavedVariables. Full installed UI/bridge acceptance remains a live check. |
+| AzerothBenchObserver | Authored observation fixture; Interface 30300; account SavedVariables. |
+| AzerothBenchObserverReport | Requires AzerothBenchObserver; load on demand; character SavedVariables. |
+| AzerothBenchUnits | Authored observed-unit UI fixture; Interface 30300. |
+
+These are discovered candidates, not automatically enabled benchmark instrumentation.
+The installed MultiBot is not bundled or copied into this repository.

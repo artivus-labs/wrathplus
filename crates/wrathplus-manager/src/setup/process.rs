@@ -22,13 +22,19 @@ mod tests {
     fn stop_terminates_only_retained_child_and_reap_releases_marker() {
         let fixture = super::super::tests::Fixture::new();
         let config = &fixture.config;
-        fs::create_dir_all(config.target.join("manager")).unwrap();
+        for marker in running_paths(config) {
+            fs::create_dir_all(marker.parent().unwrap()).unwrap();
+        }
         let mut child = Command::new("sleep").arg("30").spawn().unwrap();
-        fs::write(running_path(config), child.id().to_string()).unwrap();
+        for marker in running_paths(config) {
+            fs::write(marker, child.id().to_string()).unwrap();
+        }
         stop(&mut child).unwrap();
         child.wait().unwrap();
         assert!(reap(config, &mut child).unwrap());
-        assert!(!running_path(config).exists());
+        for marker in running_paths(config) {
+            assert!(!marker.exists());
+        }
         // Already-exited children do not cause a second signal.
         stop(&mut child).unwrap();
     }

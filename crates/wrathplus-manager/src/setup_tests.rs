@@ -1,12 +1,12 @@
 //! Synthetic MPQs only: no installed assets, subprocesses, cargo invocations or game launches.
 use super::*;
 
-pub(super) struct Fixture {
+pub(crate) struct Fixture {
     root: PathBuf,
-    pub(super) config: Config,
+    pub(crate) config: Config,
 }
 impl Fixture {
-    pub(super) fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let root = env::temp_dir().join(format!(
             "wrathplus-manager-{}-{}",
             std::process::id(),
@@ -272,9 +272,11 @@ fn symlink_outputs_and_state_aliases_cannot_write_to_install() {
     symlink(&f.config.data, &f.config.target).unwrap();
     assert!(validate(&f.config).is_err());
     fs::remove_file(&f.config.target).unwrap();
-    symlink(&f.config.data, f.config.repo.join("benilla-config")).unwrap();
-    assert!(validate(&f.config).is_err());
-    fs::remove_file(f.config.repo.join("benilla-config")).unwrap();
+    for name in ["wrathplus-config", "benilla-config"] {
+        symlink(&f.config.data, f.config.repo.join(name)).unwrap();
+        assert!(validate(&f.config).is_err());
+        fs::remove_file(f.config.repo.join(name)).unwrap();
+    }
     f.fake_binary();
     let alias = f.root.join("state-alias");
     symlink(&f.config.data, &alias).unwrap();
@@ -329,7 +331,7 @@ fn commands_keep_user_paths_as_single_arguments_and_clear_overrides() {
     assert!(command
         .get_envs()
         .any(|(k, v)| k == "CARGO_INCREMENTAL" && v == Some(std::ffi::OsStr::new("0"))));
-    let state = f.config.repo.join("benilla-config");
+    let state = f.config.repo.join("wrathplus-config");
     let command = launch_command(&f.config, &state);
     assert_eq!(command.get_program(), f.config.binary_path().as_os_str());
     assert_eq!(command.get_current_dir(), Some(state.as_path()));
@@ -454,4 +456,36 @@ fn existing_live_build_can_be_used_and_saved_without_copy_or_cargo() {
     assert!(!f.config.binary_path().exists());
     fs::remove_file(&live).unwrap();
     assert!(!available(&f.config));
+}
+
+#[test]
+fn legacy_setup_and_launch_home_stay_together_even_if_new_home_exists() {
+    let f = Fixture::new();
+    f.fake_binary();
+    let legacy = f.config.repo.join("benilla-config");
+    let new = f.config.repo.join("wrathplus-config");
+    fs::create_dir(&legacy).unwrap();
+    for name in ["account", "realmlist.wtf", "config.toml"] {
+        fs::write(legacy.join(name), name).unwrap();
+    }
+    save_config(&f.config, &legacy.join("manager.json")).unwrap();
+    fs::create_dir(&new).unwrap();
+    // An unrelated or partial new home cannot suppress old startup settings.
+    fs::write(new.join("manager.json"), b"invalid partial settings").unwrap();
+    let saved = load(&f.config).unwrap();
+    assert_eq!(saved, f.config);
+    assert_eq!(saved.state_root(), legacy);
+    let command = launch_command(&saved, &saved.state_root());
+    assert_eq!(command.get_current_dir(), Some(legacy.as_path()));
+    assert!(command
+        .get_envs()
+        .any(|(k, v)| { k == "BENILLA_HOME" && v == Some(legacy.as_os_str()) }));
+    assert_eq!(
+        fs::read_to_string(legacy.join("account")).unwrap(),
+        "account"
+    );
+    assert_eq!(
+        fs::read(new.join("manager.json")).unwrap(),
+        b"invalid partial settings"
+    );
 }

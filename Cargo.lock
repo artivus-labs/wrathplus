@@ -8952,7 +8952,9 @@ dependencies = [
  "rfd",
  "serde",
  "serde_json",
+ "wrathplus-formats",
  "wrathplus-mpq",
+ "wrathplus-ui",
 ]
 
 [[package]]
