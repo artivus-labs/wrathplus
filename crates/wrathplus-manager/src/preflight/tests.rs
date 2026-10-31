@@ -128,6 +128,12 @@ fn disk_and_wsl_parsing() {
 fn canonical_missing_paths_and_overlap() {
     let dir = Scratch::new();
     let root = std::fs::canonicalize(&dir.0).unwrap();
+    let volume_root = root.ancestors().last().unwrap();
+    assert_eq!(
+        filesystem::resolve(volume_root).unwrap(),
+        std::fs::canonicalize(volume_root).unwrap()
+    );
+    assert_eq!(filesystem::resolve(&root).unwrap(), root);
     assert_eq!(
         filesystem::resolve(&dir.0.join("missing/target")).unwrap(),
         root.join("missing/target")
@@ -137,7 +143,11 @@ fn canonical_missing_paths_and_overlap() {
         root
     );
     assert!(filesystem::resolve(Path::new("")).is_err());
-    assert!(filesystem::resolve(&root.join("../elsewhere")).is_err());
+    // PathBuf::push normalizes '..' for verbatim Windows paths; preserve raw input.
+    let mut traversal = root.as_os_str().to_os_string();
+    let separator = std::path::MAIN_SEPARATOR;
+    traversal.push(format!("{separator}..{separator}elsewhere"));
+    assert!(filesystem::resolve(Path::new(&traversal)).is_err());
     assert!(filesystem::overlaps(&root, &root.join("Data")));
     assert!(!filesystem::overlaps(
         &root.join("target"),
@@ -227,4 +237,49 @@ fn bounded_process_exit_and_timeout() {
             .contains("timed out")
     );
     assert!(start.elapsed() < std::time::Duration::from_secs(8));
+}
+
+#[cfg(windows)]
+#[test]
+fn verbatim_paths_resolve_the_complete_root_and_preserve_probe_exclusion() {
+    use std::path::{Component, Prefix};
+    let dir = Scratch::new();
+    let root = std::fs::canonicalize(&dir.0).unwrap();
+    assert!(
+        matches!(root.components().next(), Some(Component::Prefix(p))
+        if matches!(p.kind(), Prefix::VerbatimDisk(_)))
+    );
+    let volume_root = root.ancestors().last().unwrap();
+    assert_eq!(
+        filesystem::resolve(volume_root).unwrap(),
+        std::fs::canonicalize(volume_root).unwrap()
+    );
+    assert_eq!(filesystem::resolve(&root).unwrap(), root);
+    assert_eq!(
+        filesystem::resolve(&root.join("missing/nested")).unwrap(),
+        root.join("missing/nested")
+    );
+    let install = root.join("install");
+    std::fs::create_dir_all(install.join("Data")).unwrap();
+    let config = crate::setup::Config {
+        repo: root.clone(),
+        target: install.join("missing/output"),
+        data: install.join("Data"),
+        locale: "enUS".into(),
+        server: "localhost".into(),
+    };
+    let mut report = Report::default();
+    filesystem::inspect(&config, &root, &mut report);
+    assert!(
+        report
+            .checks
+            .iter()
+            .take(2)
+            .all(|c| c.status == Status::Blocked),
+        "{}",
+        report.summary()
+    );
+    assert_eq!(std::fs::read_dir(&install).unwrap().count(), 1);
+    assert_eq!(std::fs::read_dir(install.join("Data")).unwrap().count(), 0);
+    assert!(!root.join("missing").exists());
 }
