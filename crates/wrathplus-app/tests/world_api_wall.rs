@@ -103,6 +103,9 @@ const PUBLISHED: &[(&str, &str)] = &[
     ("doodad_anim::AnimMatPart", "record"),
     ("doodad_anim::DoodadAnimHost", "record"),
     ("doodad_anim::MatAnim", "record"),
+    // Moving entity-parented placements supply a parent-local animation sphere; the engine
+    // owns transformation and draw gating (docs/WRATH-WORLD-OBJECTS.md).
+    ("doodad_anim::ParentSpaceAnimBound", "WRATH-WORLD-OBJECTS"),
     ("doodad_anim::TintLoop", "record"),
     ("doodad_anim::UvLoops", "record"),
     ("doodad_anim::register_entity_uv", "record"),

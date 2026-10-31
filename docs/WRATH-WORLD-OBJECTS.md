@@ -34,6 +34,23 @@ has no producer.
 Note for the battleground owner: `wrath_battleground` tests describe 0222 as having no AC sender;
 `spell_generic.cpp:2772` sends it, and this module now decodes it.
 
+## Entity-parented animation bounds
+
+`wrathplus_world::doodad_anim::ParentSpaceAnimBound` is the engine's public input
+for an animated placement carried by another entity, including WMO game-object
+props. The caller supplies the parent entity and a bounding sphere in that
+parent's local frame: placement translation is already included in `center`,
+and placement scale in `radius`. The engine applies the parent's current world
+transform and owns animation draw gating, parking and resumption. Callers must
+not pre-apply that world transform or reuse a camera-only visibility verdict
+when the parent moves. Static terrain placements omit this component and retain
+their already-world-space bounds.
+
+This is engine spatial metadata, not a game-session or transport-policy API.
+The production-gate regression
+`doodad_anim::lazy::tests::moving_parent_bounds_promote_park_and_resume_without_double_placement`
+checks moving-parent wake/park/resume and the unchanged static-world case.
+
 ## The in-game movie
 
 `A/ui_native/wrath_movie.rs` drains 0464 from the capture and makes the movie pending, as the
