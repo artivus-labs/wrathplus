@@ -896,10 +896,14 @@ fn spell_go(
             ),
         );
     }
-    // A cast naming a GameObject goes to the GameObject animation driver, which opens the lid on
-    // an open-lock cast, streamed caster or not.
+    // Preserve caster identity for the native local-caster stored-state gate in open_go_lid;
+    // a remote opening cast must not change our actionable chest state.
     if let Some(go_guid) = go_target {
-        go_lid.write(crate::go_anim::GoLidOpen { go_guid, spell_id });
+        go_lid.write(crate::go_anim::GoLidOpen {
+            go_guid,
+            spell_id,
+            caster,
+        });
     }
     let (cooldowns, spells, items, net_commands, pet_bar, spell_mods) = cooldown_ctx;
     let (auto_repeat, sheath, engaged) = attack_ctx;
