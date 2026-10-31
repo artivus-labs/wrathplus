@@ -15,8 +15,49 @@ pub(crate) fn load(config: &Config) -> Result<Settings, String> {
         Err(e) => Err(format!("Read addon settings: {e}")),
     }
 }
-fn target_matches(path: &Path, source: &Path) -> bool {
-    std::fs::read_link(path).is_ok_and(|p| p == source)
+pub(super) fn target_matches(path: &Path, source: &Path) -> bool {
+    std::fs::read_link(path).is_ok_and(|p| same_target(&p, source))
+}
+#[cfg(not(windows))]
+fn same_target(target: &Path, source: &Path) -> bool {
+    target == source
+}
+#[cfg(windows)]
+fn same_target(target: &Path, source: &Path) -> bool {
+    use std::path::{Component, Prefix};
+    // read_link returns DOS/UNC spelling where possible; canonicalize stores verbatim paths.
+    // Compare only these namespace aliases, without following links (sources may be gone).
+    fn key(path: &Path) -> Option<PathBuf> {
+        let mut parts = path.components();
+        let Component::Prefix(prefix) = parts.next()? else {
+            return None;
+        };
+        let mut result = match prefix.kind() {
+            Prefix::Disk(drive) | Prefix::VerbatimDisk(drive) => {
+                PathBuf::from(format!(r"\\?\{}:", char::from(drive)))
+            }
+            Prefix::UNC(server, share) | Prefix::VerbatimUNC(server, share) => {
+                PathBuf::from(r"\\?\UNC").join(server).join(share)
+            }
+            _ => return None,
+        };
+        if parts.next()? != Component::RootDir {
+            return None;
+        }
+        result.push(r"\");
+        for part in parts {
+            let Component::Normal(name) = part else {
+                return None;
+            };
+            // DOS trims these suffixes; they are not namespace-only spelling changes.
+            if name.to_string_lossy().ends_with(['.', ' ']) {
+                return None;
+            }
+            result.push(name);
+        }
+        Some(result)
+    }
+    target == source || matches!((key(target), key(source)), (Some(a), Some(b)) if a == b)
 }
 #[cfg(unix)]
 fn link(source: &Path, target: &Path) -> std::io::Result<()> {
@@ -141,4 +182,36 @@ fn apply(config: &Config, next: &Settings) -> Result<(), String> {
         }
     }
     result
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn windows_target_spelling_only_equates_absolute_namespace_aliases() {
+        for (dos, verbatim) in [
+            (r"C:\addons\Demo", r"\\?\C:\addons\Demo"),
+            (r"\\server\share\Demo", r"\\?\UNC\server\share\Demo"),
+        ] {
+            assert!(same_target(Path::new(dos), Path::new(verbatim)));
+            assert!(same_target(Path::new(verbatim), Path::new(dos)));
+        }
+        for other in [
+            r"C:\addons\Other",
+            r"D:\addons\Demo",
+            r"C:addons\Demo",
+            r"addons\Demo",
+            r"C:\addons\..\Demo",
+            r"C:\addons\Demo.",
+            r"C:\addons\Demo ",
+            r"\\.\C:\addons\Demo",
+            r"\\server\other\Demo",
+        ] {
+            assert!(
+                !same_target(Path::new(other), Path::new(r"\\?\C:\addons\Demo")),
+                "{other}"
+            );
+        }
+    }
 }

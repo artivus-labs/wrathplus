@@ -331,9 +331,12 @@ fn two_vanished_sources_can_be_removed_sequentially_through_ui() {
     );
     let root = f.config.state_root().join("AddOns");
     assert!(std::fs::symlink_metadata(root.join("First")).is_err());
-    assert_eq!(std::fs::read_link(root.join("Second")).unwrap(), second);
+    assert!(storage::target_matches(&root.join("Second"), &second));
     // Unchanged unavailable registrations still require ownership verification.
+    #[cfg(unix)]
     std::fs::remove_file(root.join("Second")).unwrap();
+    #[cfg(windows)]
+    std::fs::remove_dir(root.join("Second")).unwrap();
     std::fs::create_dir(root.join("Second")).unwrap();
     assert!(save_and_apply(&f.config, &manager.addon_settings)
         .unwrap_err()
@@ -356,4 +359,36 @@ fn two_vanished_sources_can_be_removed_sequentially_through_ui() {
     assert!(save_and_apply(&f.config, &settings)
         .unwrap_err()
         .contains("No valid TOC"));
+}
+
+#[test]
+fn retargeted_managed_link_is_refused_even_if_original_source_is_gone() {
+    let f = Fixture::new();
+    let source = addon(&f.config.repo, "original", "Demo", "");
+    let other = addon(&f.config.repo, "replacement", "Demo", "");
+    let settings = Settings {
+        selected: vec![manifest(&source).unwrap().selection()],
+        ..Default::default()
+    };
+    save_and_apply(&f.config, &settings).unwrap();
+    let target = f.config.state_root().join("AddOns/Demo");
+    assert!(storage::target_matches(&target, &source));
+    #[cfg(unix)]
+    {
+        std::fs::remove_file(&target).unwrap();
+        std::os::unix::fs::symlink(&other, &target).unwrap();
+    }
+    #[cfg(windows)]
+    {
+        std::fs::remove_dir(&target).unwrap();
+        std::os::windows::fs::symlink_dir(&other, &target).unwrap();
+    }
+    std::fs::remove_dir_all(&source).unwrap();
+    assert!(!storage::target_matches(&target, &source));
+    assert!(save_and_apply(&f.config, &Settings::default())
+        .unwrap_err()
+        .contains("changed outside Manager"));
+    assert_eq!(load(&f.config).unwrap().selected, settings.selected);
+    assert!(storage::target_matches(&target, &other));
+    assert!(other.join("Demo.toc").exists());
 }
