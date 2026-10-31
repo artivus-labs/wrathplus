@@ -149,6 +149,7 @@ fn collider_is_solid(wire_state: Option<u32>) -> bool {
 pub(crate) struct GoLidOpen {
     pub(crate) go_guid: u64,
     pub(crate) spell_id: u32,
+    pub(crate) caster: u64,
 }
 
 pub(crate) use crate::app_core::anim::{DespawnAnimAnnounced, GoCustomAnim, PendingDestroy};
@@ -264,15 +265,25 @@ fn sync_wire_go_state(
     }
 }
 
-/// Caller 2, the open-lock spell-go: a cast at an animated object opens it when the spell has an
-/// open-lock effect (`[spell+0xf4] ∈ {OPEN_LOCK, OPEN_LOCK_ITEM}`), whoever cast it.
+/// Caller 2, the local player's open-lock spell-go: build 12340 `0x80f5ec..0x80f776`
+/// gates the stored-state write on the caster being the local player. Remote casts must not
+/// strand our Action-0 locks at ACTIVE; only our own loot close restores that local state.
 fn open_go_lid(
     mut opens: MessageReader<GoLidOpen>,
     spells: Option<Res<crate::app_core::state::Spells>>,
     index: Res<GuidIndex>,
+    self_guid: Res<crate::app_core::session::SelfGuid>,
     mut gos: Query<&mut GoAnim>,
 ) {
-    for GoLidOpen { go_guid, spell_id } in opens.read().copied() {
+    for GoLidOpen {
+        go_guid,
+        spell_id,
+        caster,
+    } in opens.read().copied()
+    {
+        if self_guid.0 != Some(caster) {
+            continue;
+        }
         let is_open_lock = spells
             .as_deref()
             .and_then(|s| s.catalog.get(spell_id))
@@ -690,53 +701,11 @@ pub fn plugin(app: &mut App) {
 }
 
 #[cfg(test)]
-mod tests {
-    #[test]
-    fn state_edges_use_real_layout_fields_and_normalize_wrath_bytes() {
-        use wrathplus_protocol::types::{Field, ObjectType};
-        let native_field = Field::GameobjectBytes1;
-        let span = native_field.span().expect("native state dependency exists");
-        let (field, offset) =
-            wrathplus_protocol::types::Field::at(ObjectType::GameObject, span.index).unwrap();
-        assert_eq!((field, offset), (native_field, 0));
-        let packed = 0x87654300;
-        let mut edge = crate::net::FieldChanged {
-            entity: bevy::prelude::Entity::PLACEHOLDER,
-            guid: 42,
-            kind: ObjectType::GameObject,
-            field,
-            offset,
-            old: packed | 1,
-            new: packed,
-        };
-        assert_eq!(super::go_state_edge(&edge), Some(0));
-        edge.old = packed;
-        edge.new = packed | 1;
-        assert_eq!(super::go_state_edge(&edge), Some(1));
-        for mask in [0x100, 0x10000, 0x1000000] {
-            edge.old = packed | 1;
-            edge.new = edge.old ^ mask;
-            assert_eq!(
-                super::go_state_edge(&edge),
-                None,
-                "upper bytes aren't state"
-            );
-        }
-        edge.kind = ObjectType::Unit;
-        assert_eq!(super::go_state_edge(&edge), None);
-        edge.kind = ObjectType::GameObject;
-        edge.offset = 1;
-        assert_eq!(super::go_state_edge(&edge), None);
-        let span = Field::GameobjectFlags.span().unwrap();
-        (edge.field, edge.offset) =
-            wrathplus_protocol::types::Field::at(ObjectType::GameObject, span.index).unwrap();
-        assert_eq!(
-            super::go_state_edge(&edge),
-            None,
-            "unrelated fields don't re-close chests"
-        );
-    }
+#[path = "target/lock_lid_tests.rs"]
+mod lock_lid_tests;
 
+#[cfg(test)]
+mod tests {
     use super::*;
     use wrathplus_world::model_fade::DespawnFade;
 
