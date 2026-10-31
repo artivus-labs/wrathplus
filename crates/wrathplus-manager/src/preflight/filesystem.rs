@@ -19,6 +19,11 @@ pub(super) fn resolve(path: &Path) -> Result<PathBuf, String> {
     let mut result = PathBuf::new();
     for part in absolute.components() {
         match part {
+            // A Windows prefix (e.g. a verbatim drive) is not queryable until its root is appended.
+            Component::Prefix(prefix) => {
+                result.push(prefix.as_os_str());
+                continue;
+            }
             Component::ParentDir => return Err("Paths must not contain '..'".into()),
             Component::CurDir => continue,
             part => result.push(part.as_os_str()),
