@@ -12,6 +12,22 @@ Every file format, the network protocol and the interface engine are written fro
 no original client code and no bundled game assets. The fork's scope and its evaluation contract
 are in [`docs/AZEROTHBENCH.md`](docs/AZEROTHBENCH.md).
 
+## Getting started
+
+Build the native Manager first, then use its **Client** setup page to validate your own legally
+obtained 3.3.5a/build 12340 assets, compile the game and launch it:
+
+```sh
+git clone https://github.com/artivus-labs/wrathplus.git
+cd wrathplus
+make launcher
+make manager
+```
+
+For complete non-interactive client setup, use `make setup DATA="/path/to/Data" LOCALE=enUS`
+(or `make all DATA="/path/to/Data"`). This does not download game assets or provision a server.
+See [Client setup](docs/CLIENT-SETUP.md) for prerequisites, server selection and CLI arguments.
+
 ## Status
 
 The native 3.3.5 refactor is in progress. [`docs/WRATH-NATIVE-PLAN.md`](docs/WRATH-NATIVE-PLAN.md)
@@ -102,7 +118,9 @@ You need:
 - **Rust 1.98.1** (pinned in `rust-toolchain.toml`, installed by rustup) **and a C compiler**,
   because the client's Lua is built from source: on macOS the
   Xcode command line tools, on Linux the ALSA and udev development packages and pkg-config, on
-  Windows the MSVC build tools that the Rust installer sets up.
+  Windows the separately installed Visual Studio C++ Build Tools and Windows SDK (rustup alone
+  does not install these). See [Client setup](docs/CLIENT-SETUP.md) for Arch, Debian/Ubuntu,
+  macOS, native Windows and WSL instructions, plus the Manager prerequisite checker.
 
 ```sh
 WOW_DATA=/path/to/WoW/Data cargo run --release -p wrathplus
