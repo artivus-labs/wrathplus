@@ -46,9 +46,10 @@ crate of its own or a fork, and benilla opens a piece of itself to such a crate 
   only benilla's own files.
 - **The install is read-only.** benilla never writes into the WoW folder: no screenshot, log,
   cache or scratch file. `scripts/smoke.sh` fails a run that leaves the install changed.
-- **Local state lives in one folder**, `benilla-config/`, at the repo root in a dev build and
+- **Local state lives in one folder**, `wrathplus-config/`, at the repo root in a dev build and
   beside the binary in the player build; every path to it resolves through `crate::local_state`.
-  Player settings are CVars persisted as a diff in `benilla-config/config.toml`.
+  Existing `benilla-config/` homes take precedence without moving or merging state.
+  Player settings are CVars persisted as a diff in `wrathplus-config/config.toml`.
 - **The core UI is the stock UI; benilla's own is one layer on top.** The core loads the stock
   3.3.5a FrameXML off the player's own archives, byte for byte, and builds the engine verbs those
   files call, never stubbing one to make a file load. benilla's own interface (its options

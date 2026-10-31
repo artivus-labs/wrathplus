@@ -7,7 +7,6 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use wrathplus_dbc::{DbcParser, Schema};
 
-/// The BLP texel forms, re-exported for [`BlpMipChain::texels`].
 pub use wrathplus_blp::BlpTexels;
 
 mod overrides;
@@ -19,15 +18,16 @@ mod chain;
 pub use chain::{Chain, ChainEntry, NONSTOCK_PATCHES_ENV, STOCK_MAX_PATCH};
 mod profile;
 pub use profile::DataProfile;
-/// Loose `.tga` art, as addon folders ship it.
 mod tga;
 pub use tga::tga_to_rgba;
 /// Where the WoW install is; [`Chain`] opens it.
 mod install;
+mod local_state;
 pub use install::{
     addon_corpus, addon_corpus_candidates, candidates, project_folder, set_project_folder, skipped,
     wow_data,
 };
+pub use local_state::default_state_home;
 mod characters;
 pub use characters::{
     equip_blits, equip_column, equip_region_candidates, equip_tex_dir, equip_tile, forearm_dressed,

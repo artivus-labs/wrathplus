@@ -15,7 +15,7 @@ tells the mechanisms apart:
     the limiter's own pumping . post clean but gain diving repeatedly
 
 Usage:
-    scripts/soundprobe.py                       # the default benilla-config/sound-probe
+    scripts/soundprobe.py                       # the selected home's sound-probe (legacy home takes precedence)
     scripts/soundprobe.py <dir>                 # a capture directory
     scripts/soundprobe.py <dir> --around 2.0    # widen the window read around each mark
     scripts/soundprobe.py <dir> --json
@@ -158,7 +158,10 @@ def main():
 
     d = args.dir
     if d is None:
-        for guess in ("benilla-config/sound-probe", "../benilla-config/sound-probe"):
+        for root in (".", ".."):
+            legacy = os.path.join(root, "benilla-config")
+            home = legacy if os.path.lexists(legacy) else os.path.join(root, "wrathplus-config")
+            guess = os.path.join(home, "sound-probe")
             if os.path.isdir(guess):
                 d = guess
                 break

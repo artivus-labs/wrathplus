@@ -72,7 +72,8 @@ substitution, and that prose is tidied with the docs, by hand, after the rename.
   roughly 60 other `BENILLA_*` names are Lua globals in the UI and its fixtures, not environment.
   Moving the build stamps to `WRATHPLUS_*` with old-name aliases is a separate code change with a
   test, before or after the rename, never inside the script.
-- `benilla-config/` and everything under it (saved state), `/games/benilla`-style test install
+- Existing `benilla-config/` and everything under it (saved state) remain untouched; fresh
+  homes use `wrathplus-config/` ([compatibility](CLIENT-SETUP.md#local-state-directory-compatibility)). `/games/benilla`-style test install
   paths, the Lua registry keys (`benilla_*_methods`, `benilla_zone_text`, …), settings keys
   (`benilla_seat`, `benilla_seat_options`), temp-file prefixes (`benilla-gates`, `benilla-sv-…`).
 - `third_party/` (vendored history, `BENILLA.md` provenance), historical command records
