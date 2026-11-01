@@ -1,0 +1,9 @@
+# Overrides upstream .dockerignore: retain all tracked placeholders so the
+# strict Git cleanliness check can validate the copied tree unchanged.
+# This recipe accepts only a separate clean upstream clone, never a live realm.
+/build
+/build-*
+/cmake-build-*
+/.env
+/.env.*
+/.idea

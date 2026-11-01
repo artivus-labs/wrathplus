@@ -4,7 +4,7 @@ use std::path::Component;
 
 /// Resolve every existing component (including symlinks), even for not-yet-created outputs.
 /// Parent traversal is rejected instead of lexically folding it across a symlink.
-pub(super) fn resolved(path: &Path) -> Result<PathBuf> {
+pub(crate) fn resolved(path: &Path) -> Result<PathBuf> {
     if path.as_os_str().is_empty() {
         return Err("Select an explicit, nonempty path".into());
     }

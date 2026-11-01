@@ -3,6 +3,7 @@ use super::*;
 impl Manager {
     pub(super) fn update(&mut self, message: Message) -> iced::Task<Message> {
         match message {
+            Message::Server(input) => return self.server_update(input),
             Message::ToggleBuildLog => self.build_feedback.expanded = !self.build_feedback.expanded,
             Message::CopyBuildLog => {
                 return iced::clipboard::write(self.build_feedback.copy_text())
@@ -141,6 +142,7 @@ impl Manager {
                 }
             }
             Message::Poll => {
+                let server_task = self.poll_server();
                 if self.busy {
                     self.build_feedback.refresh();
                 }
@@ -159,6 +161,7 @@ impl Manager {
                         }
                     }
                 }
+                return server_task;
             }
             Message::Build | Message::Launch => {}
             Message::Locale(value) => {
@@ -166,7 +169,16 @@ impl Manager {
                 self.validated = false;
                 self.sync_config();
             }
-            Message::Navigate(page) => self.page = page,
+            Message::Navigate(page) => {
+                self.page = page;
+                if page == Page::Server {
+                    self.load_server();
+                }
+                if page == Page::Activity {
+                    self.build_feedback.expanded = true;
+                    self.server_state.open_logs();
+                }
+            }
             Message::Profile(value) => {
                 self.profile = value;
                 self.notice =
