@@ -19,7 +19,12 @@ impl Health {
             .iter()
             .filter(|r| matches!(r["Service"].as_str(), Some("authserver" | "worldserver")))
             .collect();
-        if rows.iter().any(|r| r["Health"] == "unhealthy") {
+        if rows.iter().any(|r| {
+            matches!(
+                r["Service"].as_str(),
+                Some("mysql" | "authserver" | "worldserver")
+            ) && r["Health"] == "unhealthy"
+        }) {
             Self::Unhealthy
         } else if servers.is_empty() || servers.iter().all(|r| r["State"] == "exited") {
             Self::Stopped

@@ -4,6 +4,8 @@ impl Manager {
     pub(super) fn update(&mut self, message: Message) -> iced::Task<Message> {
         match message {
             Message::Server(input) => return self.server_update(input),
+            Message::Modules(input) => return self.module_update(input),
+            Message::ModuleConfig(input) => return self.config_update(input),
             Message::ToggleBuildLog => self.build_feedback.expanded = !self.build_feedback.expanded,
             Message::CopyBuildLog => {
                 return iced::clipboard::write(self.build_feedback.copy_text())
@@ -185,7 +187,7 @@ impl Manager {
                 self.notice =
                     "Preview profile selected. No configuration or world state was changed.".into();
             }
-            Message::Assets(value) => {
+            Message::Assets(value) if !self.choosing && !self.module_state.busy => {
                 self.assets = value;
                 self.preflight = None;
                 self.validated = false;
@@ -196,7 +198,7 @@ impl Manager {
                 self.host = value;
                 self.sync_config();
             }
-            Message::Repo(value) => {
+            Message::Repo(value) if !self.choosing && !self.module_state.busy => {
                 self.repo = value;
                 self.config.repo = self.repo.clone().into();
                 self.addon_settings = addons::Settings::default();
@@ -205,15 +207,30 @@ impl Manager {
                 self.preflight = None;
                 self.validated = false;
             }
+            Message::Assets(_) | Message::Repo(_) => {}
             Message::Search(value) => self.search = value,
             Message::AddonScope(value) => {
                 self.page = Page::Addons;
                 self.addon_scope = value;
+                if value == AddonScope::Server {
+                    self.load_server();
+                }
             }
             Message::Addon(index, value) => self.toggle_addon(index, value),
             Message::RefreshAddons => self.refresh_addons(),
             Message::AddonPath(value) => self.addon_path = value,
-            Message::AddAddonPath => self.add_addon_folder(),
+            Message::AddAddonPath => {
+                if std::path::Path::new(self.addon_path.trim()).is_dir() {
+                    self.add_addon_folder();
+                } else {
+                    return self.import_addon_github();
+                }
+            }
+            Message::AddonImportFinished(result) => {
+                self.choosing = false;
+                self.refresh_addons();
+                self.record(result.unwrap_or_else(|error| error));
+            }
             Message::BrowseAddons if !self.choosing && self.addon_editable() => {
                 self.choosing = true;
                 return iced::Task::perform(

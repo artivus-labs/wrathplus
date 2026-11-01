@@ -56,12 +56,14 @@ impl Manager {
             row![
                 column![text("Local Playerbots server").size(20), text(state.label()).color(style::GOLD)].spacing(6),
                 space().width(Fill),
-                button(state.control_label()).style(style::primary).padding([10, 20])
+                button(state.control_label()).style(style::primary)
                     .on_press_maybe(state.control_input().map(Message::Server)),
                 action("Refresh", Action::Status),
                 button("View logs").on_press(Message::Navigate(crate::Page::Activity)),
             ].spacing(12).align_y(iced::Center),
             text("Play locally with computer-controlled companions. Stopping the server keeps your characters and progress.").size(13).color(style::MUTED),
+            text(state.detail()).size(12).color(style::MUTED),
+            action("Start / check LLM bridge", Action::Start),
             button("Use this server for the client").on_press(Message::Server(Input::Connect)),
         ].spacing(12);
         if state.busy && !matches!(state.active, Some(Action::Status)) {
@@ -129,8 +131,13 @@ impl Manager {
             button(state.build.label())
                 .on_press_maybe(state.build.input(editable).map(Message::Server)),
         );
-        column![card(status), card(settings), card(build)]
-            .spacing(14)
-            .into()
+        column![
+            card(status),
+            card(settings),
+            card(build),
+            state.build_feedback_view()
+        ]
+        .spacing(14)
+        .into()
     }
 }

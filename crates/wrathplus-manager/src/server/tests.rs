@@ -22,9 +22,13 @@ fn all_commands_are_project_isolated_and_never_destructive() {
             .windows(2)
             .any(|w| w == ["--project-name", settings::PROJECT]));
         assert!(words.iter().any(|s| s == "--project-directory"));
-        assert!(words
-            .iter()
-            .any(|s| s.ends_with("packaging/server/compose.yaml")));
+        // Inspect the file argument as a native path, not a Unix string suffix.
+        let compose_file = config.repo.join("packaging/server/compose.yaml");
+        assert!(cmd
+            .get_args()
+            .collect::<Vec<_>>()
+            .windows(2)
+            .any(|w| { w[0] == "-f" && std::path::Path::new(w[1]) == compose_file }));
         for forbidden in ["down", "-v", "--volumes", "rm", "exec", "3724", "8085"] {
             assert!(!words.iter().any(|s| s == forbidden));
         }
@@ -41,7 +45,10 @@ fn all_commands_are_project_isolated_and_never_destructive() {
         assert!(env.iter().any(|(k, v)| k == "SERVER_RECIPE" && v.is_some()));
         assert!(!env.iter().any(|(k, _)| k.contains("PASSWORD")));
     }
-    assert_eq!(command::STOP, ["stop", "worldserver", "authserver"]);
+    assert_eq!(
+        command::STOP,
+        ["stop", "llm-chatter-bridge", "worldserver", "authserver"]
+    );
 }
 #[test]
 fn compose_arrays_and_ndjson_require_real_health() {

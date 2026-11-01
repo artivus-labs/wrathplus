@@ -21,8 +21,10 @@ RUN set -eux; \
     test -z "$(git diff --name-only HEAD)"; \
     git -C modules/mod-playerbots status --porcelain; \
     test -z "$(git -C modules/mod-playerbots status --porcelain)"
+# Only selected module sources enter CMake. Keep core scaffold, remove every module directory.
+RUN find modules -mindepth 1 -maxdepth 1 -type d -exec rm -rf {} +
+COPY --from=module_sources . /azerothcore/modules/
 RUN --mount=type=cache,target=/ccache,sharing=locked \
-    --mount=type=cache,target=/azerothcore/build,sharing=locked \
     cmake -S . -B build -G Ninja \
       -DCMAKE_INSTALL_PREFIX=/opt/acore -DCMAKE_BUILD_TYPE=Release \
       -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
@@ -41,7 +43,7 @@ LABEL org.opencontainers.image.title="WrathPlus Playerbots arm64 spike" \
 ENV DEBIAN_FRONTEND=noninteractive PATH=/opt/acore/bin:$PATH
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libmysqlclient21 libreadline8 libicu74 libssl3t64 zlib1g libbz2-1.0 \
-    liblzma5 libncurses6 default-mysql-client ca-certificates \
+    liblzma5 libncurses6 default-mysql-client ca-certificates util-linux \
     libboost-filesystem1.83.0 libboost-program-options1.83.0 \
     libboost-iostreams1.83.0 libboost-regex1.83.0 \
     libboost-thread1.83.0 libboost-atomic1.83.0 \

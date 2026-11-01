@@ -20,6 +20,8 @@ pub fn compose(config: &setup::Config, settings: &Settings, args: &[&str]) -> Co
                 &settings.source
             },
         )
+        .env("MODULE_SOURCES", settings.source.join("modules"))
+        .env("MODULE_CONFIG", crate::module_config::directory(config))
         .env("SPIKE_DOCKERFILE", directory.join("Dockerfile"))
         .env("SERVER_RECIPE", &directory)
         .env(
@@ -38,14 +40,18 @@ pub fn compose(config: &setup::Config, settings: &Settings, args: &[&str]) -> Co
         .env_remove("COMPOSE_ENV_FILES")
         .env("COMPOSE_DISABLE_ENV_FILE", "1")
         .env("BUILDKIT_PROGRESS", "plain")
-        .current_dir(directory);
+        .current_dir(&directory);
+    // A profile exposes companion status even when it was started outside Manager.
+    command.env("COMPOSE_PROFILES", "chatter");
+    // Runtime commands never inherit an arbitrary working-tree build context.
+    command.env("CHATTER_SOURCE", &directory);
     command
 }
 pub const BUILD: &[&str] = &["build", "playerbots-build"];
 pub const MYSQL: &[&str] = &["up", "-d", "mysql"];
 pub const BOOTSTRAP: &[&str] = &["run", "--rm", "bootstrap"];
 pub const START: &[&str] = &["up", "-d", "authserver", "worldserver"];
-pub const STOP: &[&str] = &["stop", "worldserver", "authserver"];
+pub const STOP: &[&str] = &["stop", "llm-chatter-bridge", "worldserver", "authserver"];
 pub const STATUS: &[&str] = &["ps", "--all", "--format", "json"];
 
 pub fn failed(rows: &[serde_json::Value]) -> bool {
@@ -61,6 +67,7 @@ pub const LOGS: &[&str] = &[
     "--no-color",
     "--tail",
     "150",
+    "llm-chatter-bridge",
     "mysql",
     "authserver",
     "worldserver",
@@ -96,7 +103,7 @@ pub fn summary(rows: &[serde_json::Value]) -> String {
         .filter(|r| {
             matches!(
                 r["Service"].as_str(),
-                Some("mysql" | "authserver" | "worldserver")
+                Some("mysql" | "authserver" | "worldserver" | "llm-chatter-bridge")
             )
         })
         .collect();

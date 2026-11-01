@@ -4,6 +4,9 @@ mod branding;
 mod build_feedback;
 mod cli;
 mod client_actions;
+mod module_config;
+mod module_ui;
+mod modules;
 mod pages;
 mod preflight;
 mod prerequisites;
@@ -55,16 +58,14 @@ impl Page {
 enum AddonScope {
     Client,
     Server,
-    Both,
 }
 
 impl AddonScope {
-    const ALL: [Self; 3] = [Self::Client, Self::Server, Self::Both];
+    const ALL: [Self; 2] = [Self::Client, Self::Server];
     fn label(self) -> &'static str {
         match self {
-            Self::Client => "Client only",
-            Self::Server => "Server only",
-            Self::Both => "Client + server",
+            Self::Client => "Client addons",
+            Self::Server => "Server modules",
         }
     }
 }
@@ -73,6 +74,9 @@ impl AddonScope {
 enum Message {
     Navigate(Page),
     Server(server::Input),
+    Modules(module_ui::Input),
+    ModuleConfig(module_config::Input),
+    AddonImportFinished(Result<String, String>),
     Profile(String),
     Assets(String),
     Host(String),
@@ -107,6 +111,8 @@ enum Message {
 struct Manager {
     page: Page,
     server_state: server::Server,
+    module_state: module_ui::State,
+    config_editor: module_config::State,
     profile: String,
     assets: String,
     build_directory: String,
@@ -136,6 +142,8 @@ impl Default for Manager {
         Self {
             page: Page::Play,
             server_state: server::Server::default(),
+            module_state: module_ui::State::default(),
+            config_editor: module_config::State::default(),
             profile: "Local adventures".into(),
             assets: String::new(),
             build_directory: setup::Config::defaults()
@@ -276,11 +284,13 @@ impl Manager {
         ]
         .spacing(14)
         .height(Fill);
-        row![
-            sidebar,
-            container(content).padding(22).width(Fill).height(Fill)
-        ]
-        .into()
+        self.config_overlay(
+            row![
+                sidebar,
+                container(content).padding(22).width(Fill).height(Fill)
+            ]
+            .into(),
+        )
     }
 }
 

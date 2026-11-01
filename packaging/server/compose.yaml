@@ -4,12 +4,14 @@ x-server: &server
   image: wrathplus/playerbots:arm64-spike
   platform: linux/arm64
   init: true
+  user: "0:0"
   restart: "no"
   environment:
     MANAGED_BOT_COUNT: "${MANAGED_BOT_COUNT:-5}"
   entrypoint: ["/bin/sh", "/recipe/runtime.sh"]
   volumes:
     - instance-secrets:/run/instance-secrets:ro
+    - ${MODULE_CONFIG:?Set MODULE_CONFIG to the managed module-config directory}:/module-config:ro
     - ${SERVER_RECIPE:?Set SERVER_RECIPE to packaging/server absolute path}:/recipe:ro
     - ${SERVER_DATA:?Set SERVER_DATA to extracted server data absolute path}:/server-data:ro
   depends_on:
@@ -24,12 +26,42 @@ services:
       context: ${ACORE_SOURCE:?Set ACORE_SOURCE to the clean pinned checkout}
       dockerfile: ${SPIKE_DOCKERFILE:?Set SPIKE_DOCKERFILE to the absolute recipe path}
       target: runtime
+      additional_contexts:
+        module_sources: ${MODULE_SOURCES:-${ACORE_SOURCE}/modules}
       args:
         BUILD_JOBS: "2"
         CORE_REV: "93333d6a9eb00fdf0179adde30da3c17618207d6"
         PLAYERBOTS_REV: "05a1f6fceb8a32aa879b13f5f48934c6e46a774c"
     command: [worldserver, --help]
     network_mode: none
+  llm-chatter-bridge:
+    profiles: [chatter]
+    image: wrathplus/llm-chatter:managed
+    build:
+      context: ${SERVER_RECIPE:?Set SERVER_RECIPE}
+      dockerfile: chatter.Dockerfile
+      additional_contexts:
+        chatter_source: ${CHATTER_SOURCE:-${SERVER_RECIPE}}
+    init: true
+    restart: "no"
+    read_only: true
+    tmpfs: ["/state:mode=0700", "/tmp:mode=1777"]
+    volumes:
+      - instance-secrets:/run/instance-secrets:ro
+      - ${MODULE_CONFIG:?Set MODULE_CONFIG}:/module-config:ro
+      - ${SERVER_RECIPE:?Set SERVER_RECIPE}:/recipe:ro
+    depends_on:
+      mysql:
+        condition: service_healthy
+      worldserver:
+        condition: service_healthy
+    healthcheck:
+      # Startup probes provider; recurring checks never make paid model calls.
+      test: [CMD-SHELL, 'test -s /state/healthcheck.log && python /app/chatter_healthcheck.py --config /state/mod_llm_chatter.conf --no-llm > /state/health-latest.log 2>&1']
+      interval: 30s
+      timeout: 20s
+      retries: 3
+      start_period: 120s
   credentials:
     image: wrathplus/playerbots:arm64-spike
     user: "0:0"

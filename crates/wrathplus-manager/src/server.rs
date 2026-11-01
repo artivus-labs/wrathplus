@@ -1,5 +1,7 @@
 //! Native managed disposable server workflow; no existing-realm adoption or reset.
+mod build_feedback;
 mod build_state;
+mod chatter;
 mod command;
 mod settings;
 mod status;
@@ -35,6 +37,7 @@ pub enum Input {
     Finished(Result<String, String>),
     Connect,
     ToggleLogs,
+    BuildLogs,
 }
 pub struct Server {
     settings: Settings,
@@ -54,6 +57,7 @@ pub struct Server {
     log: String,
     show_logs: bool,
     error: Option<String>,
+    build_feedback: build_feedback::Feedback,
     pulse: u16,
     next_refresh: Option<Instant>,
 }
@@ -78,12 +82,29 @@ impl Default for Server {
             log: String::new(),
             show_logs: false,
             error: None,
+            build_feedback: build_feedback::Feedback::default(),
             pulse: 0,
             next_refresh: None,
         }
     }
 }
 impl Server {
+    pub(crate) fn module_source(&self) -> &std::path::Path {
+        &self.settings.source
+    }
+    pub(crate) fn module_editable(&self) -> bool {
+        !self.busy && !self.choosing
+    }
+    pub(crate) fn module_build_input(&self, enabled: bool) -> Option<Input> {
+        self.build.input(enabled && self.module_editable())
+    }
+    pub(crate) fn module_build_label(&self) -> &'static str {
+        if matches!(self.active, Some(Action::Build | Action::ForceBuild)) {
+            "Building…"
+        } else {
+            self.build.label()
+        }
+    }
     pub fn refresh(&mut self) {
         if let Some(receiver) = &self.receiver {
             for event in receiver.try_iter() {
@@ -130,13 +151,13 @@ impl Manager {
         self.load_server();
         let state = &mut self.server_state;
         match input {
-            Input::Source(value) if !state.busy => {
+            Input::Source(value) if !state.busy && !self.module_state.busy => {
                 state.source = value.clone();
                 state.settings.source = value.into();
                 state.build = build_state::BuildState::Unknown;
                 state.next_refresh = None;
             }
-            Input::Data(value) if !state.busy => {
+            Input::Data(value) if !state.busy && !self.module_state.busy => {
                 state.data = value.clone();
                 state.settings.data = value.into();
             }
@@ -159,7 +180,7 @@ impl Manager {
                     return self.server_update(Input::Data(path.to_string_lossy().into_owned()));
                 }
             }
-            Input::Run(action) if !state.busy && !state.choosing => {
+            Input::Run(action) if !state.busy && !state.choosing && !self.module_state.busy => {
                 state.active = Some(action);
                 state.busy = true;
                 state.started = Some(Instant::now());
@@ -195,6 +216,14 @@ impl Manager {
                 state.refresh();
                 state.busy = false;
                 let action = state.active.take();
+                if matches!(action, Some(Action::Build | Action::ForceBuild)) {
+                    state.build_feedback.finish(
+                        &result,
+                        state.started.map(|t| t.elapsed()).unwrap_or_default(),
+                        state.log_path.clone(),
+                        state.log.clone(),
+                    );
+                }
                 if !matches!(action, Some(Action::Status)) {
                     self.events.push(match &result {
                         Ok(message) => format!("Server: {message}"),
@@ -211,6 +240,7 @@ impl Manager {
                     }
                 }
             }
+            Input::BuildLogs => state.build_feedback.toggle(),
             Input::ToggleLogs => state.show_logs = !state.show_logs,
             Input::Connect => {
                 if self.child.is_some() {
