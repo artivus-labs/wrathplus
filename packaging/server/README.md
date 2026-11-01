@@ -17,12 +17,22 @@ Provide a **clean** checkout with the matching module already present:
 The recipe-specific `Dockerfile.dockerignore` preserves tracked placeholders that
 upstream's ignore file excludes; do not weaken the revision/cleanliness guard.
 CMake uses two compiler jobs, Release, and `USE_COREPCH/USE_SCRIPTPCH=OFF`.
+Compose requires BuildKit additional-context support. `MODULE_SOURCES` defaults to the
+core's modules directory for manual use; Manager supplies an isolated directory containing
+only selected module sources. Base revision/cleanliness checks run before this overlay.
+Each image build uses a fresh CMake directory; ccache remains shared. Source selection is
+not runtime activation: rebuild then restart, with backups before module migrations.
 
 ```sh
 export ACORE_SOURCE=/absolute/path/to/clean/core
 export SERVER_RECIPE="$PWD/packaging/server"
 export SPIKE_DOCKERFILE="$SERVER_RECIPE/Dockerfile"
 export SERVER_DATA=/absolute/path/to/extracted/server/data
+export MODULE_CONFIG=/absolute/path/to/private/module-config
+mkdir -p "$MODULE_CONFIG"
+# Manager creates this persistent directory and supplies MODULE_CONFIG automatically.
+# Optional .conf overrides are copied privately into etc/modules on each startup.
+# Edits require restart, not rebuild. API keys are never printed by the recipe.
 # SERVER_DATA contains dbc/, maps/, vmaps/, optionally mmaps/; NOT client MPQs.
 docker compose -p wrathplus-managed-local -f "$SERVER_RECIPE/compose.yaml" config --quiet
 docker compose --progress plain -p wrathplus-managed-local -f "$SERVER_RECIPE/compose.yaml" build playerbots-build
@@ -96,6 +106,28 @@ byte using ordered, single-row SQL output. Physical CHECKSUM TABLE differed for
 acceptance criterion. The dated backup and checksum are retained privately outside Git.
 Restore-check container is stopped, its volume retained. This validates this
 fresh instance's backup/restore, not migration or recovery of the old realm.
+
+## Bundled Chatter companion
+
+Selecting `mod-llm-chatter` also enables its bundled `tools/` generation service on
+Manager Start. `chatter.Dockerfile` builds an isolated uv-managed Python environment;
+no host Python packages are installed. The `chatter` Compose profile exposes the
+service to status/log/stop commands without making it mandatory for Playerbots-only
+setups. Manager passes a bounded, isolated snapshot of the selected module as
+`CHATTER_SOURCE`, rejecting working `.conf`/`.env` files, links and special files
+before any companion image build.
+
+The bridge uses a read-only root filesystem and module-config mount. `chatter.sh`
+copies the config into private tmpfs, replaces DB settings with generated instance
+credentials/internal MySQL routing, and drops to UID/GID 10001. Provider settings
+are preserved. Startup upstream preflight performs one real provider call;
+periodic DB/schema checks do not make model calls. No MySQL port is exposed.
+Start/check recreates only the bridge on an already healthy realm, applying saved
+bridge config. Stop includes it. Disabling the module stops it on the next Start.
+A healthy bridge proves preflight and process/DB health, not in-game delivery;
+verify a new grouped-player interaction and persisted identity/memory separately.
+Upstream clears session work when no real players are online. Dependency versions
+and the uv base tag are not fully locked; record resolved digests for releases.
 
 Still unqualified: attended gameplay, graphical controls/folder-picker interaction,
 load beyond five bots, upgrades, amd64/Windows runtime, publication, migration

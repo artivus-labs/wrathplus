@@ -1,4 +1,7 @@
 //! Metadata-only addon discovery. Selecting a folder never executes addon code.
+mod github;
+#[cfg(test)]
+mod import_tests;
 mod storage;
 #[cfg(test)]
 mod tests;

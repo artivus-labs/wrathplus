@@ -46,6 +46,22 @@ impl Receipt {
             modules,
         })
     }
+    pub fn selected(
+        image: String,
+        source: &Path,
+        plan: &crate::modules::BuildPlan,
+    ) -> Result<Self, String> {
+        let mut receipt = Self::snapshot(image, source)?;
+        receipt.modules = plan
+            .selected
+            .iter()
+            .map(|m| {
+                crate::modules::fingerprint(&m.source)
+                    .map(|digest| format!("{} @ {} #{digest}", m.name, m.source.display()))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(receipt)
+    }
     pub fn save(&self, config: &setup::Config) -> Result<(), String> {
         let path = Settings::state(config).join("build-receipt.json");
         Settings::check_output(config, &path)?;
@@ -66,7 +82,12 @@ impl BuildState {
         if image.is_empty() {
             return Self::Missing;
         }
-        let current = Receipt::snapshot(image.into(), &settings.source);
+        let current = if settings.source.join("CMakeLists.txt").is_file() {
+            crate::modules::prepare(config, &settings.source)
+                .and_then(|plan| Receipt::selected(image.into(), &settings.source, &plan))
+        } else {
+            Receipt::snapshot(image.into(), &settings.source)
+        };
         let recorded = std::fs::read(Settings::state(config).join("build-receipt.json"))
             .ok()
             .and_then(|bytes| serde_json::from_slice::<Receipt>(&bytes).ok());

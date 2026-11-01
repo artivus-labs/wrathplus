@@ -44,6 +44,6 @@ pub fn primary(theme: &Theme, status: button::Status) -> button::Style {
         .into(),
     );
     style.text_color = BG;
-    style.border.radius = 8.0.into();
+    // Keep the standard button border geometry; primary differs only in colour.
     style
 }

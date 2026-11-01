@@ -41,7 +41,10 @@ fn all_commands_are_project_isolated_and_never_destructive() {
         assert!(env.iter().any(|(k, v)| k == "SERVER_RECIPE" && v.is_some()));
         assert!(!env.iter().any(|(k, _)| k.contains("PASSWORD")));
     }
-    assert_eq!(command::STOP, ["stop", "worldserver", "authserver"]);
+    assert_eq!(
+        command::STOP,
+        ["stop", "llm-chatter-bridge", "worldserver", "authserver"]
+    );
 }
 #[test]
 fn compose_arrays_and_ndjson_require_real_health() {

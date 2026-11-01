@@ -2,6 +2,65 @@
 # Managed disposable realm only; no arbitrary database addresses or credentials.
 set -eu
 umask 077
+# BEGIN managed config helpers (pure stdin/stdout; also exercised hermetically).
+# Delete every active Manager-owned definition, including indented duplicates, then
+# append one authoritative policy. A leading newline also handles unterminated input.
+managed_core_config() {
+    sed \
+        -e '/^[[:space:]]*LoginDatabaseInfo[[:space:]]*=/d' \
+        -e '/^[[:space:]]*CharacterDatabaseInfo[[:space:]]*=/d' \
+        -e '/^[[:space:]]*WorldDatabaseInfo[[:space:]]*=/d' \
+        -e '/^[[:space:]]*LogsDir[[:space:]]*=/d' \
+        -e '/^[[:space:]]*TempDir[[:space:]]*=/d' \
+        -e '/^[[:space:]]*SourceDirectory[[:space:]]*=/d' \
+        -e '/^[[:space:]]*DataDir[[:space:]]*=/d' \
+        -e '/^[[:space:]]*Console\.Enable[[:space:]]*=/d'
+    cat <<EOF
+
+LoginDatabaseInfo = "mysql;3306;acore;$password;acore_auth"
+CharacterDatabaseInfo = "mysql;3306;acore;$password;acore_characters"
+WorldDatabaseInfo = "mysql;3306;acore;$password;acore_world"
+LogsDir = "/state/logs"
+TempDir = "/state/temp"
+SourceDirectory = "/azerothcore"
+DataDir = "/server-data"
+Console.Enable = 0
+EOF
+}
+managed_playerbots_config() {
+    sed \
+        -e '/^[[:space:]]*PlayerbotsDatabaseInfo[[:space:]]*=/d' \
+        -e '/^[[:space:]]*Playerbots\.RandomBotAutologin[[:space:]]*=/d' \
+        -e '/^[[:space:]]*Playerbots\.MinRandomBots[[:space:]]*=/d' \
+        -e '/^[[:space:]]*Playerbots\.MaxRandomBots[[:space:]]*=/d' \
+        -e '/^[[:space:]]*Playerbots\.EnablePeriodicOnlineOffline[[:space:]]*=/d' \
+        -e '/^[[:space:]]*Playerbots\.AddClassAccountPoolSize[[:space:]]*=/d' \
+        -e '/^[[:space:]]*Playerbots\.RandomBotGuildCount[[:space:]]*=/d'
+    cat <<EOF
+
+PlayerbotsDatabaseInfo = "mysql;3306;acore;$password;acore_playerbots"
+Playerbots.RandomBotAutologin = $bot_autologin
+Playerbots.MinRandomBots = $bot_count
+Playerbots.MaxRandomBots = $bot_count
+Playerbots.EnablePeriodicOnlineOffline = 0
+Playerbots.AddClassAccountPoolSize = 0
+Playerbots.RandomBotGuildCount = 0
+EOF
+}
+# END managed config helpers
+# Host configs can contain API keys and are mode 0600. Copy privately as root,
+# then drop privileges before loading server code or connecting to MySQL.
+if [ "$(id -u)" = 0 ]; then
+    command -v setpriv >/dev/null 2>&1 || { echo 'This server image lacks safe privilege dropping. Rebuild the server image before starting.' >&2; exit 2; }
+    mkdir -p /state/module-overrides
+    for override in /module-config/*.conf; do
+        [ -f "$override" ] || continue
+        [ ! -L "$override" ] || { echo 'Module config symlinks are not supported' >&2; exit 2; }
+        cp "$override" "/state/module-overrides/$(basename "$override")"
+    done
+    chown -R 10001:10001 /state
+    exec setpriv --reuid=10001 --regid=10001 --init-groups /bin/sh "$0" "$@"
+fi
 mkdir -p /opt/acore/etc/modules /state/logs /state/temp /state/config
 # Module config lookup uses the compiled /opt/acore/etc path, not -c's parent.
 # Deliberately bounded qualification population, never upstream's 500-bot default.
@@ -22,33 +81,26 @@ EOF
 sql() { mysql --defaults-extra-file=/state/config/mysql.cnf "$@"; }
 configure() {
     component=$1
-    cp "/opt/acore/etc/$component.conf.dist" "/state/config/$component.conf"
-    # Replace keys rather than appending duplicate definitions.
-    sed -i \
-      -e "s|^LoginDatabaseInfo[[:space:]]*=.*|LoginDatabaseInfo = \"mysql;3306;acore;$password;acore_auth\"|" \
-      -e "s|^CharacterDatabaseInfo[[:space:]]*=.*|CharacterDatabaseInfo = \"mysql;3306;acore;$password;acore_characters\"|" \
-      -e "s|^WorldDatabaseInfo[[:space:]]*=.*|WorldDatabaseInfo = \"mysql;3306;acore;$password;acore_world\"|" \
-      -e 's|^LogsDir[[:space:]]*=.*|LogsDir = "/state/logs"|' \
-      -e 's|^TempDir[[:space:]]*=.*|TempDir = "/state/temp"|' \
-      -e 's|^SourceDirectory[[:space:]]*=.*|SourceDirectory = "/azerothcore"|' \
-      -e 's|^DataDir[[:space:]]*=.*|DataDir = "/server-data"|' \
-      -e 's|^Console.Enable[[:space:]]*=.*|Console.Enable = 0|' \
-      "/state/config/$component.conf"
+    managed_core_config < "/opt/acore/etc/$component.conf.dist" > "/state/config/$component.conf"
 }
 configure dbimport
 configure authserver
 configure worldserver
-cp /azerothcore/modules/mod-playerbots/conf/playerbots.conf.dist /opt/acore/etc/modules/playerbots.conf.dist
-cp /opt/acore/etc/modules/playerbots.conf.dist /opt/acore/etc/modules/playerbots.conf
-sed -i \
-    -e "s|^PlayerbotsDatabaseInfo[[:space:]]*=.*|PlayerbotsDatabaseInfo = \"mysql;3306;acore;$password;acore_playerbots\"|" \
-    -e "s|^Playerbots.RandomBotAutologin[[:space:]]*=.*|Playerbots.RandomBotAutologin = $bot_autologin|" \
-    -e "s|^Playerbots.MinRandomBots[[:space:]]*=.*|Playerbots.MinRandomBots = $bot_count|" \
-    -e "s|^Playerbots.MaxRandomBots[[:space:]]*=.*|Playerbots.MaxRandomBots = $bot_count|" \
-    -e 's|^Playerbots.EnablePeriodicOnlineOffline[[:space:]]*=.*|Playerbots.EnablePeriodicOnlineOffline = 0|' \
-    -e 's|^Playerbots.AddClassAccountPoolSize[[:space:]]*=.*|Playerbots.AddClassAccountPoolSize = 0|' \
-    -e 's|^Playerbots.RandomBotGuildCount[[:space:]]*=.*|Playerbots.RandomBotGuildCount = 0|' \
-    /opt/acore/etc/modules/playerbots.conf
+# Installed defaults plus explicit persistent overrides; never write to the host mount.
+for template in /opt/acore/etc/modules/*.conf.dist /azerothcore/modules/*/conf/*.conf.dist; do
+    [ -f "$template" ] || continue
+    name=$(basename "$template" .dist)
+    [ -f "/opt/acore/etc/modules/$name" ] || cp "$template" "/opt/acore/etc/modules/$name"
+done
+for override in /state/module-overrides/*.conf; do
+    [ -f "$override" ] || continue
+    [ ! -L "$override" ] || { echo 'Module config symlinks are not supported' >&2; exit 2; }
+    cp "$override" "/opt/acore/etc/modules/$(basename "$override")"
+done
+if [ -f /azerothcore/modules/mod-playerbots/conf/playerbots.conf.dist ]; then
+    managed_playerbots_config < /opt/acore/etc/modules/playerbots.conf > /state/config/playerbots.conf
+    cp /state/config/playerbots.conf /opt/acore/etc/modules/playerbots.conf
+fi
 case "${1:-}" in
 bootstrap)
     echo 'STAGE: Initializing core schemas and applying upstream module SQL'

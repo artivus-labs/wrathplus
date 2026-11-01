@@ -93,6 +93,9 @@ pub fn run(
     }
     settings.validate(&config, matches!(action, Action::Start))?;
     settings.save(&config)?;
+    let config_dir = crate::module_config::directory(&config);
+    crate::module_config::validate(&config, &settings.source, &config_dir.join("probe.conf"))?;
+    std::fs::create_dir_all(&config_dir).map_err(|e| e.to_string())?;
     let dir = Settings::state(&config).join("manager-logs");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let stamp = SystemTime::now()
@@ -132,16 +135,35 @@ pub fn run(
                 .into(),
         ),
         Action::Build | Action::ForceBuild => {
-            let before = super::build_state::Receipt::snapshot(String::new(), &settings.source)?;
-            stage("Building server image · first build can take over an hour");
-            run(command::BUILD, &log)?;
+            let plan = crate::modules::prepare(&config, &settings.source)?;
+            let before =
+                super::build_state::Receipt::selected(String::new(), &settings.source, &plan)?;
+            let staged = crate::modules::stage(&config, &plan)?;
+            for module in &plan.selected {
+                if crate::modules::fingerprint(&module.source)?
+                    != crate::modules::fingerprint(&staged.path.join(&module.name))?
+                {
+                    return Err("Module sources changed during staging; retry build".into());
+                }
+            }
+            if before
+                != super::build_state::Receipt::selected(String::new(), &settings.source, &plan)?
+            {
+                return Err("Module sources changed during staging; retry build".into());
+            }
+            stage("Building selected server modules · first build can take over an hour");
+            let mut build = command::compose(&config, &settings, command::BUILD);
+            build.env("MODULE_SOURCES", &staged.path);
+            execute(build, &log)?;
             let image = capture(command::local_image(), &mut log)?;
             if image.trim().is_empty() {
                 return Err(
                     "Build completed but no local server image was found; refresh status.".into(),
                 );
             }
-            let mut after = super::build_state::Receipt::snapshot(String::new(), &settings.source)?;
+            let next = crate::modules::prepare(&config, &settings.source)?;
+            let mut after =
+                super::build_state::Receipt::selected(String::new(), &settings.source, &next)?;
             if before != after {
                 return Err("Server image built, but modules changed during the build. Refresh and rebuild; module inventory was not recorded.".into());
             }
@@ -160,6 +182,7 @@ pub fn run(
             )?;
             let rows = command::services(&output)?;
             if command::ready(&rows) {
+                start_chatter(&config, &settings, &mut log, &sender)?;
                 let _ = sender.send(Event::Health(super::status::Health::Running));
                 return Ok(
                     "Already running · MySQL/auth/world healthy · auth 127.0.0.1:13724".into(),
@@ -184,6 +207,7 @@ pub fn run(
                 let rows = command::services(&output)?;
                 let _ = sender.send(Event::Health(super::status::Health::observed(&rows)));
                 if command::ready(&rows) {
+                    start_chatter(&config, &settings, &mut log, &sender)?;
                     return Ok("Managed MySQL/auth/world healthy · auth 127.0.0.1:13724 · world 127.0.0.1:18085".into());
                 }
                 if command::failed(&rows) || Instant::now() >= deadline {
@@ -212,8 +236,48 @@ pub fn run(
             let rows = command::services(&output)?;
             let _ = sender.send(Event::Health(super::status::Health::observed(&rows)));
             run(command::LOGS, &log)?;
-            Ok(command::summary(&rows))
+            Ok(super::chatter::summary(
+                &rows,
+                super::chatter::source(&config, &settings)?.is_some(),
+            ))
         }
+    }
+}
+
+fn start_chatter(
+    config: &setup::Config,
+    settings: &Settings,
+    log: &mut File,
+    sender: &Sender<Event>,
+) -> Result<()> {
+    if super::chatter::source(config, settings)?.is_none() {
+        // Deselecting Chatter must not leave a previously managed bridge generating work.
+        return execute(
+            command::compose(config, settings, &["stop", "llm-chatter-bridge"]),
+            log,
+        );
+    }
+    let _ = sender.send(Event::Stage(
+        "Provisioning bundled LLM Chatter bridge (realm unchanged)".into(),
+    ));
+    let staged = super::chatter::stage(config, settings)?;
+    let mut start = command::compose(config, settings, super::chatter::START);
+    start.env("CHATTER_SOURCE", staged.path.join("mod-llm-chatter"));
+    execute(start, log)?;
+    let deadline = Instant::now() + Duration::from_secs(180);
+    loop {
+        let rows = command::services(&capture(
+            command::compose(config, settings, command::STATUS),
+            log,
+        )?)?;
+        if super::chatter::ready(&rows) {
+            return Ok(());
+        }
+        if super::chatter::failed(&rows) || Instant::now() >= deadline {
+            let _ = execute(command::compose(config, settings, command::LOGS), log);
+            return Err(format!("Realm retained, but LLM Chatter bridge is not ready: {}. Check provider/model/key in mod_llm_chatter.conf and bridge logs.", command::summary(&rows)));
+        }
+        std::thread::sleep(Duration::from_secs(3));
     }
 }
 

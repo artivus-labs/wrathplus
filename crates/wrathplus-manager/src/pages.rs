@@ -29,11 +29,8 @@ fn launch_row<'a>(
         text(detail).size(12).color(style::MUTED).width(Fill),
         button(text(launch))
             .style(style::primary)
-            .padding([8, 16])
             .on_press_maybe(start),
-        button("Setup")
-            .padding([8, 12])
-            .on_press(Message::Navigate(page))
+        button("Setup").on_press(Message::Navigate(page))
     ]
     .spacing(12)
     .align_y(iced::Center)
@@ -120,8 +117,7 @@ impl Manager {
         } else {
             "Build client"
         })
-        .style(style::primary)
-        .padding([10, 18]);
+        .style(style::primary);
         let build = if self.build_ready() {
             build.on_press(Message::Build)
         } else {

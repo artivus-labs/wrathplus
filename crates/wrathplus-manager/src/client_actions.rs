@@ -11,7 +11,6 @@ impl Manager {
             "Start Client"
         })
         .style(super::style::primary)
-        .padding([8, 16])
         .on_press_maybe(
             (!self.busy && (running || super::setup::available(&self.config))).then_some(
                 if running {
