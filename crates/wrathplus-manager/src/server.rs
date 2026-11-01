@@ -60,6 +60,8 @@ pub struct Server {
     build_feedback: build_feedback::Feedback,
     pulse: u16,
     next_refresh: Option<Instant>,
+    /// An action pressed while a status check was in flight; it runs when the check returns.
+    queued: Option<Action>,
 }
 impl Default for Server {
     fn default() -> Self {
@@ -85,6 +87,7 @@ impl Default for Server {
             build_feedback: build_feedback::Feedback::default(),
             pulse: 0,
             next_refresh: None,
+            queued: None,
         }
     }
 }
@@ -93,7 +96,7 @@ impl Server {
         &self.settings.source
     }
     pub(crate) fn module_editable(&self) -> bool {
-        !self.busy && !self.choosing
+        !self.locked() && !self.choosing
     }
     pub(crate) fn module_build_input(&self, enabled: bool) -> Option<Input> {
         self.build.input(enabled && self.module_editable())
@@ -151,17 +154,17 @@ impl Manager {
         self.load_server();
         let state = &mut self.server_state;
         match input {
-            Input::Source(value) if !state.busy && !self.module_state.busy => {
+            Input::Source(value) if !state.locked() && !self.module_state.busy => {
                 state.source = value.clone();
                 state.settings.source = value.into();
                 state.build = build_state::BuildState::Unknown;
                 state.next_refresh = None;
             }
-            Input::Data(value) if !state.busy && !self.module_state.busy => {
+            Input::Data(value) if !state.locked() && !self.module_state.busy => {
                 state.data = value.clone();
                 state.settings.data = value.into();
             }
-            Input::Browse if !state.busy && !state.choosing => {
+            Input::Browse if !state.locked() && !state.choosing => {
                 state.choosing = true;
                 return iced::Task::perform(
                     async {
@@ -179,6 +182,14 @@ impl Manager {
                 if let Some(path) = path {
                     return self.server_update(Input::Data(path.to_string_lossy().into_owned()));
                 }
+            }
+            Input::Run(action)
+                if state.checking_quietly()
+                    && !matches!(action, Action::Status)
+                    && !state.choosing
+                    && !self.module_state.busy =>
+            {
+                state.queued = Some(action);
             }
             Input::Run(action) if !state.busy && !state.choosing && !self.module_state.busy => {
                 state.active = Some(action);
@@ -238,6 +249,9 @@ impl Manager {
                         state.stage = "Failed · logs retained".into();
                         state.error = Some(error);
                     }
+                }
+                if let Some(queued) = state.queued.take() {
+                    return self.server_update(Input::Run(queued));
                 }
             }
             Input::BuildLogs => state.build_feedback.toggle(),

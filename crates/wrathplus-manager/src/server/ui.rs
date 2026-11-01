@@ -48,7 +48,7 @@ impl Manager {
     }
     pub(crate) fn server(&self) -> Element<'_, Message> {
         let state = &self.server_state;
-        let editable = !state.busy && !state.choosing;
+        let editable = !state.locked() && !state.choosing;
         let action = |label, action| {
             button(label).on_press_maybe(editable.then_some(Message::Server(Input::Run(action))))
         };
