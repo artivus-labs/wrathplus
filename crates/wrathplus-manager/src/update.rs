@@ -141,6 +141,7 @@ impl Manager {
                 }
             }
             Message::Poll => {
+                crate::branding::set_dock_icon();
                 if self.busy {
                     self.build_feedback.refresh();
                 }
