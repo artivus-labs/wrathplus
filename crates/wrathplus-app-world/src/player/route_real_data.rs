@@ -1,4 +1,4 @@
-//! The session checklist's collision spots (`docs/WRATH-SESSION-CHECKLIST.md`, B2) walked headlessly
+//! The session checklist's collision spots (`https://github.com/artivus-labs/wrathplus/wiki/WRATH-SESSION-CHECKLIST`, B2) walked headlessly
 //! on the installed 3.3.5 data: the mover's own [`mover::step`] at a 60 fps run over the collision the
 //! terrain streamer builds for the same tiles. That means the terrain trimesh, every WMO's walking
 //! faces (all but MOPY `DETAIL`), the WMO doodad sets' hulls and the ADT doodads' hulls, each placed

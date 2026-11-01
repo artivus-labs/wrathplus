@@ -1,4 +1,4 @@
-//! The shipped CVar rows that leave build 12340's registered defaults (`docs/WRATH-CVARS.md`).
+//! The shipped CVar rows that leave build 12340's registered defaults (`https://github.com/artivus-labs/wrathplus/wiki/WRATH-CVARS`).
 
 use crate::cvars::Reference;
 

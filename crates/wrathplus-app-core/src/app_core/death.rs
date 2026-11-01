@@ -1,6 +1,6 @@
 //! The death state the descriptor does not carry, which the wire fills and the world and UI read:
 //! the corpse point, the resurrection offer and the reclaim, spirit-healer and corpse-guid
-//! latches. Moved here for the crate split (`docs/APP-CRATE-SPLIT-PLAN.md`, step 0 item 3, part
+//! latches. Moved here for the crate split (`https://github.com/artivus-labs/wrathplus/wiki/APP-CRATE-SPLIT-PLAN`, step 0 item 3, part
 //! 2c); `crate::death` re-exports it and keeps its systems.
 
 use bevy::prelude::*;

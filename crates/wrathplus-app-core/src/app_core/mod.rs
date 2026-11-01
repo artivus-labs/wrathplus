@@ -1,6 +1,6 @@
 //! What every layer of the app reads: the schedule sets systems order themselves on, the shared
 //! game state and UI error types, the movement model the wire and the world share, and the death
-//! state the wire fills. The first piece of the crate split (`docs/APP-CRATE-SPLIT-PLAN.md`,
+//! state the wire fills. The first piece of the crate split (`https://github.com/artivus-labs/wrathplus/wiki/APP-CRATE-SPLIT-PLAN`,
 //! step 0); the owning modules re-export from their old paths.
 
 pub mod anim;

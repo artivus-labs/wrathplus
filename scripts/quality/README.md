@@ -72,7 +72,7 @@ Heavy standalone clippy/coverage commands take a slot through the machine's
 must be set to your own directory (`run.sh` refuses without it), **never another worker's**. Check the 40-GiB cap/free space before a run; coverage must wait for its turn. Artifacts
 are left in a fresh `/tmp/azb-quality-report.*` directory for diagnosis, never committed.
 
-Fresh baselines and the activation plan: `docs/QUALITY-GATES-ACTIVATION.md`.
+Fresh baselines and the activation plan: `https://github.com/artivus-labs/wrathplus/wiki/QUALITY-GATES-ACTIVATION`.
 
 ## Initial inventory (base 68529487)
 

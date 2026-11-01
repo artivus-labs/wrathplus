@@ -110,7 +110,7 @@ run fmt cargo fmt --all -- --check
 # scripts/quality/loc-baseline.json allowance; an offender may shrink, never grow.
 run loc scripts/quality/run.sh loc
 # WS2: production wrathplus-app and wrathplus-world code names descriptor fields through `Field`, never
-# a raw index, a `FIELD_*` constant or a literal `from_pairs` key (docs/WRATH-NATIVE-PLAN.md).
+# a raw index, a `FIELD_*` constant or a literal `from_pairs` key (https://github.com/artivus-labs/wrathplus/wiki/WRATH-NATIVE-PLAN).
 run ws2 scripts/quality/run.sh ws2
 # The clippy ratchet: every warning fails unless scripts/quality/clippy-baseline.json names it.
 run clippy env AZB_QUALITY_LOCKED=1 CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$root/target}" \

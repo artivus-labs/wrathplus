@@ -1,6 +1,6 @@
 # AzerothBench fork of benilla
 
-Fork-specific scope: read `docs/AZEROTHBENCH.md` first. This fork targets Wrath
+Fork-specific scope: read `https://github.com/artivus-labs/wrathplus/wiki/AZEROTHBENCH` first. This fork targets Wrath
 3.3.5a/build 12340; upstream's vanilla-only feature scope below describes the
 baseline, not the fork's destination. Preserve upstream engineering and asset
 provenance rules. The owner authorized current-realm testing and service restarts

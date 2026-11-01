@@ -5,7 +5,7 @@
 # ///
 """Rewrite `crate::` paths that go through a re-export to the item's canonical path.
 
-The crate split (docs/APP-CRATE-SPLIT-PLAN.md) moves items down a layer and leaves a
+The crate split (https://github.com/artivus-labs/wrathplus/wiki/APP-CRATE-SPLIT-PLAN) moves items down a layer and leaves a
 `pub(crate) use crate::<home>::X;` at the old path, so callers keep compiling. A layer that
 moves into its own crate can no longer reach the upper module that re-exports, so its
 references must name the home. This script finds every re-export inside one crate's `src/`,

@@ -107,7 +107,7 @@ pub(super) fn snapshot(
     })
 }
 
-// Native 0x61e290; see docs/WRATH-INBOX-LINK.md. Never produce a plausible but
+// Native 0x61e290; see https://github.com/artivus-labs/wrathplus/wiki/WRATH-INBOX-LINK. Never produce a plausible but
 // incomplete link while instance-name metadata or the live player level is unavailable.
 fn attachment_link(
     attachment: &wrathplus_protocol::wrath_mail::Attachment,

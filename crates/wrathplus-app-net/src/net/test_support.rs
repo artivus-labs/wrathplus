@@ -1,7 +1,7 @@
 //! Test helpers that tests in other layers use: the root's `client_tests` and the `ui_native`
 //! feeds. A `#[cfg(test)]` item cannot be seen from another crate, so once `net` is its own crate
 //! these are compiled for its tests and, behind its `test-support` feature, for its dependents'
-//! (`docs/APP-CRATE-SPLIT-PLAN.md`, the core and net move dry run).
+//! (`https://github.com/artivus-labs/wrathplus/wiki/APP-CRATE-SPLIT-PLAN`, the core and net move dry run).
 // Under `test-support` outside a test build nothing in this crate calls them yet: their callers are
 // other crates' tests once the split makes them `pub`.
 #![cfg_attr(not(test), allow(dead_code))]

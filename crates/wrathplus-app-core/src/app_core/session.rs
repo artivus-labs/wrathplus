@@ -1,7 +1,7 @@
 //! The net session's markers and edges that lower layers name: our own guid and entity, the body
 //! we are attached to, the descriptor store every streamed object carries, the offline flag, the
 //! world-enter and disconnect messages and the server's system lines. Moved here for the crate
-//! split (`docs/APP-CRATE-SPLIT-PLAN.md`, step 0 residue); `crate::net` re-exports each from its
+//! split (`https://github.com/artivus-labs/wrathplus/wiki/APP-CRATE-SPLIT-PLAN`, step 0 residue); `crate::net` re-exports each from its
 //! old path and keeps the systems that write them.
 
 use bevy::prelude::*;

@@ -39,7 +39,7 @@ fn guid(m: &Model, token: &str, raid: bool, exact: bool) -> Option<u64> {
     // distance to player/controlled-unit anchor, +10000 if health<=0 OR dynamic
     // flags 0x20 OR stand-state 7. Self uses float at 0xA02A3C. Enumeration tie
     // order and controlled anchor remain unaudited; never substitute roster-first.
-    // See docs/WRATH-PARTY-ASSIGNMENT-RESOLVER.md; no new snapshot in this unit.
+    // See https://github.com/artivus-labs/wrathplus/wiki/WRATH-PARTY-ASSIGNMENT-RESOLVER; no new snapshot in this unit.
     if !exact || token.is_empty() {
         return None;
     }

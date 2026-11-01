@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Move wrathplus-app's modules into one crate per layer (docs/APP-CRATE-SPLIT-PLAN.md), in the
+# Move wrathplus-app's modules into one crate per layer (https://github.com/artivus-labs/wrathplus/wiki/APP-CRATE-SPLIT-PLAN), in the
 # checkout $PWD is in. The layers and their modules are scripts/split/layers.txt; every ui_*
 # module not listed elsewhere is ui; the rest stays in wrathplus-app, the root.
 #
@@ -109,7 +109,7 @@ for l in $layers; do
         s/^\[dependencies\]\n/[dependencies]\n$ENV{DEPS}/m;
         s/^\[dev-dependencies\]\n/[dev-dependencies]\n$ENV{DEVDEPS}/m' $app/Cargo.toml > "$dst/Cargo.toml"
     {
-        echo "//! The $l layer of $P-app: see docs/APP-CRATE-SPLIT-PLAN.md."
+        echo "//! The $l layer of $P-app: see https://github.com/artivus-labs/wrathplus/wiki/APP-CRATE-SPLIT-PLAN."
         echo '#![cfg_attr(not(feature = "dev"), allow(dead_code, unused_imports))]'
         echo
     } > "$dst/src/lib.rs"

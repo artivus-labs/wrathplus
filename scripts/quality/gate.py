@@ -50,7 +50,7 @@ def loc(paths):
         raise ValueError('\n'.join(failures))
 
 
-# WS2's gate (docs/WRATH-NATIVE-PLAN.md): production code in these crates names descriptor fields
+# WS2's gate (https://github.com/artivus-labs/wrathplus/wiki/WRATH-NATIVE-PLAN): production code in these crates names descriptor fields
 # through `Field`, never a raw index. The descriptor names come off the generated layout.
 WS2_ROOTS = ('crates/wrathplus-app/src/', 'crates/wrathplus-app-core/src/', 'crates/wrathplus-app-net/src/',
              'crates/wrathplus-app-world/src/', 'crates/wrathplus-app-ui/src/', 'crates/wrathplus-app-tools/src/',

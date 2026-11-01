@@ -1,5 +1,5 @@
 //! Offline replay of a recorded build-12340 gameplay capture (`WOW_WRATH_PACKET_RECORD`, format in
-//! `docs/WRATH-PACKET-RECORDING.md`): a strict reader and a per-opcode census that routes each
+//! `https://github.com/artivus-labs/wrathplus/wiki/WRATH-PACKET-RECORDING`): a strict reader and a per-opcode census that routes each
 //! packet the way the live reader (`wrathplus-app` `net/io/wrath.rs`) does.
 //!
 //! Routes, in the live reader's order: `SMSG_MULTIPLE_MOVES` is split and its records replayed in
