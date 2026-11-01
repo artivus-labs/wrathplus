@@ -142,6 +142,7 @@ impl Manager {
                 }
             }
             Message::Poll => {
+                crate::branding::set_dock_icon();
                 let server_task = self.poll_server();
                 if self.busy {
                     self.build_feedback.refresh();
