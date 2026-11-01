@@ -1,4 +1,4 @@
-//! Native client setup and launcher; client addon source registration; server/profile management remain previews.
+//! Native client/addon setup and isolated managed-server controls; profiles remain previews.
 mod addons;
 mod branding;
 mod build_feedback;
@@ -7,6 +7,7 @@ mod client_actions;
 mod pages;
 mod preflight;
 mod prerequisites;
+mod server;
 mod setup;
 mod style;
 mod update;
@@ -71,6 +72,7 @@ impl AddonScope {
 #[derive(Debug, Clone)]
 enum Message {
     Navigate(Page),
+    Server(server::Input),
     Profile(String),
     Assets(String),
     Host(String),
@@ -104,6 +106,7 @@ enum Message {
 
 struct Manager {
     page: Page,
+    server_state: server::Server,
     profile: String,
     assets: String,
     build_directory: String,
@@ -132,6 +135,7 @@ impl Default for Manager {
     fn default() -> Self {
         Self {
             page: Page::Play,
+            server_state: server::Server::default(),
             profile: "Local adventures".into(),
             assets: String::new(),
             build_directory: setup::Config::defaults()
@@ -146,7 +150,7 @@ impl Default for Manager {
             addon_entries: Vec::new(),
             addon_path: String::new(),
             notice: "Choose your legally obtained 3.3.5a assets to set up the client.".into(),
-            events: vec!["Manager opened. Server and profiles remain previews.".into()],
+            events: vec!["Manager opened.".into()],
             config: setup::Config::defaults(),
             locale: "enUS".into(),
             validated: false,
@@ -223,7 +227,7 @@ impl Manager {
                 nav,
                 iced::widget::Space::new().height(Fill),
                 text("CLIENT SETUP").size(10).color(style::GOLD),
-                text("No live services connected")
+                text("Managed services on explicit action")
                     .size(12)
                     .color(style::MUTED),
                 text("0.1 / prototype").size(11).color(style::MUTED),
@@ -265,23 +269,10 @@ impl Manager {
         };
         let content = column![
             header,
-            text("Client and addon setup are live · Server and profiles are previews")
+            text("Client, addon and managed server setup · Profiles are previews")
                 .size(11)
                 .color(style::GOLD),
             scrollable(body).height(Fill),
-            container(
-                row![
-                    text("ACTIVITY").size(10).color(style::GOLD),
-                    text(&self.notice).size(12),
-                    iced::widget::Space::new().width(Fill),
-                    button("View").on_press(Message::Navigate(Page::Activity))
-                ]
-                .spacing(14)
-                .align_y(iced::Center)
-            )
-            .padding(12)
-            .width(Fill)
-            .style(style::panel)
         ]
         .spacing(14)
         .height(Fill);

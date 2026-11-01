@@ -131,6 +131,11 @@ impl Manager {
             panel = panel.push(text(format!("Build failed: {error}")).color(iced::Color::from_rgb8(222, 114, 114)))
                 .push(text("Your previous client is unchanged. Copy the details below if you need help.").size(12));
         }
+        if self.page != super::Page::Activity {
+            return panel
+                .push(button("View build log").on_press(Message::Navigate(super::Page::Activity)))
+                .into();
+        }
         panel = panel.push(
             row![
                 button(if feedback.expanded {

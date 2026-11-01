@@ -1,0 +1,90 @@
+# Disposable managed realm; MySQL is never exposed to the host.
+name: wrathplus-managed-local
+x-server: &server
+  image: wrathplus/playerbots:arm64-spike
+  platform: linux/arm64
+  init: true
+  restart: "no"
+  environment:
+    MANAGED_BOT_COUNT: "${MANAGED_BOT_COUNT:-5}"
+  entrypoint: ["/bin/sh", "/recipe/runtime.sh"]
+  volumes:
+    - instance-secrets:/run/instance-secrets:ro
+    - ${SERVER_RECIPE:?Set SERVER_RECIPE to packaging/server absolute path}:/recipe:ro
+    - ${SERVER_DATA:?Set SERVER_DATA to extracted server data absolute path}:/server-data:ro
+  depends_on:
+    mysql:
+      condition: service_healthy
+services:
+  playerbots-build:
+    profiles: [build]
+    platform: linux/arm64
+    image: wrathplus/playerbots:arm64-spike
+    build:
+      context: ${ACORE_SOURCE:?Set ACORE_SOURCE to the clean pinned checkout}
+      dockerfile: ${SPIKE_DOCKERFILE:?Set SPIKE_DOCKERFILE to the absolute recipe path}
+      target: runtime
+      args:
+        BUILD_JOBS: "2"
+        CORE_REV: "93333d6a9eb00fdf0179adde30da3c17618207d6"
+        PLAYERBOTS_REV: "05a1f6fceb8a32aa879b13f5f48934c6e46a774c"
+    command: [worldserver, --help]
+    network_mode: none
+  credentials:
+    image: wrathplus/playerbots:arm64-spike
+    user: "0:0"
+    entrypoint: ["/bin/sh", "/recipe/credentials.sh"]
+    network_mode: none
+    volumes:
+      - instance-secrets:/secrets
+      - mysql-init:/init
+      - ${SERVER_RECIPE:?Set SERVER_RECIPE}:/recipe:ro
+  mysql:
+    image: mysql:8.4@sha256:a0225d1ea6631c8bc2385dc4c2faba17bbf1834ecf369e1659a9a382bd8d5dd7
+    restart: "no"
+    environment:
+      MYSQL_ROOT_PASSWORD_FILE: /run/instance-secrets/mysql-root
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - instance-secrets:/run/instance-secrets:ro
+      - mysql-init:/docker-entrypoint-initdb.d:ro
+    depends_on:
+      credentials:
+        condition: service_completed_successfully
+    healthcheck:
+      test: [CMD-SHELL, 'mysqladmin ping -h 127.0.0.1 --silent']
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+  bootstrap:
+    <<: *server
+    profiles: [tools]
+    command: [bootstrap]
+    tmpfs: ["/state:uid=10001,gid=10001,mode=0700", "/opt/acore/etc/modules:uid=10001,gid=10001,mode=0700"]
+  authserver:
+    <<: *server
+    command: [authserver]
+    tmpfs: ["/state:uid=10001,gid=10001,mode=0700", "/opt/acore/etc/modules:uid=10001,gid=10001,mode=0700"]
+    ports: ["127.0.0.1:13724:3724"]
+    healthcheck:
+      test: [CMD-SHELL, 'bash -c "echo > /dev/tcp/127.0.0.1/3724"']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+  worldserver:
+    <<: *server
+    command: [worldserver]
+    tmpfs: ["/state:uid=10001,gid=10001,mode=0700", "/opt/acore/etc/modules:uid=10001,gid=10001,mode=0700"]
+    ports: ["127.0.0.1:18085:8085"]
+    stop_grace_period: 60s
+    healthcheck:
+      test: [CMD-SHELL, 'bash -c "echo > /dev/tcp/127.0.0.1/8085"']
+      interval: 10s
+      timeout: 5s
+      retries: 90
+      start_period: 60s
+volumes:
+  mysql-data:
+  instance-secrets:
+  mysql-init:

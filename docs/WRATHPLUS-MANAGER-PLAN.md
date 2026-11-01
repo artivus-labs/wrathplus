@@ -215,6 +215,33 @@ Fetched primary references:
 - https://kdab.github.io/cxx-qt/book/
 - https://slint.dev and https://slint.dev/pricing
 
-## 12. Recommended next action
+## 12. Accepted server direction and next gate
 
-Review this architecture and visual direction, then implement milestone 0 as a separate feature branch/PR. Default recommendation is Iced; switch to Qt Quick/QML if the spike demonstrates a material accessibility/table/desktop-integration gap. Do not begin server installation or migrate the current realm as part of the visual prototype.
+The server foundation is Docker Compose with MySQL 8.4, persistent instance-scoped volumes, explicit database bootstrap/migrations, and staged image rebuilds for native modules. Expose authentication/world TCP ports to host loopback by default; keep MySQL internal. LAN exposure and realm advertisement are an explicit configuration change. Existing-realm migration and character import/export require separate restore and round-trip qualification before real cutover.
+
+### Upstream-first policy
+
+Start from clean, pinned upstream sources and supported module/addon pairs, not the existing development realm's dirty working trees. Preserve the old installation and its patches as reference; do not implicitly adopt, discard or deploy those patches. Custom Vulcan chatter/control, guildhouse behavior and local bot/economy fixes are not baseline dependencies. Reintroduce a local fix only after reproducing a relevant failure against the selected upstream baseline and reviewing it separately, preferably upstream.
+
+Provide distinct standard-core and Playerbots recipes. The latter requires the upstream-maintained `mod-playerbots/azerothcore-wotlk` Playerbot fork plus `mod-playerbots`; it cannot be obtained by installing the module into a published standard-core binary. MultiBot Chatless and its companion `mod-multibot-bridge` are an optional matched pair to qualify after basic Playerbots operation. Guildhouse, auction-house bot and LLM chatter are later optional additions, not requirements for first boot.
+
+### First gate: disposable Linux/arm64 Compose spike
+
+Before implementing Manager server controls:
+
+1. Select and record clean upstream Playerbot-compatible core and `mod-playerbots` commits. Target Playerbots from the outset rather than first building standard core; include no local patches or conversational-control integration. Maintain our own Dockerfile/Compose recipe so native modules can be rebuilt. Initial setup may compile locally; publishing qualified, pinned prebuilt images to Docker Hub or another registry is a later distribution optimization, not a prerequisite.
+2. Build Linux/arm64 images using a self-contained source context and bounded compiler jobs. Record architecture, build identity, resource use and any failures. Published `acore` `master` auth/world/importer/tools tags inspected on 2026-10-31 advertise Linux/amd64; do not claim native arm64 support from their availability. Check manifests again when selecting artifacts.
+3. Bootstrap a disposable MySQL 8.4 volume and validated server-derived data. Verify the three core databases and the fourth Playerbots database where applicable, including runtime module SQL availability.
+4. Run on separate project names, volumes and host ports from the current realm. Validate realm advertisement, readiness, attended login, ordinary gameplay, restart persistence and a modest explicit bot population before measuring larger loads.
+5. Qualify clean upstream MultiBot Chatless plus its matching bridge separately. Record addon handshake, roster and representative read/action behavior; registration alone is not compatibility evidence.
+6. Measure native arm64 stability/performance. If blocked, report the exact build/runtime failure before proposing amd64 emulation or targeted upstream fixes. A successful compile alone is not the exit gate.
+
+The isolated Playerbots-first arm64 build/Compose spike is authorized. Use disposable resources and clean upstream sources; do not access real characters, stop the old realm, migrate its databases or publish registry images as part of this gate. Manager server integration remains subsequent work.
+
+### Migration boundaries
+
+For the existing realm, prefer a rehearsed logical backup/restore of auth, characters, world and Playerbots databases with compatible core/module identities. First prove restoration in an isolated instance; separate container migration from core/module upgrades where possible. If the clean upstream target differs from the customized source, inventory custom schema/data and explicitly test that compatibility rather than assuming exact reproduction.
+
+Individual character transfer is a separate feature based initially on AzerothCore's `pdump write/load`. It has a fixed table coverage, does not export accounts or guild/guild-bank state, and does not automatically preserve arbitrary module tables. Report coverage, handle identity/account conflicts, and test export/import/login/save/restart/relogin on disposable characters. Full-realm backup/restore remains necessary.
+
+Final cutover requires agreed downtime, stopped writers, a consistent final backup, verified restoration and attended acceptance. Preserve the old installation and backup. An old image is not a database rollback; warn that reverting after new play can lose subsequent progress. No destructive volume removal in ordinary lifecycle operations.

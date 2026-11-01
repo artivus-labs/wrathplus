@@ -1,4 +1,4 @@
-use super::{style, AddonScope, Manager, Message, Page};
+use super::{style, Manager, Message, Page};
 use iced::widget::{button, column, container, row, text, text_input, Column};
 use iced::{Element, Fill};
 
@@ -15,27 +15,14 @@ fn action(label: &'static str, note: &'static str) -> Element<'static, Message> 
         .on_press(Message::Notice(note))
         .into()
 }
-fn metric(
-    label: &'static str,
-    value: &'static str,
-    detail: &'static str,
-) -> Element<'static, Message> {
-    card(
-        column![
-            text(label).size(11).color(style::MUTED),
-            text(value).size(24),
-            text(detail).size(11).color(style::MUTED)
-        ]
-        .spacing(8),
-    )
-}
-fn launch_row(
+fn launch_row<'a>(
     name: &'static str,
     status: &'static str,
-    detail: &'static str,
+    detail: &'a str,
     launch: &'static str,
+    start: Option<Message>,
     page: Page,
-) -> Element<'static, Message> {
+) -> Element<'a, Message> {
     row![
         text(name).size(17).width(90),
         text(status).size(13).color(style::GOLD).width(95),
@@ -43,9 +30,7 @@ fn launch_row(
         button(text(launch))
             .style(style::primary)
             .padding([8, 16])
-            .on_press(Message::Notice(
-                "launch/start is a stub; no process was started."
-            )),
+            .on_press_maybe(start),
         button("Setup")
             .padding([8, 12])
             .on_press(Message::Navigate(page))
@@ -76,12 +61,13 @@ impl Manager {
                     .color(style::MUTED),
                     launch_row(
                         "Server",
-                        "Stopped",
-                        "Local AzerothCore · sample instance",
-                        "Start",
+                        self.server_state.label(),
+                        self.server_state.detail(),
+                        self.server_state.control_label(),
+                        self.server_state.control_input().map(Message::Server),
                         Page::Server
                     ),
-                    text("States: Uninstalled / Stopped / Running · sample values, not detected.")
+                    text("Manage server files, builds and logs in Setup.")
                         .size(11)
                         .color(style::MUTED),
                 ]
@@ -199,29 +185,6 @@ impl Manager {
         .into()
     }
 
-    pub(super) fn server(&self) -> Element<'_, Message> {
-        column![
-            card(column![launch_row("Server", "Stopped", "Local AzerothCore · sample instance", "Start", Page::Server),
-                row![action("Stop", "server stop is not connected."), action("Restart", "server restart is not connected."), action("Logs", "server logs are not connected."), action("Attach existing…", "server adoption is not connected."), action("Create…", "realm setup is not connected.")].spacing(8),
-            ].spacing(14)),
-            row![metric("USERS ONLINE", "—", "Human players · not queried"), metric("PLAYERBOTS ACTIVE", "—", "Available when module installed"), metric("LLM AGENTS", "—", "Explicit headless-client flag · proposed")].spacing(10),
-            card(column![text("Players & agents").size(18),
-                row![text_input("Find player or agent…", &self.search).on_input(Message::Search).padding(10), action("Find players", "player search is not connected."), action("Find agents", "agent search is not connected.")].spacing(8),
-                row![text("IDENTITY").size(11).width(Fill), text("TYPE").size(11).width(130), text("STATUS").size(11).width(100)].spacing(12),
-                population_row("Example player", "Human", "Offline"),
-                population_row("Example bot", "Playerbot", "Unknown"),
-                population_row("Example agent", "LLM agent", "Unknown"),
-                text("Sample identities only. Agents use a proposed explicit flag, never inferred from names.").size(11).color(style::MUTED),
-                row![action("Set GM…", "GM changes require selected identity and confirmation; stub only."), action("Inspect", "identity inspection is not connected."), action("Kick…", "kick is not connected."), action("Playerbot controls", "module-specific bot controls are not connected.")].spacing(8),
-            ].spacing(12)),
-            card(column![text("Maintenance").size(18),
-                row![action("Check updates", "update inspection is not connected."), action("Build", "server build is not connected."), action("Migrations…", "migration planning is not connected."), action("Backup", "database backup is not connected."), action("Restore…", "restore requires backup and confirmation; stub only.")].spacing(8),
-                button("AzerothCore modules →").on_press(Message::AddonScope(AddonScope::Server)),
-                text("Pinned sources · migration plan · backup · downtime review before applying.").size(11).color(style::MUTED),
-            ].spacing(12)),
-        ].spacing(14).into()
-    }
-
     pub(super) fn profiles(&self) -> Element<'_, Message> {
         let mut list = Column::new().spacing(10);
         for name in ["Local adventures", "Classic essentials", "Bot workshop"] {
@@ -266,7 +229,14 @@ impl Manager {
                 .spacing(14),
             );
         }
-        card(events)
+        column![
+            text("Operation history and logs").size(18),
+            card(column![text("Manager history").size(18), events].spacing(12)),
+            card(column![text("Client build").size(18), self.build_feedback()].spacing(12)),
+            self.server_logs(),
+        ]
+        .spacing(14)
+        .into()
     }
     pub(super) fn settings(&self) -> Element<'_, Message> {
         card(
@@ -281,17 +251,4 @@ impl Manager {
             .spacing(14),
         )
     }
-}
-fn population_row(
-    name: &'static str,
-    kind: &'static str,
-    status: &'static str,
-) -> Element<'static, Message> {
-    row![
-        text(name).size(13).width(Fill),
-        text(kind).size(12).color(style::ICE).width(130),
-        text(status).size(12).color(style::MUTED).width(100)
-    ]
-    .spacing(12)
-    .into()
 }

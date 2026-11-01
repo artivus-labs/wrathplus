@@ -24,7 +24,8 @@ mod process;
 pub(crate) use assets::validate;
 #[cfg(test)]
 use assets::{check_component, check_dbc};
-use paths::{checked_config, resolved, writable};
+pub(crate) use paths::resolved;
+use paths::{checked_config, writable};
 pub(crate) use process::stop;
 
 type Result<T> = std::result::Result<T, String>;
