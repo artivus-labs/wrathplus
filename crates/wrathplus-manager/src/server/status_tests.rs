@@ -136,3 +136,36 @@ fn worker_health_and_failure_remain_visible_on_play_and_server() {
     assert_eq!(manager.server_state.detail(), "Docker unavailable");
     assert!(manager.server_state.next_refresh.is_some());
 }
+#[test]
+fn a_status_check_never_locks_the_page_and_queues_a_pressed_action() {
+    let mut manager = Manager::default();
+    manager.server_state.loaded = true;
+    manager.server_state.busy = true;
+    manager.server_state.active = Some(Action::Status);
+    let state = &manager.server_state;
+    assert!(state.checking_quietly());
+    assert!(!state.locked());
+    assert!(state.module_editable());
+    assert!(state.control_input().is_some());
+    let _ = manager.server_update(Input::Data("/extracted/data".into()));
+    assert_eq!(manager.server_state.data, "/extracted/data");
+    let _ = manager.server_update(Input::Run(Action::Status));
+    assert!(manager.server_state.queued.is_none());
+    let _ = manager.server_update(Input::Run(Action::Stop));
+    assert!(matches!(manager.server_state.queued, Some(Action::Stop)));
+    assert!(matches!(manager.server_state.active, Some(Action::Status)));
+}
+#[test]
+fn a_real_operation_still_locks_the_page() {
+    let mut manager = Manager::default();
+    manager.server_state.loaded = true;
+    manager.server_state.busy = true;
+    manager.server_state.active = Some(Action::Start);
+    assert!(manager.server_state.locked());
+    assert!(!manager.server_state.module_editable());
+    assert!(manager.server_state.control_input().is_none());
+    let _ = manager.server_update(Input::Data("/ignored".into()));
+    assert_ne!(manager.server_state.data, "/ignored");
+    let _ = manager.server_update(Input::Run(Action::Stop));
+    assert!(manager.server_state.queued.is_none());
+}

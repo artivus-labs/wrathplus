@@ -39,6 +39,15 @@ impl Server {
     pub(crate) fn open_logs(&mut self) {
         self.show_logs = true;
     }
+    /// A status check is in flight. It never locks the page: fields stay editable and an action
+    /// pressed meanwhile is queued until the check returns (one Docker operation at a time).
+    pub(super) fn checking_quietly(&self) -> bool {
+        self.busy && matches!(self.active, Some(Action::Status))
+    }
+    /// An operation the page must wait for (start, stop, build), not a status check.
+    pub(crate) fn locked(&self) -> bool {
+        self.busy && !self.checking_quietly()
+    }
     pub(super) fn refresh_due(&self) -> bool {
         !self.busy
             && !self.choosing
@@ -65,7 +74,7 @@ impl Server {
         self.error.as_deref().unwrap_or(&self.stage)
     }
     pub(crate) fn control_input(&self) -> Option<super::Input> {
-        (!self.busy && !self.choosing).then_some(super::Input::Run(
+        (!self.locked() && !self.choosing).then_some(super::Input::Run(
             if self.health == Health::Running {
                 Action::Stop
             } else {
