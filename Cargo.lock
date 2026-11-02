@@ -8782,6 +8782,9 @@ dependencies = [
  "serde_json",
  "tiny_http",
  "wrathplus-app-core",
+ "wrathplus-app-net",
+ "wrathplus-app-world",
+ "wrathplus-protocol",
  "wrathplus-ui",
  "wrathplus-world",
 ]

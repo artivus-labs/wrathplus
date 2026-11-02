@@ -113,6 +113,32 @@ function V.free_bag_slots()
   return free
 end
 
+-- Nearby objects the client knows (AgentNearby: units, players, game objects, corpses), nearest
+-- first, filtered by opts: kind ("unit", "player", "gameobject", "corpse"), reaction ("hostile",
+-- "neutral", "friendly"), alive (true), max (yards), quest ("available", "incomplete", "reward"),
+-- npc ("vendor", "trainer"...), name (exact), lootable (true).
+function V.nearby(opts)
+  opts = opts or {}
+  local out = {}
+  for _, o in ipairs(AgentNearby(opts.max)) do
+    local keep = (not opts.kind or o.kind == opts.kind)
+      and (not opts.reaction or o.reaction == opts.reaction)
+      and (not opts.alive or not o.dead)
+      and (not opts.quest or o.quest == opts.quest)
+      and (not opts.name or o.name == opts.name)
+      and (not opts.lootable or o.lootable)
+    if keep and opts.npc then
+      keep = false
+      for _, service in ipairs(o.npc or {}) do if service == opts.npc then keep = true end end
+    end
+    if keep then out[#out + 1] = o end
+  end
+  return out
+end
+
+-- The nearest object matching opts (see V.nearby), or nil.
+function V.nearest(opts) return V.nearby(opts)[1] end
+
 -- Where the player is: zone, subzone and map position (0-1).
 function V.position()
   local x, y = GetPlayerMapPosition("player")
