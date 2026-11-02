@@ -301,3 +301,12 @@ impl Manager {
         iced::Task::none()
     }
 }
+
+/// One worldserver command as the Manager's admin, over the realm's local command port (the same
+/// path character transfer uses). Blocking; the realm must be running.
+pub(crate) fn admin_command(
+    config: &crate::setup::Config,
+    command: &str,
+) -> Result<String, String> {
+    characters::soap(config, command)
+}

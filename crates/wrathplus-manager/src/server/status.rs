@@ -55,6 +55,10 @@ impl Server {
                 .next_refresh
                 .is_none_or(|t| std::time::Instant::now() >= t)
     }
+    /// The realm is up (MySQL, auth and world healthy).
+    pub(crate) fn running(&self) -> bool {
+        self.health == Health::Running
+    }
     pub(crate) fn label(&self) -> &'static str {
         match self.active {
             Some(Action::Start) => "Starting…",

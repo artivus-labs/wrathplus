@@ -1,5 +1,6 @@
 //! Native client/addon setup and isolated managed-server controls; profiles remain previews.
 mod addons;
+mod agents;
 mod branding;
 mod build_feedback;
 mod cli;
@@ -26,16 +27,18 @@ enum Page {
     Client,
     Addons,
     Server,
+    Agents,
     Profiles,
     Activity,
     Settings,
 }
 
 impl Page {
-    const ALL: [Self; 7] = [
+    const ALL: [Self; 8] = [
         Self::Play,
         Self::Client,
         Self::Server,
+        Self::Agents,
         Self::Addons,
         Self::Profiles,
         Self::Activity,
@@ -47,6 +50,7 @@ impl Page {
             Self::Client => "Client",
             Self::Addons => "Addons",
             Self::Server => "Server",
+            Self::Agents => "Agents",
             Self::Profiles => "Profiles",
             Self::Activity => "Activity",
             Self::Settings => "Settings",
@@ -74,6 +78,7 @@ impl AddonScope {
 enum Message {
     Navigate(Page),
     Server(server::Input),
+    Agents(agents::Input),
     Modules(module_ui::Input),
     ModuleConfig(module_config::Input),
     AddonImportFinished(Result<String, String>),
@@ -111,6 +116,7 @@ enum Message {
 struct Manager {
     page: Page,
     server_state: server::Server,
+    agents: agents::Agents,
     module_state: module_ui::State,
     config_editor: module_config::State,
     profile: String,
@@ -142,6 +148,7 @@ impl Default for Manager {
         Self {
             page: Page::Play,
             server_state: server::Server::default(),
+            agents: agents::Agents::default(),
             module_state: module_ui::State::default(),
             config_editor: module_config::State::default(),
             profile: "Local adventures".into(),
@@ -265,6 +272,7 @@ impl Manager {
             Page::Client => self.client(),
             Page::Addons => self.packages(),
             Page::Server => self.server(),
+            Page::Agents => self.agents_page(),
             Page::Profiles => self.profiles(),
             Page::Activity => self.activity(),
             Page::Settings => self.settings(),

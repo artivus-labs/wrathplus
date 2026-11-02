@@ -205,7 +205,7 @@ fn admin(config: &setup::Config) -> Result<String> {
 }
 
 /// One worldserver command over SOAP; a SOAP fault is the command's error message.
-fn soap(config: &setup::Config, command: &str) -> Result<String> {
+pub(super) fn soap(config: &setup::Config, command: &str) -> Result<String> {
     let password = admin(config)?;
     let body = format!(
         "<?xml version=\"1.0\" encoding=\"utf-8\"?>\
