@@ -52,6 +52,12 @@ owns the fourth **Playerbots** schema population and update; healthy world start
 must follow dbimport. The runtime includes the pinned SQL trees at their compiled
 source paths and loads module config from `/opt/acore/etc/modules`.
 
+When the image includes **mod-ah-bot** and no saved `mod_ahbot.conf` names its own account,
+worldserver startup creates an `AHBOT` account (random salt and verifier, so nobody can log
+in) and one level-1 character, `Ahbot`, then points `AuctionHouseBot.Account`/`GUID` at them.
+Without a saved override the seller is also switched on. If a player already took the name
+`Ahbot`, the bot stays disabled and the log says so.
+
 Auth publishes only `127.0.0.1:13724`, world only `127.0.0.1:18085`; realmlist
 advertises the latter. Extracted server data is mounted read-only. The managed qualification population defaults to five online random bots
 (`MANAGED_BOT_COUNT=0..5`, zero disables autologin). Periodic population inflation,

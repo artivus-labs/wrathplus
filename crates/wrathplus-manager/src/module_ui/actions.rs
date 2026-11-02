@@ -1,5 +1,4 @@
 use super::*;
-use iced::widget::column;
 impl Manager {
     pub(crate) fn module_update(&mut self, input: Input) -> iced::Task<Message> {
         self.load_server();
@@ -13,9 +12,27 @@ impl Manager {
             self.module_state.source = value;
             return iced::Task::none();
         }
+        if let Input::OpenRepository(repository) = input {
+            if let Err(error) = standard::open_repository(repository) {
+                self.module_state.notice = error;
+            }
+            return iced::Task::none();
+        }
         if self.module_state.busy || !self.server_state.module_editable() {
             return iced::Task::none();
         }
+        let standard_add = matches!(input, Input::AddStandard(_));
+        // A standard module is the same import as a typed source, from its known repository.
+        let input = match input {
+            Input::AddStandard(slot) => match STANDARD.get(slot) {
+                Some(module) => {
+                    self.module_state.source = module.repository.into();
+                    Input::Register
+                }
+                None => return iced::Task::none(),
+            },
+            input => input,
+        };
         let config = self.config.clone();
         let core = self.server_state.module_source().to_owned();
         let result = (|| {
@@ -50,6 +67,10 @@ impl Manager {
                 _ => Ok("Module catalog refreshed. Selections describe the next build, not running activation.".into()),
             }.map(|note| { self.module_state.notice = note; iced::Task::none() })
         })();
+        if standard_add {
+            // The repository went in through the custom-source box; leave that box as it was.
+            self.module_state.source.clear();
+        }
         match result {
             Ok(task) => task,
             Err(error) => {
@@ -57,42 +78,5 @@ impl Manager {
                 iced::Task::none()
             }
         }
-    }
-    pub(crate) fn module_entries(&self) -> Element<'_, Message> {
-        let catalog = match modules::Catalog::load(&self.config, self.server_state.module_source())
-        {
-            Ok(catalog) => catalog,
-            Err(error) => {
-                return text(format!(
-                    "{error}. Choose your core checkout on Server setup first."
-                ))
-                .into()
-            }
-        };
-        let mut rows = Column::new().spacing(12);
-        for (index, entry) in catalog.entries().iter().enumerate() {
-            let mut check = checkbox(entry.enabled).label("Include in next build");
-            if !self.module_state.busy && self.server_state.module_editable() {
-                check = check.on_toggle(move |v| Message::Modules(Input::Toggle(index, v)));
-            }
-            let configs = self.module_config_rows(entry);
-            rows = rows.push(
-                container(
-                    column![
-                        text(entry.name.clone()).size(18),
-                        text(format!("{:?}", entry.source))
-                            .size(12)
-                            .color(style::MUTED),
-                        check,
-                        configs
-                    ]
-                    .spacing(8),
-                )
-                .padding(16)
-                .width(Fill)
-                .style(style::panel),
-            );
-        }
-        rows.into()
     }
 }

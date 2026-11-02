@@ -67,4 +67,8 @@ Playerbots.RandomBotGuildCount = 0
 EOF
     check_policy managed_playerbots_config "$work/bot-policy"
 done
+ahbot_account=7
+ahbot_guid=1056
+printf 'AuctionHouseBot.Account = 7\nAuctionHouseBot.GUID = 1056\n' > "$work/ahbot-policy"
+check_policy managed_ahbot_config "$work/ahbot-policy"
 printf 'runtime managed config policy tests passed\n'

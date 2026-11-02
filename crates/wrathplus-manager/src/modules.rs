@@ -209,6 +209,11 @@ impl Catalog {
         Ok(plan)
     }
 }
+/// The canonical owner/repository form an import records.
+#[cfg(test)]
+pub(crate) fn normalize_repository(input: &str) -> Result<String> {
+    github::normalize(input)
+}
 /// Reload persisted choices for each build. Does not write, fetch, stage or execute code.
 pub(crate) fn prepare(config: &Config, core_path: &Path) -> Result<BuildPlan> {
     Catalog::load(config, core_path)?.build_plan()

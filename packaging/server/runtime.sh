@@ -47,6 +47,17 @@ Playerbots.AddClassAccountPoolSize = 0
 Playerbots.RandomBotGuildCount = 0
 EOF
 }
+# The auction house bot sells as the managed seller character (see managed_ahbot below).
+managed_ahbot_config() {
+    sed \
+        -e '/^[[:space:]]*AuctionHouseBot\.Account[[:space:]]*=/d' \
+        -e '/^[[:space:]]*AuctionHouseBot\.GUID[[:space:]]*=/d'
+    cat <<EOF
+
+AuctionHouseBot.Account = $ahbot_account
+AuctionHouseBot.GUID = $ahbot_guid
+EOF
+}
 # END managed config helpers
 # Host configs can contain API keys and are mode 0600. Copy privately as root,
 # then drop privileges before loading server code or connecting to MySQL.
@@ -101,6 +112,42 @@ if [ -f /azerothcore/modules/mod-playerbots/conf/playerbots.conf.dist ]; then
     managed_playerbots_config < /opt/acore/etc/modules/playerbots.conf > /state/config/playerbots.conf
     cp /state/config/playerbots.conf /opt/acore/etc/modules/playerbots.conf
 fi
+# mod-ah-bot needs an account and a character to own its auctions. Unless a saved config names its
+# own account, create an unloginable seller (random salt/verifier, no password exists) and its
+# character once, before worldserver allocates guids, and point the bot at them.
+managed_ahbot() {
+    conf=/opt/acore/etc/modules/mod_ahbot.conf
+    [ -f "$conf" ] || return 0
+    if grep -Eq '^[[:space:]]*AuctionHouseBot\.Account[[:space:]]*=[[:space:]]*0*[1-9]' "$conf"; then
+        echo 'STAGE: Auction house bot uses the account in its saved config'
+        return 0
+    fi
+    sql acore_auth <<'SQL'
+INSERT INTO account (username, salt, verifier, email, reg_mail, expansion)
+SELECT 'AHBOT', RANDOM_BYTES(32), RANDOM_BYTES(32), '', '', 2 FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM account WHERE username = 'AHBOT');
+SQL
+    ahbot_account=$(sql -N -B acore_auth -e "SELECT id FROM account WHERE username = 'AHBOT'")
+    case "$ahbot_account" in ''|*[!0-9]*) echo 'Auction house bot account missing; bot left disabled' >&2; return 0;; esac
+    # A level-1 human warrior in Stormwind, as on the old dev realm. Skipped if a player took the name.
+    sql acore_characters <<SQL
+INSERT INTO characters (guid, account, name, race, class, gender, level, map, zone,
+    position_x, position_y, position_z, orientation, taximask, innTriggerId, health)
+SELECT COALESCE(MAX(guid), 0) + 1, $ahbot_account, 'Ahbot', 1, 1, 0, 1, 0, 1519,
+    -8833.38, 628.628, 94.0066, 0.65, '', 0, 20 FROM characters
+WHERE NOT EXISTS (SELECT 1 FROM characters WHERE account = $ahbot_account OR name = 'Ahbot');
+SQL
+    ahbot_guid=$(sql -N -B acore_characters -e "SELECT MIN(guid) FROM characters WHERE account = $ahbot_account")
+    case "$ahbot_guid" in ''|NULL|*[!0-9]*) echo 'Auction house bot: the name Ahbot is taken; bot left disabled' >&2; return 0;; esac
+    managed_ahbot_config < "$conf" > /state/config/mod_ahbot.conf
+    if [ ! -f /state/module-overrides/mod_ahbot.conf ]; then
+        # Upstream ships the seller off; a realm that chose this module wants a stocked market.
+        sed -i 's/^[[:space:]]*AuctionHouseBot\.EnableSeller[[:space:]]*=.*/AuctionHouseBot.EnableSeller = 1/' \
+            /state/config/mod_ahbot.conf
+    fi
+    cp /state/config/mod_ahbot.conf "$conf"
+    echo "STAGE: Auction house bot sells as Ahbot (account $ahbot_account, guid $ahbot_guid)"
+}
 case "${1:-}" in
 bootstrap)
     echo 'STAGE: Initializing core schemas and applying upstream module SQL'
@@ -114,6 +161,9 @@ SQL
     ;;
 authserver|worldserver)
     echo "STAGE: Starting $1 (upstream database updates enabled)"
+    if [ "$1" = worldserver ]; then
+        managed_ahbot || echo 'Auction house bot setup failed; bot left disabled' >&2
+    fi
     exec "$1" -c "/state/config/$1.conf"
     ;;
 *) echo 'Expected bootstrap, authserver or worldserver' >&2; exit 2;;
