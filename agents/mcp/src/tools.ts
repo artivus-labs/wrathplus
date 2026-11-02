@@ -9,7 +9,13 @@ const LUA_DESCRIPTION = `Run a Lua chunk in the WrathPlus game client's UI Lua V
 Use it to read game state (UnitName("player"), UnitHealth("target"), GetPlayerMapPosition("player"), GetQuestLogTitle(i), GetContainerItemInfo(bag, slot), ...) and to act (TargetUnit, CastSpellByName, UseContainerItem, SendChatMessage, InteractUnit, ...).
 Movement functions work from here (MoveForwardStart/MoveForwardStop, TurnLeftStart/TurnLeftStop, StrafeLeftStart, JumpOrAscendStart, ToggleAutoRun, ...): start a motion, wait, then stop it in a later call.
 A bare expression (e.g. \`UnitLevel("player")\`) returns its values; otherwise use \`return a, b\`. The answer is JSON: {ok, values, output} where output holds anything print()ed, or {ok:false, error, output} on a Lua error.
-Each chunk runs to completion inside one game frame, so do not loop waiting for the world to change: return and call again (or use the events tool).`;
+Each chunk runs to completion inside one game frame, so do not loop waiting for the world to change: return and call again (or use the events tool).
+For logic that should run on its own every frame (rotations, following, looting), save it as a module with save_module and load it with require("name") (AgentReload("name") after changes); a module named autoexec runs whenever the client enters the world. Frames work as in addons: CreateFrame("Frame"):SetScript("OnUpdate", fn) ticks, :RegisterEvent(...) reacts.
+Built in: require("wp.engine") (a Playerbots-style decision engine: triggers, actions with relevance, prerequisites/alternatives/continuers, strategies per combat state) and require("wp.values") (health, power, group, auras, cooldowns, spell readiness, range, threat, bags, position).`;
+
+const MODULES_DESCRIPTION = `List your saved Lua modules, or read one when \`name\` is given (dotted names like grind.loop). Modules persist across reloads and restarts of the client.`;
+
+const SAVE_MODULE_DESCRIPTION = `Save a Lua module (source code) under a dotted name like grind.loop, for require("grind.loop") in the lua tool. Saving does not run it: call require (first load) or AgentReload("grind.loop") (after a change). Name it autoexec to run it whenever the client enters the world.`;
 
 const SCREENSHOT_DESCRIPTION = `Capture the next rendered frame of the WrathPlus game client as a PNG image. scale (0-1, default 0.5) shrinks it; use 1 for full resolution when reading small text.`;
 
@@ -40,7 +46,7 @@ async function guarded(run: () => Promise<CallToolResult>): Promise<CallToolResu
   }
 }
 
-/** Register the four tools on `server`, each calling the control port through `client`. */
+/** Register the tools on `server`, each calling the control port through `client`. */
 export function registerTools(server: McpServer, client: AgentClient): void {
   server.registerTool(
     "lua",
@@ -106,6 +112,37 @@ export function registerTools(server: McpServer, client: AgentClient): void {
     },
     ({ since, wait_ms, limit }) =>
       guarded(async () => text(await client.events({ since: since ?? 0, wait_ms, limit }))),
+  );
+
+  server.registerTool(
+    "modules",
+    {
+      title: "Saved Lua modules",
+      description: MODULES_DESCRIPTION,
+      inputSchema: {
+        name: z.string().optional().describe("A module to read; omit to list them all."),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    ({ name }) =>
+      guarded(async () =>
+        name
+          ? { content: [{ type: "text", text: await client.readModule(name) }] }
+          : text(await client.modules()),
+      ),
+  );
+
+  server.registerTool(
+    "save_module",
+    {
+      title: "Save a Lua module",
+      description: SAVE_MODULE_DESCRIPTION,
+      inputSchema: {
+        name: z.string().regex(/^[A-Za-z0-9_]+(\.[A-Za-z0-9_]+)*$/).describe("Dotted module name."),
+        source: z.string().describe("The module's Lua source; usually ends with `return M`."),
+      },
+    },
+    ({ name, source }) => guarded(async () => text(await client.saveModule(name, source))),
   );
 
   server.registerTool(

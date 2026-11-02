@@ -46,6 +46,21 @@ export class AgentClient {
     return this.#json("GET", "/events", { ...query });
   }
 
+  /** `GET /files`: the agent's saved Lua modules. */
+  modules(): Promise<unknown> {
+    return this.#json("GET", "/files");
+  }
+
+  /** `GET /files/<name>`: one module's source. */
+  async readModule(name: string): Promise<string> {
+    return (await this.#request("GET", `/files/${encodeURIComponent(name)}`, {})).text();
+  }
+
+  /** `PUT /files/<name>`: save a module (does not reload it; AgentReload does). */
+  saveModule(name: string, source: string): Promise<unknown> {
+    return this.#json("PUT", `/files/${encodeURIComponent(name)}`, {}, source);
+  }
+
   /** `GET /screenshot[?scale=S]`: the next rendered frame as PNG bytes. */
   async screenshot(scale?: number): Promise<Uint8Array> {
     const response = await this.#request("GET", "/screenshot", { scale });
