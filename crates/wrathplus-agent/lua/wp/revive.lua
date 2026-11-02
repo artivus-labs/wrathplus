@@ -5,6 +5,7 @@
 --   Dead:  accept a resurrection that is offered (a party healer, a soulstone is the agent's call);
 --          otherwise release (RepopMe) after `release_after` seconds, longer in a party so a
 --          healer has the chance to resurrect first.
+-- `clear` and `safe` (yards) are fields, so code can tune them live.
 --   Ghost: run back toward the corpse (AgentCorpse) through the navmesh, to a spot clear of the
 --          hostiles standing over it; once the server's reclaim delay is over and nothing hostile
 --          is close, RetrieveCorpse.
@@ -18,9 +19,10 @@ local R = {
   party_release_after = 20,
   -- The server reclaims within 39 yards of the corpse; stay inside it.
   reach = 32,
-  -- How far from the corpse's hostiles to stand up, and how close one may be.
-  clear = 25,
-  safe = 15,
+  -- How far from the corpse's hostiles to stand up, and how close one may be: a monster a few
+  -- levels up aggroes from about 20 yards, and they wander.
+  clear = 30,
+  safe = 25,
   state = nil,
 }
 
@@ -107,7 +109,10 @@ frame:SetScript("OnUpdate", function(_, dt)
   since = since + dt
   if since < 0.5 then return end
   since = 0
-  if not R.on then return end
+  if not R.on then
+    R.state = nil
+    return
+  end
   local now = GetTime()
   if UnitIsGhost("player") then return ghost(now) end
   if UnitIsDead("player") then

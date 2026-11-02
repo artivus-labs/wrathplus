@@ -340,11 +340,11 @@ mod tests {
             state,
             "ghost at the corpse, waiting for Mangy Wolf to move off"
         );
-        // It moves away from the wolf, 25 yards out on the far side of the corpse, and stands up.
+        // It moves away from the wolf, 30 yards out on the far side of the corpse, and stands up.
         ticks(&mut script, 1);
-        assert!(calls(&script).ends_with("move 75,0"), "{}", calls(&script));
+        assert!(calls(&script).ends_with("move 70,0"), "{}", calls(&script));
         script
-            .run("me = { x = 75, y = 0, z = 0 } walking = false")
+            .run("me = { x = 70, y = 0, z = 0 } walking = false")
             .unwrap();
         ticks(&mut script, 1);
         assert!(calls(&script).ends_with("reclaim"), "{}", calls(&script));
