@@ -1,6 +1,7 @@
 [package]
 name = "wrathplus-app-tools"
 version.workspace = true
+description = "The app's dev instruments: debug panel, perf journal, probes and censuses (mostly behind the dev feature)"
 edition.workspace = true
 license.workspace = true
 

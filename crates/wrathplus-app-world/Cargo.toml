@@ -1,6 +1,7 @@
 [package]
 name = "wrathplus-app-world"
 version.workspace = true
+description = "The app's world layer: units, models, markers and everything the game draws in the world"
 edition.workspace = true
 license.workspace = true
 

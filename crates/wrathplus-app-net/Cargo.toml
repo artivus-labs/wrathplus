@@ -1,6 +1,7 @@
 [package]
 name = "wrathplus-app-net"
 version.workspace = true
+description = "The app's net layer: the realm session and the packet handlers that turn server messages into game state"
 edition.workspace = true
 license.workspace = true
 

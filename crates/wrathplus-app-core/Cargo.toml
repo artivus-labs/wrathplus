@@ -1,6 +1,7 @@
 [package]
 name = "wrathplus-app-core"
 version.workspace = true
+description = "The app's core layer: cvars, local state, data configuration and the shared types the other app crates build on"
 edition.workspace = true
 license.workspace = true
 

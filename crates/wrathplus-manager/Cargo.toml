@@ -1,6 +1,7 @@
 [package]
 name = "wrathplus-manager"
 version.workspace = true
+description = "The WrathPlus launcher: client setup, addons and the managed local Playerbots server"
 edition.workspace = true
 license.workspace = true
 
