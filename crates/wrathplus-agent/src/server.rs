@@ -39,6 +39,8 @@ pub(crate) struct Port {
     pub token: String,
     pub jobs: Sender<Job>,
     pub events: Arc<EventLog>,
+    /// The agent's modules (`env::scripts_dir`), served by `/files`.
+    pub scripts: std::path::PathBuf,
 }
 
 /// Bind and serve on background threads. Returns the bound address.
@@ -117,6 +119,13 @@ fn route(shared: &Port, request: &mut HttpRequest) -> Reply {
             .find(|(k, _)| *k == name)
             .map(|(_, v)| v.to_owned())
     };
+    if path == "/files" || path.starts_with("/files/") {
+        return files(
+            shared,
+            request,
+            path.trim_start_matches("/files").trim_start_matches('/'),
+        );
+    }
     match (request.method(), path.as_str()) {
         (Method::Get, "/view") => Response::from_data(
             VIEW.replace(
@@ -184,8 +193,64 @@ fn route(shared: &Port, request: &mut HttpRequest) -> Reply {
         }
         _ => json_response(
             404,
-            &json!({"error": "unknown route", "routes": ["GET /status", "POST /lua", "GET /screenshot", "GET /events", "GET /view"]}),
+            &json!({"error": "unknown route", "routes": ["GET /status", "POST /lua", "GET /screenshot", "GET /events", "GET /view", "GET|PUT|DELETE /files/<module>"]}),
         ),
+    }
+}
+
+/// The agent's modules: `GET /files` lists them, `GET|PUT|DELETE /files/<module>` reads, writes
+/// (creating folders) or removes one. Module names are dotted words (`grind.loop`), so a path can
+/// never leave the scripts folder. Writing does not reload: `AgentReload(name)` in Lua does.
+fn files(shared: &Port, request: &mut HttpRequest, name: &str) -> Reply {
+    let dir = &shared.scripts;
+    if name.is_empty() {
+        return match request.method() {
+            Method::Get => json_response(
+                200,
+                &json!({"modules": crate::env::list(dir), "folder": dir.display().to_string()}),
+            ),
+            _ => json_response(405, &json!({"error": "GET /files lists modules"})),
+        };
+    }
+    if !crate::env::valid_module(name) {
+        return json_response(
+            400,
+            &json!({"error": "module names are dotted words: grind.loop"}),
+        );
+    }
+    let path = crate::env::module_path(dir, name);
+    match request.method() {
+        Method::Get => match std::fs::read(&path) {
+            Ok(source) => Response::from_data(source)
+                .with_header(header("Content-Type", "text/plain; charset=utf-8")),
+            Err(_) => json_response(404, &json!({"error": format!("no module {name}")})),
+        },
+        Method::Put => {
+            let mut body = Vec::new();
+            if let Err(e) = request
+                .as_reader()
+                .take(MAX_BODY as u64 + 1)
+                .read_to_end(&mut body)
+            {
+                return json_response(400, &json!({"error": format!("body: {e}")}));
+            }
+            if body.len() > MAX_BODY {
+                return json_response(413, &json!({"error": "module larger than 1 MiB"}));
+            }
+            let written = path
+                .parent()
+                .map_or(Ok(()), std::fs::create_dir_all)
+                .and_then(|()| std::fs::write(&path, &body));
+            match written {
+                Ok(()) => json_response(200, &json!({"saved": name, "bytes": body.len()})),
+                Err(e) => json_response(500, &json!({"error": e.to_string()})),
+            }
+        }
+        Method::Delete => match std::fs::remove_file(&path) {
+            Ok(()) => json_response(200, &json!({"deleted": name})),
+            Err(_) => json_response(404, &json!({"error": format!("no module {name}")})),
+        },
+        _ => json_response(405, &json!({"error": "GET, PUT or DELETE"})),
     }
 }
 
@@ -246,6 +311,8 @@ mod tests {
                 token: TOKEN.into(),
                 jobs,
                 events: events.clone(),
+                scripts: std::env::temp_dir()
+                    .join(format!("wp-agent-port-test-{}", std::process::id())),
             },
         )
         .unwrap();
@@ -333,5 +400,28 @@ mod tests {
         let api =
             format!("GET /status?token={TOKEN} HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
         assert_eq!(call(address, &api).0, 401);
+    }
+
+    #[test]
+    fn modules_are_saved_listed_read_and_deleted_inside_the_scripts_folder() {
+        let (address, _) = port();
+        let auth = format!("Authorization: Bearer {TOKEN}\r\nConnection: close\r\n");
+        let source = "return { hello = true }";
+        let put = format!(
+            "PUT /files/grind.loop HTTP/1.1\r\nHost: x\r\n{auth}Content-Length: {}\r\n\r\n{source}",
+            source.len()
+        );
+        assert_eq!(call(address, &put).0, 200);
+        let (status, body) = get(address, "/files", TOKEN);
+        assert_eq!(status, 200);
+        assert!(body.contains("\"grind.loop\""));
+        assert_eq!(
+            get(address, "/files/grind.loop", TOKEN),
+            (200, source.to_string())
+        );
+        assert_eq!(get(address, "/files/..%2Fetc", TOKEN).0, 400);
+        let delete = format!("DELETE /files/grind.loop HTTP/1.1\r\nHost: x\r\n{auth}\r\n");
+        assert_eq!(call(address, &delete).0, 200);
+        assert_eq!(get(address, "/files/grind.loop", TOKEN).0, 404);
     }
 }

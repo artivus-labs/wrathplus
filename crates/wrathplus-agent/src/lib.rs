@@ -9,6 +9,7 @@
 //! | `GET /screenshot[?scale=0.5]` | the next rendered frame as PNG |
 //! | `GET /events?since=N[&wait_ms=M][&limit=K]` | every UI event since cursor `N`, long-polling |
 //! | `GET /view?token=…` | a read-only page for people: the live frame, the character, events and the agent's Lua |
+//! | `GET /files`, `GET|PUT|DELETE /files/<module>` | the agent's own Lua modules (see `env`) |
 //!
 //! With the port open, the UI's movement verbs run from any Lua (stock gates them on a key
 //! binding), so an agent's scripts can walk. Everything else an agent does goes through the same
@@ -19,6 +20,7 @@
 //! A headless client (`WOW_HEADLESS=1`, `wrathplus_world::headless`) answers screenshots from its
 //! offscreen frame.
 
+mod env;
 mod events;
 mod lua;
 mod server;
@@ -75,6 +77,7 @@ impl Plugin for AgentPlugin {
                 token,
                 jobs,
                 events: events.clone(),
+                scripts: env::scripts_dir(),
             },
         ) {
             Ok(address) => info!("agent port: listening on http://{address}"),
@@ -87,6 +90,9 @@ impl Plugin for AgentPlugin {
             queue,
             events,
             started: Instant::now(),
+            scripts: env::scripts_dir(),
+            env_session: 0,
+            autoexec_due: false,
         })
         .add_systems(Update, (pump_events, serve_jobs).chain());
     }
@@ -97,16 +103,42 @@ struct Link {
     queue: Receiver<Job>,
     events: Arc<EventLog>,
     started: Instant,
+    /// The agent's modules (`env`).
+    scripts: std::path::PathBuf,
+    /// The VM session the environment was last installed into.
+    env_session: u64,
+    /// An `autoexec` module waits for this VM to reach the world.
+    autoexec_due: bool,
 }
 
 /// Keep the VM's agent hooks on (a relog or `ReloadUI()` builds a fresh VM) and move this
 /// frame's events into the log.
-fn pump_events(link: Res<Link>, script: Option<NonSend<UiScript>>) {
+fn pump_events(
+    mut link: ResMut<Link>,
+    script: Option<NonSend<UiScript>>,
+    state: Option<Res<State<ClientState>>>,
+) {
     let Some(script) = script else {
         return;
     };
     script.set_event_tap(true);
     script.set_agent_input(true);
+    if link.env_session != script.session() {
+        link.env_session = script.session();
+        match env::install(&script, link.scripts.clone()) {
+            Ok(autoexec) => link.autoexec_due = autoexec,
+            Err(e) => error!("agent port: Lua environment: {e}"),
+        }
+    }
+    if link.autoexec_due && state.is_some_and(|s| *s.get() == ClientState::InWorld) {
+        link.autoexec_due = false;
+        let reply = lua::run(&script, "return require(\"autoexec\")", DEFAULT_BUDGET);
+        link.events.push([json!({
+            "time": link.started.elapsed().as_secs_f64(),
+            "event": "AGENT_LUA",
+            "args": ["require(\"autoexec\")", reply["ok"], reply.get("error")],
+        })]);
+    }
     let taken = script.take_tapped_events();
     let time = link.started.elapsed().as_secs_f64();
     let dropped = (taken.dropped > 0)

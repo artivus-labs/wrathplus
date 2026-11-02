@@ -72,9 +72,17 @@ function textOf(result: CallToolResult): string {
 }
 
 describe("tools", () => {
-  test("lists the four tools", async () => {
+  test("lists the tools", async () => {
     const { tools } = await (await connect()).listTools();
-    expect(tools.map((t) => t.name).sort()).toEqual(["events", "lua", "screenshot", "status"]);
+    expect(tools.map((t) => t.name).sort()).toEqual([
+      "events",
+      "lua",
+      "modules",
+      "save_module",
+      "screenshot",
+      "status",
+    ]);
+    expect(tools.find((t) => t.name === "lua")?.description).toContain("wp.engine");
     expect(tools.find((t) => t.name === "lua")?.description).toContain("3.3.5");
     expect(tools.find((t) => t.name === "events")?.description).toContain("next");
   });
@@ -200,5 +208,31 @@ describe("configFromEnv", () => {
     }
     expect(message).toContain("not an http(s) URL");
     expect(message).not.toContain(TOKEN);
+  });
+});
+
+describe("modules", () => {
+  test("save_module puts the source and modules lists or reads", async () => {
+    reply = (req) =>
+      req.method === "GET" && req.path === "/files/grind.loop"
+        ? new Response("return {}", { headers: { "content-type": "text/plain" } })
+        : Response.json(req.path === "/files" ? { modules: ["grind.loop"] } : { saved: "grind.loop" });
+    const client = await connect();
+    const saved = await call("save_module", { name: "grind.loop", source: "return {}" }, client);
+    expect(saved.isError).toBeUndefined();
+    expect(seen[0]).toMatchObject({ method: "PUT", path: "/files/grind.loop", body: "return {}" });
+    expect(textOf(await call("modules", {}, client))).toContain("grind.loop");
+    expect(textOf(await call("modules", { name: "grind.loop" }, client))).toBe("return {}");
+    expect(seen.map((s) => `${s.method} ${s.path}`)).toEqual([
+      "PUT /files/grind.loop",
+      "GET /files",
+      "GET /files/grind.loop",
+    ]);
+  });
+
+  test("save_module refuses names that are not dotted words", async () => {
+    const result = await call("save_module", { name: "../etc", source: "x" });
+    expect(result.isError).toBe(true);
+    expect(seen).toEqual([]);
   });
 });

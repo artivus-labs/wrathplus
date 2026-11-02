@@ -10,10 +10,16 @@ tool is one HTTP call to the port.
 | `screenshot(scale?)` | `GET /screenshot?scale=S` | PNG image content, scale 0.5 by default |
 | `events(since?, wait_ms?, limit?)` | `GET /events` | `{events, next, missed}`; pass `next` as the next `since` |
 | `status()` | `GET /status` | `{state, in_world, ui_ready, time, player}` |
+| `modules(name?)` | `GET /files[/<name>]` | the saved module list, or one module's source |
+| `save_module(name, source)` | `PUT /files/<name>` | `{saved, bytes}`; `require(name)` or `AgentReload(name)` in Lua loads it |
 
 Lua runs in the UI's VM against the stock WoW 3.3.5a API. With the port open, the movement
 functions (`MoveForwardStart`, `TurnLeftStart`, ...) work from any Lua. HTTP failures (401, 504,
 ...) and unreachable ports come back as MCP tool errors carrying the port's error text.
+
+Modules are the agent's own Lua, kept in the client's `Agent/scripts` folder across reloads and
+restarts; a module named `autoexec` runs whenever the client enters the world. Two are built in:
+`wp.engine`, a Playerbots-style decision engine, and `wp.values`, client-visible world state.
 
 ## Environment
 
