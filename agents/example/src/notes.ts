@@ -81,18 +81,37 @@ export class Notes {
     );
   }
 
-  /** Search past sessions with ripgrep (case-insensitive), newest files first. */
+  /** Search past sessions with ripgrep (case-insensitive), newest files first; in-process without it. */
   search(query: string, limit = 30): string {
     const files = readdirSync(this.sessions).filter((f) => f.endsWith(".jsonl")).sort().reverse();
     if (!files.length) return "No sessions recorded yet.";
-    const run = Bun.spawnSync(["rg", "--no-heading", "-i", "-m", String(limit), "--", query, ...files], {
-      cwd: this.sessions,
-    });
-    if (run.exitCode === 1) return `No matches for "${query}".`;
-    if (run.exitCode !== 0 && run.exitCode !== null) {
-      return `Search failed: ${run.stderr.toString().slice(0, 300) || "is ripgrep (rg) installed?"}`;
+    let lines: string[];
+    if (Bun.which("rg")) {
+      const run = Bun.spawnSync(["rg", "--no-heading", "-i", "-m", String(limit), "--", query, ...files], {
+        cwd: this.sessions,
+      });
+      if (run.exitCode === 1) return `No matches for "${query}".`;
+      if (run.exitCode !== 0 && run.exitCode !== null) return `Search failed: ${run.stderr.toString().slice(0, 300)}`;
+      lines = run.stdout.toString().trim().split("\n").slice(0, limit);
+    } else {
+      // Without ripgrep: the same regex, case-insensitive, in-process.
+      let pattern: RegExp;
+      try {
+        pattern = new RegExp(query, "i");
+      } catch (error) {
+        return `Search failed: ${(error as Error).message}`;
+      }
+      lines = files
+        .flatMap((file) =>
+          readFileSync(join(this.sessions, file), "utf8")
+            .split("\n")
+            .filter((line) => pattern.test(line))
+            .slice(0, limit)
+            .map((line) => `${file}:${line}`),
+        )
+        .slice(0, limit);
+      if (!lines.length) return `No matches for "${query}".`;
     }
-    const lines = run.stdout.toString().trim().split("\n").slice(0, limit);
     return lines
       .map((line) => {
         const at = line.indexOf(":");
