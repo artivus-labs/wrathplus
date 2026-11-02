@@ -3,7 +3,8 @@
 //!
 //! The UI VM is sandboxed (no `require`, `io`, `os`), as addons expect. This adds back exactly one
 //! door: `require(name)` reads `<scripts>/<name with dots as slashes>.lua`, or a built-in module
-//! (`wp.engine`, `wp.values`), and nothing else. `AgentReload(name)` forgets a module and loads it
+//! (`wp.engine`, `wp.values`, `wp.agent`), and nothing else. `wp.agent` is preloaded as the global
+//! `Agent`: the registry of intents and decisions the fast tier chooses among. `AgentReload(name)` forgets a module and loads it
 //! again; `AgentModules()` lists the agent's files. If `autoexec.lua` exists, every new in-game
 //! VM runs it, so an agent's logic comes back after `ReloadUI()` or a restart.
 
@@ -15,6 +16,7 @@ use wrathplus_ui::script::UiScript;
 const BUILT_IN: &[(&str, &str)] = &[
     ("wp.engine", include_str!("../lua/wp/engine.lua")),
     ("wp.values", include_str!("../lua/wp/values.lua")),
+    ("wp.agent", include_str!("../lua/wp/agent.lua")),
 ];
 
 /// Where the agent's modules live: `WOW_AGENT_SCRIPTS`, else `<client home>/Agent/scripts`.
@@ -98,6 +100,9 @@ pub(crate) fn install(script: &UiScript, dir: PathBuf) -> mlua::Result<bool> {
     let list_dir = dir.clone();
     let modules = lua.create_function(move |_, ()| Ok(list(&list_dir)))?;
     lua.globals().set("AgentModules", modules)?;
+    // The intent and decision registry the fast tier reads, as the global `Agent`.
+    let agent = load_module(lua, &dir, "wp.agent")?;
+    lua.globals().set("Agent", agent)?;
     Ok(module_path(&dir, "autoexec").is_file())
 }
 
@@ -185,6 +190,35 @@ mod tests {
             .eval("return require('demo.wander'):describe().active")
             .unwrap();
         assert_eq!(active, ["wander"]);
+    }
+
+    #[test]
+    fn modules_register_intents_and_decisions_for_the_fast_tier() {
+        let script = UiScript::new().unwrap();
+        install(&script, scratch("registry")).unwrap();
+        let (names, ran, asked, resolved, after): (Vec<String>, bool, String, bool, usize) = script
+            .eval(
+                r#"
+                local hits = 0
+                Agent.intent("say_hi", { when = "Greet", run = function() hits = hits + 1 return hits end })
+                Agent.intent("hidden", { when = "Never now", available = function() return false end, run = function() end })
+                local names = {}
+                for _, i in ipairs(Agent.available()) do names[#names + 1] = i.name end
+                local ok = Agent.run("say_hi")
+                local picked
+                local id = Agent.decide("fight_or_flee", { question = "Fight?", options = { fight = "Stay", flee = "Run" }, on = function(c) picked = c end })
+                local asked = Agent.questions()[1].question
+                Agent.resolve(id, "flee")
+                return names, ok and hits == 1, asked, picked == "flee", #Agent.questions()
+                "#,
+            )
+            .unwrap();
+        assert_eq!(names, ["say_hi"]);
+        assert!(ran && resolved);
+        assert_eq!((asked.as_str(), after), ("Fight?", 0));
+        assert!(script
+            .run("Agent.intent('Bad Name', { when = 'x', run = function() end })")
+            .is_err());
     }
 
     #[test]

@@ -414,3 +414,11 @@ fn mirror_mover_collision_height(
         }
     }
 }
+
+impl AutoMove<'_, '_> {
+    /// A click-to-move walk is in flight; for the agent port's path walker, which feeds the walk
+    /// one waypoint at a time.
+    pub fn walking(&self) -> bool {
+        self.approach.active()
+    }
+}

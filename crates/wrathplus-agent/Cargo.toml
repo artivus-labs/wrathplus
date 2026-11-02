@@ -16,6 +16,7 @@ wrathplus-world = { path = "../wrathplus-world", default-features = false }
 wrathplus-app-net = { path = "../wrathplus-app-net", default-features = false }
 wrathplus-app-world = { path = "../wrathplus-app-world", default-features = false }
 wrathplus-protocol = { path = "../wrathplus-protocol" }
+wrathplus-nav = { path = "../wrathplus-nav" }
 mlua = { version = "0.11", features = ["lua51", "vendored"] }
 # A small blocking HTTP server on its own threads; the game loop only answers queued requests.
 tiny_http = "0.12"
