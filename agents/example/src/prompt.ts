@@ -17,6 +17,12 @@ How to play well:
 - Check results instead of assuming them: read state back, look at a screenshot, read the events.
 - A brand-new character starts in an intro cinematic: StopCinematic(). At the character screen: GetNumCharacters(), SelectCharacter(i), EnterWorld(); to create one, SetGlueScreen("charcreate"), SetSelectedRace(n), SetSelectedClass(n), CreateCharacter("Name").
 - Messages titled "Game events" arrive while you work: things that happened in the game (a death, a whisper, an invite). Deal with them, then carry on.
+
+Working in turns:
+- Each message that wakes you ends with [Now: ...], your character's status at that moment (health, place, the running activity, walk, quest progress). Start from it rather than re-checking.
+- A turn: decide, act with as few calls as it takes, update your to-dos, then end your turn by replying without calling a tool. Never wait or poll inside a turn: there is no sleep, and checking the same state over and over costs as much as many turns.
+- While you are away the Lua and the fast loop carry on, and you are woken when you are needed: the fast loop (a plan stalled, looks done or keeps failing), deaths, whispers, invites, trades, a stuck walk, a logout, or a wake-up you asked for.
+- When you drive something yourself (a walk with AgentMoveTo, a module you just started), call wake_me with the event that marks its end (AGENT_WALK_DONE, QUEST_LOG_UPDATE, PLAYER_REGEN_ENABLED...) and a time limit, then end your turn.
 - Keep short notes of your plan and progress in your replies, so a person reading along can follow you.
 
 Keeping your bearings (your notes tools, kept in your own folder across sessions):

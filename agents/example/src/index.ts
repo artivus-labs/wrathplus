@@ -15,6 +15,7 @@ import { Jev } from "./jev.ts";
 import { Notes } from "./notes.ts";
 import { Policy } from "./policy.ts";
 import { kickoff } from "./prompt.ts";
+import { statusLine, Waker } from "./wake.ts";
 import { watch } from "./watch.ts";
 
 export interface Config {
@@ -54,11 +55,16 @@ async function main(): Promise<void> {
     process.env.WRATHPLUS_AGENT_HOME ??
       join(homedir(), ".local/share/wrathplus-agents", `agent-${new URL(config.url).port || "default"}`),
   );
-  // Everything that reaches the planner also goes in the session log.
+  // Everything that reaches the planner also goes in the session log, with the character's
+  // status at that moment, so a wake-up needs no calls to see where things stand.
   const tell = (kind: string, text: string) => {
-    notes.record(kind, text);
-    inbox.push(text);
+    void statusLine(config.url, config.token).then((status) => {
+      const message = status ? `${text}\n\n[Now: ${status}]` : text;
+      notes.record(kind, message);
+      inbox.push(message);
+    });
   };
+  const waker = new Waker((text) => tell("wake-up", text));
   // The fast tier, when a TypeSafe key is available (TYPESAFE_API_KEY).
   const policy = process.env.TYPESAFE_API_KEY
     ? new Policy({
@@ -79,7 +85,10 @@ async function main(): Promise<void> {
     token: config.token,
     self: () => self,
     signal: abortController.signal,
-    onEvents: (events) => policy?.notice(events),
+    onEvents: (events) => {
+      policy?.notice(events);
+      waker.notice(events);
+    },
     onMessage: (text) => {
       console.log(`\n[events] ${text.replace(/\n/g, " ")}`);
       tell("events", text);
@@ -98,7 +107,7 @@ async function main(): Promise<void> {
   console.log(`Notes: ${notes.home}`);
   const compactAt = Number(process.env.WRATHPLUS_AGENT_COMPACT_AT ?? 400_000);
   let begun = false;
-  for await (const message of think(inbox, { ...config, mcpEntry, abortController, notes, compactAt, ...(policy ? { policy } : {}) })) {
+  for await (const message of think(inbox, { ...config, mcpEntry, abortController, notes, waker, compactAt, ...(policy ? { policy } : {}) })) {
     if (message.type === "system" && message.subtype === "init") {
       console.log(`[session ${message.session_id}]`);
       if (!begun) {

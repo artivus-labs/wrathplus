@@ -12,6 +12,7 @@ import {
 import { z } from "zod";
 import type { Policy } from "./policy.ts";
 import { NOTE_TOOLS, notesServer, type Notes } from "./notes.ts";
+import { WAKE_TOOLS, wakeServer, type Waker } from "./wake.ts";
 import { SYSTEM_PROMPT } from "./prompt.ts";
 
 /** The MCP tools the planner may use, all from the wrathplus server; nothing else. */
@@ -71,6 +72,8 @@ export interface BrainOptions {
   notes?: Notes;
   /** Compact the conversation once it reaches this many tokens. */
   compactAt?: number;
+  /** The planner's alarm clock (wake_me); with it, the events tool does not long-poll. */
+  waker?: Waker;
 }
 
 /** Start the planner on the inbox; yields every SDK message for the caller to log. */
@@ -89,6 +92,7 @@ export function think(inbox: Inbox, options: BrainOptions): AsyncIterable<SDKMes
         ...TOOLS,
         ...(options.policy ? ["mcp__plan__set_plan", "mcp__plan__fast_loop_status"] : []),
         ...(options.notes ? NOTE_TOOLS : []),
+        ...(options.waker ? WAKE_TOOLS : []),
       ],
       // Compaction well inside the window: recall degrades long before the window fills.
       settings: { autoCompactEnabled: true, autoCompactWindow: options.compactAt ?? 400_000 },
@@ -98,10 +102,16 @@ export function think(inbox: Inbox, options: BrainOptions): AsyncIterable<SDKMes
           type: "stdio",
           command: process.execPath,
           args: ["run", options.mcpEntry],
-          env: { WRATHPLUS_AGENT_URL: options.url, WRATHPLUS_AGENT_TOKEN: options.token },
+          env: {
+            WRATHPLUS_AGENT_URL: options.url,
+            WRATHPLUS_AGENT_TOKEN: options.token,
+            // It sleeps by ending its turn, not inside a tool call.
+            ...(options.waker ? { WRATHPLUS_MCP_LONG_POLL: "0" } : {}),
+          },
         },
         ...(options.policy ? { plan: planServer(options.policy) } : {}),
         ...(options.notes ? { notes: notesServer(options.notes) } : {}),
+        ...(options.waker ? { wake: wakeServer(options.waker) } : {}),
       },
       ...(options.maxTurns ? { maxTurns: options.maxTurns } : {}),
       abortController: options.abortController,
@@ -119,7 +129,7 @@ export function summarize(message: SDKMessage): string | null {
         if (block.type === "text" && block.text.trim()) parts.push(block.text.trim());
         if (block.type === "tool_use") {
           const input = JSON.stringify(block.input);
-          parts.push(`→ ${block.name.replace(/^mcp__(wrathplus|plan|notes)__/, "")} ${input.length > 300 ? input.slice(0, 300) + "…" : input}`);
+          parts.push(`→ ${block.name.replace(/^mcp__(wrathplus|plan|notes|wake)__/, "")} ${input.length > 300 ? input.slice(0, 300) + "…" : input}`);
         }
       }
       return parts.length ? parts.join("\n") : null;
