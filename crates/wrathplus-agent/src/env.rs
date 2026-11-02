@@ -142,6 +142,10 @@ fn load_module(lua: &Lua, dir: &Path, name: &str) -> mlua::Result<Value> {
 }
 
 #[cfg(test)]
+#[path = "revive_tests.rs"]
+mod revive_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -280,78 +284,6 @@ mod tests {
         script.tick(0.3);
         let said: String = script.eval("return table.concat(said, ' ')").unwrap();
         assert_eq!(said, "broken=false walk_there=true");
-    }
-
-    #[test]
-    fn revive_releases_runs_back_and_reclaims_clear_of_hostiles() {
-        let mut script = UiScript::new().unwrap();
-        install(&script, scratch("revive")).unwrap();
-        // The game, stubbed: a solo character dead 100 yards from its corpse.
-        script
-            .run(
-                r#"
-                calls = {}
-                dead, ghost, delay, hostiles = true, false, 0, {}
-                me = { x = 0, y = 0, z = 0 }
-                walking = false
-                UnitIsDead = function() return dead end
-                UnitIsGhost = function() return ghost end
-                GetNumPartyMembers = function() return 0 end
-                RepopMe = function() calls[#calls + 1] = "repop" end
-                RetrieveCorpse = function() calls[#calls + 1] = "reclaim" end
-                GetCorpseRecoveryDelay = function() return delay end
-                AgentCorpse = function() return { x = 100, y = 0, z = 0 } end
-                AgentPosition = function() return me end
-                AgentNearby = function() return hostiles end
-                AgentWalk = function() return { status = walking and "walking" or "idle" } end
-                AgentMoveTo = function(x, y) calls[#calls + 1] = string.format("move %d,%d", x, y) walking = true end
-                "#,
-            )
-            .unwrap();
-        let ticks = |script: &mut UiScript, n: usize| (0..n).for_each(|_| script.tick(0.6));
-        let calls = |script: &UiScript| -> String {
-            script.eval("return table.concat(calls, ' ')").unwrap()
-        };
-        ticks(&mut script, 2);
-        let state: String = script.eval("return Revive.state").unwrap();
-        assert!(state.starts_with("dead, releasing in"), "{state}");
-        ticks(&mut script, 5);
-        assert_eq!(calls(&script), "repop");
-        // A ghost far away runs to the corpse, which nothing hostile stands over.
-        script.run("dead, ghost = false, true").unwrap();
-        ticks(&mut script, 1);
-        assert_eq!(calls(&script), "repop move 100,0");
-        // At the corpse: the reclaim delay, then a wolf that wandered close, then clear.
-        script
-            .run("me = { x = 99, y = 0, z = 0 } walking = false delay = 12")
-            .unwrap();
-        ticks(&mut script, 1);
-        let state: String = script.eval("return Revive.state").unwrap();
-        assert_eq!(
-            state,
-            "ghost at the corpse, waiting 12s for the reclaim delay"
-        );
-        script
-            .run("delay = 0 hostiles = { { name = 'Mangy Wolf', reaction = 'hostile', x = 104, y = 0, kind = 'unit' } }")
-            .unwrap();
-        ticks(&mut script, 1);
-        let state: String = script.eval("return Revive.state").unwrap();
-        assert_eq!(
-            state,
-            "ghost at the corpse, waiting for Mangy Wolf to move off"
-        );
-        // It moves away from the wolf, 30 yards out on the far side of the corpse, and stands up.
-        ticks(&mut script, 1);
-        assert!(calls(&script).ends_with("move 70,0"), "{}", calls(&script));
-        script
-            .run("me = { x = 70, y = 0, z = 0 } walking = false")
-            .unwrap();
-        ticks(&mut script, 1);
-        assert!(calls(&script).ends_with("reclaim"), "{}", calls(&script));
-        // Alive again: nothing more to do.
-        script.run("ghost = false").unwrap();
-        ticks(&mut script, 1);
-        assert!(script.eval::<bool>("return Revive.state == nil").unwrap());
     }
 
     #[test]

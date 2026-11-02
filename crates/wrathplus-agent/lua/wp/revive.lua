@@ -5,11 +5,13 @@
 --   Dead:  accept a resurrection that is offered (a party healer, a soulstone is the agent's call);
 --          otherwise release (RepopMe) after `release_after` seconds, longer in a party so a
 --          healer has the chance to resurrect first.
--- `clear` and `safe` (yards) are fields, so code can tune them live.
 --   Ghost: run back toward the corpse (AgentCorpse) through the navmesh, to a spot clear of the
 --          hostiles standing over it; once the server's reclaim delay is over and nothing hostile
---          is close, RetrieveCorpse.
+--          is close, RetrieveCorpse. If hostiles keep the corpse unsafe for `spirit_after`
+--          seconds, give up on it and resurrect at the graveyard's spirit healer instead
+--          (interact, then accept the CONFIRM_XP_LOSS it raises: a durability cost).
 --
+-- `clear`, `safe` (yards) and the timings are fields, so code can tune them live.
 -- `Revive.state` says what it is doing ("waiting 21s for the reclaim delay", ...), nil when alive.
 -- A death also ends the running activity (Agent.stop), so the fast tier chooses afresh after.
 
@@ -23,13 +25,20 @@ local R = {
   -- levels up aggroes from about 20 yards, and they wander.
   clear = 30,
   safe = 25,
+  spirit_after = 120,
   state = nil,
 }
 
-local died_at, spot, tried_at
+-- Per death: when it died, where to stand up, the last reclaim, since when hostiles have kept
+-- the corpse unsafe, the graveyard's spirit healer, and when it was last asked.
+local died_at, spot, tried_at, blocked_since, healer, asked_healer
 
 local function say(state)
   R.state = state
+end
+
+local function reset()
+  died_at, spot, tried_at, blocked_since, healer, asked_healer = nil, nil, nil, nil, nil, nil
 end
 
 local function far(a, b)
@@ -60,7 +69,19 @@ local function choose_spot(corpse)
   return { x = corpse.x + dx / len * R.clear, y = corpse.y + dy / len * R.clear, z = corpse.z }
 end
 
+-- The corpse stayed unsafe too long: the spirit healer (AgentInteract walks there first).
+local function use_healer(now)
+  if not asked_healer or now - asked_healer >= 10 then
+    asked_healer = now
+    AgentInteract(healer.guid)
+  end
+  return say("ghost, resurrecting at the spirit healer (the corpse stayed unsafe)")
+end
+
 local function ghost(now)
+  -- A released ghost appears beside the graveyard's spirit healer: remember it.
+  healer = healer or (AgentFindNpc and AgentFindNpc("spirithealer", 60))
+  if healer and blocked_since and now - blocked_since >= R.spirit_after then return use_healer(now) end
   local corpse = AgentCorpse and AgentCorpse()
   if not corpse then return say("ghost, waiting for the corpse's location") end
   local me = AgentPosition()
@@ -82,8 +103,10 @@ local function ghost(now)
   local close = hostiles_near(me, R.safe)
   if #close > 0 then
     spot = nil
+    blocked_since = blocked_since or now
     return say("ghost at the corpse, waiting for " .. (close[1].name or "a hostile") .. " to move off")
   end
+  blocked_since = nil
   if not tried_at or now - tried_at >= 3 then
     tried_at = now
     say("reclaiming the corpse")
@@ -95,14 +118,20 @@ local frame = CreateFrame("Frame")
 local since = 0
 frame:RegisterEvent("PLAYER_DEAD")
 frame:RegisterEvent("RESURRECT_REQUEST")
+frame:RegisterEvent("CONFIRM_XP_LOSS")
 frame:SetScript("OnEvent", function(_, event)
   if not R.on then return end
   if event == "PLAYER_DEAD" then
-    died_at, spot, tried_at = GetTime(), nil, nil
+    reset()
+    died_at = GetTime()
     if Agent and Agent.stop then Agent.stop("died") end
   elseif event == "RESURRECT_REQUEST" then
     AcceptResurrect()
     say("accepted a resurrection")
+  elseif event == "CONFIRM_XP_LOSS" and asked_healer then
+    -- Only the healer this module asked for; an agent's own ask is its call.
+    AcceptXPLoss()
+    say("accepted the spirit healer's resurrection")
   end
 end)
 frame:SetScript("OnUpdate", function(_, dt)
@@ -127,7 +156,8 @@ frame:SetScript("OnUpdate", function(_, dt)
     end
     return
   end
-  died_at, spot, tried_at, R.state = nil, nil, nil, nil
+  reset()
+  R.state = nil
 end)
 
 return R
