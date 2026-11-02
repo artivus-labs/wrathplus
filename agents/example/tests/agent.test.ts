@@ -1,7 +1,7 @@
 import { describe as group, expect, test } from "bun:test";
 import { Inbox, summarize, TOOLS } from "../src/brain.ts";
 import { configFromEnv } from "../src/index.ts";
-import { describe, watch, type GameEvent } from "../src/watch.ts";
+import { describe, PLANNER_EVENTS, watch, type GameEvent } from "../src/watch.ts";
 
 const event = (seq: number, name: string, args: unknown[] = []): GameEvent => ({ seq, time: seq, event: name, args });
 
@@ -17,6 +17,8 @@ group("events a player would notice", () => {
       event(7, "CHAT_MSG_SAY", ["hello", "Agentone"]),
       event(8, "UI_ERROR_MESSAGE", ["Out of range."]),
       event(9, "UI_ERROR_MESSAGE", ["Out of range."]),
+      event(10, "AGENT_WALK_DONE", ["arrived"]),
+      event(11, "AGENT_WALK_DONE", ["stuck"]),
     ], "Agentone");
     expect(lines).toEqual([
       "You died.",
@@ -24,7 +26,17 @@ group("events a player would notice", () => {
       "Wifey invites you to a party (AcceptGroup() or DeclineGroup()).",
       "Your Lua failed: module x not found (in: require('x'))",
       "Game error: Out of range.",
+      "Your walk ended stuck: AgentWalk().note says why; route around it or pick another way.",
     ]);
+  });
+
+  test("the planner hears /say only when it names the character", () => {
+    const lines = describe([
+      event(1, "CHAT_MSG_SAY", ["anyone selling bread?", "Botty"]),
+      event(2, "CHAT_MSG_SAY", ["agenttwo, follow me", "Shannon"]),
+      event(3, "CHAT_MSG_PARTY", ["pull the next one", "Shannon"]),
+    ], "Agenttwo", PLANNER_EVENTS);
+    expect(lines).toEqual(["Shannon says: agenttwo, follow me", "[Party] Shannon: pull the next one"]);
   });
 
   test("the watcher batches a burst into one message", async () => {
@@ -89,6 +101,6 @@ group("planner plumbing", () => {
   test("config needs the port and token; Sonnet 5.5 by default", () => {
     expect(() => configFromEnv([], {})).toThrow("WRATHPLUS_AGENT_URL");
     const config = configFromEnv(["Reach", "level", "5"], { WRATHPLUS_AGENT_URL: "http://127.0.0.1:17950/", WRATHPLUS_AGENT_TOKEN: "t" });
-    expect(config).toEqual({ url: "http://127.0.0.1:17950", token: "t", goal: "Reach level 5", model: "claude-sonnet-5-5", checkInSeconds: 120 });
+    expect(config).toEqual({ url: "http://127.0.0.1:17950", token: "t", goal: "Reach level 5", model: "claude-haiku-5-5", checkInSeconds: 0 });
   });
 });

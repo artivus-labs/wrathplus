@@ -28,7 +28,10 @@ if (import.meta.main) {
     console.error(`wrathplus-agent-mcp: ${(error as Error).message}`);
     process.exit(1);
   }
-  const server = createServer(new AgentClient(config.url, config.token));
+  // WRATHPLUS_MCP_LONG_POLL=0: no events wait_ms (a host that wakes its agent itself).
+  const server = createServer(new AgentClient(config.url, config.token), {
+    longPoll: process.env.WRATHPLUS_MCP_LONG_POLL !== "0",
+  });
   await server.connect(new StdioServerTransport());
   console.error(`wrathplus-agent-mcp: serving ${config.url} on stdio`);
 }

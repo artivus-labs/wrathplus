@@ -3,8 +3,8 @@
 //! that act on one of them by GUID. Nothing here knows more than the client: the list is what the
 //! server sent this client, and reactions, quest markers and names are the client's own reading.
 //!
-//! Lua (installed by `env`): `AgentPosition()`, `AgentNearby([max_yards])`, `AgentTarget(guid)`,
-//! `AgentInteract(guid)`. GUIDs travel as `"0x…"` hex strings. `AgentInteract` turns on click-to-move
+//! Lua (installed by `env`): `AgentPosition()`, `AgentNearby([max_yards])`,
+//! `AgentFindNpc(service [, max_yards])`, `AgentTarget(guid)`, `AgentInteract(guid)`. GUIDs travel as `"0x…"` hex strings. `AgentInteract` turns on click-to-move
 //! (`autoInteract`), so the character walks to the object first, as a player's right-click would.
 
 use bevy::prelude::*;
@@ -18,6 +18,7 @@ use wrathplus_app_net::names::NameCache;
 use wrathplus_app_net::net::{Guid, GuidIndex, NetEntity};
 use wrathplus_app_world::target::click::Interact;
 use wrathplus_app_world::target::{RelationInputs, SelectCommit};
+use wrathplus_protocol::types::NpcService;
 use wrathplus_protocol::EntityKind;
 
 /// How often the snapshot is rebuilt (seconds).
@@ -44,8 +45,11 @@ pub(crate) struct Seen {
     pub tapped: bool,
     pub tapped_by_me: bool,
     pub target: Option<u64>,
-    /// NPC services: "questgiver", "vendor", "trainer", "flightmaster", "repair", "innkeeper"…
+    /// NPC services, from the unit's NPC flags ([`SERVICES`]): what it offers before it is
+    /// spoken to, which the stock API cannot tell (`CanMerchantRepair` needs an open window).
     pub npc: Vec<&'static str>,
+    /// The title under a creature's name ("Weapons Merchant", "Blacksmithing Trainer").
+    pub title: Option<String>,
     /// The quest marker over it: "available", "incomplete" or "reward".
     pub quest: Option<&'static str>,
     pub go_type: Option<i32>,
@@ -194,17 +198,11 @@ pub(crate) fn snapshot(
                 s.tapped = fields.unit_tapped();
                 s.tapped_by_me = fields.unit_tapped_by_player();
                 s.target = fields.unit_target().filter(|t| *t != 0);
-                let npc = fields.unit_npc_services();
-                for (on, label) in [
-                    (npc.is_quest_giver(), "questgiver"),
-                    (npc.is_vendor(), "vendor"),
-                    (npc.is_trainer(), "trainer"),
-                    (npc.can_repair(), "repair"),
-                ] {
-                    if on {
-                        s.npc.push(label);
-                    }
-                }
+                s.npc = services(fields.unit_npc_flags());
+                s.title = names.as_ref().and_then(|n| {
+                    let entry = fields.object_entry()?;
+                    n.creature_subname(entry).map(str::to_owned)
+                });
             } else if net.kind == EntityKind::GameObject {
                 s.name = templates
                     .as_ref()
@@ -257,11 +255,49 @@ pub(crate) fn parse_guid(text: &str) -> Option<u64> {
     u64::from_str_radix(hex, 16).ok()
 }
 
+/// The NPC services an agent can ask for, by name: `NpcService`'s flags, with trainers also split
+/// by kind (AzerothCore `UNIT_NPC_FLAG_TRAINER_CLASS` 0x20, `_PROFESSION` 0x40).
+pub(crate) const SERVICES: &[(&str, Option<NpcService>, u32)] = &[
+    ("gossip", Some(NpcService::Gossip), 0),
+    ("questgiver", Some(NpcService::QuestGiver), 0),
+    ("vendor", Some(NpcService::Vendor), 0),
+    ("repair", Some(NpcService::Repair), 0),
+    ("trainer", Some(NpcService::Trainer), 0),
+    ("classtrainer", None, 0x20),
+    ("professiontrainer", None, 0x40),
+    ("flightmaster", Some(NpcService::FlightMaster), 0),
+    ("innkeeper", Some(NpcService::Innkeeper), 0),
+    ("banker", Some(NpcService::Banker), 0),
+    ("auctioneer", Some(NpcService::Auctioneer), 0),
+    ("stablemaster", Some(NpcService::StableMaster), 0),
+    ("spirithealer", Some(NpcService::SpiritHealer), 0),
+    ("spiritguide", Some(NpcService::SpiritGuide), 0),
+    ("battlemaster", Some(NpcService::BattleMaster), 0),
+    ("tabarddesigner", Some(NpcService::TabardDesigner), 0),
+    ("petitioner", Some(NpcService::Petitioner), 0),
+    ("guildbanker", Some(NpcService::GuildBanker), 0),
+    ("mailbox", Some(NpcService::Mailbox), 0),
+];
+
+/// The service names an NPC flags word offers.
+pub(crate) fn services(bits: u32) -> Vec<&'static str> {
+    let flags = wrathplus_protocol::types::NpcFlags::from_bits(bits);
+    SERVICES
+        .iter()
+        .filter(|(_, service, mask)| match service {
+            Some(service) => flags.has(*service),
+            None => bits & mask != 0,
+        })
+        .map(|(name, _, _)| *name)
+        .collect()
+}
+
 fn seen_table(lua: &Lua, s: &Seen) -> mlua::Result<Table> {
     let t = lua.create_table()?;
     t.set("guid", guid_text(s.guid))?;
     t.set("kind", s.kind)?;
     t.set("name", s.name.clone())?;
+    t.set("title", s.title.clone())?;
     t.set("entry", s.entry)?;
     t.set("x", s.pos[0])?;
     t.set("y", s.pos[1])?;
@@ -321,6 +357,30 @@ pub(crate) fn install(lua: &Lua, handles: &Handles) -> mlua::Result<()> {
             Ok(list)
         })?,
     )?;
+    let snap = handles.snapshot.clone();
+    g.set(
+        "AgentFindNpc",
+        lua.create_function(move |lua, (service, max): (String, Option<f32>)| {
+            if !SERVICES.iter().any(|(name, _, _)| *name == service) {
+                let known: Vec<&str> = SERVICES.iter().map(|(name, _, _)| *name).collect();
+                return Err(mlua::Error::runtime(format!(
+                    "AgentFindNpc: no service {service:?}; one of {}",
+                    known.join(", ")
+                )));
+            }
+            let Ok(s) = snap.lock() else {
+                return Ok(None);
+            };
+            // The nearest living one the client knows of; none in sight is nil.
+            s.objects
+                .iter()
+                .filter(|o| !o.dead && o.npc.contains(&service.as_str()))
+                .filter(|o| max.is_none_or(|m| o.distance <= m))
+                .min_by(|a, b| a.distance.total_cmp(&b.distance))
+                .map(|o| seen_table(lua, o))
+                .transpose()
+        })?,
+    )?;
     for (name, make) in [
         ("AgentTarget", Order::Target as fn(u64) -> Order),
         ("AgentInteract", Order::Interact as fn(u64) -> Order),
@@ -347,76 +407,5 @@ pub(crate) fn install(lua: &Lua, handles: &Handles) -> mlua::Result<()> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn guids_round_trip_as_hex_text() {
-        assert_eq!(guid_text(0xF130_0000_4E00_079A), "0xF13000004E00079A");
-        assert_eq!(
-            parse_guid("0xF13000004E00079A"),
-            Some(0xF130_0000_4E00_079A)
-        );
-        assert_eq!(parse_guid("F130"), None);
-        assert_eq!(parse_guid("0xZZ"), None);
-    }
-
-    #[test]
-    fn quest_status_bytes_read_as_markers() {
-        assert_eq!(quest_marker(8), Some("available"));
-        assert_eq!(quest_marker(5), Some("incomplete"));
-        assert_eq!(quest_marker(10), Some("reward"));
-        assert_eq!(quest_marker(0), None);
-    }
-
-    #[test]
-    fn lua_reads_the_snapshot_and_sends_orders() {
-        let (handles, link) = link();
-        {
-            let mut s = handles.snapshot.lock().unwrap();
-            s.me = Some(Me {
-                pos: [1.0, 2.0, 3.0],
-                facing: 1.5,
-                map: 0,
-            });
-            s.objects = vec![
-                Seen {
-                    guid: 0x10,
-                    kind: "unit",
-                    name: Some("Deputy Willem".into()),
-                    distance: 12.0,
-                    npc: vec!["questgiver"],
-                    quest: Some("available"),
-                    ..Default::default()
-                },
-                Seen {
-                    guid: 0x20,
-                    kind: "unit",
-                    distance: 80.0,
-                    ..Default::default()
-                },
-            ];
-        }
-        let lua = Lua::new();
-        install(&lua, &handles).unwrap();
-        let (name, quest, count_near, facing): (String, String, usize, f32) = lua
-            .load(
-                "local n = AgentNearby() local near = AgentNearby(50) \
-                 return n[1].name, n[1].quest, #near, AgentPosition().facing",
-            )
-            .eval()
-            .unwrap();
-        assert_eq!(
-            (name.as_str(), quest.as_str(), count_near),
-            ("Deputy Willem", "available", 1)
-        );
-        assert_eq!(facing, 1.5);
-        let sent: bool = lua
-            .load("return AgentInteract('0x0000000000000010')")
-            .eval()
-            .unwrap();
-        assert!(sent);
-        assert!(matches!(link.orders.try_recv(), Ok(Order::Interact(0x10))));
-        assert!(lua.load("AgentTarget('Deputy')").exec().is_err());
-    }
-}
+#[path = "world_tests.rs"]
+mod tests;
