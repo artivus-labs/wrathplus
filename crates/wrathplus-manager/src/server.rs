@@ -1,6 +1,10 @@
 //! Native managed disposable server workflow; no existing-realm adoption or reset.
 mod build_feedback;
 mod build_state;
+mod characters;
+#[cfg(test)]
+mod characters_tests;
+mod characters_ui;
 mod chatter;
 mod command;
 mod docker;
@@ -40,6 +44,7 @@ pub enum Input {
     StartDocker,
     ToggleLogs,
     BuildLogs,
+    Transfer(characters_ui::TransferInput),
 }
 pub struct Server {
     settings: Settings,
@@ -65,6 +70,7 @@ pub struct Server {
     next_refresh: Option<Instant>,
     /// An action pressed while a status check was in flight; it runs when the check returns.
     queued: Option<Action>,
+    transfer: characters_ui::Transfer,
 }
 impl Default for Server {
     fn default() -> Self {
@@ -92,6 +98,7 @@ impl Default for Server {
             pulse: 0,
             next_refresh: None,
             queued: None,
+            transfer: characters_ui::Transfer::default(),
         }
     }
 }
@@ -139,7 +146,7 @@ impl Manager {
         if self.server_state.refresh_due() {
             return self.server_update(Input::Run(Action::Status));
         }
-        iced::Task::none()
+        self.transfer_poll()
     }
     pub(super) fn load_server(&mut self) {
         if self.server_state.loaded {
@@ -277,6 +284,7 @@ impl Manager {
                 }
                 state.next_refresh = Some(Instant::now() + std::time::Duration::from_secs(3));
             }
+            Input::Transfer(input) => return self.transfer_update(input),
             Input::BuildLogs => state.build_feedback.toggle(),
             Input::ToggleLogs => state.show_logs = !state.show_logs,
             Input::Connect => {

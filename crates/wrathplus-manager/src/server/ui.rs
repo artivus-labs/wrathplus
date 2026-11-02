@@ -133,6 +133,7 @@ impl Manager {
         );
         column![
             card(status),
+            self.transfer_card(),
             card(settings),
             card(build),
             state.build_feedback_view()
