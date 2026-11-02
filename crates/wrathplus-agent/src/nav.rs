@@ -5,7 +5,8 @@
 //! The mmaps folder comes from `WOW_NAV_MMAPS` (the launcher passes `<server data>/mmaps`).
 //!
 //! Lua: `AgentPath(x, y, z | guid)` → `{complete, length, points = {{x, y, z}, ...}}`;
-//! `AgentMoveTo(x, y, z | guid)` starts walking; `AgentStop()`; `AgentWalk()` → `{status,
+//! `AgentMoveTo(x, y, z | guid)` starts walking; `AgentInteract(guid)` from farther than a few
+//! yards walks the route, then interacts; `AgentStop()`; `AgentWalk()` → `{status,
 //! remaining, goal, note}` with status `idle`, `walking`, `arrived`, `stopped`, `failed` (refused)
 //! or `stuck` (a corner not reached). Each end but `stopped` is put on the event stream as
 //! `AGENT_WALK_DONE` with the status.
@@ -29,6 +30,8 @@ pub(crate) struct Walk {
     /// The corner click-to-move is walking to, and whether it is the second try.
     corner: Option<[f32; 3]>,
     retried: bool,
+    /// Interact with this object on arrival (`AgentInteract` from afar).
+    then_interact: Option<u64>,
 }
 
 pub(crate) struct Mesh {
@@ -48,11 +51,14 @@ pub(crate) struct NavLink {
     /// Where a walk's end is announced (`AGENT_WALK_DONE`), to wake the tiers above.
     events: Arc<crate::events::EventLog>,
     started: std::time::Instant,
+    /// The world's orders, for the interaction a walk ends in.
+    orders: crossbeam_channel::Sender<world::Order>,
 }
 
 pub(crate) fn link(
     events: Arc<crate::events::EventLog>,
     started: std::time::Instant,
+    orders: crossbeam_channel::Sender<world::Order>,
 ) -> (Handles, NavLink) {
     let walk = Arc::new(Mutex::new(Walk {
         status: "idle",
@@ -71,6 +77,7 @@ pub(crate) fn link(
             walk,
             events,
             started,
+            orders,
         },
     )
 }
@@ -103,6 +110,7 @@ pub(crate) fn walk(link: Res<NavLink>, mut auto: AutoMove) {
         walk.stop = false;
         walk.queue.clear();
         walk.corner = None;
+        walk.then_interact = None;
         if walk.status == "walking" {
             walk.status = "stopped";
         }
@@ -126,6 +134,7 @@ pub(crate) fn walk(link: Res<NavLink>, mut auto: AutoMove) {
                 ));
                 walk.queue.clear();
                 walk.corner = None;
+                walk.then_interact = None;
                 announce(&link, "stuck");
                 return;
             }
@@ -143,11 +152,15 @@ pub(crate) fn walk(link: Res<NavLink>, mut auto: AutoMove) {
                 );
                 walk.queue.clear();
                 walk.corner = None;
+                walk.then_interact = None;
                 announce(&link, "failed");
             }
         }
         None => {
             walk.status = "arrived";
+            if let Some(guid) = walk.then_interact.take() {
+                let _ = link.orders.send(world::Order::Interact(guid));
+            }
             announce(&link, "arrived");
         }
     }
@@ -209,6 +222,36 @@ fn route_table(lua: &Lua, route: &Route) -> mlua::Result<Table> {
     Ok(t)
 }
 
+/// Within this many yards `AgentInteract` uses the stock right-click approach, a straight line;
+/// farther, it walks the navmesh route first (a straight line stalls on walls and counters).
+const INTERACT_DIRECT: f32 = 3.0;
+
+/// Start walking a route, and interact with `then_interact` on arrival.
+fn start(lua: &Lua, nav: &Handles, route: &Route, then_interact: Option<u64>) {
+    // Click-to-move carries the walk; an agent client has its own settings.
+    if let Ok(set) = lua.globals().get::<mlua::Function>("SetCVar") {
+        let _ = set.call::<()>(("autoInteract", "1"));
+    }
+    let Ok(mut walk) = nav.walk.lock() else {
+        return;
+    };
+    // The first corner is where we stand.
+    walk.queue = route.points.iter().skip(1).copied().collect();
+    walk.goal = route.points.last().copied();
+    walk.status = "walking";
+    walk.note = if !route.complete {
+        Some("partial route: walking as far as the navmesh reaches".to_string())
+    } else if route.steep {
+        Some("the only route crosses steep ground, which may not be climbable".to_string())
+    } else {
+        None
+    };
+    walk.stop = false;
+    walk.corner = None;
+    walk.retried = false;
+    walk.then_interact = then_interact;
+}
+
 pub(crate) fn install(lua: &Lua, nav: &Handles, world: &world::Handles) -> mlua::Result<()> {
     let g = lua.globals();
     let plan = |args: MultiValue, nav: &Handles, world: &world::Handles| -> Result<Route, String> {
@@ -237,31 +280,33 @@ pub(crate) fn install(lua: &Lua, nav: &Handles, world: &world::Handles) -> mlua:
                 Ok(route) => route,
                 Err(e) => return Ok((None, Some(e))),
             };
-            // Click-to-move carries the walk; an agent client has its own settings.
-            if let Ok(set) = lua.globals().get::<mlua::Function>("SetCVar") {
-                let _ = set.call::<()>(("autoInteract", "1"));
-            }
+            start(lua, &n, &route, None);
             let summary = route_table(lua, &route)?;
-            if let Ok(mut walk) = n.walk.lock() {
-                // The first corner is where we stand.
-                walk.queue = route.points.iter().skip(1).copied().collect();
-                walk.goal = route.points.last().copied();
-                walk.status = "walking";
-                walk.note = if !route.complete {
-                    Some("partial route: walking as far as the navmesh reaches".to_string())
-                } else if route.steep {
-                    Some(
-                        "the only route crosses steep ground, which may not be climbable"
-                            .to_string(),
-                    )
-                } else {
-                    None
-                };
-                walk.stop = false;
-                walk.corner = None;
-                walk.retried = false;
-            }
             Ok((Some(summary), None))
+        })?,
+    )?;
+    // `AgentInteract` (from `world`) walks the navmesh route first unless the object is close.
+    let direct: mlua::Function = g.get("AgentInteract")?;
+    let (n, w) = (nav.clone(), world.clone());
+    g.set(
+        "AgentInteract",
+        lua.create_function(move |lua, guid: String| {
+            let far = world::parse_guid(&guid).filter(|g| {
+                w.snapshot.lock().ok().is_some_and(|s| {
+                    s.objects
+                        .iter()
+                        .any(|o| o.guid == *g && o.distance > INTERACT_DIRECT)
+                })
+            });
+            if let Some(object) = far {
+                let args = MultiValue::from_iter([Value::String(lua.create_string(&guid)?)]);
+                // No navmesh, or no route: fall back to the straight approach.
+                if let Ok(route) = plan(args, &n, &w) {
+                    start(lua, &n, &route, Some(object));
+                    return Ok(true);
+                }
+            }
+            direct.call::<bool>(guid)
         })?,
     )?;
     let n = nav.clone();
@@ -324,6 +369,7 @@ mod tests {
         let (handles, _) = link(
             Arc::new(crate::events::EventLog::new()),
             std::time::Instant::now(),
+            crossbeam_channel::unbounded().0,
         );
         handles.mesh.lock().unwrap().dir = None;
         let me = world::Me {
@@ -334,5 +380,43 @@ mod tests {
         assert!(route_to(&handles, me, [1.0, 1.0, 0.0])
             .unwrap_err()
             .contains("WOW_NAV_MMAPS"));
+    }
+
+    #[test]
+    fn a_far_interaction_without_a_navmesh_falls_back_to_the_straight_approach() {
+        let (world_handles, world_link) = world::link();
+        let (handles, _) = link(
+            Arc::new(crate::events::EventLog::new()),
+            std::time::Instant::now(),
+            world_handles.orders.clone(),
+        );
+        handles.mesh.lock().unwrap().dir = None;
+        {
+            let mut s = world_handles.snapshot.lock().unwrap();
+            s.me = Some(world::Me {
+                pos: [0.0; 3],
+                facing: 0.0,
+                map: 0,
+            });
+            s.objects = vec![world::Seen {
+                guid: 0x10,
+                distance: 24.0,
+                pos: [24.0, 0.0, 0.0],
+                ..Default::default()
+            }];
+        }
+        let lua = Lua::new();
+        world::install(&lua, &world_handles).unwrap();
+        install(&lua, &handles, &world_handles).unwrap();
+        let sent: bool = lua
+            .load("return AgentInteract('0x0000000000000010')")
+            .eval()
+            .unwrap();
+        assert!(sent);
+        assert!(matches!(
+            world_link.orders.try_recv(),
+            Ok(world::Order::Interact(0x10))
+        ));
+        assert_eq!(handles.walk.lock().unwrap().then_interact, None);
     }
 }

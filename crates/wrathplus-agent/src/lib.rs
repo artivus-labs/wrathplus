@@ -95,7 +95,7 @@ impl Plugin for AgentPlugin {
         }
         let (world, world_link) = world::link();
         let started = Instant::now();
-        let (nav, nav_link) = nav::link(events.clone(), started);
+        let (nav, nav_link) = nav::link(events.clone(), started, world.orders.clone());
         app.insert_resource(Link {
             world,
             nav,
