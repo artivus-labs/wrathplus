@@ -10,6 +10,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use tiny_http::{Header, Method, Request as HttpRequest, Response, Server};
 
+/// The read-only web view of what the agent sees (#62).
+const VIEW: &str = include_str!("view.html");
 /// How long an HTTP thread waits for the game loop before answering 504.
 const GAME_TIMEOUT: Duration = Duration::from_secs(60);
 /// The longest an events read may wait for the next event.
@@ -63,11 +65,12 @@ pub(crate) fn start(port: u16, shared: Port) -> Result<std::net::SocketAddr, Str
 }
 
 fn handle(shared: &Port, mut request: HttpRequest) {
-    let response = if !authorized(&request, &shared.token) {
-        json_response(401, &json!({"error": "missing or wrong bearer token"}))
-    } else {
-        route(shared, &mut request)
-    };
+    let response =
+        if !authorized(&request, &shared.token) && !view_with_token(&request, &shared.token) {
+            json_response(401, &json!({"error": "missing or wrong bearer token"}))
+        } else {
+            route(shared, &mut request)
+        };
     let _ = request.respond(response);
 }
 
@@ -77,6 +80,21 @@ fn authorized(request: &HttpRequest, token: &str) -> bool {
         h.field.equiv("Authorization")
             && constant_time_eq(h.value.as_str().as_bytes(), expected.as_bytes())
     })
+}
+
+/// `GET /view?token=…`: a browser cannot set a header from the address bar, so the page alone takes
+/// the token as a query parameter (loopback only, like everything here).
+fn view_with_token(request: &HttpRequest, token: &str) -> bool {
+    let url = request.url();
+    *request.method() == Method::Get
+        && url.split('?').next() == Some("/view")
+        && url
+            .split_once('?')
+            .map(|(_, q)| {
+                q.split('&')
+                    .any(|kv| constant_time_eq(kv.as_bytes(), format!("token={token}").as_bytes()))
+            })
+            .unwrap_or(false)
 }
 
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
@@ -100,6 +118,16 @@ fn route(shared: &Port, request: &mut HttpRequest) -> Reply {
             .map(|(_, v)| v.to_owned())
     };
     match (request.method(), path.as_str()) {
+        (Method::Get, "/view") => Response::from_data(
+            VIEW.replace(
+                "__TOKEN__",
+                // A JS string literal that cannot close the script tag.
+                &json!(shared.token).to_string().replace('<', "\\u003c"),
+            )
+            .into_bytes(),
+        )
+        .with_header(header("Content-Type", "text/html; charset=utf-8"))
+        .with_header(header("Cache-Control", "no-store")),
         (Method::Get, "/status") => ask(shared, |reply| Job::Status { reply }),
         (Method::Post, "/lua") => {
             let mut body = String::new();
@@ -156,7 +184,7 @@ fn route(shared: &Port, request: &mut HttpRequest) -> Reply {
         }
         _ => json_response(
             404,
-            &json!({"error": "unknown route", "routes": ["GET /status", "POST /lua", "GET /screenshot", "GET /events"]}),
+            &json!({"error": "unknown route", "routes": ["GET /status", "POST /lua", "GET /screenshot", "GET /events", "GET /view"]}),
         ),
     }
 }
@@ -288,5 +316,22 @@ mod tests {
         assert_eq!(status, 404);
         assert!(body.contains("POST /lua"));
         assert_eq!(get(address, "/screenshot", TOKEN).0, 500);
+    }
+
+    #[test]
+    fn the_view_takes_its_token_from_the_address_and_carries_it() {
+        let (address, _) = port();
+        let (status, page) = call(
+            address,
+            &format!("GET /view?token={TOKEN} HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n"),
+        );
+        assert_eq!(status, 200);
+        assert!(page.contains(&format!("const TOKEN = \"{TOKEN}\";")));
+        let wrong = "GET /view?token=nope HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n";
+        assert_eq!(call(address, wrong).0, 401);
+        // The address-bar token opens the page only, not the API.
+        let api =
+            format!("GET /status?token={TOKEN} HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
+        assert_eq!(call(address, &api).0, 401);
     }
 }
