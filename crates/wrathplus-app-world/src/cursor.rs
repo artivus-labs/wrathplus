@@ -242,6 +242,11 @@ impl Plugin for CursorPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(crate::app_icon::AppIconPlugin);
         app.init_resource::<DisplayedCursor>();
+        // Headless runs have no window cursor; AppKit stays untouched.
+        #[cfg(target_os = "macos")]
+        if wrathplus_world::headless::active() {
+            return;
+        }
         #[cfg(target_os = "macos")]
         app.add_systems(Startup, macos::setup.after(AssetSet::Open))
             .add_systems(

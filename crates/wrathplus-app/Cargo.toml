@@ -21,6 +21,7 @@ trace_chrome = ["bevy/trace_chrome"]
 test-support = ["wrathplus-app-core/test-support", "wrathplus-app-net/test-support", "wrathplus-app-world/test-support", "wrathplus-app-ui/test-support", "wrathplus-app-tools/test-support"]
 
 [dependencies]
+wrathplus-agent = { path = "../wrathplus-agent" }
 wrathplus-app-core = { path = "../wrathplus-app-core", default-features = false }
 wrathplus-app-net = { path = "../wrathplus-app-net", default-features = false }
 wrathplus-app-world = { path = "../wrathplus-app-world", default-features = false }

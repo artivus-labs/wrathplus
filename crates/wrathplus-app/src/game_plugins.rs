@@ -282,6 +282,8 @@ impl PluginGroup for GamePlugins {
             .add(crate::ui_native_who::UiNativeWhoPlugin)
             .add(UiLayoutPlugin)
             .add(crate::screenshot::ScreenshotPlugin)
+            // The agent control port (#59); inert unless the launch passes `--agent-port`.
+            .add(wrathplus_agent::AgentPlugin)
     }
 }
 

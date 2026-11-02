@@ -14,6 +14,10 @@ pub struct AppIconPlugin;
 
 impl Plugin for AppIconPlugin {
     fn build(&self, app: &mut App) {
+        // No Dock or window icon to set in a headless run, and AppKit must stay untouched.
+        if wrathplus_world::headless::active() {
+            return;
+        }
         app.add_systems(Update, set_app_icon);
     }
 }

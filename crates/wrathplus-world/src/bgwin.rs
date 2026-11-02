@@ -99,7 +99,7 @@ pub struct BgWinPlugin;
 
 impl Plugin for BgWinPlugin {
     fn build(&self, app: &mut App) {
-        if !background_run() {
+        if !background_run() || crate::headless::active() {
             return;
         }
         info!(
