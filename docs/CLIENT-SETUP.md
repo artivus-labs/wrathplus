@@ -138,7 +138,11 @@ Extract your own supported installation outside the checkout. In **Client**, pas
 folder path and select the matching locale (for example `enUS`). Do not select an installer,
 a compressed download, or just `Wow.exe`.
 
-Choosing a folder validates it automatically; for a typed path click **Validate assets**. Canceling\nthe dialog preserves the previous selection. Linux uses the desktop XDG file portal, so install\n`xdg-desktop-portal` and the backend appropriate to your desktop if the chooser is unavailable.\n\nClick **Validate assets**. Validation reads the archive chain, checks build 12340 metadata and
+Choosing a folder validates it automatically; for a typed path click **Validate assets**. Canceling
+the dialog preserves the previous selection. Linux uses the desktop XDG file portal, so install
+`xdg-desktop-portal` and the backend appropriate to your desktop if the chooser is unavailable.
+
+Click **Validate assets**. Validation reads the archive chain, checks build 12340 metadata and
 required client resources. It does not run the original executable or modify your installation.
 Missing, unreadable, truncated or wrong-version data produces an actionable error rather than
 silently marking the game ready. A successful validation is a compatibility smoke check, not a
@@ -167,12 +171,29 @@ target/release/wrathplus-manager --use-existing --data /path/to/Data
 
 After successful setup the Client row shows **Available** and enables **Launch game**. Launch
 starts the managed executable with your chosen read-only assets, locale and server. Enter account
-credentials in the game; Manager does not store passwords. The server must already exist and be
-reachable: server provisioning, migrations, addon installation and combined-start remain previews.
+credentials in the game; Manager does not store passwords. The server must be running and
+reachable: run a local realm from the **Server** page (see below) or enter an existing realm's
+address. Starting server and client with one press is still a preview.
 
 Close the game normally before rebuilding. The Manager tracks its launched process and disables
 rebuild/duplicate launch while it is running. Keep the Manager open while playing in this initial
 setup version; do not run concurrent Managers against the same checkout.
+
+## 4. A local realm (optional)
+
+The **Server** page builds and runs a private AzerothCore 3.3.5a realm with Playerbots, isolated
+from any other server on the machine. It needs **Docker Desktop** (or Docker Engine with Compose
+v2 on Linux); if Docker is missing or stopped the page says so, and **Start Docker** opens it.
+
+1. Choose an AzerothCore source folder (the Playerbot branch) and your extracted server data
+   (`dbc`, `maps`, `vmaps`, optionally `mmaps`; not the client MPQs).
+2. Pick modules under **Addons → Server modules**: the standard ones are one click each.
+3. **Build** the server image. The first build can take over an hour.
+4. **Start**. The realm listens on `127.0.0.1:13724`; **Use this server for the client** points
+   the client at it. Stopping keeps characters, progress and the database.
+
+The recipe behind the page, its isolation and credential handling are in
+[`packaging/server/README.md`](../packaging/server/README.md).
 
 ## Non-interactive setup
 
@@ -304,3 +325,43 @@ Manager does not connect to the realm to certify server modules or exercise addo
 
 These are discovered candidates, not automatically enabled benchmark instrumentation.
 The installed MultiBot is not bundled or copied into this repository.
+
+## Running the game directly
+
+The launcher is optional once the client builds. With Cargo:
+
+```sh
+WOW_DATA=/path/to/WoW/Data cargo run --release -p wrathplus
+```
+
+You need **Rust** (the version pinned in `rust-toolchain.toml`, installed by rustup) **and a C
+compiler**, because the client's Lua is built from source: see the platform sections above.
+
+`WOW_DATA` names the install's `Data` folder; a link to the install named `WoW` at the repo root
+does the same. `enUS` is the default locale; `WOW_LOCALE` selects another. The server defaults to
+`127.0.0.1:3724`, or what the install's `Data/<locale>/realmlist.wtf` sets; change it from the
+Realmlist button on the login screen, or for one session with `--server <host[:port]>`
+(`WOW_HOST`). Credentials go in at the login screen.
+
+Flags skip steps, each only its own: `--account <name>` with `--password-env <VAR>` or
+`--password-stdin` logs in (the password is never an argument), `--realm <name>`,
+`--character <name>` and `--enter-world`. `WOW_USER`, `WOW_PASS`, `WOW_REALM` and `WOW_CHAR`
+(pick and enter) map onto the same steps. See `crates/wrathplus-app/src/launch_plan.rs`.
+
+## Using your own AzerothCore server
+
+Any **AzerothCore WotLK / 3.3.5a (build 12340)** realm works; other expansions and server
+implementations are not tested. The client needs:
+
+- `authserver` and `worldserver` running, with their databases set up
+  ([AzerothCore installation guide](https://www.azerothcore.org/wiki/installation)).
+- The auth port (normally TCP **3724**) reachable, and the world address the realm list
+  advertises (normally TCP **8085**). `--server` selects auth only; it does not fix a wrong
+  address in the server's realm list.
+- An ordinary player account. No GM rights, bot account or LLM key is needed to play.
+
+Playerbots needs the [`Playerbot` branch of mod-playerbots/azerothcore-wotlk](https://github.com/mod-playerbots/azerothcore-wotlk/tree/Playerbot)
+with [mod-playerbots](https://github.com/mod-playerbots/mod-playerbots); it does not build on
+stock AzerothCore. The modules the launcher offers (MultiBot bridge, LLM Chatter, guild house,
+Playerbot guild house, auction house bot) are all optional server additions; on a server you run
+yourself, follow each module's own install, SQL and config steps. Back up databases first.
