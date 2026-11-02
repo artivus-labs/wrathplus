@@ -233,12 +233,6 @@ impl Manager {
                 .width(190)
                 .height(94),
                 nav,
-                iced::widget::Space::new().height(Fill),
-                text("CLIENT SETUP").size(10).color(style::GOLD),
-                text("Managed services on explicit action")
-                    .size(12)
-                    .color(style::MUTED),
-                text("0.1 / prototype").size(11).color(style::MUTED),
             ]
             .spacing(24)
             .height(Fill),
