@@ -179,7 +179,7 @@ pub fn can_auto_interact(enabled: bool, me: Option<&ObjectStore>, player: &Playe
 pub struct AutoMove<'w, 's> {
     pub(crate) approach: ResMut<'w, Approach>,
     follow: ResMut<'w, FollowState>,
-    player: Res<'w, Player>,
+    pub(crate) player: Res<'w, Player>,
     me: Query<'w, 's, (&'static Guid, &'static ObjectStore), With<SelfPlayer>>,
     stand: MessageWriter<'w, super::StandStateRequest>,
     transports: Query<'w, 's, &'static Transform>,

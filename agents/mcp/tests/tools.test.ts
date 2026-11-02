@@ -51,8 +51,8 @@ afterEach(() => {
   reply = () => Response.json({});
 });
 
-async function connect(baseUrl = port.url.href, token = TOKEN): Promise<Client> {
-  const server = createServer(new AgentClient(baseUrl, token));
+async function connect(baseUrl = port.url.href, token = TOKEN, longPoll = true): Promise<Client> {
+  const server = createServer(new AgentClient(baseUrl, token), { longPoll });
   const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
   await server.connect(serverSide);
   const client = new Client({ name: "test", version: "0" });
@@ -85,6 +85,16 @@ describe("tools", () => {
     expect(tools.find((t) => t.name === "lua")?.description).toContain("wp.engine");
     expect(tools.find((t) => t.name === "lua")?.description).toContain("3.3.5");
     expect(tools.find((t) => t.name === "events")?.description).toContain("next");
+  });
+
+  test("without long-polling, events offers no wait_ms and never waits", async () => {
+    const client = await connect(port.url.href, TOKEN, false);
+    const events = (await client.listTools()).tools.find((t) => t.name === "events");
+    expect(Object.keys(events?.inputSchema.properties ?? {})).not.toContain("wait_ms");
+    expect(events?.description).not.toContain("wait_ms");
+    reply = () => Response.json({ events: [], next: 0, missed: 0 });
+    await call("events", { since: 3, wait_ms: 30_000 }, client);
+    expect(seen[0]?.query.wait_ms).toBeUndefined();
   });
 
   test("lua posts the chunk as the raw body with its budget and the bearer token", async () => {

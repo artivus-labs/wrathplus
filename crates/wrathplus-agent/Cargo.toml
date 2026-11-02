@@ -15,6 +15,7 @@ wrathplus-ui = { path = "../wrathplus-ui" }
 wrathplus-world = { path = "../wrathplus-world", default-features = false }
 wrathplus-app-net = { path = "../wrathplus-app-net", default-features = false }
 wrathplus-app-world = { path = "../wrathplus-app-world", default-features = false }
+wrathplus-app-ui = { path = "../wrathplus-app-ui", default-features = false }
 wrathplus-protocol = { path = "../wrathplus-protocol" }
 wrathplus-nav = { path = "../wrathplus-nav" }
 mlua = { version = "0.11", features = ["lua51", "vendored"] }
