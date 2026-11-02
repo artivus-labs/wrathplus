@@ -1,0 +1,39 @@
+# The agent tooling under agents/: the MCP server over the client's control port (agents/mcp).
+name: Agents
+
+on:
+  push:
+    paths:
+      - "agents/**"
+      - ".github/workflows/agents.yml"
+  pull_request:
+    paths:
+      - "agents/**"
+      - ".github/workflows/agents.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agents-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mcp:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: agents/mcp
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+      - name: Install
+        run: bun install --frozen-lockfile
+      - name: Typecheck
+        run: bun run typecheck
+      - name: Test
+        run: bun test

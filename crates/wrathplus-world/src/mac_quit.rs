@@ -12,6 +12,10 @@ pub struct MacQuitPlugin;
 
 impl Plugin for MacQuitPlugin {
     fn build(&self, app: &mut App) {
+        // Headless runs have no NSApplication to re-point (and must not create one).
+        if crate::headless::active() {
+            return;
+        }
         app.add_systems(Startup, route_quit_through_window_close);
     }
 }

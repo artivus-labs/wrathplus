@@ -124,6 +124,7 @@ const PUBLISHED: &[(&str, &str)] = &[
     ("final_pass::FinalPassTarget", "record"),
     // A spell effect's ground decal, spawned by spell_fx.
     ("ground_fx::spawn_ground_fx_decal", "record"),
+    ("headless::active", "record"),
     ("instance_tint::InstanceTintMirrors", "record"),
     ("instance_tint::InstanceTints", "record"),
     // The creature pick volume target/hover tests the cursor against.

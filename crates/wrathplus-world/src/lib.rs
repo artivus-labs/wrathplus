@@ -132,6 +132,7 @@ pub mod log_ring;
 pub mod modern_lighting;
 pub mod modern_shadows;
 
+pub mod headless;
 pub mod light_anim;
 /// macOS `Cmd+Q`, re-pointed at the window close so the shutdown systems run.
 pub mod mac_quit;

@@ -330,7 +330,7 @@ impl Plugin for SoundPlugin {
         app.add_observer(on_cvar);
         // `$WOW_NOSOUND` (a silent unattended run) and `$WOW_CAPTURE` open no device at all, so
         // they never hold the audio hardware against a session someone is listening to.
-        let silent = ["WOW_NOSOUND", "WOW_CAPTURE"]
+        let silent = ["WOW_NOSOUND", "WOW_CAPTURE", "WOW_HEADLESS"]
             .into_iter()
             .find(|v| std::env::var_os(v).is_some());
         // Before the mixer: the probe's taps are main-track effects, fixed when kira builds it.

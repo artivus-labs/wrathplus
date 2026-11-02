@@ -14,6 +14,7 @@
 //! | `--character <name>` | | the selected row on character select |
 //! | `--enter-world` | | the Enter World press, on the selected row |
 //! | `--fill-only` | `WOW_FILL_ONLY=1` | with `--account`/a password, fill the login boxes and stop: the player presses Login |
+//! | `--agent-port <port>` | `WOW_AGENT_PORT` | not a step: opens the agent control port (`WOW_AGENT_TOKEN`) |
 //!
 //! `WOW_CHAR=<name>` is the scripted fast path the probes use: `--character <name> --enter-world`.
 //! So `--account X --password-env Y` logs in and stops at character select.
@@ -36,6 +37,9 @@ pub struct LaunchPlan {
     pub enter_world: bool,
     /// `--fill-only`: the credentials fill the login screen and the login waits for the player.
     pub fill_only: bool,
+    /// `--agent-port <port>`: open the agent control port on 127.0.0.1 (`wrathplus-agent`; the token
+    /// comes from `WOW_AGENT_TOKEN`). `0` lets the system pick a free port, logged at start.
+    pub agent_port: Option<u16>,
 }
 
 impl std::fmt::Debug for LaunchPlan {
@@ -48,6 +52,7 @@ impl std::fmt::Debug for LaunchPlan {
             .field("character", &self.character)
             .field("enter_world", &self.enter_world)
             .field("fill_only", &self.fill_only)
+            .field("agent_port", &self.agent_port)
             .finish()
     }
 }
@@ -88,9 +93,10 @@ impl LaunchPlan {
 pub(crate) const USAGE: &str = "\
 usage: wrathplus [--server <host[:port]>] [--account <name>] \
 [--password-env <VAR> | --password-stdin] [--realm <name>] [--character <name>] [--enter-world] \
-[--fill-only]
+[--fill-only] [--agent-port <port>]
 Each flag skips only its own pre-world step; with none, the login screen shows.
 --fill-only puts the account and password in the login boxes and waits for the Login press.
+--agent-port opens the agent control port on 127.0.0.1 (token in WOW_AGENT_TOKEN).
 The password is never an argument: name an environment variable or pipe it on stdin.";
 
 /// Fold `args` (without the program name) and the environment into a plan. `env` reads a
@@ -110,6 +116,10 @@ pub(crate) fn parse(
         character: None,
         enter_world: false,
         fill_only: env("WOW_FILL_ONLY").as_deref() == Some("1"),
+        agent_port: match given(env("WOW_AGENT_PORT")) {
+            Some(port) => Some(agent_port(&port)?),
+            None => None,
+        },
     };
     if let Some(name) = given(env("WOW_CHAR")) {
         plan.character = Some(name);
@@ -154,6 +164,7 @@ pub(crate) fn parse(
             "--character" => plan.character = Some(value("--character")?),
             "--enter-world" => plan.enter_world = true,
             "--fill-only" => plan.fill_only = true,
+            "--agent-port" => plan.agent_port = Some(agent_port(&value("--agent-port")?)?),
             // Refused without echoing what followed it.
             "--password" | "-p" => {
                 return Err(format!(
@@ -166,6 +177,13 @@ pub(crate) fn parse(
         }
     }
     Ok(plan)
+}
+
+fn agent_port(value: &str) -> Result<u16, String> {
+    value
+        .trim()
+        .parse()
+        .map_err(|_| format!("--agent-port: {value:?} is not a port number\n{USAGE}"))
 }
 
 static PLAN: OnceLock<LaunchPlan> = OnceLock::new();
@@ -334,6 +352,49 @@ mod tests {
         assert!(
             run(&["-psn_0_12345"], &[], None).is_ok(),
             "a Finder launch's argument"
+        );
+    }
+}
+
+#[cfg(test)]
+mod agent_port_tests {
+    use super::*;
+
+    fn run(args: &[&str], env: &[(&str, &str)]) -> Result<LaunchPlan, String> {
+        parse(
+            args.iter().map(|s| s.to_string()),
+            |k| {
+                env.iter()
+                    .find(|(n, _)| *n == k)
+                    .map(|(_, v)| v.to_string())
+            },
+            || None,
+        )
+    }
+
+    #[test]
+    fn the_agent_port_comes_from_the_flag_or_the_environment() {
+        assert_eq!(run(&[], &[]).unwrap().agent_port, None);
+        assert_eq!(
+            run(&["--agent-port", "17950"], &[]).unwrap().agent_port,
+            Some(17950)
+        );
+        assert_eq!(
+            run(&[], &[("WOW_AGENT_PORT", "0")]).unwrap().agent_port,
+            Some(0)
+        );
+        assert_eq!(
+            run(&["--agent-port=1"], &[("WOW_AGENT_PORT", "2")])
+                .unwrap()
+                .agent_port,
+            Some(1),
+            "the flag overrides the environment"
+        );
+        assert!(run(&["--agent-port", "lots"], &[]).is_err());
+        assert!(run(&[], &[("WOW_AGENT_PORT", "70000")]).is_err());
+        assert!(
+            !run(&["--agent-port", "1"], &[]).unwrap().logs_in(),
+            "not a login step"
         );
     }
 }

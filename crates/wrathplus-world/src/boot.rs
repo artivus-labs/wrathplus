@@ -8,9 +8,14 @@ use crate::thread_qos;
 
 /// `DefaultPlugins` with benilla's engine tuning applied, around the caller's primary window.
 pub fn tuned_default_plugins(primary_window: Window) -> PluginGroupBuilder {
-    DefaultPlugins
+    let headless = crate::headless::active();
+    let group = DefaultPlugins
         .set(WindowPlugin {
-            primary_window: Some(primary_window),
+            primary_window: Some(if headless {
+                crate::headless::window(primary_window)
+            } else {
+                primary_window
+            }),
             ..default()
         })
         // Deliberately no `AssetPlugin::file_path`: a baked source path resolves only on the build
@@ -68,5 +73,13 @@ pub fn tuned_default_plugins(primary_window: Window) -> PluginGroupBuilder {
         // No bevy AA: no Fxaa/TAA/SMAA/CAS component anywhere (MSAA is core render, unaffected).
         .disable::<bevy::anti_alias::AntiAliasPlugin>()
         // No gamepad input; 1.12's bindings are keyboard/mouse.
-        .disable::<bevy::gilrs::GilrsPlugin>()
+        .disable::<bevy::gilrs::GilrsPlugin>();
+    // Headless (`WOW_HEADLESS=1`): no winit, so no OS window; frames go to an image on a timer.
+    if headless {
+        group
+            .disable::<bevy::winit::WinitPlugin>()
+            .add(crate::headless::HeadlessPlugin)
+    } else {
+        group
+    }
 }

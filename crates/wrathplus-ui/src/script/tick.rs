@@ -35,6 +35,7 @@ impl UiScript {
 
 /// [`UiScript::fire_event`] for a caller holding `&Lua`, such as a Lua binding.
 pub(crate) fn fire_event_into(lua: &Lua, event: &str, args: Vec<ScriptValue>) {
+    super::agent::tap_event(lua, event, &args);
     super::wrath_addon_api::on_event(lua, event);
     let model_mut = || lua.app_data_mut::<Model>().expect("model app_data set");
     {

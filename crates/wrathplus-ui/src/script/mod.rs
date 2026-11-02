@@ -99,6 +99,8 @@ pub(crate) use editbox::{adopt_text_region, editbox_text_region_wrapper};
 pub(crate) mod addon;
 mod addon_enable;
 pub mod addon_gate;
+mod agent;
+pub use agent::TappedEvents;
 mod client;
 mod clock;
 mod cvars;

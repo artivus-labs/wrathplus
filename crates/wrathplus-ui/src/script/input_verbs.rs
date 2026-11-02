@@ -137,7 +137,7 @@ impl UiScript {
 /// The hardware-event gate `0x494a50(0)`: inside a binding body.
 pub(super) fn in_binding(lua: &Lua) -> bool {
     let model = lua.app_data_ref::<Model>().expect("model app_data");
-    model.input.binding_depth > 0
+    model.input.binding_depth > 0 || super::agent::input_open(lua)
 }
 
 pub(super) fn push(lua: &Lua, input: BindingInput) {
