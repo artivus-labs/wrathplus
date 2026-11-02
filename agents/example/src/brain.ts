@@ -11,6 +11,7 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import type { Policy } from "./policy.ts";
+import { claudeEnv } from "./env.ts";
 import { NOTE_TOOLS, notesServer, type Notes } from "./notes.ts";
 import { sleepGuard, WAKE_TOOLS, wakeServer, type Waker } from "./wake.ts";
 import { SYSTEM_PROMPT } from "./prompt.ts";
@@ -97,6 +98,12 @@ export function think(inbox: Inbox, options: BrainOptions): AsyncIterable<SDKMes
       // Compaction well inside the window: recall degrades long before the window fills.
       settings: { autoCompactEnabled: true, autoCompactWindow: options.compactAt ?? 400_000 },
       permissionMode: "dontAsk",
+      // The Claude Code login, not a stray ANTHROPIC_API_KEY from the shell (`env.ts`).
+      env: claudeEnv(),
+      // Isolated from this machine's Claude Code setup: no CLAUDE.md/AGENTS.md from the checkout, no
+      // user settings, hooks or MCP servers. It works in its own notes folder.
+      settingSources: [],
+      ...(options.notes ? { cwd: options.notes.home } : {}),
       ...(options.waker ? { hooks: { PreToolUse: [{ hooks: [sleepGuard(options.waker)] }] } } : {}),
       mcpServers: {
         wrathplus: {

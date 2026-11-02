@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Inbox, summarize, think } from "./brain.ts";
 import { Jev } from "./jev.ts";
+import { claudeAuth, loadEnv } from "./env.ts";
 import { Notes } from "./notes.ts";
 import { Policy } from "./policy.ts";
 import { kickoff } from "./prompt.ts";
@@ -39,22 +40,25 @@ export function configFromEnv(argv: string[], env: Record<string, string | undef
     url: url.replace(/\/+$/, ""),
     token,
     goal,
-    model: env.WRATHPLUS_AGENT_MODEL ?? "claude-sonnet-5-5",
+    model: env.WRATHPLUS_AGENT_MODEL ?? "claude-haiku-5-5",
     checkInSeconds: Number(env.WRATHPLUS_AGENT_CHECKIN_SECONDS ?? 0),
     ...(maxTurns && maxTurns > 0 ? { maxTurns } : {}),
   };
 }
 
-async function main(): Promise<void> {
-  const config = configFromEnv(process.argv.slice(2), process.env);
-  const abortController = new AbortController();
-  process.on("SIGINT", () => abortController.abort());
+export interface RunOptions {
+  /** Where the agent keeps its notes (memory, to-dos, session logs). */
+  notesHome: string;
+  abortController: AbortController;
+  /** Read operator notes from stdin (one agent per terminal). */
+  stdin?: boolean;
+}
+
+/** Run the planner (and the fast tier, with a TypeSafe key) against a client until aborted. */
+export async function runAgent(config: Config, options: RunOptions): Promise<void> {
+  const { abortController } = options;
   const inbox = new Inbox();
-  // The agent's own notes: memory, to-dos and its session log, kept per control port.
-  const notes = new Notes(
-    process.env.WRATHPLUS_AGENT_HOME ??
-      join(homedir(), ".local/share/wrathplus-agents", `agent-${new URL(config.url).port || "default"}`),
-  );
+  const notes = new Notes(options.notesHome);
   // Everything that reaches the planner also goes in the session log, with the character's
   // status at that moment, so a wake-up needs no calls to see where things stand.
   const tell = (kind: string, text: string) => {
@@ -95,14 +99,16 @@ async function main(): Promise<void> {
     },
   });
   // Operator notes from stdin.
-  void (async () => {
-    for await (const line of console) {
-      if (line.trim()) tell("operator", `Note from the operator: ${line.trim()}`);
-    }
-  })();
+  if (options.stdin ?? true) {
+    void (async () => {
+      for await (const line of console) {
+        if (line.trim()) tell("operator", `Note from the operator: ${line.trim()}`);
+      }
+    })();
+  }
   const mcpEntry = fileURLToPath(new URL("../../mcp/src/index.ts", import.meta.url));
   let checkIn: ReturnType<typeof setTimeout> | undefined;
-  console.log(`WrathPlus example agent · ${config.model} · ${config.url}\nGoal: ${config.goal}\n`);
+  console.log(`WrathPlus example agent · ${config.model} (${claudeAuth()}) · ${config.url}\nGoal: ${config.goal}\n`);
   console.log(policy ? "Fast tier: Jev on" : "Fast tier: off (no TYPESAFE_API_KEY)");
   console.log(`Notes: ${notes.home}`);
   const compactAt = Number(process.env.WRATHPLUS_AGENT_COMPACT_AT ?? 400_000);
@@ -163,6 +169,20 @@ async function main(): Promise<void> {
       self = /\\"name\\":\s*\\"([A-Z][a-z]+)\\"/.exec(text)?.[1];
     }
   }
+}
+
+/** By hand, against a client someone else started: the control port and token from the env. */
+async function main(): Promise<void> {
+  loadEnv();
+  const config = configFromEnv(process.argv.slice(2), process.env);
+  const abortController = new AbortController();
+  process.on("SIGINT", () => abortController.abort());
+  await runAgent(config, {
+    abortController,
+    notesHome:
+      process.env.WRATHPLUS_AGENT_HOME ??
+      join(homedir(), ".local/share/wrathplus-agents", `agent-${new URL(config.url).port || "default"}`),
+  });
 }
 
 if (import.meta.main) {

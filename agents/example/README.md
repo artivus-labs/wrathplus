@@ -2,7 +2,7 @@
 
 A WrathPlus agent in three tiers: **Claude plans, Jev decides, Lua plays.** It runs on the
 [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk), so it uses this machine's Claude
-Code login (a Claude subscription works; no API key), with **Claude Sonnet 5.5** by default.
+Code login (a Claude subscription works; no API key), with **Claude Haiku 5.5** by default.
 
 - **The planner** has exactly the six tools of the client's MCP server (`../mcp`): `lua`,
   `screenshot`, `events`, `status`, `modules`, `save_module`. It has no files, shell or web.
@@ -32,28 +32,48 @@ Code login (a Claude subscription works; no API key), with **Claude Sonnet 5.5**
 
 ## Run it
 
-Start an agent client from the launcher's **Agents** page (or by hand with `--agent-port` and
-`WOW_AGENT_TOKEN`), then:
+Each agent is one of the Manager's agents: its own realm account, headless client and control
+port, shared with the Manager's **Agents** page. The managed realm must be running.
 
 ```sh
 cd agents/mcp && bun install && cd ../example && bun install
-WRATHPLUS_AGENT_URL=http://127.0.0.1:17950 WRATHPLUS_AGENT_TOKEN=… \
-  bun run src/index.ts "Reach level 5 in Northshire, doing the quests as you go."
+cp ../.env.example ../.env          # then fill in TYPESAFE_API_KEY (for Jev)
+
+bun run agent add Scout             # a realm account (AGENTSCOUT), control port and token
+bun run agent run Scout --character Scoutly "Reach level 5 in Northshire."
+bun run agent list                  # every agent, its client and whether a planner drives it
+bun run agent dashboard             # http://127.0.0.1:17900: every running agent on one page
 ```
 
-| Env | Default | |
-|---|---|---|
-| `WRATHPLUS_AGENT_URL`, `WRATHPLUS_AGENT_TOKEN` | required | the client's control port and token |
-| `WRATHPLUS_AGENT_MODEL` | `claude-sonnet-5-5` | any Claude model id |
-| `WRATHPLUS_AGENT_CHECKIN_SECONDS` | `0` (off) | idle check-in |
-| `TYPESAFE_API_KEY` | none | turns on the fast tier (Jev) |
-| `WRATHPLUS_JEV_MODEL`, `WRATHPLUS_JEV_HEARTBEAT_MS` | `jev-latest`, `20000` | the fast tier's model and safety heartbeat |
-| `WRATHPLUS_AGENT_MAX_TURNS` | none | smoke runs only: stop after the first turn, at most this many tool turns |
+- **`run`** starts the agent's headless client (logged in, `--character` entered; without it the
+  planner picks or creates one at character select), waits for it, runs the planner and Jev, and
+  stops the client when you stop the agent (Ctrl-C). A client already started from the Manager is
+  driven as it is. Lines typed into the terminal reach the planner as operator notes.
+- **Several at once:** one `run` per terminal; each agent has its own account and port.
+- **Watching:** each client serves a live view (`run` prints its address); the dashboard shows
+  all of them side by side, with what each planner last said and did.
+- **The planner model:** `--model haiku` (Claude Haiku 5.5, the default) or `--model sonnet` or
+  any model id. It runs on this machine's Claude Code login (a Claude subscription) and ignores an
+  `ANTHROPIC_API_KEY` in the shell; put `WRATHPLUS_ANTHROPIC_API_KEY` in `agents/.env` to bill an
+  API key instead. It is isolated from your own Claude Code setup (no CLAUDE.md, settings or MCP
+  servers) and works in its own notes folder.
+- **State** lives with the Manager's (`<checkout>/wrathplus-config/agents/<ACCOUNT>/`): the
+  secrets (0600), the client's home and log, and the agent's notes (memory, to-dos, sessions).
 
-Watch it at the client's web view (`/view?token=…`, or **Watch** on the Agents page).
+| Env (shell or `agents/.env`) | Default | |
+|---|---|---|
+| `TYPESAFE_API_KEY` | none | turns on the fast tier (Jev) |
+| `WRATHPLUS_ANTHROPIC_API_KEY` | none | bill this key instead of the Claude Code login |
+| `WRATHPLUS_CLIENT` | the Manager's build | the client binary |
+| `WOW_NAV_MMAPS` | the managed server's `mmaps` | the navmesh for `AgentMoveTo` |
+| `WRATHPLUS_AGENT_MODEL` | `claude-haiku-5-5` | when `--model` is not given |
+| `WRATHPLUS_AGENT_CHECKIN_SECONDS` | `0` (off) | idle check-in |
+| `WRATHPLUS_JEV_MODEL`, `WRATHPLUS_JEV_HEARTBEAT_MS` | `jev-latest`, `20000` | the fast tier's model and safety heartbeat |
+
+Against a client you started some other way, `src/index.ts` takes the control port from
+`WRATHPLUS_AGENT_URL` and `WRATHPLUS_AGENT_TOKEN` (and `WRATHPLUS_AGENT_MAX_TURNS` for smoke runs).
 
 ## Not yet
 
-- **Pathfinding** (#68): click-to-move walks in a straight line, so indoor targets defeat it.
 - **Other providers** (OpenAI-compatible, pi agent, Prime Intellect) after this works well.
 - **WrathBench run records** (#66).

@@ -310,3 +310,10 @@ pub(crate) fn admin_command(
 ) -> Result<String, String> {
     characters::soap(config, command)
 }
+
+/// The managed realm's navmesh (`<server data>/mmaps`), for agent clients' `AgentMoveTo`.
+pub(crate) fn mmaps(config: &crate::setup::Config) -> Option<std::path::PathBuf> {
+    let data = settings::Settings::load(config).ok()?.data;
+    let dir = data.join("mmaps");
+    (!data.as_os_str().is_empty() && dir.is_dir()).then_some(dir)
+}
