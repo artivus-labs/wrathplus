@@ -14,7 +14,10 @@ managed_core_config() {
         -e '/^[[:space:]]*TempDir[[:space:]]*=/d' \
         -e '/^[[:space:]]*SourceDirectory[[:space:]]*=/d' \
         -e '/^[[:space:]]*DataDir[[:space:]]*=/d' \
-        -e '/^[[:space:]]*Console\.Enable[[:space:]]*=/d'
+        -e '/^[[:space:]]*Console\.Enable[[:space:]]*=/d' \
+        -e '/^[[:space:]]*SOAP\.Enabled[[:space:]]*=/d' \
+        -e '/^[[:space:]]*SOAP\.IP[[:space:]]*=/d' \
+        -e '/^[[:space:]]*SOAP\.Port[[:space:]]*=/d'
     cat <<EOF
 
 LoginDatabaseInfo = "mysql;3306;acore;$password;acore_auth"
@@ -25,6 +28,9 @@ TempDir = "/state/temp"
 SourceDirectory = "/azerothcore"
 DataDir = "/server-data"
 Console.Enable = 0
+SOAP.Enabled = 1
+SOAP.IP = "0.0.0.0"
+SOAP.Port = 7878
 EOF
 }
 managed_playerbots_config() {

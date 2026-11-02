@@ -19,6 +19,9 @@ TempDir = "/state/temp"
 SourceDirectory = "/azerothcore"
 DataDir = "/server-data"
 Console.Enable = 0
+SOAP.Enabled = 1
+SOAP.IP = "0.0.0.0"
+SOAP.Port = 7878
 EOF
 check_policy() {
     helper=$1

@@ -108,7 +108,8 @@ services:
     <<: *server
     command: [worldserver]
     tmpfs: ["/state:uid=10001,gid=10001,mode=0700", "/opt/acore/etc/modules:uid=10001,gid=10001,mode=0700"]
-    ports: ["127.0.0.1:18085:8085"]
+    # 17878: SOAP for the Manager's character export/import, admin-only and on loopback only.
+    ports: ["127.0.0.1:18085:8085", "127.0.0.1:17878:7878"]
     stop_grace_period: 60s
     healthcheck:
       test: [CMD-SHELL, 'bash -c "echo > /dev/tcp/127.0.0.1/8085"']
