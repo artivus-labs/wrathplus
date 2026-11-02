@@ -224,8 +224,8 @@ impl AutoMove<'_, '_> {
         self.arm(Toward::Object { verb, guid }, at, stop)
     }
 
-    /// `0x6102b0`, the right-click on the ground (`0x5e0378`).
-    pub(crate) fn walk_to_ground(&mut self, at: Vec3) -> bool {
+    /// `0x6102b0`, the right-click on the ground (`0x5e0378`). Public for the agent port's path walker.
+    pub fn walk_to_ground(&mut self, at: Vec3) -> bool {
         if !self.can_auto_interact() {
             return false;
         }

@@ -3,7 +3,7 @@
 // The realtime tier (the agent's own wp.engine modules) keeps running underneath; the slow tier
 // (the planner) sets the plan and the intents and is told when Jev thinks the plan has stalled.
 
-import { choice, chosen, Jev, noul, yes } from "./jev.ts";
+import { choice, chosen, Jev, noul, yes, type Question } from "./jev.ts";
 
 /** One thing the fast loop may do: a name, when it applies (Jev reads this), and its Lua. */
 export interface Intent {
@@ -12,6 +12,22 @@ export interface Intent {
   lua: string;
   /** Seconds before the same intent may run again (default 3). */
   every?: number;
+}
+
+/** An intent the agent's own Lua registered (`Agent.intent`), as `Agent.available()` lists it. */
+export interface Registered {
+  name: string;
+  when: string;
+  every?: number;
+}
+
+/** A choice the realtime tier is waiting on (`Agent.decide`), as `Agent.questions()` lists it. */
+export interface OpenDecision {
+  id: number;
+  name: string;
+  question: string;
+  options: Record<string, string>;
+  context?: unknown;
 }
 
 export interface Decision {
@@ -52,6 +68,7 @@ return { level = UnitLevel("player"), health = V.health("player"), power = V.pow
   gossip_open = GossipFrame and GossipFrame:IsShown() and true or false,
   quest_window_open = QuestFrame and QuestFrame:IsShown() and true or false,
   loot_open = LootFrame and LootFrame:IsShown() and true or false,
+  registered = Agent and Agent.available() or {}, decisions = Agent and Agent.questions() or {},
   nearby = near }`;
 
 export interface PolicyOptions {
@@ -88,11 +105,17 @@ export class Policy {
     if (this.events.length > 10) this.events.shift();
   }
 
-  /** The question Jev answers each tick. */
-  questions() {
+  /**
+   * The questions Jev answers each tick: which intent to act on (the planner's, those the agent's
+   * own Lua registered with `Agent.intent`, or wait), whether the plan has stalled, and one
+   * question per open `Agent.decide` from the realtime tier.
+   */
+  questions(registered: Registered[] = [], decisions: OpenDecision[] = []) {
     const criteria: Record<string, string> = {};
-    for (const intent of [...this.intents, WAIT]) criteria[intent.name] = intent.when;
-    return {
+    for (const intent of this.intents) criteria[intent.name] = intent.when;
+    for (const intent of registered) criteria[intent.name] ??= intent.when;
+    criteria[WAIT.name] = WAIT.when;
+    const questions: Record<string, Question> = {
       next: choice(
         "A game-playing agent is following the plan in state.plan. Given the game state, which intent should it act on right now?",
         criteria,
@@ -101,24 +124,42 @@ export class Policy {
         "Has the plan stalled: is the character failing to make progress on it, or does the situation no longer fit the plan?",
       ),
     };
+    for (const d of decisions) {
+      questions[`decision_${d.id}`] = choice(
+        `${d.question} (A decision the agent's own logic is waiting on; its context is in state.game.decisions, id ${d.id}.)`,
+        d.options,
+      );
+    }
+    return questions;
   }
 
   async tick(): Promise<Decision | null> {
-    if (!this.plan || this.#busy) return null;
+    if (this.#busy) return null;
     this.#busy = true;
     try {
       const state = await this.#lua(STATE_LUA);
       if (!state.ok) return null;
+      const game = (state.values[0] ?? {}) as { registered?: Registered[]; decisions?: OpenDecision[] };
+      const registered = Array.isArray(game.registered) ? game.registered : [];
+      const decisions = Array.isArray(game.decisions) ? game.decisions : [];
+      // Nothing to choose among yet: no plan, no registered intents, no open decisions.
+      if (!this.plan && !registered.length && !decisions.length) return null;
       const response = await this.options.jev.ask(
         {
-          plan: this.plan,
+          plan: this.plan || "No plan from the planner yet: follow the agent's own registered intents.",
           // Plain JSON from the client's Lua.
-          game: state.values[0] as never,
+          game: game as never,
           recent_events: this.events,
           recent_decisions: this.decisions.slice(-5).map((d) => d.choice),
         },
-        this.questions(),
+        this.questions(registered, decisions),
       );
+      for (const d of decisions) {
+        const answer = response.answers[`decision_${d.id}`];
+        if (answer?.type !== "choice") continue;
+        const result = await this.#lua(`return Agent.resolve(${d.id}, ${JSON.stringify(answer.choice)})`);
+        this.options.log?.(`[jev] decision ${d.name}: ${answer.choice} (${answer.confidence.toFixed(2)})${result.ok ? "" : ` → error: ${result.error}`}`);
+      }
       const next = chosen(response.answers.next);
       const name = next.choice;
       const decision: Decision = {
@@ -128,10 +169,12 @@ export class Policy {
         ran: false,
         stuck: yes(response.answers.stuck),
       };
-      const intent = this.intents.find((i) => i.name === name);
+      const planned = this.intents.find((i) => i.name === name);
+      const own = registered.find((i) => i.name === name);
       const last = this.#lastRun.get(name) ?? 0;
-      if (intent && Date.now() - last >= (intent.every ?? 3) * 1000) {
-        const result = await this.#lua(intent.lua);
+      const every = planned?.every ?? own?.every ?? 3;
+      if ((planned || own) && Date.now() - last >= every * 1000) {
+        const result = await this.#lua(planned ? planned.lua : `return Agent.run(${JSON.stringify(name)})`);
         decision.ran = true;
         decision.result = result.ok ? JSON.stringify(result.values ?? []) : `error: ${result.error}`;
         this.#lastRun.set(name, Date.now());

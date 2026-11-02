@@ -52,3 +52,43 @@ test("Jev errors carry the status and body", async () => {
   await expect(jev.ask({}, {})).rejects.toThrow("Jev HTTP 403");
   server.stop(true);
 });
+
+test("intents and decisions registered by the agent's own Lua are offered to Jev and carried out", async () => {
+  const lua: string[] = [];
+  let asked: { questions: Record<string, { criteria?: Record<string, string> }> } | undefined;
+  const server = Bun.serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    async fetch(request) {
+      const url = new URL(request.url);
+      if (url.pathname === "/lua") {
+        const code = await request.text();
+        lua.push(code);
+        const state = {
+          registered: [{ name: "pull_wolf", when: "A wolf is near and we are healthy." }],
+          decisions: [{ id: 7, name: "flee_or_fight", question: "Fight on?", options: { fight: "Stay", flee: "Run" } }],
+        };
+        return Response.json({ ok: true, values: code.includes("AgentNearby") ? [state] : [true] });
+      }
+      asked = (await request.json()) as typeof asked;
+      return Response.json({
+        model: "jev-test",
+        answers: {
+          next: { type: "choice", choice: "pull_wolf", confidence: 0.8, probabilities: {} },
+          stuck: { type: "noul", noul: 0.1 },
+          decision_7: { type: "choice", choice: "flee", confidence: 0.7, probabilities: {} },
+        },
+      });
+    },
+  });
+  const base = server.url.href.replace(/\/$/, "");
+  const policy = new Policy({ url: base, token: "t", jev: new Jev("k", "jev-test", base), onStalled: () => {} });
+  const decision = await policy.tick();
+  server.stop(true);
+  // No set_plan at all: the registered intent alone is enough to ask.
+  expect(Object.keys(asked?.questions.next?.criteria ?? {})).toEqual(["pull_wolf", "wait"]);
+  expect(asked?.questions.decision_7?.criteria).toEqual({ fight: "Stay", flee: "Run" });
+  expect(lua).toContain('return Agent.resolve(7, "flee")');
+  expect(lua).toContain('return Agent.run("pull_wolf")');
+  expect(decision?.ran).toBe(true);
+});
