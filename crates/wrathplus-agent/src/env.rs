@@ -256,6 +256,25 @@ mod tests {
                 .unwrap(),
             "timed out"
         );
+        // Ends are announced for activities and failures, not for an instant intent that ran.
+        let said: String = script
+            .eval(
+                r#"
+                said = {}
+                AgentSignal = function(name, intent, ok) said[#said + 1] = intent .. "=" .. tostring(ok) end
+                Agent.intent("instant", { when = "z", run = function() end })
+                Agent.intent("broken", { when = "z", run = function() error("no") end })
+                Agent.run("instant")
+                Agent.run("broken")
+                Agent.run("walk_there")
+                return table.concat(said, " ")
+                "#,
+            )
+            .unwrap();
+        assert_eq!(said, "broken=false");
+        script.tick(0.3);
+        let said: String = script.eval("return table.concat(said, ' ')").unwrap();
+        assert_eq!(said, "broken=false walk_there=true");
     }
 
     #[test]

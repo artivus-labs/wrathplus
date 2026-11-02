@@ -8,7 +8,8 @@
 --     done = function() return Hunt.finished, Hunt.ok end,       -- optional: when it has ended
 --     timeout = 120,                                             -- optional: give up after (s)
 --   })
--- Choosing an intent starts an *activity*. Without `done` it ends as soon as `run` returns. With
+-- Choosing an intent starts an *activity*. Without `done` it ends, unannounced, as soon as `run`
+-- returns (a failed `run` is still announced). With
 -- `done`, it runs until `done()` returns true (or `timeout` passes), and the fast tier stays
 -- asleep meanwhile: realtime Lua carries it. Its end is signalled (AGENT_INTENT_DONE), which wakes
 -- the fast tier for the next choice. Registering again replaces; Agent.remove(name) drops one.
@@ -66,12 +67,14 @@ function A.available()
   return out
 end
 
+-- An activity's end is signalled; an instant intent (no `done`) that ran cleanly is not, or the
+-- fast tier, woken by its "end", would choose it again at once in a loop.
 local function finish(ok, why)
   local c = A.current
   if not c then return end
   A.current = nil
   note((ok and "done " or "ended ") .. c.name .. (why and (": " .. why) or ""))
-  A.signal("INTENT_DONE", c.name, ok and true or false, why)
+  if c.spec.done or not ok then A.signal("INTENT_DONE", c.name, ok and true or false, why) end
 end
 
 -- Start an intent's activity (called by the fast tier). Returns ok and run's result or error.
