@@ -17,6 +17,8 @@ group("events a player would notice", () => {
       event(7, "CHAT_MSG_SAY", ["hello", "Agentone"]),
       event(8, "UI_ERROR_MESSAGE", ["Out of range."]),
       event(9, "UI_ERROR_MESSAGE", ["Out of range."]),
+      event(10, "AGENT_WALK_DONE", ["arrived"]),
+      event(11, "AGENT_WALK_DONE", ["stuck"]),
     ], "Agentone");
     expect(lines).toEqual([
       "You died.",
@@ -24,6 +26,7 @@ group("events a player would notice", () => {
       "Wifey invites you to a party (AcceptGroup() or DeclineGroup()).",
       "Your Lua failed: module x not found (in: require('x'))",
       "Game error: Out of range.",
+      "Your walk ended stuck: AgentWalk().note says why; route around it or pick another way.",
     ]);
   });
 

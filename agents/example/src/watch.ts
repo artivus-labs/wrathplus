@@ -24,6 +24,11 @@ const NOTABLE: Record<string, (args: unknown[]) => string | null> = {
   QUEST_COMPLETE: () => "A quest turn-in window is open.",
   UI_ERROR_MESSAGE: (a) => `Game error: ${a[0]}`,
   AGENT_LUA: (a) => (a[1] === false ? `Your Lua failed: ${a[2]} (in: ${String(a[0]).slice(0, 120)})` : null),
+  AGENT_WALK_DONE: (a) =>
+    a[0] === "stuck" || a[0] === "failed"
+      ? `Your walk ended ${a[0]}: AgentWalk().note says why; route around it or pick another way.`
+      : null,
+  PLAYER_CAMPING: () => "The client is logging out (20 s): CancelLogout() to stay in the world.",
 };
 
 /** What wakes the planner: things only it should handle. The rest (combat, loot, quest windows,
@@ -36,6 +41,8 @@ export const PLANNER_EVENTS = new Set([
   "PARTY_INVITE_REQUEST",
   "TRADE_SHOW",
   "DUEL_REQUESTED",
+  "AGENT_WALK_DONE",
+  "PLAYER_CAMPING",
 ]);
 
 /** Turn a batch of raw events into lines, skipping the ones a player wouldn't notice. */

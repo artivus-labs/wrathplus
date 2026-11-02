@@ -19,7 +19,8 @@
 //! binding), so an agent's scripts can walk. Everything else an agent does goes through the same
 //! Lua API the stock interface uses.
 //!
-//! Each Lua call is also logged on the event stream as `AGENT_LUA` (code, ok, error), for watchers.
+//! Each Lua call is also logged on the event stream as `AGENT_LUA` (code, ok, error), for watchers,
+//! and counts as input for the idle handler, so a driven client is not seated, AFK or logged out.
 //!
 //! A headless client (`WOW_HEADLESS=1`, `wrathplus_world::headless`) answers screenshots from its
 //! offscreen frame.
@@ -191,6 +192,8 @@ fn serve_jobs(
     script: Option<NonSend<UiScript>>,
     state: Option<Res<State<ClientState>>>,
     headless: Option<Res<wrathplus_world::headless::HeadlessFrame>>,
+    time: Res<Time<bevy::time::Real>>,
+    mut idle: Option<ResMut<wrathplus_app_ui::ui_chat::idle::LastInput>>,
 ) {
     for job in link.queue.try_iter() {
         match job {
@@ -199,6 +202,11 @@ fn serve_jobs(
                 budget,
                 reply,
             } => {
+                // An agent's Lua is its input: without this the stock idle handler sits the
+                // player and marks them AFK at 5 minutes, and logs out at 30 (#82).
+                if let Some(idle) = idle.as_mut() {
+                    idle.stamp_present(time.elapsed());
+                }
                 let answer = match &script {
                     Some(script) => lua::run(script, &code, budget.unwrap_or(DEFAULT_BUDGET)),
                     None => {

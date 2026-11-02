@@ -60,6 +60,8 @@ pub struct Route {
     pub points: Vec<[f32; 3]>,
     /// False when the end could not be reached and the route stops at the closest point.
     pub complete: bool,
+    /// The route crosses steep ground (the extractor's 50-60 degree band): no gentler one reached.
+    pub steep: bool,
 }
 
 /// The server grid cell a WoW coordinate falls in (`MMMXXYY.mmtile`'s XX for x, YY for y).
@@ -124,15 +126,8 @@ impl NavMesh {
         let shim =
             NonNull::new(unsafe { nav_create(params.as_ptr(), params.len() as c_int, MAX_NODES) })
                 .ok_or_else(|| format!("{}: not a navmesh header", params_path.display()))?;
-        // A player's walk: ground, steep ground and water, never magma or slime; water is slow.
-        unsafe {
-            nav_set_filter(
-                shim.as_ptr(),
-                NAV_GROUND | NAV_GROUND_STEEP | NAV_WATER,
-                NAV_MAGMA | NAV_SLIME,
-            );
-            nav_set_area_cost(shim.as_ptr(), NAV_WATER as c_int, 4.0);
-        }
+        // Water at mod-playerbots' bot cost (`PathGenerator::CreateFilter`): swim only when needed.
+        unsafe { nav_set_area_cost(shim.as_ptr(), NAV_WATER as c_int, 20.0) };
         Ok(NavMesh {
             shim,
             dir: dir.to_path_buf(),
@@ -176,6 +171,10 @@ impl NavMesh {
 
     /// A walkable route from `from` to `to` (WoW coordinates), as Detour's straight path: the
     /// corners to walk through. Loads the tiles spanning both ends, plus a cell of margin.
+    ///
+    /// Like mod-playerbots' bots, it keeps off steep ground, which a walking player slides back
+    /// down; the server's filter for real players allows it. Only when no gentle route reaches the
+    /// end (or the walk starts on a steep face) does it take one over steep ground.
     pub fn route(&mut self, from: [f32; 3], to: [f32; 3]) -> Result<Route, String> {
         let (ax, ay, bx, by) = (grid(from[0]), grid(from[1]), grid(to[0]), grid(to[1]));
         for gx in ax.min(bx) - 1..=ax.max(bx) + 1 {
@@ -183,6 +182,29 @@ impl NavMesh {
                 self.ensure(gx, gy)?;
             }
         }
+        let gentle = self.search(from, to, false);
+        if gentle.as_ref().is_ok_and(|r| r.complete) {
+            return gentle;
+        }
+        match self.search(from, to, true) {
+            Ok(steep) if steep.complete => Ok(steep),
+            steep => gentle.or(steep),
+        }
+    }
+
+    fn search(&mut self, from: [f32; 3], to: [f32; 3], steep: bool) -> Result<Route, String> {
+        let (include, exclude) = if steep {
+            (
+                NAV_GROUND | NAV_GROUND_STEEP | NAV_WATER,
+                NAV_MAGMA | NAV_SLIME,
+            )
+        } else {
+            (
+                NAV_GROUND | NAV_WATER,
+                NAV_MAGMA | NAV_SLIME | NAV_GROUND_STEEP,
+            )
+        };
+        unsafe { nav_set_filter(self.shim.as_ptr(), include, exclude) };
         let (start, end) = (to_recast(from), to_recast(to));
         // The server's first search box; a point more than a few yards off the mesh finds nothing.
         let extents = [3.0f32, 5.0, 3.0];
@@ -233,6 +255,7 @@ impl NavMesh {
         Ok(Route {
             complete: status & DT_PARTIAL == 0 && reached,
             points,
+            steep,
         })
     }
 }
@@ -282,6 +305,27 @@ mod tests {
                 .points
                 .iter()
                 .any(|p| (p[0] + 8910.4).abs() < 2.0 && (p[1] + 140.0).abs() < 3.0),
+            "{route:?}"
+        );
+    }
+
+    /// The walk an agent got stuck on (#82): out of Northshire toward Goldshire. With steep ground
+    /// allowed, the route's next corner was 12 yards up the valley wall, 14 yards away.
+    #[test]
+    #[ignore = "needs the server's extracted mmaps"]
+    fn the_road_out_of_northshire_keeps_off_the_valley_wall() {
+        let dir = std::env::var("WRATHPLUS_MMAPS").expect("set WRATHPLUS_MMAPS");
+        let mut mesh = NavMesh::open(Path::new(&dir), 0).unwrap();
+        let route = mesh
+            .route([-9045.7, -129.3, 96.0], [-9464.0, 64.0, 56.0])
+            .unwrap();
+        assert!(route.complete && !route.steep, "{route:?}");
+        // The corner on the wall the stuck walk kept falling short of.
+        assert!(
+            !route
+                .points
+                .iter()
+                .any(|p| (p[0] + 9058.1).hypot(p[1] + 121.1) < 3.0),
             "{route:?}"
         );
     }

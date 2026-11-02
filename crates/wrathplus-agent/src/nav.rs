@@ -6,7 +6,9 @@
 //!
 //! Lua: `AgentPath(x, y, z | guid)` → `{complete, length, points = {{x, y, z}, ...}}`;
 //! `AgentMoveTo(x, y, z | guid)` starts walking; `AgentStop()`; `AgentWalk()` → `{status,
-//! remaining, goal, note}` with status `idle`, `walking`, `arrived`, `stopped` or `failed`.
+//! remaining, goal, note}` with status `idle`, `walking`, `arrived`, `stopped`, `failed` (refused)
+//! or `stuck` (a corner not reached). Each end but `stopped` is put on the event stream as
+//! `AGENT_WALK_DONE` with the status.
 
 use crate::world;
 use bevy::prelude::*;
@@ -24,6 +26,9 @@ pub(crate) struct Walk {
     status: &'static str,
     note: Option<String>,
     stop: bool,
+    /// The corner click-to-move is walking to, and whether it is the second try.
+    corner: Option<[f32; 3]>,
+    retried: bool,
 }
 
 pub(crate) struct Mesh {
@@ -84,7 +89,12 @@ fn announce(link: &NavLink, status: &str) {
     })]);
 }
 
-/// Feed the route to click-to-move: when one walk ends, start the next corner.
+/// How close (yards, level) a corner counts as reached: click-to-move stops half a yard short.
+const REACHED: f32 = 2.0;
+
+/// Feed the route to click-to-move: when one walk ends, check it reached its corner, then start
+/// the next. Click-to-move gives up when it stops closing (a slope too steep, a wall), so a corner
+/// it fell short of is tried once more, then the walk ends as `stuck`.
 pub(crate) fn walk(link: Res<NavLink>, mut auto: AutoMove) {
     let Ok(mut walk) = link.walk.lock() else {
         return;
@@ -92,6 +102,7 @@ pub(crate) fn walk(link: Res<NavLink>, mut auto: AutoMove) {
     if walk.stop {
         walk.stop = false;
         walk.queue.clear();
+        walk.corner = None;
         if walk.status == "walking" {
             walk.status = "stopped";
         }
@@ -100,6 +111,29 @@ pub(crate) fn walk(link: Res<NavLink>, mut auto: AutoMove) {
     if walk.status != "walking" || auto.walking() {
         return;
     }
+    if let Some(corner) = walk.corner {
+        let at = auto.position();
+        let short = to_bevy(corner).xz().distance(at.xz());
+        if short > REACHED {
+            if !walk.retried {
+                walk.retried = true;
+                walk.queue.push_front(corner);
+            } else {
+                walk.status = "stuck";
+                walk.note = Some(format!(
+                    "click-to-move stopped {short:.0} yd short of the corner at ({:.0}, {:.0}, {:.0}), twice",
+                    corner[0], corner[1], corner[2]
+                ));
+                walk.queue.clear();
+                walk.corner = None;
+                announce(&link, "stuck");
+                return;
+            }
+        } else {
+            walk.retried = false;
+        }
+    }
+    walk.corner = walk.queue.front().copied();
     match walk.queue.pop_front() {
         Some(point) => {
             if !auto.walk_to_ground(to_bevy(point)) {
@@ -108,6 +142,7 @@ pub(crate) fn walk(link: Res<NavLink>, mut auto: AutoMove) {
                     "click-to-move refused the walk (dead, controlled, or autoInteract off)".into(),
                 );
                 walk.queue.clear();
+                walk.corner = None;
                 announce(&link, "failed");
             }
         }
@@ -212,9 +247,19 @@ pub(crate) fn install(lua: &Lua, nav: &Handles, world: &world::Handles) -> mlua:
                 walk.queue = route.points.iter().skip(1).copied().collect();
                 walk.goal = route.points.last().copied();
                 walk.status = "walking";
-                walk.note = (!route.complete)
-                    .then(|| "partial route: walking as far as the navmesh reaches".to_string());
+                walk.note = if !route.complete {
+                    Some("partial route: walking as far as the navmesh reaches".to_string())
+                } else if route.steep {
+                    Some(
+                        "the only route crosses steep ground, which may not be climbable"
+                            .to_string(),
+                    )
+                } else {
+                    None
+                };
                 walk.stop = false;
+                walk.corner = None;
+                walk.retried = false;
             }
             Ok((Some(summary), None))
         })?,
