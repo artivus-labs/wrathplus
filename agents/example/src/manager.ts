@@ -127,6 +127,8 @@ export function startClient(home: string, agent: ManagedAgent, character?: strin
   const dir = agentDir(home, agent.account);
   const config = managerConfig(home);
   const nav = mmaps(home);
+  // A fresh log per start, so an exit reads its own lines.
+  writeFileSync(join(dir, "client.log"), "");
   const log = Bun.file(join(dir, "client.log"));
   return Bun.spawn(
     [
@@ -156,10 +158,25 @@ export function startClient(home: string, agent: ManagedAgent, character?: strin
 }
 
 /** Wait until the client is past loading: in the world, or at character select with its UI up. */
-export async function waitReady(agent: ManagedAgent, token: string, client: Subprocess, timeoutMs = 120_000): Promise<Record<string, unknown>> {
+/** Why a client that exited at start did: its own words from the log, and what to do about them. */
+export function exitReason(log: string): string {
+  const lines = log.split("\n");
+  const said = lines.filter((l) => l.trim() && !/^\d{4}-\d\d-\d\dT/.test(l)).slice(0, 2);
+  const errors = lines.filter((l) => / ERROR /.test(l)).slice(0, 3).map((l) => l.replace(/^\S+\s+ERROR\s+/, ""));
+  const reason = [...said, ...errors].join("\n  ");
+  const hint = /unknown argument "--agent-port"/.test(log)
+    ? "\nThis client build predates the agent port: rebuild it (Manager, Client page) or set WRATHPLUS_CLIENT."
+    : "";
+  return (reason ? `:\n  ${reason}` : "") + hint;
+}
+
+export async function waitReady(agent: ManagedAgent, token: string, client: Subprocess, logPath: string, timeoutMs = 120_000): Promise<Record<string, unknown>> {
   const until = Date.now() + timeoutMs;
   while (Date.now() < until) {
-    if (client.exitCode !== null) throw new Error(`The client exited (code ${client.exitCode}); see its client.log.`);
+    if (client.exitCode !== null) {
+      const log = existsSync(logPath) ? readFileSync(logPath, "utf8") : "";
+      throw new Error(`The client exited (code ${client.exitCode})${exitReason(log)}\n(log: ${logPath})`);
+    }
     const status = await answering(agent, token);
     const player = status?.player as { level?: number } | undefined;
     if (status?.in_world && (player?.level ?? 0) > 0) return status;

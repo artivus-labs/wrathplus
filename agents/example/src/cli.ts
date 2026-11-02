@@ -19,6 +19,7 @@ import {
   agentDir,
   answering,
   clearRunning,
+  clientBinary,
   createAgent,
   findAgent,
   loadAgents,
@@ -96,8 +97,9 @@ async function run(argv: string[]): Promise<void> {
   }
   process.on("exit", () => client?.kill());
   if (client) {
-    console.log(`Starting ${agent.name}'s client (log: ${join(agentDir(home, agent.account), "client.log")})...`);
-    await waitReady(agent, token, client);
+    const log = join(agentDir(home, agent.account), "client.log");
+    console.log(`Starting ${agent.name}'s client (${clientBinary(home)})...`);
+    await waitReady(agent, token, client, log);
   } else {
     console.log(`${agent.name}'s client is already running; driving it.`);
   }
