@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { recentLines } from "../src/dashboard.ts";
 import { claudeEnv, loadEnv, parseEnv } from "../src/env.ts";
-import { accountFor, findAgent } from "../src/manager.ts";
+import { accountFor, exitReason, findAgent } from "../src/manager.ts";
 
 test("agents/.env: KEY=value lines, comments and quotes; the shell wins", () => {
   expect(parseEnv("# keys\nTYPESAFE_API_KEY=abc\nexport A='q r'\nB=\"x\"\nnot a line\n=nokey\n")).toEqual({
@@ -48,4 +48,13 @@ test("the dashboard shows the planner's latest lines without the status suffix",
   );
   expect(recentLines(notes)).toEqual(["01:02:03 → status {}", "01:02:03 Game events:\n- You died.\n"]);
   expect(recentLines(join(notes, "missing"))).toEqual([]);
+});
+
+test("a client that exits at start says why, with a hint for an old build", () => {
+  const old = 'unknown argument "--agent-port"\nusage: wrathplus [--server <host[:port]>]\n2026-11-03T01:00:00Z  WARN x: noise\n';
+  expect(exitReason(old)).toBe(
+    ':\n  unknown argument "--agent-port"\n  usage: wrathplus [--server <host[:port]>]\nThis client build predates the agent port: rebuild it (Manager, Client page) or set WRATHPLUS_CLIENT.',
+  );
+  expect(exitReason("2026-11-03T01:00:00Z ERROR wrathplus: no WOW_DATA\n")).toBe(":\n  wrathplus: no WOW_DATA");
+  expect(exitReason("")).toBe("");
 });
