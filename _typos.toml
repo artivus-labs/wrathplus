@@ -1,4 +1,4 @@
-# typos (scripts/quality, docs/QUALITY-GATES-ACTIVATION.md): Blizzard's own spellings and this
+# typos (scripts/quality, https://github.com/artivus-labs/wrathplus/wiki/QUALITY-GATES-ACTIVATION): Blizzard's own spellings and this
 # codebase's domain words. A word belongs here only when it is a name we cannot rename.
 
 [files]
@@ -9,7 +9,6 @@ extend-exclude = [
     # Ratchet budgets: paths and function names as the scorer wrote them.
     "scripts/quality/*-baseline.json",
     # Quotes the findings it counts.
-    "docs/QUALITY-GATES-ACTIVATION.md",
 ]
 
 [default.extend-words]

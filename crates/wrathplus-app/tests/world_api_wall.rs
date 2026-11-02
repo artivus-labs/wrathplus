@@ -104,13 +104,13 @@ const PUBLISHED: &[(&str, &str)] = &[
     ("doodad_anim::DoodadAnimHost", "record"),
     ("doodad_anim::MatAnim", "record"),
     // Moving entity-parented placements supply a parent-local animation sphere; the engine
-    // owns transformation and draw gating (docs/WRATH-WORLD-OBJECTS.md).
+    // owns transformation and draw gating (https://github.com/artivus-labs/wrathplus/wiki/WRATH-WORLD-OBJECTS).
     ("doodad_anim::ParentSpaceAnimBound", "WRATH-WORLD-OBJECTS"),
     ("doodad_anim::TintLoop", "record"),
     ("doodad_anim::UvLoops", "record"),
     ("doodad_anim::register_entity_uv", "record"),
     // Stage-two UV registration on the shared lane, which glue scenes use as stage one does
-    // (docs/WRATH-TWO-STAGE.md, "Second weight and off-world lanes").
+    // (https://github.com/artivus-labs/wrathplus/wiki/WRATH-TWO-STAGE, "Second weight and off-world lanes").
     ("doodad_anim::register_entity_uv_stage2", "record"),
     ("doodad_anim::register_fx_uv", "record"),
     ("doodad_anim::register_tint", "record"),
@@ -169,7 +169,7 @@ const PUBLISHED: &[(&str, &str)] = &[
     ("model_render::ModelPart", "record"),
     ("model_render::lazy::realize", "record"),
     // An off-world lane's stage-two UV loops, seeded on its material: the documented entry for
-    // UI tiles and glue scenes (docs/WRATH-TWO-STAGE.md, "Second weight and off-world lanes").
+    // UI tiles and glue scenes (https://github.com/artivus-labs/wrathplus/wiki/WRATH-TWO-STAGE, "Second weight and off-world lanes").
     ("model_render::second_stage_loops", "record"),
     // The Plus lighting preset the experience profile toggles (WS7).
     ("modern_lighting::ModernLighting", "record"),

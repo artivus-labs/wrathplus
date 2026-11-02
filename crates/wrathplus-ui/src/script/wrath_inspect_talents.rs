@@ -1,5 +1,5 @@
 //! Build-12340 inspected talents: the host's reduction of `SMSG_INSPECT_TALENT` (`0x3F4`,
-//! `docs/WRATH-INSPECT-TALENTS.md`). The host pushes the latest reply for the inspected player,
+//! `https://github.com/artivus-labs/wrathplus/wiki/WRATH-INSPECT-TALENTS`). The host pushes the latest reply for the inspected player,
 //! then fires `INSPECT_TALENT_READY`; the talent getters' inspect branches read it.
 
 /// One talent group (spec) as the inspected player has it.

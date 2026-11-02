@@ -1,4 +1,4 @@
-//! Vanilla-removal step 1's guard (`docs/VANILLA-REMOVAL-PLAN.md`): no build-12340 module decodes
+//! Vanilla-removal step 1's guard (`https://github.com/artivus-labs/wrathplus/wiki/VANILLA-REMOVAL-PLAN`): no build-12340 module decodes
 //! through the 1.12 parser. Every `wrath_*` source names neither `parse_server*` nor the 1.12
 //! `events::decode`, so deleting `messages/parse.rs` cannot break a Wrath arm.
 

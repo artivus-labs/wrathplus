@@ -7,10 +7,10 @@
 [benilla](https://github.com/samwhosung/benilla), porting its from-scratch 1.12.1 client to
 Wrath of the Lich King 3.3.5a against an AzerothCore server. The launcher and workspace crates
 use the `wrathplus` name; remaining 1.12 client paths are being removed
-([`docs/VANILLA-REMOVAL-PLAN.md`](docs/VANILLA-REMOVAL-PLAN.md)).
+([`https://github.com/artivus-labs/wrathplus/wiki/VANILLA-REMOVAL-PLAN`](https://github.com/artivus-labs/wrathplus/wiki/VANILLA-REMOVAL-PLAN)).
 Every file format, the network protocol and the interface engine are written from scratch, with
 no original client code and no bundled game assets. The fork's scope and its evaluation contract
-are in [`docs/AZEROTHBENCH.md`](docs/AZEROTHBENCH.md).
+are in [`https://github.com/artivus-labs/wrathplus/wiki/AZEROTHBENCH`](https://github.com/artivus-labs/wrathplus/wiki/AZEROTHBENCH).
 
 ## Getting started
 
@@ -30,14 +30,14 @@ See [Client setup](docs/CLIENT-SETUP.md) for prerequisites, server selection and
 
 ## Status
 
-The native 3.3.5 refactor is in progress. [`docs/WRATH-NATIVE-PLAN.md`](docs/WRATH-NATIVE-PLAN.md)
+The native 3.3.5 refactor is in progress. [`https://github.com/artivus-labs/wrathplus/wiki/WRATH-NATIVE-PLAN`](https://github.com/artivus-labs/wrathplus/wiki/WRATH-NATIVE-PLAN)
 holds the workstreams and what is done in each, [`docs/WRATH-OPCODE-COVERAGE.md`](docs/WRATH-OPCODE-COVERAGE.md)
-the wire coverage, and [`docs/WRATH-BUG-BACKLOG.md`](docs/WRATH-BUG-BACKLOG.md) what play-testing
+the wire coverage, and [`https://github.com/artivus-labs/wrathplus/issues`](https://github.com/artivus-labs/wrathplus/issues) what play-testing
 has found. A feature counts as working only with tests and live evidence on 3.3.5 data
-([`docs/AZEROTHBENCH.md`](docs/AZEROTHBENCH.md), "Port gates"); this README makes no capability
+([`https://github.com/artivus-labs/wrathplus/wiki/AZEROTHBENCH`](https://github.com/artivus-labs/wrathplus/wiki/AZEROTHBENCH), "Port gates"); this README makes no capability
 claims beyond those documents.
 
-Two experience presets exist ([`docs/EXPERIENCE.md`](docs/EXPERIENCE.md)): **Classic**, the
+Two experience presets exist ([`https://github.com/artivus-labs/wrathplus/wiki/EXPERIENCE`](https://github.com/artivus-labs/wrathplus/wiki/EXPERIENCE)): **Classic**, the
 default, matches the stock 3.3.5 client; **Plus** is an optional modern preset.
 
 ## What's inside

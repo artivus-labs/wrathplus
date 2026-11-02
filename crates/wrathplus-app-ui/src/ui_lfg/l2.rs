@@ -1,5 +1,5 @@
 //! L2: the dungeon finder's queue, role check, proposal, boot and status receipts
-//! (`docs/WRATH-LFG-L2-CONTRACT.md`), as build 12340's one LFG handler `0x55bdc0` treats them:
+//! (`https://github.com/artivus-labs/wrathplus/wiki/WRATH-LFG-L2-CONTRACT`), as build 12340's one LFG handler `0x55bdc0` treats them:
 //! each packet updates its own store, then prints its system lines (message table `0xac8af0`)
 //! and fires its events (`0x81b530`), in the handler's order. [`LfgQueue::apply`] is pure; the L1
 //! feed ([`super::l1`]) drains the shared FIFO and runs the effects.

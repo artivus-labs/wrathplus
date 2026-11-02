@@ -3,16 +3,16 @@
 This fork is a faithful 3.3.5a (build 12340) client: in its default **Classic** preset a change
 is accepted when it makes the client more like the stock 3.3.5a client or fixes a bug, with
 evidence from the reference, in one small piece, with the gates green. The optional **Plus**
-preset ([`EXPERIENCE.md`](EXPERIENCE.md)) is the one in-tree exception, and every Plus feature is
+preset ([`https://github.com/artivus-labs/wrathplus/wiki/EXPERIENCE`](https://github.com/artivus-labs/wrathplus/wiki/EXPERIENCE)) is the one in-tree exception, and every Plus feature is
 off under Classic. Everything else lives on top, in a crate of its own or a fork. The 1.12 paths
-still in the tree are being removed ([`VANILLA-REMOVAL-PLAN.md`](VANILLA-REMOVAL-PLAN.md)) and are
+still in the tree are being removed ([`https://github.com/artivus-labs/wrathplus/wiki/VANILLA-REMOVAL-PLAN`](https://github.com/artivus-labs/wrathplus/wiki/VANILLA-REMOVAL-PLAN)) and are
 not a reference for new work.
 
 ## Where to start
 
-Open work is planned in [`WRATH-NATIVE-PLAN.md`](WRATH-NATIVE-PLAN.md), its gaps in
+Open work is planned in [`https://github.com/artivus-labs/wrathplus/wiki/WRATH-NATIVE-PLAN`](https://github.com/artivus-labs/wrathplus/wiki/WRATH-NATIVE-PLAN), its gaps in
 [`WRATH-OPCODE-COVERAGE.md`](WRATH-OPCODE-COVERAGE.md), and what play-testing found in
-[`WRATH-BUG-BACKLOG.md`](WRATH-BUG-BACKLOG.md). Each entry says what 3.3.5a does, what the client
+[`https://github.com/artivus-labs/wrathplus/issues`](https://github.com/artivus-labs/wrathplus/issues). Each entry says what 3.3.5a does, what the client
 does instead, and where. Work happens on a branch and lands by review.
 
 ## What gets in
@@ -129,9 +129,21 @@ out of scope is closed with the reason.
 
 ## Reporting a bug
 
-Add it to [`WRATH-BUG-BACKLOG.md`](WRATH-BUG-BACKLOG.md): what you did, what you saw and what
-3.3.5a does instead, with the `benilla build` line from the start of the terminal output, your
-platform and the server you ran on.
+Open a [GitHub issue](https://github.com/artivus-labs/wrathplus/issues): what you did, what you
+saw and what 3.3.5a does instead, with the `benilla build` line from the start of the terminal
+output, your platform and the server you ran on.
+
+## Where notes go
+
+- **Open work** (bugs, playtest findings, ideas, plans, spikes) goes in
+  [issues](https://github.com/artivus-labs/wrathplus/issues), tracked on the
+  [WrathPlus project board](https://github.com/users/artivus-labs/projects/4). Opt-in classic+
+  ideas take the `type:plus` label; stock 3.3.5 stays the default.
+- **Reference** (how the stock client behaves, audits, qualification evidence, past plans) goes in
+  the [developer wiki](https://github.com/artivus-labs/wrathplus/wiki).
+- The repo keeps only docs the code or a new contributor needs: this file, `CLIENT-SETUP.md`,
+  `METHOD.md`, the generated `MAP.md` and `WRATH-OPCODE-COVERAGE.md` (read by the replay tool).
+  Don't add loose markdown notes or backlogs to `docs/`.
 
 Working with an AI agent is expected. The agent reads `AGENTS.md`, and the same rules bind it.
 

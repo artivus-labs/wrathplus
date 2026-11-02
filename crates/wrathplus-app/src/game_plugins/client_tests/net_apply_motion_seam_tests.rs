@@ -2,7 +2,7 @@
 //! `headless_client`, so they live in the root layer.
 //!
 //! The movement apply's ordering laws on the real drain, pinned before the apply leaves `net`
-//! (`docs/APP-CRATE-SPLIT-PLAN.md`, item 3 part A): a handler later in a drain sees exactly the
+//! (`https://github.com/artivus-labs/wrathplus/wiki/APP-CRATE-SPLIT-PLAN`, item 3 part A): a handler later in a drain sees exactly the
 //! movement state the earlier events left; a create, a move and a destroy in one drain apply in
 //! wire order; the movement kinds' other handlers and the movement chain keep their order.
 

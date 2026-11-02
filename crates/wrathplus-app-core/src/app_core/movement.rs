@@ -1,6 +1,6 @@
 //! The movement model the wire and the world both read: the movement-flag word, the capsule and
 //! step geometry, the swim predicates, landings and server-pushed kits, and the transport pose
-//! components. Moved here for the crate split (`docs/APP-CRATE-SPLIT-PLAN.md`, step 0 item 3);
+//! components. Moved here for the crate split (`https://github.com/artivus-labs/wrathplus/wiki/APP-CRATE-SPLIT-PLAN`, step 0 item 3);
 //! the owning modules re-export each item from its old path, and their systems stay with them.
 
 use std::time::Instant;

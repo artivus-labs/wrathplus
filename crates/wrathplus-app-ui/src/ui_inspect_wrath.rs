@@ -1,4 +1,4 @@
-//! Build 12340's inspect reply (`SMSG_INSPECT_TALENT`, `0x3F4`, `docs/WRATH-INSPECT-TALENTS.md`):
+//! Build 12340's inspect reply (`SMSG_INSPECT_TALENT`, `0x3F4`, `https://github.com/artivus-labs/wrathplus/wiki/WRATH-INSPECT-TALENTS`):
 //! the inspected player's talent groups, glyphs and equipped gear. The latest reply drained from
 //! [`NativeInspectPackets`] is held for its guid; [`crate::ui_inspect`] lays its gear over the
 //! visible-item slots and pushes its talents ([`UiScript::set_wrath_inspect_talents`]), then

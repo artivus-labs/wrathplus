@@ -1,5 +1,5 @@
-//! Dungeon finder L1: locks and random reward previews (`docs/WRATH-LFG-L1-CONTRACT.md`,
-//! lifecycle evidence `docs/WRATH-LFG-L1-LIFECYCLE.md`). This is the sole reducer of the lock
+//! Dungeon finder L1: locks and random reward previews (`https://github.com/artivus-labs/wrathplus/wiki/WRATH-LFG-L1-CONTRACT`,
+//! lifecycle evidence `https://github.com/artivus-labs/wrathplus/wiki/WRATH-LFG-L1-LIFECYCLE`). This is the sole reducer of the lock
 //! receipts in [`super::NativeLfgPackets`]; other LFG families stay queued for their owners.
 //!
 //! - Receipts: `PLAYER_INFO` (`0x36F`) replaces the self block, `PARTY_INFO` (`0x372`) the party

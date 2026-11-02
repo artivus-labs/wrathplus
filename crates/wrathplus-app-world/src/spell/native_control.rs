@@ -1,6 +1,6 @@
 //! The spell-control packets whose native handlers act on our own state, beside their capture
 //! FIFO (`crate::net::wrath_spell_control_capture`). One read-only Ghidra round on build 12340
-//! traced both through their `0x6b0b80` registrations (docs/WRATH-SPELL-CONTROL.md).
+//! traced both through their `0x6b0b80` registrations (https://github.com/artivus-labs/wrathplus/wiki/WRATH-SPELL-CONTROL).
 //!
 //! `SMSG_MODIFY_COOLDOWN` (AzerothCore `Player::ModifySpellCooldown`, `Player.cpp:11275`): one
 //! running cooldown moves by a signed delta in milliseconds. The handler (`0x804010`, registered

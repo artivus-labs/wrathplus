@@ -1,4 +1,4 @@
-//! Build-12340 combat-log entries for `COMBAT_LOG_EVENT(_UNFILTERED)` (`docs/WRATH-COMBAT-LOG.md`).
+//! Build-12340 combat-log entries for `COMBAT_LOG_EVENT(_UNFILTERED)` (`https://github.com/artivus-labs/wrathplus/wiki/WRATH-COMBAT-LOG`).
 //! The combat-log handlers ([`super`]) record each packet here as it lands; [`feed`] stamps the
 //! unit flags (`0x74dcb0`, [`super::native_flags`]) and names, then hands each entry to Native UI's
 //! store (`push_wrath_combat_log`), in wire order.

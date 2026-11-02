@@ -1,5 +1,5 @@
 //! CVars a saved `config.toml` may still hold under 1.12's names, which build 12340 replaced with
-//! `Sound_*` (`docs/WRATH-CVARS.md`). Each is carried to its new name at load, unless the file
+//! `Sound_*` (`https://github.com/artivus-labs/wrathplus/wiki/WRATH-CVARS`). Each is carried to its new name at load, unless the file
 //! already holds the new one, and the next save writes only the new name.
 
 use std::collections::BTreeMap;

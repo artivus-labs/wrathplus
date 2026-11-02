@@ -1,4 +1,4 @@
-# Module -> layer for the crate split (docs/APP-CRATE-SPLIT-PLAN.md). Every top-level module of
+# Module -> layer for the crate split (https://github.com/artivus-labs/wrathplus/wiki/APP-CRATE-SPLIT-PLAN). Every top-level module of
 # wrathplus-app's lib.rs not listed here stays in the root; every ui_* module not listed elsewhere is ui.
 # scripts/split/move-layers.sh reads it; one line per layer, in dependency order.
 core: run_mode local_state query_cache area chr_classes text_filter text_reshape glue_strings crash shutdown pending_item_ops quest_reputation cvars launch_plan app_core wrath_vehicle_seats

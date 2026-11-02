@@ -1,4 +1,4 @@
-//! The core layer of wrathplus-app: see docs/APP-CRATE-SPLIT-PLAN.md.
+//! The core layer of wrathplus-app: see https://github.com/artivus-labs/wrathplus/wiki/APP-CRATE-SPLIT-PLAN.
 #![cfg_attr(not(feature = "dev"), allow(dead_code, unused_imports))]
 
 pub mod app_core;

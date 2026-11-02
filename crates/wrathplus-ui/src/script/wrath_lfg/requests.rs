@@ -1,7 +1,7 @@
 //! Explicit L1 lock requests: `RequestLFDPlayerLockInfo` (0x5569d0) and
 //! `RequestLFDPartyLockInfo` (0x556a50), each with its own process-lifetime gate.
 //!
-//! Native (`WRATH-LFG-L1-LIFECYCLE.md`): the counter (initialised to 2) is incremented before it
+//! Native (`https://github.com/artivus-labs/wrathplus/wiki/WRATH-LFG-L1-LIFECYCLE`): the counter (initialised to 2) is incremented before it
 //! is tested; values <= 2 send. Above 2, the clock (OS milliseconds as unsigned 32-bit, times
 //! the widened f32 0.001, `0x86d400`) is compared with the stored f32 timestamp: under 10.0
 //! seconds rejects, still counting; otherwise the timestamp is stored, the counter reset to 0

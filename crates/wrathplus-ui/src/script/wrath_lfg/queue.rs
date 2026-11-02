@@ -1,4 +1,4 @@
-//! Build-12340 LFG L2 (docs/WRATH-LFG-L2-CONTRACT.md): the queue, role check, proposal, boot and
+//! Build-12340 LFG L2 (https://github.com/artivus-labs/wrathplus/wiki/WRATH-LFG-L2-CONTRACT): the queue, role check, proposal, boot and
 //! completion getters over App's [`WrathLfgQueueSnapshot`], the L0 selection, and the verbs'
 //! outbox. One Wow.exe round: `/tmp/azb-ui-lfg-l2-native.log`, `/tmp/azb-ui-lfg-l2-inner.log`,
 //! `/tmp/azb-ui-lfg-l2-LfgL2Rest.log`, `/tmp/azb-ui-lfg-l2-LfgL2Inner2.log`.

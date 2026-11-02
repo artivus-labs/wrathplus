@@ -399,7 +399,7 @@ mod tests {
     }
 
     /// Every global function the Wrath compat chunk still serves, the shim burn-down list
-    /// (`docs/WRATH-COMPAT-SHIM-AUDIT.md`): a native binding installed after it drops its name here,
+    /// (`https://github.com/artivus-labs/wrathplus/wiki/WRATH-COMPAT-SHIM-AUDIT`): a native binding installed after it drops its name here,
     /// and a shim line a native binding already replaces is dead and goes.
     const COMPAT_SERVED: &[&str] = &[
         "BNConnected",

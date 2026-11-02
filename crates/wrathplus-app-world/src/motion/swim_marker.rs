@@ -146,7 +146,7 @@ pub(in crate::motion) fn mark_swimming_creatures(
 /// AC `GetMinHeightInWater` seats at (1 - 4*1040/10202)*h without necessarily
 /// broadcasting SWIMMING for playerbots. Admit ONLY that surface seat on a live ground
 /// spline above measured deep support; never infer depth from missing collision.
-/// See docs/WRATH-AC-SURFACE-SWIM.md for provenance, authority and numeric bounds.
+/// See https://github.com/artivus-labs/wrathplus/wiki/WRATH-AC-SURFACE-SWIM for provenance, authority and numeric bounds.
 fn ac_surface_swimming(
     collision: &wrathplus_world::collision::WorldCollision,
     t: &Transform,

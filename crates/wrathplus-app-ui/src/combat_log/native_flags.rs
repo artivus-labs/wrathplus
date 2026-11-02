@@ -1,5 +1,5 @@
 //! A combat-log unit's `COMBATLOG_OBJECT_*` flags, build 12340's `0x74dcb0`
-//! (`docs/WRATH-COMBAT-LOG.md`, `/tmp/azb-app-mig/ghidra/combatlog-unitflags.log`).
+//! (`https://github.com/artivus-labs/wrathplus/wiki/WRATH-COMBAT-LOG`, `/tmp/azb-app-mig/ghidra/combatlog-unitflags.log`).
 use wrathplus_protocol::types::{ObjectType, OwnerFallback};
 
 use crate::app_core::group::GroupState;

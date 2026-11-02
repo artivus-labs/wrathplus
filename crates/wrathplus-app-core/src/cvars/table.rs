@@ -104,7 +104,7 @@ pub const fn ours(name: &'static str, default: &'static str, why: &'static str) 
     }
 }
 
-/// Why a renderer row keeps its tested 1.12 value over build 12340's (`docs/WRATH-CVARS.md`).
+/// Why a renderer row keeps its tested 1.12 value over build 12340's (`https://github.com/artivus-labs/wrathplus/wiki/WRATH-CVARS`).
 const RENDERER_TESTED: &str =
     "a renderer setting kept at the value its passes and thresholds were \
      tuned at; 12340's is untried here, its first-run hardware detection untraced";

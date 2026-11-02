@@ -1,7 +1,7 @@
 //! Build 12340 flight (`MOVEMENTFLAG_FLYING`, with `CAN_FLY` granted by `SMSG_MOVE_SET_CAN_FLY`).
 //! The mover flies gravity-free through the swim resolver with no waterline: forward along the
 //! pitched facing, strafe level, and the ascend and descend keys straight up and down (`Wow.exe`
-//! `0x9898e0`), at the server's flight speeds. `docs/WRATH-FLIGHT.md` has the native trace.
+//! `0x9898e0`), at the server's flight speeds. `https://github.com/artivus-labs/wrathplus/wiki/WRATH-FLIGHT` has the native trace.
 //!
 //! Take-off is `0x989890`: CAN_FLY, no pending root, and it clears FALLING. Which input queues it
 //! (the drain's event `0x2d`) was not traced in the one Ghidra round; here it is the ascend key

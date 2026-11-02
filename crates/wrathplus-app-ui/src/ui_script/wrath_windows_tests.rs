@@ -1,4 +1,4 @@
-//! The session checklist's headless UI halves (`docs/WRATH-SESSION-CHECKLIST.md`, class H): every
+//! The session checklist's headless UI halves (`https://github.com/artivus-labs/wrathplus/wiki/WRATH-SESSION-CHECKLIST`, class H): every
 //! major 3.3.5 window opened through its stock toggle on the live-session load, with no Lua raise.
 
 use wrathplus_ui::script::UiScript;
