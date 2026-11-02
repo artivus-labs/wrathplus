@@ -421,4 +421,9 @@ impl AutoMove<'_, '_> {
     pub fn walking(&self) -> bool {
         self.approach.active()
     }
+
+    /// Where the player stands (Bevy coordinates), for the walker's check that a corner was reached.
+    pub fn position(&self) -> Vec3 {
+        self.player.pos
+    }
 }

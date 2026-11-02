@@ -11,6 +11,9 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import type { Policy } from "./policy.ts";
+import { claudeEnv } from "./env.ts";
+import { NOTE_TOOLS, notesServer, type Notes } from "./notes.ts";
+import { sleepGuard, WAKE_TOOLS, wakeServer, type Waker } from "./wake.ts";
 import { SYSTEM_PROMPT } from "./prompt.ts";
 
 /** The MCP tools the planner may use, all from the wrathplus server; nothing else. */
@@ -66,6 +69,12 @@ export interface BrainOptions {
   abortController: AbortController;
   /** The fast tier (Jev). With it, the planner gets the plan tools. */
   policy?: Policy;
+  /** Memory, to-dos and session search. */
+  notes?: Notes;
+  /** Compact the conversation once it reaches this many tokens. */
+  compactAt?: number;
+  /** The planner's alarm clock (wake_me); with it, the events tool does not long-poll. */
+  waker?: Waker;
 }
 
 /** Start the planner on the inbox; yields every SDK message for the caller to log. */
@@ -80,16 +89,37 @@ export function think(inbox: Inbox, options: BrainOptions): AsyncIterable<SDKMes
       systemPrompt: SYSTEM_PROMPT,
       // No built-in tools (files, shell, web): the agent acts only through the game client.
       tools: [],
-      allowedTools: options.policy ? [...TOOLS, "mcp__plan__set_plan", "mcp__plan__fast_loop_status"] : TOOLS,
+      allowedTools: [
+        ...TOOLS,
+        ...(options.policy ? ["mcp__plan__set_plan", "mcp__plan__fast_loop_status"] : []),
+        ...(options.notes ? NOTE_TOOLS : []),
+        ...(options.waker ? WAKE_TOOLS : []),
+      ],
+      // Compaction well inside the window: recall degrades long before the window fills.
+      settings: { autoCompactEnabled: true, autoCompactWindow: options.compactAt ?? 400_000 },
       permissionMode: "dontAsk",
+      // The Claude Code login, not a stray ANTHROPIC_API_KEY from the shell (`env.ts`).
+      env: claudeEnv(),
+      // Isolated from this machine's Claude Code setup: no CLAUDE.md/AGENTS.md from the checkout, no
+      // user settings, hooks or MCP servers. It works in its own notes folder.
+      settingSources: [],
+      ...(options.notes ? { cwd: options.notes.home } : {}),
+      ...(options.waker ? { hooks: { PreToolUse: [{ hooks: [sleepGuard(options.waker)] }] } } : {}),
       mcpServers: {
         wrathplus: {
           type: "stdio",
           command: process.execPath,
           args: ["run", options.mcpEntry],
-          env: { WRATHPLUS_AGENT_URL: options.url, WRATHPLUS_AGENT_TOKEN: options.token },
+          env: {
+            WRATHPLUS_AGENT_URL: options.url,
+            WRATHPLUS_AGENT_TOKEN: options.token,
+            // It sleeps by ending its turn, not inside a tool call.
+            ...(options.waker ? { WRATHPLUS_MCP_LONG_POLL: "0" } : {}),
+          },
         },
         ...(options.policy ? { plan: planServer(options.policy) } : {}),
+        ...(options.notes ? { notes: notesServer(options.notes) } : {}),
+        ...(options.waker ? { wake: wakeServer(options.waker) } : {}),
       },
       ...(options.maxTurns ? { maxTurns: options.maxTurns } : {}),
       abortController: options.abortController,
@@ -107,7 +137,7 @@ export function summarize(message: SDKMessage): string | null {
         if (block.type === "text" && block.text.trim()) parts.push(block.text.trim());
         if (block.type === "tool_use") {
           const input = JSON.stringify(block.input);
-          parts.push(`→ ${block.name.replace(/^mcp__(wrathplus|plan)__/, "")} ${input.length > 300 ? input.slice(0, 300) + "…" : input}`);
+          parts.push(`→ ${block.name.replace(/^mcp__(wrathplus|plan|notes|wake)__/, "")} ${input.length > 300 ? input.slice(0, 300) + "…" : input}`);
         }
       }
       return parts.length ? parts.join("\n") : null;
@@ -129,7 +159,7 @@ export function planServer(policy: Policy) {
     tools: [
       tool(
         "set_plan",
-        "Hand the fast decision loop (Jev, about once a second) your current plan and the intents it may act on. Each intent is a name, a plain description of when it applies (Jev chooses by these), and the Lua to run when chosen (the same Lua as the lua tool; keep each one short and safe to repeat, e.g. AgentInteract(guid) toward the nearest quest giver, CastSpellByName, AcceptQuest()). A built-in 'wait' intent covers letting things run. Replaces the previous plan and intents.",
+        "Hand the fast decision loop (Jev) your plan and the intents it may choose from. Each intent is an activity: a name, a plain description of when it applies (Jev chooses by these), the Lua that starts it, and optionally Lua that returns true once it has finished (until) and a timeout. Jev chooses when something happens (an activity ends, combat starts, a window opens, you send a plan) and sleeps while an activity runs, so make activities substantial: start your module's behaviour and let it run until done, rather than one tiny step per choice. Intents your own modules register with Agent.intent are offered too. Replaces the previous plan and its intents.",
         {
           plan: z.string().describe("The plan in a few sentences: the goal and the steps, for the fast loop to follow."),
           intents: z
@@ -137,20 +167,20 @@ export function planServer(policy: Policy) {
               z.object({
                 name: z.string().regex(/^[a-z][a-z0-9_]*$/).describe("snake_case name"),
                 when: z.string().describe("When this is the right thing to do, in plain words."),
-                lua: z.string().describe("Lua to run when chosen."),
-                every: z.number().positive().optional().describe("Seconds before it may run again (default 3)."),
+                lua: z.string().describe("Lua that starts it."),
+                until: z.string().optional().describe("Lua returning true once it has finished (and false as a second value if it failed). Without it the intent ends as soon as its Lua returns."),
+                timeout: z.number().positive().optional().describe("Seconds before it counts as failed."),
               }),
             )
             .max(254),
         },
-        async ({ plan, intents }) => {
-          policy.update(plan, intents);
-          return { content: [{ type: "text", text: `Plan set with ${intents.length} intents (+ wait).` }] };
-        },
+        async ({ plan, intents }) => ({
+          content: [{ type: "text", text: await policy.update(plan, intents) }],
+        }),
       ),
       tool(
         "fast_loop_status",
-        "What the fast loop has decided recently: its choices with confidence, whether each ran and what the Lua returned, and how stalled it judges the plan to be.",
+        "What the fast loop has decided recently: why it woke, what it chose (with confidence), whether that started a new activity, how stalled it judges the plan, and how many Jev calls it has made.",
         {},
         async () => ({ content: [{ type: "text", text: policy.describe() }] }),
       ),

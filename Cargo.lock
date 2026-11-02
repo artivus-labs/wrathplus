@@ -8783,6 +8783,7 @@ dependencies = [
  "tiny_http",
  "wrathplus-app-core",
  "wrathplus-app-net",
+ "wrathplus-app-ui",
  "wrathplus-app-world",
  "wrathplus-nav",
  "wrathplus-protocol",

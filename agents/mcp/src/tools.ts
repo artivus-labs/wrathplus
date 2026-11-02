@@ -11,7 +11,7 @@ Movement functions work from here (MoveForwardStart/MoveForwardStop, TurnLeftSta
 A bare expression (e.g. \`UnitLevel("player")\`) returns its values; otherwise use \`return a, b\`. The answer is JSON: {ok, values, output} where output holds anything print()ed, or {ok:false, error, output} on a Lua error.
 Each chunk runs to completion inside one game frame, so do not loop waiting for the world to change: return and call again (or use the events tool).
 For logic that should run on its own every frame (rotations, following, looting), save it as a module with save_module and load it with require("name") (AgentReload("name") after changes); a module named autoexec runs whenever the client enters the world. Frames work as in addons: CreateFrame("Frame"):SetScript("OnUpdate", fn) ticks, :RegisterEvent(...) reacts.
-Beyond the stock API: AgentNearby([yards]) lists every unit, player, game object and corpse the client knows (guid, name, kind, distance, x/y/z, level, health, dead, reaction, quest marker, npc services, lootable); AgentPosition(); AgentTarget(guid); AgentInteract(guid) (talk to, loot or use it; straight-line walk); AgentMoveTo(x, y, z | guid) walks a navmesh route (doors, stairs), with AgentPath, AgentWalk and AgentStop; Agent.intent(name, {when, run}) and Agent.decide(name, {question, options, on}) hand intents and decisions to a fast decision loop when one runs.
+Beyond the stock API: AgentNearby([yards]) lists every unit, player, game object and corpse the client knows (guid, name, kind, distance, x/y/z, level, health, dead, reaction, quest marker, title, npc services such as vendor/repair/trainer/innkeeper/flightmaster, lootable); AgentFindNpc(service [, yards]) gives the nearest NPC offering a service ("repair", "vendor", "classtrainer", "innkeeper"...); AgentPosition(); AgentTarget(guid); AgentInteract(guid) (talk to, loot or use it; straight-line walk); AgentMoveTo(x, y, z | guid) walks a navmesh route (doors, stairs), with AgentPath, AgentWalk and AgentStop; Agent.intent(name, {when, run}) and Agent.decide(name, {question, options, on}) hand intents and decisions to a fast decision loop when one runs.
 Built in: require("wp.engine") (a Playerbots-style decision engine: triggers, actions with relevance, prerequisites/alternatives/continuers, strategies per combat state) and require("wp.values") (health, power, group, auras, cooldowns, spell readiness, range, threat, bags, position).`;
 
 const MODULES_DESCRIPTION = `List your saved Lua modules, or read one when \`name\` is given (dotted names like grind.loop). Modules persist across reloads and restarts of the client.`;
@@ -22,7 +22,15 @@ const SCREENSHOT_DESCRIPTION = `Capture the next rendered frame of the WrathPlus
 
 const EVENTS_DESCRIPTION = `Read the game UI events (the same events addons receive: PLAYER_TARGET_CHANGED, CHAT_MSG_SAY, UNIT_HEALTH, COMBAT_LOG_EVENT_UNFILTERED, ...) that fired after cursor \`since\`.
 Returns JSON {events:[{seq, time, event, args}], next, missed}. Pass \`next\` as \`since\` on the following call to continue where you left off; start with since=0. \`missed\` counts events that dropped out of the retained window before you read them.
-wait_ms (up to 30000) long-polls until at least one event arrives; limit caps how many come back (default 1000).`;
+limit caps how many come back (default 1000).`;
+
+const EVENTS_WAIT = "\nwait_ms (up to 30000) long-polls until at least one event arrives.";
+
+export interface ToolOptions {
+  /** Offer events' wait_ms long-poll (default true). A host that wakes its agent on events itself
+   *  turns it off, so the agent ends its turn instead of sleeping inside one. */
+  longPoll?: boolean;
+}
 
 const STATUS_DESCRIPTION = `Report the WrathPlus game client's state: {state, in_world, ui_ready, time, player}. state is the client phase (login, character select, in world, ...); in world, player summarises name, level, class, race, health, power, dead, combat, zone, subzone, map position and target.`;
 
@@ -48,7 +56,8 @@ async function guarded(run: () => Promise<CallToolResult>): Promise<CallToolResu
 }
 
 /** Register the tools on `server`, each calling the control port through `client`. */
-export function registerTools(server: McpServer, client: AgentClient): void {
+export function registerTools(server: McpServer, client: AgentClient, options: ToolOptions = {}): void {
+  const longPoll = options.longPoll ?? true;
   server.registerTool(
     "lua",
     {
@@ -103,16 +112,18 @@ export function registerTools(server: McpServer, client: AgentClient): void {
     "events",
     {
       title: "Read UI events",
-      description: EVENTS_DESCRIPTION,
+      description: EVENTS_DESCRIPTION + (longPoll ? EVENTS_WAIT : ""),
       inputSchema: {
         since: z.number().int().min(0).optional().describe("Cursor: the `next` of the last call (0 to start)."),
-        wait_ms: z.number().int().min(0).max(30_000).optional().describe("Long-poll up to this many ms for an event."),
+        ...(longPoll
+          ? { wait_ms: z.number().int().min(0).max(30_000).optional().describe("Long-poll up to this many ms for an event.") }
+          : {}),
         limit: z.number().int().min(1).max(10_000).optional().describe("Most events to return (default 1000)."),
       },
       annotations: { readOnlyHint: true },
     },
-    ({ since, wait_ms, limit }) =>
-      guarded(async () => text(await client.events({ since: since ?? 0, wait_ms, limit }))),
+    ({ since, wait_ms, limit }: { since?: number; wait_ms?: number; limit?: number }) =>
+      guarded(async () => text(await client.events({ since: since ?? 0, wait_ms: longPoll ? wait_ms : undefined, limit }))),
   );
 
   server.registerTool(
@@ -157,8 +168,8 @@ export function registerTools(server: McpServer, client: AgentClient): void {
   );
 }
 
-export function createServer(client: AgentClient): McpServer {
+export function createServer(client: AgentClient, options: ToolOptions = {}): McpServer {
   const server = new McpServer({ name: "wrathplus-agent", version: "0.1.0" });
-  registerTools(server, client);
+  registerTools(server, client, options);
   return server;
 }

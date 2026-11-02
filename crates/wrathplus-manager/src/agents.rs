@@ -132,8 +132,17 @@ pub(crate) fn create(config: &Config, name: &str) -> Result<Agent> {
     }
     let password = secret(14);
     crate::server::admin_command(config, &format!(".account create {account} {password}"))?;
-    // Wrath content needs the expansion flag on the account.
-    crate::server::admin_command(config, &format!(".account set addon {account} 2"))?;
+    // Wrath content needs the expansion flag on the account. The realm creates accounts
+    // asynchronously, so the flag can briefly find no account yet.
+    let addon = format!(".account set addon {account} 2");
+    let mut attempt = 1;
+    while let Err(e) = crate::server::admin_command(config, &addon) {
+        if attempt >= 20 || !e.contains("not exist") {
+            return Err(e);
+        }
+        attempt += 1;
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
     let dir = home(config, &account);
     write_private(&dir.join("password"), &password)?;
     write_private(&dir.join("token"), &secret(32))?;
@@ -179,6 +188,7 @@ pub(crate) fn start(config: &Config, agent: &Agent) -> Result<Child> {
         .env("WOW_HEADLESS", "1")
         .env("WOW_AGENT_TOKEN", token)
         .env("WRATHPLUS_AGENT_PASSWORD", password)
+        .envs(crate::server::mmaps(config).map(|dir| ("WOW_NAV_MMAPS", dir)))
         .args(["--server", REALM_ADDRESS, "--account", &agent.account])
         .args(["--password-env", "WRATHPLUS_AGENT_PASSWORD"])
         .args([

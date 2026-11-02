@@ -11,15 +11,16 @@
 //! | `GET /view?token=…` | a read-only page for people: the live frame, the character, events and the agent's Lua |
 //! | `GET /files`, `GET|PUT|DELETE /files/<module>` | the agent's own Lua modules (see `env`) |
 //!
-//! In Lua, besides the stock API: `AgentNearby([yards])`, `AgentPosition()`, `AgentTarget(guid)`,
-//! `AgentInteract(guid)` (`world`), `AgentPath`, `AgentMoveTo`, `AgentStop`, `AgentWalk` (`nav`,
+//! In Lua, besides the stock API: `AgentNearby([yards])`, `AgentFindNpc(service [, yards])`,
+//! `AgentPosition()`, `AgentTarget(guid)`, `AgentInteract(guid)` (`world`), `AgentPath`, `AgentMoveTo`, `AgentStop`, `AgentWalk` (`nav`,
 //! over the realm's mmaps from `WOW_NAV_MMAPS`), and the module functions (`env`).
 //!
 //! With the port open, the UI's movement verbs run from any Lua (stock gates them on a key
 //! binding), so an agent's scripts can walk. Everything else an agent does goes through the same
 //! Lua API the stock interface uses.
 //!
-//! Each Lua call is also logged on the event stream as `AGENT_LUA` (code, ok, error), for watchers.
+//! Each Lua call is also logged on the event stream as `AGENT_LUA` (code, ok, error), for watchers,
+//! and counts as input for the idle handler, so a driven client is not seated, AFK or logged out.
 //!
 //! A headless client (`WOW_HEADLESS=1`, `wrathplus_world::headless`) answers screenshots from its
 //! offscreen frame.
@@ -93,13 +94,14 @@ impl Plugin for AgentPlugin {
             }
         }
         let (world, world_link) = world::link();
-        let (nav, nav_link) = nav::link();
+        let started = Instant::now();
+        let (nav, nav_link) = nav::link(events.clone(), started, world.orders.clone());
         app.insert_resource(Link {
             world,
             nav,
             queue,
             events,
-            started: Instant::now(),
+            started,
             scripts: env::scripts_dir(),
             env_session: 0,
             autoexec_due: false,
@@ -152,6 +154,9 @@ fn pump_events(
         if let Err(e) = nav::install(script.lua(), &link.nav, &link.world) {
             error!("agent port: navigation functions: {e}");
         }
+        if let Err(e) = install_signal(script.lua(), link.events.clone(), link.started) {
+            error!("agent port: AgentSignal: {e}");
+        }
     }
     if link.autoexec_due && state.is_some_and(|s| *s.get() == ClientState::InWorld) {
         link.autoexec_due = false;
@@ -187,6 +192,8 @@ fn serve_jobs(
     script: Option<NonSend<UiScript>>,
     state: Option<Res<State<ClientState>>>,
     headless: Option<Res<wrathplus_world::headless::HeadlessFrame>>,
+    time: Res<Time<bevy::time::Real>>,
+    mut idle: Option<ResMut<wrathplus_app_ui::ui_chat::idle::LastInput>>,
 ) {
     for job in link.queue.try_iter() {
         match job {
@@ -195,6 +202,11 @@ fn serve_jobs(
                 budget,
                 reply,
             } => {
+                // An agent's Lua is its input: without this the stock idle handler sits the
+                // player and marks them AFK at 5 minutes, and logs out at 30 (#82).
+                if let Some(idle) = idle.as_mut() {
+                    idle.stamp_present(time.elapsed());
+                }
                 let answer = match &script {
                     Some(script) => lua::run(script, &code, budget.unwrap_or(DEFAULT_BUDGET)),
                     None => {
@@ -276,4 +288,29 @@ fn script_value(value: &ScriptValue) -> Value {
         ScriptValue::Str(s) => json!(s),
         ScriptValue::Bytes(b) => json!(String::from_utf8_lossy(b)),
     }
+}
+
+/// `AgentSignal(name, ...)`: put `AGENT_<NAME>` with the arguments on the event stream, so the
+/// agent's own Lua can wake the tiers above (an activity ended, a decision is open, anything else).
+fn install_signal(lua: &mlua::Lua, events: Arc<EventLog>, started: Instant) -> mlua::Result<()> {
+    lua.globals().set(
+        "AgentSignal",
+        lua.create_function(
+            move |_, (name, args): (String, mlua::Variadic<mlua::Value>)| {
+                let name = name.to_ascii_uppercase();
+                if name.is_empty() || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+                {
+                    return Err(mlua::Error::runtime(
+                        "AgentSignal: names are words and underscores",
+                    ));
+                }
+                events.push([json!({
+                    "time": started.elapsed().as_secs_f64(),
+                    "event": format!("AGENT_{name}"),
+                    "args": args.iter().map(|v| lua::to_json(v, 0)).collect::<Vec<_>>(),
+                })]);
+                Ok(())
+            },
+        )?,
+    )
 }
