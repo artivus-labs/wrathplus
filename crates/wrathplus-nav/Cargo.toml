@@ -1,0 +1,12 @@
+[package]
+name = "wrathplus-nav"
+version.workspace = true
+description = "Pathfinding over AzerothCore's mmaps navmesh tiles, with the server's own Detour"
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[build-dependencies]
+cc = "1"
