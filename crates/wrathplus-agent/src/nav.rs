@@ -350,6 +350,7 @@ mod tests {
                 pos: [1.0, 2.0, 3.0],
                 ..Default::default()
             }],
+            corpse: None,
         };
         let args = |code: &str| lua.load(code).eval::<MultiValue>().unwrap();
         assert_eq!(

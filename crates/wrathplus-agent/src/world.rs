@@ -4,7 +4,7 @@
 //! server sent this client, and reactions, quest markers and names are the client's own reading.
 //!
 //! Lua (installed by `env`): `AgentPosition()`, `AgentNearby([max_yards])`,
-//! `AgentFindNpc(service [, max_yards])`, `AgentTarget(guid)`, `AgentInteract(guid)`. GUIDs travel as `"0x…"` hex strings. `AgentInteract` turns on click-to-move
+//! `AgentFindNpc(service [, max_yards])`, `AgentCorpse()`, `AgentTarget(guid)`, `AgentInteract(guid)`. GUIDs travel as `"0x…"` hex strings. `AgentInteract` turns on click-to-move
 //! (`autoInteract`), so the character walks to the object first, as a player's right-click would.
 
 use bevy::prelude::*;
@@ -68,6 +68,15 @@ pub(crate) struct Me {
 pub(crate) struct Snapshot {
     pub me: Option<Me>,
     pub objects: Vec<Seen>,
+    /// Our corpse (the server's `MSG_CORPSE_QUERY` answer): where to run as a ghost.
+    pub corpse: Option<Corpse>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Corpse {
+    /// World coordinates; inside an instance, its entrance's.
+    pub pos: [f32; 3],
+    pub map: i32,
 }
 
 pub(crate) enum Order {
@@ -152,6 +161,7 @@ pub(crate) fn snapshot(
     templates: Option<Res<GameObjectTemplates>>,
     quests: Option<Res<QuestGiver>>,
     relations: RelationInputs,
+    death: Option<Res<wrathplus_app_core::app_core::death::DeathNet>>,
 ) {
     link.since += time.delta_secs();
     if link.since < REFRESH {
@@ -221,6 +231,10 @@ pub(crate) fn snapshot(
     if let Ok(mut shared) = link.snapshot.lock() {
         shared.me = me;
         shared.objects = seen;
+        shared.corpse = death.and_then(|d| d.corpse).map(|c| Corpse {
+            pos: c.position,
+            map: c.display_map,
+        });
     }
 }
 
@@ -324,6 +338,25 @@ fn seen_table(lua: &Lua, s: &Seen) -> mlua::Result<Table> {
 /// Install the world functions into this VM.
 pub(crate) fn install(lua: &Lua, handles: &Handles) -> mlua::Result<()> {
     let g = lua.globals();
+    let snap = handles.snapshot.clone();
+    g.set(
+        "AgentCorpse",
+        lua.create_function(move |lua, ()| {
+            let Some((corpse, me)) = snap.lock().ok().and_then(|s| Some((s.corpse?, s.me))) else {
+                return Ok(None);
+            };
+            let t = lua.create_table()?;
+            t.set("x", corpse.pos[0])?;
+            t.set("y", corpse.pos[1])?;
+            t.set("z", corpse.pos[2])?;
+            t.set("map", corpse.map)?;
+            if let Some(me) = me.filter(|m| m.map as i32 == corpse.map) {
+                let d = (me.pos[0] - corpse.pos[0]).hypot(me.pos[1] - corpse.pos[1]);
+                t.set("distance", (d * 10.0).round() / 10.0)?;
+            }
+            Ok(Some(t))
+        })?,
+    )?;
     let snap = handles.snapshot.clone();
     g.set(
         "AgentPosition",

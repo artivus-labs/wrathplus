@@ -93,6 +93,11 @@ function A.run(name)
   return true, result
 end
 
+-- End the running activity, as failed (a death, a new plan from code): signalled like any end.
+function A.stop(why)
+  finish(false, why)
+end
+
 -- The activity in progress: { name, seconds } or nil.
 function A.activity()
   local c = A.current
