@@ -14,6 +14,7 @@ pub enum Event {
     Stage(String),
     Health(super::status::Health),
     Build(super::build_state::BuildState),
+    Docker(super::docker::Docker),
 }
 type Result<T> = std::result::Result<T, String>;
 fn execute(mut command: Command, log: &File) -> Result<()> {
@@ -74,6 +75,15 @@ pub fn run(
     action: Action,
     sender: Sender<Event>,
 ) -> Result<String> {
+    if !matches!(action, Action::Save) {
+        let docker = super::docker::check();
+        let blocked = docker.blocked();
+        let advice = docker.advice();
+        let _ = sender.send(Event::Docker(docker));
+        if blocked {
+            return Err(advice.into());
+        }
+    }
     config.repo = setup::resolved(&config.repo)?;
     if !config.data.as_os_str().is_empty() {
         config.data = setup::resolved(&config.data)?;

@@ -60,6 +60,7 @@ impl Server {
             Some(Action::Start) => "Starting…",
             Some(Action::Stop) => "Stopping…",
             Some(Action::Build | Action::ForceBuild) => "Building…",
+            _ if self.docker.blocked() => self.docker.label(),
             _ if self.error.is_some() => "Check failed",
             _ => match self.health {
                 Health::Unknown => "Checking…",
@@ -74,6 +75,10 @@ impl Server {
         self.error.as_deref().unwrap_or(&self.stage)
     }
     pub(crate) fn control_input(&self) -> Option<super::Input> {
+        if self.docker.blocked() && !self.busy {
+            return (self.docker.can_start() && !self.choosing)
+                .then_some(super::Input::StartDocker);
+        }
         (!self.locked() && !self.choosing).then_some(super::Input::Run(
             if self.health == Health::Running {
                 Action::Stop
@@ -86,6 +91,7 @@ impl Server {
         match self.active {
             Some(Action::Start) => "Starting…",
             Some(Action::Stop) => "Stopping…",
+            _ if self.docker.can_start() => "Start Docker",
             _ if self.health == Health::Running => "Stop",
             _ => "Start",
         }

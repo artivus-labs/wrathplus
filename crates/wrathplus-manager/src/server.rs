@@ -3,6 +3,7 @@ mod build_feedback;
 mod build_state;
 mod chatter;
 mod command;
+mod docker;
 mod settings;
 mod status;
 #[cfg(test)]
@@ -36,12 +37,14 @@ pub enum Input {
     Run(Action),
     Finished(Result<String, String>),
     Connect,
+    StartDocker,
     ToggleLogs,
     BuildLogs,
 }
 pub struct Server {
     settings: Settings,
     health: status::Health,
+    docker: docker::Docker,
     build: build_state::BuildState,
     active: Option<Action>,
     source: String,
@@ -71,6 +74,7 @@ impl Default for Server {
             data: String::new(),
             settings,
             health: status::Health::Unknown,
+            docker: docker::Docker::Unknown,
             build: build_state::BuildState::Unknown,
             active: None,
             busy: false,
@@ -116,6 +120,7 @@ impl Server {
                     worker::Event::Stage(stage) => self.stage = stage,
                     worker::Event::Health(health) => self.health = health,
                     worker::Event::Build(build) => self.build = build,
+                    worker::Event::Docker(docker) => self.docker = docker,
                 }
             }
         }
@@ -242,7 +247,9 @@ impl Manager {
                     });
                 }
                 state.finished = Some(Instant::now());
-                state.next_refresh = Some(Instant::now() + std::time::Duration::from_secs(10));
+                // While Docker is down, look again sooner so the page clears as soon as it answers.
+                let wait = if state.docker.blocked() { 3 } else { 10 };
+                state.next_refresh = Some(Instant::now() + std::time::Duration::from_secs(wait));
                 match result {
                     Ok(message) => state.stage = message,
                     Err(error) => {
@@ -253,6 +260,22 @@ impl Manager {
                 if let Some(queued) = state.queued.take() {
                     return self.server_update(Input::Run(queued));
                 }
+            }
+            Input::StartDocker if !state.busy => {
+                let started = docker::start();
+                self.events.push(match &started {
+                    Ok(message) => format!("Server: {message}"),
+                    Err(error) => format!("Server: {error}"),
+                });
+                match started {
+                    Ok(message) => {
+                        state.docker = docker::Docker::Slow;
+                        state.error = None;
+                        state.stage = message;
+                    }
+                    Err(error) => state.error = Some(error),
+                }
+                state.next_refresh = Some(Instant::now() + std::time::Duration::from_secs(3));
             }
             Input::BuildLogs => state.build_feedback.toggle(),
             Input::ToggleLogs => state.show_logs = !state.show_logs,
