@@ -140,6 +140,7 @@ async function main(): Promise<void> {
       }
     }
     if (message.type === "result") {
+      waker.turnEnded();
       // A smoke run (a turn limit) ends with its first turn; a real run waits for news.
       if (config.maxTurns) {
         abortController.abort();

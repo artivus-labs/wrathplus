@@ -2,7 +2,7 @@
 // by a wake-up it asked for (wake_me: after a while, or when given events fire). Every wake comes
 // with a one-line status of the character, so the planner need not spend calls re-checking.
 
-import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk";
+import { createSdkMcpServer, tool, type HookCallback } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import type { GameEvent } from "./watch.ts";
 
@@ -58,8 +58,19 @@ export class Waker {
   #timer: ReturnType<typeof setTimeout> | undefined;
   #events = new Set<string>();
   #reason = "";
+  /** Asked to be woken this turn: the game tools are refused until the turn ends. */
+  #asleep = false;
 
   constructor(private readonly onWake: (text: string) => void) {}
+
+  get asleep(): boolean {
+    return this.#asleep;
+  }
+
+  /** The planner's turn ended. */
+  turnEnded(): void {
+    this.#asleep = false;
+  }
 
   get pending(): boolean {
     return this.#timer !== undefined || this.#events.size > 0;
@@ -70,6 +81,7 @@ export class Waker {
     this.cancel();
     this.#reason = reason;
     this.#events = new Set(events);
+    this.#asleep = true;
     if (seconds) this.#timer = setTimeout(() => this.#fire(`${seconds}s passed`), seconds * 1000);
     const when = [seconds ? `in ${seconds}s` : "", events.length ? `on ${events.join(", ")}` : ""].filter(Boolean);
     return `I will wake you ${when.join(" or ")}. End your turn now.`;
@@ -96,6 +108,24 @@ export class Waker {
 
 export const WAKE_TOOLS = ["mcp__wake__wake_me"];
 
+/** A PreToolUse hook: once the planner has asked to be woken, it may still write its notes, but
+ *  the game tools are refused until it ends the turn (a reply with no tool call). */
+export function sleepGuard(waker: Waker): HookCallback {
+  return async (input) => {
+    if (!waker.asleep || input.hook_event_name !== "PreToolUse" || !input.tool_name.startsWith("mcp__wrathplus__")) {
+      return {};
+    }
+    return {
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason:
+          "You asked to be woken, so this turn is over: reply without calling a tool. The wake-up (or any news) starts your next turn.",
+      },
+    };
+  };
+}
+
 /** The planner's alarm clock. */
 export function wakeServer(waker: Waker) {
   return createSdkMcpServer({
@@ -104,7 +134,7 @@ export function wakeServer(waker: Waker) {
     tools: [
       tool(
         "wake_me",
-        "Ask to be woken later, then end your turn: after `seconds`, or when one of `events` fires (game events such as AGENT_WALK_DONE, QUEST_LOG_UPDATE, PLAYER_REGEN_ENABLED), whichever is first. Replaces any earlier wake-up. You are woken anyway by news (the fast loop, deaths, whispers, stuck walks); use this only when you are driving something yourself and want to look again.",
+        "Ask to be woken later; your turn ends with it (the game tools are refused until you reply without a tool call). Wakes you after `seconds`, or when one of `events` fires (game events such as AGENT_WALK_DONE, QUEST_LOG_UPDATE, PLAYER_REGEN_ENABLED), whichever is first. Replaces any earlier wake-up. You are woken anyway by news (the fast loop, deaths, whispers, stuck walks); use this only when you are driving something yourself and want to look again.",
         {
           seconds: z.number().int().min(1).optional(),
           events: z.array(z.string().regex(/^[A-Z][A-Z0-9_]*$/)).optional(),

@@ -12,7 +12,7 @@ import {
 import { z } from "zod";
 import type { Policy } from "./policy.ts";
 import { NOTE_TOOLS, notesServer, type Notes } from "./notes.ts";
-import { WAKE_TOOLS, wakeServer, type Waker } from "./wake.ts";
+import { sleepGuard, WAKE_TOOLS, wakeServer, type Waker } from "./wake.ts";
 import { SYSTEM_PROMPT } from "./prompt.ts";
 
 /** The MCP tools the planner may use, all from the wrathplus server; nothing else. */
@@ -97,6 +97,7 @@ export function think(inbox: Inbox, options: BrainOptions): AsyncIterable<SDKMes
       // Compaction well inside the window: recall degrades long before the window fills.
       settings: { autoCompactEnabled: true, autoCompactWindow: options.compactAt ?? 400_000 },
       permissionMode: "dontAsk",
+      ...(options.waker ? { hooks: { PreToolUse: [{ hooks: [sleepGuard(options.waker)] }] } } : {}),
       mcpServers: {
         wrathplus: {
           type: "stdio",

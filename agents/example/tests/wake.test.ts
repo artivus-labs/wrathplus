@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { Waker } from "../src/wake.ts";
+import { sleepGuard, Waker } from "../src/wake.ts";
 
 const event = (name: string, args: unknown[] = []) => ({ seq: 1, time: 0, event: name, args });
 
@@ -29,4 +29,18 @@ test("setting a wake-up replaces the one before", () => {
   expect(woken).toEqual([]);
   waker.notice([event("PLAYER_LEVEL_UP", [4])]);
   expect(woken).toEqual(["Wake-up you asked for (second): PLAYER_LEVEL_UP [4]."]);
+});
+
+test("after wake_me the game tools are refused until the turn ends; notes stay open", async () => {
+  const waker = new Waker(() => {});
+  const guard = sleepGuard(waker);
+  const pre = (tool_name: string) =>
+    guard({ hook_event_name: "PreToolUse", tool_name, tool_input: {}, tool_use_id: "t", session_id: "s", transcript_path: "", cwd: "" } as never, "t", { signal: new AbortController().signal });
+  expect(await pre("mcp__wrathplus__lua")).toEqual({});
+  waker.set(30, [], "check the walk");
+  expect(JSON.stringify(await pre("mcp__wrathplus__lua"))).toContain('"permissionDecision":"deny"');
+  expect(await pre("mcp__notes__todo_write")).toEqual({});
+  waker.turnEnded();
+  expect(await pre("mcp__wrathplus__lua")).toEqual({});
+  waker.cancel();
 });

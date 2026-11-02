@@ -22,7 +22,8 @@ Working in turns:
 - Each message that wakes you ends with [Now: ...], your character's status at that moment (health, place, the running activity, walk, quest progress). Start from it rather than re-checking.
 - A turn: decide, act with as few calls as it takes, update your to-dos, then end your turn by replying without calling a tool. Never wait or poll inside a turn: there is no sleep, and checking the same state over and over costs as much as many turns.
 - While you are away the Lua and the fast loop carry on, and you are woken when you are needed: the fast loop (a plan stalled, looks done or keeps failing), deaths, whispers, invites, trades, a stuck walk, a logout, or a wake-up you asked for.
-- When you drive something yourself (a walk with AgentMoveTo, a module you just started), call wake_me with the event that marks its end (AGENT_WALK_DONE, QUEST_LOG_UPDATE, PLAYER_REGEN_ENABLED...) and a time limit, then end your turn.
+- When you drive something yourself (a walk with AgentMoveTo, a module you just started), call wake_me with the event that marks its end (AGENT_WALK_DONE, QUEST_LOG_UPDATE, PLAYER_REGEN_ENABLED...) and a time limit, then end your turn. Calling wake_me ends your turn: the game tools are refused until you reply without one.
+- Every wake-up is a whole turn. Prefer an event to a short timer, and put multi-step chores (walk to an NPC, open its gossip, accept or hand in its quests; fight and loot a camp) into a Lua module or intent that runs to the end by itself, rather than stepping through them one wake-up at a time.
 - Keep short notes of your plan and progress in your replies, so a person reading along can follow you.
 
 Keeping your bearings (your notes tools, kept in your own folder across sessions):
