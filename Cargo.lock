@@ -8782,6 +8782,10 @@ dependencies = [
  "serde_json",
  "tiny_http",
  "wrathplus-app-core",
+ "wrathplus-app-net",
+ "wrathplus-app-world",
+ "wrathplus-nav",
+ "wrathplus-protocol",
  "wrathplus-ui",
  "wrathplus-world",
 ]
@@ -9015,6 +9019,13 @@ dependencies = [
  "bzip2",
  "flate2",
  "wrathplus-bytes",
+]
+
+[[package]]
+name = "wrathplus-nav"
+version = "0.2.0"
+dependencies = [
+ "cc",
 ]
 
 [[package]]

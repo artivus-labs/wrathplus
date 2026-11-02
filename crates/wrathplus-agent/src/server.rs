@@ -10,6 +10,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use tiny_http::{Header, Method, Request as HttpRequest, Response, Server};
 
+/// The read-only web view of what the agent sees (#62).
+const VIEW: &str = include_str!("view.html");
 /// How long an HTTP thread waits for the game loop before answering 504.
 const GAME_TIMEOUT: Duration = Duration::from_secs(60);
 /// The longest an events read may wait for the next event.
@@ -37,6 +39,8 @@ pub(crate) struct Port {
     pub token: String,
     pub jobs: Sender<Job>,
     pub events: Arc<EventLog>,
+    /// The agent's modules (`env::scripts_dir`), served by `/files`.
+    pub scripts: std::path::PathBuf,
 }
 
 /// Bind and serve on background threads. Returns the bound address.
@@ -63,11 +67,12 @@ pub(crate) fn start(port: u16, shared: Port) -> Result<std::net::SocketAddr, Str
 }
 
 fn handle(shared: &Port, mut request: HttpRequest) {
-    let response = if !authorized(&request, &shared.token) {
-        json_response(401, &json!({"error": "missing or wrong bearer token"}))
-    } else {
-        route(shared, &mut request)
-    };
+    let response =
+        if !authorized(&request, &shared.token) && !view_with_token(&request, &shared.token) {
+            json_response(401, &json!({"error": "missing or wrong bearer token"}))
+        } else {
+            route(shared, &mut request)
+        };
     let _ = request.respond(response);
 }
 
@@ -77,6 +82,21 @@ fn authorized(request: &HttpRequest, token: &str) -> bool {
         h.field.equiv("Authorization")
             && constant_time_eq(h.value.as_str().as_bytes(), expected.as_bytes())
     })
+}
+
+/// `GET /view?token=…`: a browser cannot set a header from the address bar, so the page alone takes
+/// the token as a query parameter (loopback only, like everything here).
+fn view_with_token(request: &HttpRequest, token: &str) -> bool {
+    let url = request.url();
+    *request.method() == Method::Get
+        && url.split('?').next() == Some("/view")
+        && url
+            .split_once('?')
+            .map(|(_, q)| {
+                q.split('&')
+                    .any(|kv| constant_time_eq(kv.as_bytes(), format!("token={token}").as_bytes()))
+            })
+            .unwrap_or(false)
 }
 
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
@@ -99,7 +119,24 @@ fn route(shared: &Port, request: &mut HttpRequest) -> Reply {
             .find(|(k, _)| *k == name)
             .map(|(_, v)| v.to_owned())
     };
+    if path == "/files" || path.starts_with("/files/") {
+        return files(
+            shared,
+            request,
+            path.trim_start_matches("/files").trim_start_matches('/'),
+        );
+    }
     match (request.method(), path.as_str()) {
+        (Method::Get, "/view") => Response::from_data(
+            VIEW.replace(
+                "__TOKEN__",
+                // A JS string literal that cannot close the script tag.
+                &json!(shared.token).to_string().replace('<', "\\u003c"),
+            )
+            .into_bytes(),
+        )
+        .with_header(header("Content-Type", "text/html; charset=utf-8"))
+        .with_header(header("Cache-Control", "no-store")),
         (Method::Get, "/status") => ask(shared, |reply| Job::Status { reply }),
         (Method::Post, "/lua") => {
             let mut body = String::new();
@@ -156,8 +193,64 @@ fn route(shared: &Port, request: &mut HttpRequest) -> Reply {
         }
         _ => json_response(
             404,
-            &json!({"error": "unknown route", "routes": ["GET /status", "POST /lua", "GET /screenshot", "GET /events"]}),
+            &json!({"error": "unknown route", "routes": ["GET /status", "POST /lua", "GET /screenshot", "GET /events", "GET /view", "GET|PUT|DELETE /files/<module>"]}),
         ),
+    }
+}
+
+/// The agent's modules: `GET /files` lists them, `GET|PUT|DELETE /files/<module>` reads, writes
+/// (creating folders) or removes one. Module names are dotted words (`grind.loop`), so a path can
+/// never leave the scripts folder. Writing does not reload: `AgentReload(name)` in Lua does.
+fn files(shared: &Port, request: &mut HttpRequest, name: &str) -> Reply {
+    let dir = &shared.scripts;
+    if name.is_empty() {
+        return match request.method() {
+            Method::Get => json_response(
+                200,
+                &json!({"modules": crate::env::list(dir), "folder": dir.display().to_string()}),
+            ),
+            _ => json_response(405, &json!({"error": "GET /files lists modules"})),
+        };
+    }
+    if !crate::env::valid_module(name) {
+        return json_response(
+            400,
+            &json!({"error": "module names are dotted words: grind.loop"}),
+        );
+    }
+    let path = crate::env::module_path(dir, name);
+    match request.method() {
+        Method::Get => match std::fs::read(&path) {
+            Ok(source) => Response::from_data(source)
+                .with_header(header("Content-Type", "text/plain; charset=utf-8")),
+            Err(_) => json_response(404, &json!({"error": format!("no module {name}")})),
+        },
+        Method::Put => {
+            let mut body = Vec::new();
+            if let Err(e) = request
+                .as_reader()
+                .take(MAX_BODY as u64 + 1)
+                .read_to_end(&mut body)
+            {
+                return json_response(400, &json!({"error": format!("body: {e}")}));
+            }
+            if body.len() > MAX_BODY {
+                return json_response(413, &json!({"error": "module larger than 1 MiB"}));
+            }
+            let written = path
+                .parent()
+                .map_or(Ok(()), std::fs::create_dir_all)
+                .and_then(|()| std::fs::write(&path, &body));
+            match written {
+                Ok(()) => json_response(200, &json!({"saved": name, "bytes": body.len()})),
+                Err(e) => json_response(500, &json!({"error": e.to_string()})),
+            }
+        }
+        Method::Delete => match std::fs::remove_file(&path) {
+            Ok(()) => json_response(200, &json!({"deleted": name})),
+            Err(_) => json_response(404, &json!({"error": format!("no module {name}")})),
+        },
+        _ => json_response(405, &json!({"error": "GET, PUT or DELETE"})),
     }
 }
 
@@ -218,6 +311,8 @@ mod tests {
                 token: TOKEN.into(),
                 jobs,
                 events: events.clone(),
+                scripts: std::env::temp_dir()
+                    .join(format!("wp-agent-port-test-{}", std::process::id())),
             },
         )
         .unwrap();
@@ -288,5 +383,45 @@ mod tests {
         assert_eq!(status, 404);
         assert!(body.contains("POST /lua"));
         assert_eq!(get(address, "/screenshot", TOKEN).0, 500);
+    }
+
+    #[test]
+    fn the_view_takes_its_token_from_the_address_and_carries_it() {
+        let (address, _) = port();
+        let (status, page) = call(
+            address,
+            &format!("GET /view?token={TOKEN} HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n"),
+        );
+        assert_eq!(status, 200);
+        assert!(page.contains(&format!("const TOKEN = \"{TOKEN}\";")));
+        let wrong = "GET /view?token=nope HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n";
+        assert_eq!(call(address, wrong).0, 401);
+        // The address-bar token opens the page only, not the API.
+        let api =
+            format!("GET /status?token={TOKEN} HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
+        assert_eq!(call(address, &api).0, 401);
+    }
+
+    #[test]
+    fn modules_are_saved_listed_read_and_deleted_inside_the_scripts_folder() {
+        let (address, _) = port();
+        let auth = format!("Authorization: Bearer {TOKEN}\r\nConnection: close\r\n");
+        let source = "return { hello = true }";
+        let put = format!(
+            "PUT /files/grind.loop HTTP/1.1\r\nHost: x\r\n{auth}Content-Length: {}\r\n\r\n{source}",
+            source.len()
+        );
+        assert_eq!(call(address, &put).0, 200);
+        let (status, body) = get(address, "/files", TOKEN);
+        assert_eq!(status, 200);
+        assert!(body.contains("\"grind.loop\""));
+        assert_eq!(
+            get(address, "/files/grind.loop", TOKEN),
+            (200, source.to_string())
+        );
+        assert_eq!(get(address, "/files/..%2Fetc", TOKEN).0, 400);
+        let delete = format!("DELETE /files/grind.loop HTTP/1.1\r\nHost: x\r\n{auth}\r\n");
+        assert_eq!(call(address, &delete).0, 200);
+        assert_eq!(get(address, "/files/grind.loop", TOKEN).0, 404);
     }
 }
