@@ -1,7 +1,7 @@
 import { describe as group, expect, test } from "bun:test";
 import { Inbox, summarize, TOOLS } from "../src/brain.ts";
 import { configFromEnv } from "../src/index.ts";
-import { describe, watch, type GameEvent } from "../src/watch.ts";
+import { describe, PLANNER_EVENTS, watch, type GameEvent } from "../src/watch.ts";
 
 const event = (seq: number, name: string, args: unknown[] = []): GameEvent => ({ seq, time: seq, event: name, args });
 
@@ -28,6 +28,15 @@ group("events a player would notice", () => {
       "Game error: Out of range.",
       "Your walk ended stuck: AgentWalk().note says why; route around it or pick another way.",
     ]);
+  });
+
+  test("the planner hears /say only when it names the character", () => {
+    const lines = describe([
+      event(1, "CHAT_MSG_SAY", ["anyone selling bread?", "Botty"]),
+      event(2, "CHAT_MSG_SAY", ["agenttwo, follow me", "Shannon"]),
+      event(3, "CHAT_MSG_PARTY", ["pull the next one", "Shannon"]),
+    ], "Agenttwo", PLANNER_EVENTS);
+    expect(lines).toEqual(["Shannon says: agenttwo, follow me", "[Party] Shannon: pull the next one"]);
   });
 
   test("the watcher batches a burst into one message", async () => {

@@ -17,6 +17,8 @@ const NOTABLE: Record<string, (args: unknown[]) => string | null> = {
   CHAT_MSG_WHISPER: (a) => `${a[1]} whispers: ${a[0]}`,
   CHAT_MSG_PARTY: (a) => `[Party] ${a[1]}: ${a[0]}`,
   CHAT_MSG_PARTY_LEADER: (a) => `[Party leader] ${a[1]}: ${a[0]}`,
+  CHAT_MSG_RAID: (a) => `[Raid] ${a[1]}: ${a[0]}`,
+  CHAT_MSG_RAID_LEADER: (a) => `[Raid leader] ${a[1]}: ${a[0]}`,
   CHAT_MSG_SAY: (a) => (a[1] === undefined ? null : `${a[1]} says: ${a[0]}`),
   PARTY_INVITE_REQUEST: (a) => `${a[0]} invites you to a party (AcceptGroup() or DeclineGroup()).`,
   TRADE_SHOW: () => "Someone opened a trade window with you.",
@@ -39,6 +41,9 @@ export const PLANNER_EVENTS = new Set([
   "CHAT_MSG_PARTY",
   "CHAT_MSG_PARTY_LEADER",
   "PARTY_INVITE_REQUEST",
+  "CHAT_MSG_SAY",
+  "CHAT_MSG_RAID",
+  "CHAT_MSG_RAID_LEADER",
   "TRADE_SHOW",
   "DUEL_REQUESTED",
   "AGENT_WALK_DONE",
@@ -52,6 +57,8 @@ export function describe(events: GameEvent[], self?: string, kinds?: Set<string>
     // Your own chat comes back too; it isn't news.
     if (self && e.event.startsWith("CHAT_MSG_") && e.args[1] === self) continue;
     if (kinds && !kinds.has(e.event)) continue;
+    // Said nearby: the planner hears it only when it is addressed by name (bots chatter in /say).
+    if (kinds && e.event === "CHAT_MSG_SAY" && !(self && String(e.args[0]).toLowerCase().includes(self.toLowerCase()))) continue;
     const say = NOTABLE[e.event];
     const line = say?.(e.args);
     if (line) lines.push(line);
