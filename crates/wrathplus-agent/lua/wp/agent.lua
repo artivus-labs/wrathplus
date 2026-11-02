@@ -1,16 +1,19 @@
 -- wp.agent: where the agent's own Lua meets the fast decision tier. Loaded as the global `Agent`.
 --
--- Intents: things the fast tier (Jev) may choose to do, registered by any module at runtime.
---   Agent.intent("pull_wolf", {
---     when = "Out of combat, healthy, and a living wolf is within 30 yards.",
+-- Intents are things the fast tier (Jev) may choose to do, registered by any module at runtime:
+--   Agent.intent("clear_camp", {
+--     when = "Out of combat and the quest still needs kobolds.",   -- what Jev reads
 --     available = function() return not UnitAffectingCombat("player") end,  -- optional filter
---     run = function() local w = V.nearest({ name = "Diseased Young Wolf", alive = true }) ... end,
---     every = 2,                                                             -- optional repeat gap
+--     run = function() Hunt:start() end,                         -- starts the activity
+--     done = function() return Hunt.finished, Hunt.ok end,       -- optional: when it has ended
+--     timeout = 120,                                             -- optional: give up after (s)
 --   })
--- The fast tier lists the available intents every tick, lets Jev choose among them, and calls
--- the chosen one's run. Registering again replaces; Agent.remove(name) drops one.
+-- Choosing an intent starts an *activity*. Without `done` it ends as soon as `run` returns. With
+-- `done`, it runs until `done()` returns true (or `timeout` passes), and the fast tier stays
+-- asleep meanwhile: realtime Lua carries it. Its end is signalled (AGENT_INTENT_DONE), which wakes
+-- the fast tier for the next choice. Registering again replaces; Agent.remove(name) drops one.
 --
--- Decisions: a tricky choice inside realtime code, handed up to the fast tier.
+-- Decisions hand a tricky choice from realtime code up to the fast tier:
 --   Agent.decide("flee_or_fight", {
 --     question = "Two wolves are on us at half health. Fight on or run?",
 --     options = { fight = "Keep attacking", flee = "Run back toward the guards" },
@@ -18,9 +21,12 @@
 --     on = function(choice) ... end,
 --     default = "fight", timeout = 2,                -- used if no answer comes in time
 --   })
--- The fast tier answers on its next tick; if it doesn't within `timeout` seconds, `default` is used.
+-- Opening one signals AGENT_DECISION, which wakes the fast tier at once.
+--
+-- Agent.signal(name, ...) puts an event on the agent's event stream (AGENT_<NAME>), for anything
+-- else the tiers above should hear about.
 
-local A = { intents = {}, pending = {}, next_id = 0, log = {} }
+local A = { intents = {}, pending = {}, next_id = 0, log = {}, current = nil }
 
 local function note(text)
   A.log[#A.log + 1] = string.format("%.1f %s", GetTime(), text)
@@ -31,6 +37,10 @@ local function valid_name(name)
   return type(name) == "string" and name:match("^[a-z][a-z0-9_]*$") ~= nil
 end
 
+function A.signal(name, ...)
+  if AgentSignal then AgentSignal(name, ...) end
+end
+
 function A.intent(name, spec)
   assert(valid_name(name), "intent names are snake_case words")
   assert(type(spec) == "table" and type(spec.run) == "function", "intent " .. name .. " needs run")
@@ -39,7 +49,10 @@ function A.intent(name, spec)
   return spec
 end
 
-function A.remove(name) A.intents[name] = nil end
+function A.remove(name)
+  A.intents[name] = nil
+  if A.current and A.current.name == name then A.current = nil end
+end
 
 -- The intents whose `available` passes now, as { name, when } pairs, for the fast tier.
 function A.available()
@@ -47,24 +60,44 @@ function A.available()
   for name, spec in pairs(A.intents) do
     local ok, yes = true, true
     if spec.available then ok, yes = pcall(spec.available) end
-    if ok and yes then out[#out + 1] = { name = name, when = spec.when, every = spec.every } end
+    if ok and yes then out[#out + 1] = { name = name, when = spec.when } end
   end
   table.sort(out, function(a, b) return a.name < b.name end)
   return out
 end
 
--- Run an intent (called by the fast tier). Returns ok and its result or error.
+local function finish(ok, why)
+  local c = A.current
+  if not c then return end
+  A.current = nil
+  note((ok and "done " or "ended ") .. c.name .. (why and (": " .. why) or ""))
+  A.signal("INTENT_DONE", c.name, ok and true or false, why)
+end
+
+-- Start an intent's activity (called by the fast tier). Returns ok and run's result or error.
 function A.run(name)
   local spec = A.intents[name]
   if not spec then return false, "no intent " .. tostring(name) end
+  if A.current then finish(false, "replaced by " .. name) end
+  A.current = { name = name, since = GetTime(), spec = spec }
   local ok, result = pcall(spec.run)
-  note((ok and "ran " or "failed ") .. name .. (ok and "" or ": " .. tostring(result)))
-  return ok, result
+  if not ok then
+    note("failed " .. name .. ": " .. tostring(result))
+    finish(false, tostring(result))
+    return false, result
+  end
+  if not spec.done then finish(true) end
+  return true, result
 end
 
-local timer
-local function expire()
-  local now = GetTime()
+-- The activity in progress: { name, seconds } or nil.
+function A.activity()
+  local c = A.current
+  if not c then return nil end
+  return { name = c.name, seconds = math.floor((GetTime() - c.since) * 10) / 10 }
+end
+
+local function decision_expiry(now)
   for id, d in pairs(A.pending) do
     if now >= d.deadline then
       A.pending[id] = nil
@@ -73,6 +106,33 @@ local function expire()
     end
   end
 end
+
+-- One watcher frame: activity ends and decision timeouts, a few times a second.
+local watcher
+local since = 0
+local function ensure_watcher()
+  if watcher then return end
+  watcher = CreateFrame("Frame")
+  watcher:SetScript("OnUpdate", function(_, dt)
+    since = since + dt
+    if since < 0.2 then return end
+    since = 0
+    local now = GetTime()
+    decision_expiry(now)
+    local c = A.current
+    if c and c.spec.done then
+      local ok, finished, succeeded = pcall(c.spec.done)
+      if not ok then
+        finish(false, "done check failed: " .. tostring(finished))
+      elseif finished then
+        finish(succeeded ~= false)
+      elseif c.spec.timeout and now - c.since >= c.spec.timeout then
+        finish(false, "timed out")
+      end
+    end
+  end)
+end
+ensure_watcher()
 
 function A.decide(name, spec)
   assert(valid_name(name), "decision names are snake_case words")
@@ -86,10 +146,7 @@ function A.decide(name, spec)
     context = spec.context, on = spec.on, default = spec.default,
     deadline = GetTime() + (spec.timeout or 3),
   }
-  if not timer then
-    timer = CreateFrame("Frame")
-    timer:SetScript("OnUpdate", expire)
-  end
+  A.signal("DECISION", name, id)
   return id
 end
 

@@ -93,13 +93,14 @@ impl Plugin for AgentPlugin {
             }
         }
         let (world, world_link) = world::link();
-        let (nav, nav_link) = nav::link();
+        let started = Instant::now();
+        let (nav, nav_link) = nav::link(events.clone(), started);
         app.insert_resource(Link {
             world,
             nav,
             queue,
             events,
-            started: Instant::now(),
+            started,
             scripts: env::scripts_dir(),
             env_session: 0,
             autoexec_due: false,
@@ -151,6 +152,9 @@ fn pump_events(
         }
         if let Err(e) = nav::install(script.lua(), &link.nav, &link.world) {
             error!("agent port: navigation functions: {e}");
+        }
+        if let Err(e) = install_signal(script.lua(), link.events.clone(), link.started) {
+            error!("agent port: AgentSignal: {e}");
         }
     }
     if link.autoexec_due && state.is_some_and(|s| *s.get() == ClientState::InWorld) {
@@ -276,4 +280,29 @@ fn script_value(value: &ScriptValue) -> Value {
         ScriptValue::Str(s) => json!(s),
         ScriptValue::Bytes(b) => json!(String::from_utf8_lossy(b)),
     }
+}
+
+/// `AgentSignal(name, ...)`: put `AGENT_<NAME>` with the arguments on the event stream, so the
+/// agent's own Lua can wake the tiers above (an activity ended, a decision is open, anything else).
+fn install_signal(lua: &mlua::Lua, events: Arc<EventLog>, started: Instant) -> mlua::Result<()> {
+    lua.globals().set(
+        "AgentSignal",
+        lua.create_function(
+            move |_, (name, args): (String, mlua::Variadic<mlua::Value>)| {
+                let name = name.to_ascii_uppercase();
+                if name.is_empty() || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+                {
+                    return Err(mlua::Error::runtime(
+                        "AgentSignal: names are words and underscores",
+                    ));
+                }
+                events.push([json!({
+                    "time": started.elapsed().as_secs_f64(),
+                    "event": format!("AGENT_{name}"),
+                    "args": args.iter().map(|v| lua::to_json(v, 0)).collect::<Vec<_>>(),
+                })]);
+                Ok(())
+            },
+        )?,
+    )
 }

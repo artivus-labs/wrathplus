@@ -7,9 +7,12 @@
 //
 // Runs on the Claude Code login of this machine (a Claude subscription works); no API key needed.
 
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Inbox, summarize, think } from "./brain.ts";
 import { Jev } from "./jev.ts";
+import { Notes } from "./notes.ts";
 import { Policy } from "./policy.ts";
 import { kickoff } from "./prompt.ts";
 import { watch } from "./watch.ts";
@@ -36,7 +39,7 @@ export function configFromEnv(argv: string[], env: Record<string, string | undef
     token,
     goal,
     model: env.WRATHPLUS_AGENT_MODEL ?? "claude-sonnet-5-5",
-    checkInSeconds: Number(env.WRATHPLUS_AGENT_CHECKIN_SECONDS ?? 120),
+    checkInSeconds: Number(env.WRATHPLUS_AGENT_CHECKIN_SECONDS ?? 0),
     ...(maxTurns && maxTurns > 0 ? { maxTurns } : {}),
   };
 }
@@ -46,47 +49,87 @@ async function main(): Promise<void> {
   const abortController = new AbortController();
   process.on("SIGINT", () => abortController.abort());
   const inbox = new Inbox();
+  // The agent's own notes: memory, to-dos and its session log, kept per control port.
+  const notes = new Notes(
+    process.env.WRATHPLUS_AGENT_HOME ??
+      join(homedir(), ".local/share/wrathplus-agents", `agent-${new URL(config.url).port || "default"}`),
+  );
+  // Everything that reaches the planner also goes in the session log.
+  const tell = (kind: string, text: string) => {
+    notes.record(kind, text);
+    inbox.push(text);
+  };
   // The fast tier, when a TypeSafe key is available (TYPESAFE_API_KEY).
   const policy = process.env.TYPESAFE_API_KEY
     ? new Policy({
         url: config.url,
         token: config.token,
         jev: new Jev(process.env.TYPESAFE_API_KEY, process.env.WRATHPLUS_JEV_MODEL ?? "jev-latest"),
-        intervalMs: Number(process.env.WRATHPLUS_JEV_INTERVAL_MS ?? 1500),
-        onStalled: (summary) => inbox.push(summary),
+        heartbeatMs: Number(process.env.WRATHPLUS_JEV_HEARTBEAT_MS ?? 20_000),
+        onNotify: (summary) => tell("fast loop", summary),
         log: (line) => console.log(line),
       })
     : undefined;
   if (policy) void policy.run(abortController.signal);
-  inbox.push(kickoff(config.goal));
+  const opening = kickoff(config.goal, notes.briefing());
+  inbox.push(opening);
   let self: string | undefined;
   void watch({
     url: config.url,
     token: config.token,
     self: () => self,
     signal: abortController.signal,
+    onEvents: (events) => policy?.notice(events),
     onMessage: (text) => {
       console.log(`\n[events] ${text.replace(/\n/g, " ")}`);
-      for (const line of text.split("\n- ").slice(1)) policy?.note(line);
-      inbox.push(text);
+      tell("events", text);
     },
   });
   // Operator notes from stdin.
   void (async () => {
     for await (const line of console) {
-      if (line.trim()) inbox.push(`Note from the operator: ${line.trim()}`);
+      if (line.trim()) tell("operator", `Note from the operator: ${line.trim()}`);
     }
   })();
   const mcpEntry = fileURLToPath(new URL("../../mcp/src/index.ts", import.meta.url));
   let checkIn: ReturnType<typeof setTimeout> | undefined;
   console.log(`WrathPlus example agent · ${config.model} · ${config.url}\nGoal: ${config.goal}\n`);
   console.log(policy ? "Fast tier: Jev on" : "Fast tier: off (no TYPESAFE_API_KEY)");
-  for await (const message of think(inbox, { ...config, mcpEntry, abortController, ...(policy ? { policy } : {}) })) {
+  console.log(`Notes: ${notes.home}`);
+  const compactAt = Number(process.env.WRATHPLUS_AGENT_COMPACT_AT ?? 400_000);
+  let begun = false;
+  for await (const message of think(inbox, { ...config, mcpEntry, abortController, notes, compactAt, ...(policy ? { policy } : {}) })) {
     if (message.type === "system" && message.subtype === "init") {
       console.log(`[session ${message.session_id}]`);
+      if (!begun) {
+        begun = true;
+        notes.begin(message.session_id);
+        notes.record("goal", opening);
+      }
+    }
+    if (message.type === "system" && message.subtype === "compact_boundary") {
+      const tokens = message.compact_metadata.pre_tokens;
+      console.log(`[compacted at ${tokens} tokens]`);
+      tell(
+        "compaction",
+        `Your conversation was compacted (it had reached ${tokens} tokens). Your notes are unchanged:\n\n${notes.briefing()}`,
+      );
     }
     const line = summarize(message);
-    if (line) console.log(line);
+    if (line) {
+      console.log(line);
+      notes.record(message.type === "result" ? "turn end" : "planner", line);
+    }
+    if (message.type === "user" && Array.isArray(message.message.content)) {
+      for (const block of message.message.content) {
+        if (typeof block === "object" && block.type === "tool_result") {
+          const content = Array.isArray(block.content)
+            ? block.content.map((c) => (c.type === "text" ? c.text : `[${c.type}]`)).join(" ")
+            : String(block.content ?? "");
+          notes.record("result", content.slice(0, 1500));
+        }
+      }
+    }
     if (message.type === "result") {
       // A smoke run (a turn limit) ends with its first turn; a real run waits for news.
       if (config.maxTurns) {
@@ -97,7 +140,7 @@ async function main(): Promise<void> {
       clearTimeout(checkIn);
       if (config.checkInSeconds > 0) {
         checkIn = setTimeout(
-          () => inbox.push("Check in: look at the game, review your Lua's progress and carry on toward your goal."),
+          () => tell("check-in", "Check in: look at the game, review your Lua's progress and carry on toward your goal."),
           config.checkInSeconds * 1000,
         );
       }

@@ -40,9 +40,15 @@ pub(crate) struct Handles {
 #[derive(Resource)]
 pub(crate) struct NavLink {
     walk: Arc<Mutex<Walk>>,
+    /// Where a walk's end is announced (`AGENT_WALK_DONE`), to wake the tiers above.
+    events: Arc<crate::events::EventLog>,
+    started: std::time::Instant,
 }
 
-pub(crate) fn link() -> (Handles, NavLink) {
+pub(crate) fn link(
+    events: Arc<crate::events::EventLog>,
+    started: std::time::Instant,
+) -> (Handles, NavLink) {
     let walk = Arc::new(Mutex::new(Walk {
         status: "idle",
         ..Default::default()
@@ -56,13 +62,26 @@ pub(crate) fn link() -> (Handles, NavLink) {
             walk: walk.clone(),
             mesh,
         },
-        NavLink { walk },
+        NavLink {
+            walk,
+            events,
+            started,
+        },
     )
 }
 
 /// World coordinates to Bevy (x right, y up, z back), as `wrathplus_assets::coords::wow_to_bevy`.
 fn to_bevy(p: [f32; 3]) -> Vec3 {
     Vec3::new(-p[1], p[2], -p[0])
+}
+
+/// Put a walk's end on the event stream.
+fn announce(link: &NavLink, status: &str) {
+    link.events.push([serde_json::json!({
+        "time": link.started.elapsed().as_secs_f64(),
+        "event": "AGENT_WALK_DONE",
+        "args": [status],
+    })]);
 }
 
 /// Feed the route to click-to-move: when one walk ends, start the next corner.
@@ -89,9 +108,13 @@ pub(crate) fn walk(link: Res<NavLink>, mut auto: AutoMove) {
                     "click-to-move refused the walk (dead, controlled, or autoInteract off)".into(),
                 );
                 walk.queue.clear();
+                announce(&link, "failed");
             }
         }
-        None => walk.status = "arrived",
+        None => {
+            walk.status = "arrived";
+            announce(&link, "arrived");
+        }
     }
 }
 
@@ -253,7 +276,10 @@ mod tests {
 
     #[test]
     fn without_mmaps_a_route_says_how_to_get_one() {
-        let (handles, _) = link();
+        let (handles, _) = link(
+            Arc::new(crate::events::EventLog::new()),
+            std::time::Instant::now(),
+        );
         handles.mesh.lock().unwrap().dir = None;
         let me = world::Me {
             pos: [0.0; 3],

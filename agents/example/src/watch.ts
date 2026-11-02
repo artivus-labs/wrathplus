@@ -26,12 +26,25 @@ const NOTABLE: Record<string, (args: unknown[]) => string | null> = {
   AGENT_LUA: (a) => (a[1] === false ? `Your Lua failed: ${a[2]} (in: ${String(a[0]).slice(0, 120)})` : null),
 };
 
+/** What wakes the planner: things only it should handle. The rest (combat, loot, quest windows,
+ *  errors, level-ups) is the fast tier's, and reaches the planner through it. */
+export const PLANNER_EVENTS = new Set([
+  "PLAYER_DEAD",
+  "CHAT_MSG_WHISPER",
+  "CHAT_MSG_PARTY",
+  "CHAT_MSG_PARTY_LEADER",
+  "PARTY_INVITE_REQUEST",
+  "TRADE_SHOW",
+  "DUEL_REQUESTED",
+]);
+
 /** Turn a batch of raw events into lines, skipping the ones a player wouldn't notice. */
-export function describe(events: GameEvent[], self?: string): string[] {
+export function describe(events: GameEvent[], self?: string, kinds?: Set<string>): string[] {
   const lines: string[] = [];
   for (const e of events) {
     // Your own chat comes back too; it isn't news.
     if (self && e.event.startsWith("CHAT_MSG_") && e.args[1] === self) continue;
+    if (kinds && !kinds.has(e.event)) continue;
     const say = NOTABLE[e.event];
     const line = say?.(e.args);
     if (line) lines.push(line);
@@ -48,6 +61,8 @@ export interface WatchOptions {
   /** Gather lines for this long after the first before sending (ms). */
   batchMs?: number;
   onMessage: (text: string) => void;
+  /** Every batch of raw events, for the fast tier. */
+  onEvents?: (events: GameEvent[]) => void;
   signal: AbortSignal;
 }
 
@@ -70,7 +85,8 @@ export async function watch(options: WatchOptions): Promise<void> {
       const wait = pending.length ? Math.max(0, flushAt - Date.now()) : 25_000;
       const batch = await read(url, token, since, wait, signal);
       since = batch.next;
-      const lines = describe(batch.events, options.self?.());
+      if (batch.events.length) options.onEvents?.(batch.events);
+      const lines = describe(batch.events, options.self?.(), PLANNER_EVENTS);
       if (lines.length && !pending.length) flushAt = Date.now() + batchMs;
       pending.push(...lines);
       if (batch.missed) pending.push(`(${batch.missed} game events were missed.)`);

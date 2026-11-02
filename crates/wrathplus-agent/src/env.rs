@@ -222,6 +222,43 @@ mod tests {
     }
 
     #[test]
+    fn an_activity_runs_until_its_done_check_passes_or_it_times_out() {
+        let mut script = UiScript::new().unwrap();
+        install(&script, scratch("activity")).unwrap();
+        script
+            .run(
+                r#"
+                finished = false
+                Agent.intent("walk_there", { when = "x", run = function() end, done = function() return finished end })
+                Agent.intent("forever", { when = "y", run = function() end, done = function() return false end, timeout = 1 })
+                Agent.run("walk_there")
+                "#,
+            )
+            .unwrap();
+        let busy: String = script.eval("return Agent.activity().name").unwrap();
+        assert_eq!(busy, "walk_there");
+        script.tick(0.3);
+        assert!(script
+            .eval::<bool>("return Agent.activity() ~= nil")
+            .unwrap());
+        script.run("finished = true").unwrap();
+        script.tick(0.3);
+        assert!(script
+            .eval::<bool>("return Agent.activity() == nil")
+            .unwrap());
+        script.run("Agent.run('forever')").unwrap();
+        for _ in 0..6 {
+            script.tick(0.3);
+        }
+        assert!(
+            script
+                .eval::<bool>("return Agent.activity() == nil")
+                .unwrap(),
+            "timed out"
+        );
+    }
+
+    #[test]
     fn the_built_in_library_loads() {
         let script = UiScript::new().unwrap();
         install(&script, scratch("builtin")).unwrap();

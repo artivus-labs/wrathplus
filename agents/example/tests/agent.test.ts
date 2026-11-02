@@ -89,6 +89,6 @@ group("planner plumbing", () => {
   test("config needs the port and token; Sonnet 5.5 by default", () => {
     expect(() => configFromEnv([], {})).toThrow("WRATHPLUS_AGENT_URL");
     const config = configFromEnv(["Reach", "level", "5"], { WRATHPLUS_AGENT_URL: "http://127.0.0.1:17950/", WRATHPLUS_AGENT_TOKEN: "t" });
-    expect(config).toEqual({ url: "http://127.0.0.1:17950", token: "t", goal: "Reach level 5", model: "claude-sonnet-5-5", checkInSeconds: 120 });
+    expect(config).toEqual({ url: "http://127.0.0.1:17950", token: "t", goal: "Reach level 5", model: "claude-sonnet-5-5", checkInSeconds: 0 });
   });
 });
