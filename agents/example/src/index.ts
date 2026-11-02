@@ -9,6 +9,8 @@
 
 import { fileURLToPath } from "node:url";
 import { Inbox, summarize, think } from "./brain.ts";
+import { Jev } from "./jev.ts";
+import { Policy } from "./policy.ts";
 import { kickoff } from "./prompt.ts";
 import { watch } from "./watch.ts";
 
@@ -44,6 +46,18 @@ async function main(): Promise<void> {
   const abortController = new AbortController();
   process.on("SIGINT", () => abortController.abort());
   const inbox = new Inbox();
+  // The fast tier, when a TypeSafe key is available (TYPESAFE_API_KEY).
+  const policy = process.env.TYPESAFE_API_KEY
+    ? new Policy({
+        url: config.url,
+        token: config.token,
+        jev: new Jev(process.env.TYPESAFE_API_KEY, process.env.WRATHPLUS_JEV_MODEL ?? "jev-latest"),
+        intervalMs: Number(process.env.WRATHPLUS_JEV_INTERVAL_MS ?? 1500),
+        onStalled: (summary) => inbox.push(summary),
+        log: (line) => console.log(line),
+      })
+    : undefined;
+  if (policy) void policy.run(abortController.signal);
   inbox.push(kickoff(config.goal));
   let self: string | undefined;
   void watch({
@@ -53,6 +67,7 @@ async function main(): Promise<void> {
     signal: abortController.signal,
     onMessage: (text) => {
       console.log(`\n[events] ${text.replace(/\n/g, " ")}`);
+      for (const line of text.split("\n- ").slice(1)) policy?.note(line);
       inbox.push(text);
     },
   });
@@ -65,7 +80,8 @@ async function main(): Promise<void> {
   const mcpEntry = fileURLToPath(new URL("../../mcp/src/index.ts", import.meta.url));
   let checkIn: ReturnType<typeof setTimeout> | undefined;
   console.log(`WrathPlus example agent · ${config.model} · ${config.url}\nGoal: ${config.goal}\n`);
-  for await (const message of think(inbox, { ...config, mcpEntry, abortController })) {
+  console.log(policy ? "Fast tier: Jev on" : "Fast tier: off (no TYPESAFE_API_KEY)");
+  for await (const message of think(inbox, { ...config, mcpEntry, abortController, ...(policy ? { policy } : {}) })) {
     if (message.type === "system" && message.subtype === "init") {
       console.log(`[session ${message.session_id}]`);
     }
