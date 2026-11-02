@@ -10,8 +10,17 @@ cd "$(dirname "$0")/.."
 # Extract a quoted `key = "value"` field from a Cargo.toml.
 field() { grep -m1 "^$2" "$1" 2>/dev/null | sed -E "s/^$2[[:space:]]*=[[:space:]]*\"//; s/\".*$//"; }
 
+# List the plugins one registration call adds, in order: `$1` is the call (`add_plugins`, `\.add`), `$2`
+# the file. A plugin type prints as its name (`FooPlugin`), a plugin function as `module::fn`;
+# a generic (`MaterialPlugin::<T>`) prints once.
+plugins() {
+  grep -oE "$1\(([A-Za-z_]+::)*[A-Za-z_]+" "$2" | sed -E "s/^$1\(//; s/^(crate|super):://" \
+    | awk -F"::" "{ n = NF; print (\$n ~ /^[a-z]/ && n > 1) ? \$(n-1) \"::\" \$n : \$n }" \
+    | awk "!seen[\$0]++ { print \"- \" \$0 }"
+}
+
 {
-  echo "# benilla — generated map"
+  echo "# WrathPlus — generated map"
   echo
   echo "> **GENERATED** by \`scripts/genmap.sh\` from the code — do not edit by hand; rerun the script"
   echo "> when what's built changes. *What-is* only: the *what-changed* is in git. No timestamp —"
@@ -34,15 +43,24 @@ field() { grep -m1 "^$2" "$1" 2>/dev/null | sed -E "s/^$2[[:space:]]*=[[:space:]
   echo
   # Accept bare (`add_plugins(FooPlugin)`) and path-qualified (`add_plugins(foo::FooPlugin)`)
   # registrations; print the plugin type name either way.
-  grep -oE 'add_plugins\(([a-z_]+::)*[A-Za-z_]+Plugins?' crates/wrathplus-app/src/lib.rs \
-    | sed -E 's/add_plugins\(//; s/([a-z_]+::)+//' | awk '!seen[$0]++ {print "- " $0}'
+  plugins 'add_plugins' crates/wrathplus-app/src/lib.rs
   echo
 
-  # `lib.rs` adds each dev group in one line, so their members are read out of `dev.rs`.
-  echo "### Behind the \`dev\` feature (\`crates/wrathplus-app/src/dev.rs\` — compiled out by \`--no-default-features\`)"
+  # `run()` adds the two plugin groups in one line each, so their members are read out of the
+  # group definitions.
+  echo "### \`WorldPlugins\` — the engine (\`crates/wrathplus-world/src/world_plugins.rs\`)"
   echo
-  grep -oE 'add_plugins\(([a-z_]+::)*[A-Za-z_]+Plugins?' crates/wrathplus-app/src/dev.rs \
-    | sed -E 's/add_plugins\(//; s/([a-z_]+::)+//' | awk '!seen[$0]++ {print "- " $0}'
+  plugins '\.add' crates/wrathplus-world/src/world_plugins.rs
+  echo
+
+  echo "### \`GamePlugins\` — the game (\`crates/wrathplus-app/src/game_plugins.rs\`)"
+  echo
+  plugins '\.add' crates/wrathplus-app/src/game_plugins.rs
+  echo
+
+  echo "### Behind the \`dev\` feature (\`crates/wrathplus-app-tools/src/dev.rs\` — compiled out by \`--no-default-features\`)"
+  echo
+  plugins 'add_plugins' crates/wrathplus-app-tools/src/dev.rs
   echo
 
   echo "## Modules (top-level, per crate)"

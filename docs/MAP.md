@@ -1,4 +1,4 @@
-# benilla — generated map
+# WrathPlus — generated map
 
 > **GENERATED** by `scripts/genmap.sh` from the code — do not edit by hand; rerun the script
 > when what's built changes. *What-is* only: the *what-changed* is in git. No timestamp —
@@ -6,28 +6,35 @@
 
 ## Crates
 
-- **wrathplus-adt** (no Bevy) — ADT terrain-tile reader for WoW 1.12.1 (build 5875)
-- **wrathplus-app** (Bevy) — The Bevy app as a library: everything but the build-id stamp, which lives in the `benilla` launcher so a new commit does not rebuild this crate
-- **wrathplus-assets** (Bevy) — Bevy AssetSource + AssetLoaders over the WoW 1.12.1 MPQ patch chain
-- **wrathplus-blp** (no Bevy) — BLP2 texture decoder for WoW 1.12.1 (build 5875)
+- **wrathplus-adt** (no Bevy) — ADT terrain-tile reader for WoW 3.3.5a (build 12340)
+- **wrathplus-app-core** (Bevy) — The app's core layer: cvars, local state, data configuration and the shared types the other app crates build on
+- **wrathplus-app-net** (Bevy) — The app's net layer: the realm session and the packet handlers that turn server messages into game state
+- **wrathplus-app-tools** (Bevy) — The app's dev instruments: debug panel, perf journal, probes and censuses (mostly behind the dev feature)
+- **wrathplus-app-ui** (Bevy) — The app's UI layer: FrameXML hosting, the Lua API and the stock 3.3.5a windows
+- **wrathplus-app-world** (Bevy) — The app's world layer: units, models, markers and everything the game draws in the world
+- **wrathplus-app** (Bevy) — The Bevy app as a library: everything but the build-id stamp, which lives in the `wrathplus` launcher so a new commit does not rebuild this crate
+- **wrathplus-assets** (Bevy) — Bevy AssetSource + AssetLoaders over the WoW 3.3.5a MPQ patch chain
+- **wrathplus-blp** (no Bevy) — BLP2 texture decoder for WoW 3.3.5a (build 12340)
 - **wrathplus-buildstamp** (no Bevy) — The git build-id stamp shared by the launchers' build scripts
 - **wrathplus-bytes** (no Bevy) — Bounds-checked byte readers and IFF chunk iteration shared by the format parsers
-- **wrathplus-dbc** (no Bevy) — WDBC (client DBC) reader for WoW 1.12.1 (build 5875)
-- **wrathplus-formats** (no Bevy) — WoW 1.12.1 asset-format adapters (MPQ/BLP/DBC/ADT/WDT) and the wrathplus-extract CLI
-- **wrathplus-m2** (no Bevy) — M2 (MD20) model reader for WoW 1.12.1 (build 5875)
+- **wrathplus-dbc** (no Bevy) — WDBC (client DBC) reader for WoW 3.3.5a (build 12340)
+- **wrathplus-formats** (no Bevy) — WoW 3.3.5a asset-format adapters (MPQ/BLP/DBC/ADT/WDT) and the wrathplus-extract CLI
+- **wrathplus-m2** (no Bevy) — M2 (MD20) model reader for WoW 3.3.5a (build 12340)
+- **wrathplus-manager** (no Bevy) — The WrathPlus launcher: client setup, addons and the managed local Playerbots server
 - **wrathplus-mpq** (no Bevy) — Read-only MPQ archive reader for WoW 3.3.5 (build 12340)
 - **wrathplus-protocol** (no Bevy) — WoW 3.3.5a (build 12340) auth (SRP6) and world wire protocol
-- **wrathplus-srp** (no Bevy) — WoW 1.12.1 (build 5875) SRP6 client and world-header crypto
+- **wrathplus-srp** (no Bevy) — WoW 3.3.5a (build 12340) SRP6 client and world-header crypto
 - **wrathplus-ui** (no Bevy) — Engine-free WoW UI engine core: TOC and FrameXML parsing, templates, anchors, z-order
 - **wrathplus-visual** (no Bevy) — Perceptual image diff for the visual A/B render harness
-- **wrathplus-wdt** (no Bevy) — WDT map tile-table reader and tile/world coordinates for WoW 1.12.1 (build 5875)
-- **wrathplus-wmo** (no Bevy) — WMO (root and group) reader for WoW 1.12.1 (build 5875)
+- **wrathplus-wdt** (no Bevy) — WDT map tile-table reader and tile/world coordinates for WoW 3.3.5a (build 12340)
+- **wrathplus-wmo** (no Bevy) — WMO (root and group) reader for WoW 3.3.5a (build 12340)
 - **wrathplus-world** (Bevy) — The world renderer: terrain, water, sky, weather, models, lighting, collision and the frame ladder; everything needed to put something in a world and ask the world about itself, with no game attached
 - **wrathplus-worldview** (no Bevy) — The world viewer: the engine with no game attached, which keeps the engine and game split honest
-- **benilla** (no Bevy) — The launcher: build.rs stamps the git build id and main() hands it to wrathplus-app, so a new commit rebuilds this package and not the app crate
+- **wrathplus** (no Bevy) — The launcher: build.rs stamps the git build id and main() hands it to wrathplus-app, so a new commit rebuilds this package and not the app crate
 
 ## App subsystems — Bevy plugins in load order (`crates/wrathplus-app/src/lib.rs`)
 
+- boot::tuned_default_plugins
 - ThreadQosPlugin
 - BgWinPlugin
 - MacQuitPlugin
@@ -37,10 +44,209 @@
 - GamePlugins
 - DevProbesPlugin
 
-### Behind the `dev` feature (`crates/wrathplus-app/src/dev.rs` — compiled out by `--no-default-features`)
+### `WorldPlugins` — the engine (`crates/wrathplus-world/src/world_plugins.rs`)
+
+- shaders::plugin
+- MaterialPlugin
+- material_specialization::plugin
+- WorldFoundation
+- SchedulePlugin
+- InteractPlugin
+- BillboardPlugin
+- ground_fx::plugin
+- frame_pace::plugin
+- OccludedFramesPlugin
+- CleanExitPlugin
+- rig_palette::plugin
+- rig_anim::plugin
+- instance_tint::plugin
+- mat_anim_table::plugin
+- model_fade::plugin
+- model_render::plugin
+- zfill::plugin
+- straddle::plugin
+- ArtScopePlugin
+- AssetPlugin
+- WorldMapPlugin
+- LightingPlugin
+- ModernShadowsPlugin
+- SkyPlugin
+- SkyboxPlugin
+- CloudsPlugin
+- WeatherPlugin
+- SunPlugin
+- InteriorPlugin
+- EntityShadePlugin
+- ViewPlugin
+- WmoPortalPlugin
+- ExteriorCullPlugin
+- DoodadAnimPlugin
+- ClutterPlugin
+- WdlPlugin
+- LiquidPlugin
+- ParticlePlugin
+- WaterFxPlugin
+- FfxGlowPlugin
+- RibbonPlugin
+- LightAnimPlugin
+- ModKeysPlugin
+- LayoutKeysPlugin
+- TerrainPlugin
+
+### `GamePlugins` — the game (`crates/wrathplus-app/src/game_plugins.rs`)
+
+- shaders::plugin
+- BowstringPlugin
+- WeaponTrailPlugin
+- FishingLinePlugin
+- QuestMarkersPlugin
+- pipe_warm::plugin
+- EntitiesPlugin
+- CombatLogPlugin
+- CreatureAnimPlugin
+- BlobShadowPlugin
+- CameraShakePlugin
+- FootprintsPlugin
+- go_anim::plugin
+- doodad_events::plugin
+- PlayerPlugin
+- ScreenFadePlugin
+- CinematicPlugin
+- CursorPlugin
+- NetPlugin
+- MotionPlugin
+- FactionStandingPlugin
+- DeathPlugin
+- UiDeathPlugin
+- GluePlugin
+- CharSelectPlugin
+- LoginPlugin
+- RealmSelectPlugin
+- CharCreatePlugin
+- StockCreatePlugin
+- SoundPlugin
+- TargetPlugin
+- TransportPlugin
+- LoadingScreenPlugin
+- PlayerUiPlugin
+- WorldBackdropPlugin
+- MinimapPlugin
+- UiModelsPlugin
+- AreaPlugin
+- AreaPoiPlugin
+- WorldStateUiPlugin
+- AreaTriggerPlugin
+- WorldMapUiPlugin
+- PoiMarkerPlugin
+- UiTextPlugin
+- UiSessionPlugin
+- PortraitPlugin
+- TextInputPlugin
+- UiScriptPlugin
+- VideoPlugin
+- RealmlistPlugin
+- CvarPlugin
+- ConsolePlugin
+- BindingsPlugin
+- UiUnitPlugin
+- UiPartyPlugin
+- UiDuelPlugin
+- UiBinderPlugin
+- UiDialogVerbsPlugin
+- BattlefieldScorePlugin
+- BattlefieldPlugin
+- BattlefieldPositionsPlugin
+- GameTipPlugin
+- TextFilterPlugin
+- TextReshapePlugin
+- TutorialPlugin
+- SwingRefusalPlugin
+- UiSummonPlugin
+- UiGmTicketPlugin
+- UiFollowPlugin
+- UiInstancePlugin
+- UiLogoutPlugin
+- UiSocialPlugin
+- UiGuildPlugin
+- UiPetitionPlugin
+- UiTooltipPlugin
+- UiCharPlugin
+- UiReputationPlugin
+- InspectUiPlugin
+- UiHonorPlugin
+- DressUpUiPlugin
+- UiActionPlugin
+- SpellPlugin
+- UiAuraPlugin
+- UiSpellbookPlugin
+- UiAchievementsPlugin
+- UiMacroPlugin
+- UiTalentPlugin
+- UiTalentWipePlugin
+- UiStaticPopupPlugin
+- UiShapeshiftPlugin
+- UiPetPlugin
+- ChrClassesPlugin
+- UiPetBookPlugin
+- UiPetStatsPlugin
+- UiPetTalentTreePlugin
+- UiVehiclePlugin
+- UiCompanionsPlugin
+- UiTotemsPlugin
+- UiGlyphsPlugin
+- VehicleSeatsPlugin
+- UiRaidVehiclesPlugin
+- UiUnitPopupPlugin
+- UiRunesPlugin
+- UiPaperDollPlugin
+- UiPetDollPlugin
+- UiNetPlugin
+- NativeFeedsPlugin
+- UiCastPlugin
+- UiSpellTargetingPlugin
+- UiMirrorPlugin
+- CombatTextPlugin
+- NameplatesPlugin
+- RaidMarksPlugin
+- VPlatesPlugin
+- ChatBubblePlugin
+- UiItemsPlugin
+- UiGossipPlugin
+- UiMerchantPlugin
+- UiAuctionPlugin
+- UiBankPlugin
+- UiMailPlugin
+- UiTradePlugin
+- UiItemTextPlugin
+- UiSavedPlugin
+- NamePersistPlugin
+- UiStablePlugin
+- TabardUiPlugin
+- UiTrainerPlugin
+- UiTaxiPlugin
+- UiTradeSkillPlugin
+- WrathStateFeedPlugin
+- UiLootPlugin
+- UiLootRollPlugin
+- UiQuestPlugin
+- UiQuestLogPlugin
+- QuestSharePlugin
+- UiChatPlugin
+- UiLfgPlugin
+- UiGuildBankPlugin
+- UiCalendarPlugin
+- UiArenaTeamPlugin
+- UiNativeChatPlugin
+- UiNativePetNamePlugin
+- UiNativeWhoPlugin
+- UiLayoutPlugin
+- ScreenshotPlugin
+
+### Behind the `dev` feature (`crates/wrathplus-app-tools/src/dev.rs` — compiled out by `--no-default-features`)
 
 - DebugPanelPlugin
 - PerfPlugin
+- capture::fx_draw_census_plugin
 - HoverLogPlugin
 - AssetChurnPlugin
 - PreflightPlugin
@@ -102,30 +308,37 @@
 ## Modules (top-level, per crate)
 
 - **wrathplus-adt** (lib.rs): combined_alpha 
-- **wrathplus-app** (lib.rs): addon_harness app_core area area_poi area_trigger asset_churn aura_visual bindings blob_shadow bowstring camera_shake capture char_create char_select chat_bubble chr_classes cinematic combat_log combat_text console crash creature_anim creature_type cursor cvars death debug_panel dev doodad_events entities experience experience_ao experience_ui fishing_line footprints game_plugins game_tip glue glue_strings go_anim go_templates guild hover_log inventory items launch_plan loading_screen local_state login loot minimap motion name_persist nameplates names net npc_text opaque2d overlay pending_item_ops perf pipe_warm player poi_marker portrait preflight probe_shield query_cache quest_markers quest_reputation quest_rewards raid_marks ranged_flex realm_select realmlist run_mode screen_fade screenshot script_calls shaders shipped_cvars showcase_capture shutdown smart_rect sound spell swing_refusal target test_support text_filter text_reshape textinput transport tutorial ui_achievements ui_action ui_arena_team ui_auction ui_aura ui_bank ui_battlefield ui_battlefield_arena_lines ui_battlefield_positions ui_battlefield_score ui_bind_confirm ui_binder ui_calendar ui_cast ui_char ui_chat ui_chat_verbs ui_companions ui_death ui_dialog_verbs ui_dressup ui_duel ui_follow ui_gamma ui_glyphs ui_gm_ticket ui_gossip ui_guild ui_guild_bank ui_honor ui_inspect ui_inspect_wrath ui_instance ui_item_text ui_items ui_layout ui_lfg ui_logout ui_loot ui_loot_roll ui_macro ui_mail ui_merchant ui_mirror ui_models ui_native ui_native_chat ui_net ui_paperdoll ui_party ui_pass ui_pet ui_pet_book ui_pet_doll ui_pet_stats ui_pet_talent_tree ui_petition ui_quest ui_quest_log ui_quest_share ui_raid_vehicles ui_reputation ui_runes ui_saved ui_script ui_session ui_shapeshift ui_social ui_spellbook ui_stable ui_static_popup ui_summon ui_tabard ui_talent ui_talent_wipe ui_taxi ui_text ui_tooltip ui_totems ui_trade ui_tradeskill ui_trainer ui_unit ui_unit_popup ui_vehicle ui_world_map video vplates weapon_trail world_backdrop world_state world_state_ui wrath_vehicle_seats 
+- **wrathplus-app-core** (lib.rs): app_core area chr_classes crash cvars data_config glue_strings launch_plan local_state pending_item_ops query_cache quest_reputation run_mode shutdown text_filter text_reshape wrath_vehicle_seats 
+- **wrathplus-app-net** (lib.rs): area_trigger creature_type go_templates items name_persist names net realmlist 
+- **wrathplus-app-tools** (lib.rs): addon_harness capture debug_panel dev hover_log perf preflight probe_shield showcase_capture 
+- **wrathplus-app-ui** (lib.rs): bindings char_create char_select combat_log console experience_ui glue login npc_text quest_rewards realm_select script_calls shipped_cvars textinput tutorial ui_achievements ui_action ui_arena_team ui_auction ui_aura ui_bank ui_battlefield ui_battlefield_arena_lines ui_battlefield_positions ui_battlefield_score ui_bind_confirm ui_binder ui_calendar ui_cast ui_char ui_chat ui_chat_verbs ui_companions ui_death ui_dialog_verbs ui_dressup ui_duel ui_follow ui_gamma ui_glyphs ui_gm_response ui_gm_ticket ui_gossip ui_guild ui_guild_bank ui_honor ui_inspect ui_inspect_wrath ui_instance ui_item_text ui_items ui_layout ui_lfg ui_logout ui_loot ui_loot_roll ui_macro ui_mail ui_merchant ui_mirror ui_models ui_native ui_native_chat ui_net ui_paperdoll ui_party ui_pass ui_pet ui_pet_book ui_pet_doll ui_pet_stats ui_pet_talent_tree ui_petition ui_quest ui_quest_log ui_quest_share ui_raid_vehicles ui_reputation ui_runes ui_saved ui_script ui_session ui_shapeshift ui_social ui_spellbook ui_stable ui_static_popup ui_summon ui_tabard ui_talent ui_talent_wipe ui_taxi ui_tooltip ui_totems ui_trade ui_tradeskill ui_trainer ui_unit ui_unit_popup ui_unit_quest_tooltip ui_vehicle ui_world_map world_state_ui wrathplus_pack 
+- **wrathplus-app-world** (lib.rs): app_icon area_poi asset_churn aura_visual blob_shadow bowstring camera_shake chat_bubble cinematic combat_text creature_anim cursor death doodad_events entities experience experience_ao fishing_line footprints game_tip go_anim guild inventory loading_screen loot minimap motion nameplates opaque2d overlay pipe_warm player poi_marker portrait quest_markers raid_marks ranged_flex screen_fade screenshot shaders smart_rect sound spell swing_refusal target transport ui_text video vplates weapon_trail world_backdrop world_state 
+- **wrathplus-app** (lib.rs): game_plugins test_support 
 - **wrathplus-assets** (lib.rs): adt anim_rng blp column_grid coords gpu_blp m2 materials minimap_grid model override_real_data spatial_cache terrain tex_filter trace wdt wmo world_assets 
-- **wrathplus-formats** (lib.rs): achievements anim_data area_poi area_sound area_table area_trigger auction_house bank_bag_slot_prices barber battlemaster camera_shakes cfg_categories chain characters chat_channels chr_classes cinematics creature_families creature_sound creature_types creatures currencies dbc death_thud durability elevators emit_timing emote_text emotes environmental_damage exhaustion factions footsteps game_tables game_tips gameobjects garble gems glyphs gm_survey gm_ticket_category ground_effects heirlooms holidays install item_extended_cost item_limit_category item_random_properties item_records item_sounds item_visuals itembagfamily itemclass items itemsets itemsubclass languages lfg light liquid loading_screen lock lock_type macro_icons maps material minimap_translate models movies name_gen npc_greeting overrides packages page_text_material particles pet_stats profile quest_headers quest_info quest_rewards race_creature_type race_pvp_team race_sound ribbons server_messages sheathe skill_lines sound_entries sound_provider sound_water spell_focus spell_mechanic spell_visual spells stable_slot_prices stationery summon_properties talents taxi taxi_nodes taxi_path terrain text_filter_lists tga transport_period transports unit_blood value_track vehicle_indicators vehicles vocal_ui_sounds wdl weapon_impact weapon_swing wmo_area world_map_area world_map_continent world_map_overlay world_map_wrath world_state_ui wow_ini wrath_layouts wrath_layouts_installed_tests wrath_liquid wrath_liquid_surface zone_map 
+- **wrathplus-formats** (lib.rs): achievements anim_data area_poi area_sound area_table area_trigger auction_house bank_bag_slot_prices barber battlemaster camera_shakes cfg_categories chain characters chat_channels chr_classes cinematics creature_families creature_sound creature_types creatures currencies dbc death_thud durability elevators emit_timing emote_text emotes environmental_damage exhaustion factions footsteps game_tables game_tips gameobjects garble gems glyphs gm_survey gm_ticket_category ground_effects heirlooms holidays install item_extended_cost item_limit_category item_random_properties item_records item_sounds item_visuals itembagfamily itemclass items itemsets itemsubclass languages lfg light liquid loading_screen local_state lock lock_type macro_icons maps material minimap_translate models movies name_gen npc_greeting overrides packages page_text_material particles pet_stats profile quest_headers quest_info quest_rewards race_creature_type race_pvp_team race_sound ribbons server_messages sheathe skill_lines sound_entries sound_provider sound_water spell_focus spell_mechanic spell_visual spells stable_slot_prices stationery summon_properties talents taxi taxi_nodes taxi_path terrain text_filter_lists tga totem_category transport_period transports unit_blood value_track vehicle_indicators vehicles vocal_ui_sounds wdl weapon_impact weapon_swing wmo_area world_map_area world_map_continent world_map_overlay world_map_wrath world_state_ui wow_ini wrath_layouts wrath_layouts_installed_tests wrath_liquid wrath_liquid_surface zone_map 
 - **wrathplus-m2** (lib.rs): error model skin track wrath wrath_tests 
 - **wrathplus-mpq** (lib.rs): crypto 
 - **wrathplus-protocol** (lib.rs): events guid types wire wrath_achievement wrath_appearance wrath_arena_team wrath_auras wrath_auth wrath_authority wrath_battleground wrath_bind wrath_bootstrap wrath_calendar wrath_capture wrath_channel wrath_channel_members wrath_char_services wrath_chat wrath_chat_notices wrath_combat wrath_contacts wrath_death wrath_duel wrath_environment wrath_events wrath_exchange wrath_faction wrath_gameplay wrath_ground wrath_group wrath_guild wrath_guild_bank wrath_guild_bank_commands wrath_guild_bank_log wrath_guild_bank_query wrath_guild_bank_swap wrath_guild_bank_tab wrath_guild_bank_text wrath_guild_commands wrath_guild_rank wrath_help wrath_inspect wrath_instance wrath_instance_control wrath_inventory wrath_items wrath_lfg wrath_logout wrath_logs wrath_loot wrath_mail wrath_mail_mutations wrath_mirror_image wrath_misc wrath_movement wrath_movement_misc wrath_native_codec_guard_tests wrath_native_stream_tests wrath_npc wrath_opcode_names wrath_party wrath_pet wrath_pet_name wrath_petition wrath_progress wrath_quest wrath_quests_completed wrath_raid_browser wrath_refer_friend wrath_relay wrath_roll wrath_session wrath_session_meta wrath_session_misc wrath_social wrath_speed wrath_spell_control wrath_spell_failure wrath_spline wrath_stable wrath_taxi wrath_taxi_ack wrath_trade wrath_trainer wrath_transfer wrath_ui_timer wrath_vehicle wrath_vendor wrath_who wrath_world wrath_world_objects 
 - **wrathplus-srp** (lib.rs): vanilla_header wrath_header 
 - **wrathplus-ui** (lib.rs): bindings_xml civil framexml grammar heirloom justify layout loader markup messages order script source status strings toc widget 
 - **wrathplus-visual** (lib.rs): relight 
-- **wrathplus-world** (lib.rs): art_scope assets bgwin billboard boot build_id clouds clutter collision decal dev_state doodad_anim entity_shade exterior_cull ffx_glow final_pass frame_pace ground_fx instance_tint interact interior layout_keys light_anim lighting liquid log_ring mac_quit map_proj mat_anim_table material_specialization mesh_tag model_fade model_forms model_render modern_lighting modern_shadows modkeys particles ribbons ride_frame rig_anim rig_palette rig_rider schedule shaders shadow_gpu_smoke sky sky_order skybox static_gx static_merge straddle sun surface terrain_stream thread_qos view vis_chain water_fx wdl weather wmo_portal world_census world_map world_plugins world_point world_unit worldview zfill 
+- **wrathplus-wmo** (lib.rs): tests 
+- **wrathplus-world** (lib.rs): art_scope assets bgwin billboard boot build_id clean_exit clouds clutter collision decal dev_state doodad_anim entity_shade exterior_cull ffx_glow final_pass frame_pace ground_fx instance_tint interact interior layout_keys light_anim lighting liquid log_ring mac_quit map_proj mat_anim_table material_specialization mesh_tag model_fade model_forms model_render modern_lighting modern_shadows modkeys occluded particles ribbons ride_frame rig_anim rig_palette rig_rider schedule shaders shadow_gpu_smoke sky sky_order skybox static_gx static_merge straddle sun surface terrain_stream thread_qos view vis_chain water_fx wdl weather wmo_portal wmo_unified_gpu_tests world_census world_map world_plugins world_point world_unit worldview zfill 
+- **wrathplus-manager** (main.rs): addons branding build_feedback cli client_actions module_config module_ui modules pages preflight prerequisites server setup style tests update 
 
 ## CLI binaries
 
-- `wrathplus-extract` (in wrathplus-formats)
 - `blpx` (in wrathplus-blp)
 - `mpqx` (in wrathplus-formats)
+- `wrathplus-extract` (in wrathplus-formats)
 
 ## WGSL shaders (`crates/*/src/shaders/`, embedded)
 
-- `embedded://wrathplus_app/shaders/ui_add.wgsl`
-- `embedded://wrathplus_app/shaders/ui_gamma.wgsl`
-- `embedded://wrathplus_app/shaders/ui_node_gamma.wgsl`
-- `embedded://wrathplus_app/shaders/ui_quad.wgsl`
-- `embedded://wrathplus_app/shaders/ui_slice_gamma.wgsl`
+- `embedded://wrathplus_app_world/shaders/ui_add.wgsl`
+- `embedded://wrathplus_app_world/shaders/ui_gamma.wgsl`
+- `embedded://wrathplus_app_world/shaders/ui_node_gamma.wgsl`
+- `embedded://wrathplus_app_world/shaders/ui_quad.wgsl`
+- `embedded://wrathplus_app_world/shaders/ui_slice_gamma.wgsl`
 - `embedded://wrathplus_assets/shaders/liquid.wgsl`
 - `embedded://wrathplus_assets/shaders/terrain.wgsl`
 - `embedded://wrathplus_assets/shaders/wdl.wgsl`
@@ -148,168 +361,167 @@
 > semantics. (The in-window surfaces — the Ctrl+Shift dev-chord overlays — are plugins
 > above; this indexes the switches that don't announce themselves.)
 
-- `WOW_ALLOW_ACCOUNT` — wrathplus-app/src/login/mod.rs, wrathplus-app/src/run_mode.rs
+- `WOW_ALLOW_ACCOUNT` — wrathplus-app-core/src/run_mode.rs, wrathplus-app-ui/src/login/mod.rs
 - `WOW_AMBIGUITY_DUMP` — wrathplus-app/src/game_plugins.rs
-- `WOW_ANIM_COST` — wrathplus-app/src/creature_anim/driver.rs
-- `WOW_ANIM_PARK_ALL` — wrathplus-app/src/creature_anim/lod.rs
-- `WOW_ANISO` — wrathplus-app/src/cvars/mod.rs, wrathplus-app/src/game_plugins/client_tests/shipped_cvars.rs, wrathplus-assets/src/tex_filter.rs
+- `WOW_ANIM_COST` — wrathplus-app-world/src/creature_anim/driver.rs
+- `WOW_ANIM_PARK_ALL` — wrathplus-app-world/src/creature_anim/lod.rs
+- `WOW_ANISO` — wrathplus-app-core/src/cvars/mod.rs, wrathplus-app/src/game_plugins/client_tests/shipped_cvars.rs, wrathplus-assets/src/tex_filter.rs
 - `WOW_API_DUMP` — wrathplus-app/tests/world_api_wall.rs
-- `WOW_ARCH_CENSUS` — wrathplus-app/src/perf/mod.rs
+- `WOW_ARCH_CENSUS` — wrathplus-app-tools/src/perf/mod.rs
 - `WOW_ART_RADIUS` — wrathplus-world/src/art_scope.rs
-- `WOW_ASSET_CHURN` — wrathplus-app/src/asset_churn.rs
-- `WOW_ASSET_DUMP` — wrathplus-app/src/capture/probes/live_fps.rs
-- `WOW_AUDIO_LIVE` — wrathplus-app/src/sound/output/mod.rs
-- `WOW_AUDIO_NO_RT` — wrathplus-app/src/sound/output/mod.rs
+- `WOW_ASSET_CHURN` — wrathplus-app-world/src/asset_churn.rs
+- `WOW_ASSET_DUMP` — wrathplus-app-tools/src/capture/probes/live_fps.rs
+- `WOW_AUDIO_LIVE` — wrathplus-app-world/src/sound/output/mod.rs
+- `WOW_AUDIO_NO_RT` — wrathplus-app-world/src/sound/output/mod.rs
 - `WOW_AUDIT_` — wrathplus-world/src/bgwin.rs
 - `WOW_AUDIT_START` — wrathplus-world/src/wmo_portal/audit/mod.rs
 - `WOW_AUDIT_WMO` — wrathplus-world/src/wmo_portal/audit/mod.rs
 - `WOW_BARE_DOODAD_COLLIDERS` — wrathplus-world/src/terrain_stream/collider.rs
-- `WOW_BG` — wrathplus-world/src/bgwin.rs
+- `WOW_BG` — wrathplus-manager/src/setup/login.rs, wrathplus-world/src/bgwin.rs
 - `WOW_BLOB_VIS` — wrathplus-world/src/terrain_stream/merge.rs
 - `WOW_BLOB_VIS_UID` — wrathplus-world/src/terrain_stream/merge.rs
-- `WOW_BOOTH_DUMP` — wrathplus-app/src/portrait/test_bake.rs
-- `WOW_BOOTH_LOG` — wrathplus-app/src/portrait/mod.rs
-- `WOW_BUBBLE_TRACE` — wrathplus-app/src/chat_bubble.rs
+- `WOW_BOOTH_DUMP` — wrathplus-app-world/src/portrait/test_bake.rs
+- `WOW_BOOTH_LOG` — wrathplus-app-world/src/portrait/mod.rs
+- `WOW_BUBBLE_TRACE` — wrathplus-app-world/src/chat_bubble.rs
 - `WOW_CAMERA_EXCLUDE` — wrathplus-assets/src/materials.rs, wrathplus-world/src/shaders.rs
 - `WOW_CAMERA_NORMAL` — wrathplus-assets/src/materials.rs, wrathplus-world/src/shaders.rs
-- `WOW_CAM_CHANGED` — wrathplus-app/src/perf/mod.rs
-- `WOW_CAM_DUMP` — wrathplus-app/src/player/camera.rs
-- `WOW_CAPTURE` — wrathplus-app/src/capture/mod.rs, wrathplus-app/src/capture/scenarios.rs, wrathplus-app/src/char_select/addons.rs, wrathplus-app/src/game_plugins/client_tests/cvars.rs, wrathplus-app/src/lib.rs, wrathplus-app/src/local_state.rs, wrathplus-app/src/login/mod.rs, wrathplus-app/src/name_persist.rs, wrathplus-app/src/net.rs, wrathplus-app/src/player/camera_saved.rs, wrathplus-app/src/run_mode.rs, wrathplus-app/src/showcase_capture/driver.rs, wrathplus-app/src/sound/mod.rs, wrathplus-app/src/ui_chat/settings.rs, wrathplus-app/src/ui_chat/tests.rs, wrathplus-app/src/ui_macro/tests.rs, wrathplus-app/src/ui_script/addons.rs, wrathplus-app/src/ui_script/mod.rs, wrathplus-app/src/ui_script/production_load.rs, wrathplus-app/src/ui_script/world_entry_tests.rs, wrathplus-app/src/ui_script/wrath_native.rs, wrathplus-app/src/video.rs, wrathplus-world/src/bgwin.rs, wrathplus-world/src/clouds/mod.rs, wrathplus-world/src/dev_state.rs
-- `WOW_CAPTURE_AGE` — wrathplus-app/src/capture/mod.rs
-- `WOW_CAPTURE_DEADLINE` — wrathplus-app/src/capture/mod.rs
-- `WOW_CAPTURE_OUT` — wrathplus-app/src/capture/mod.rs
-- `WOW_CAPTURE_REHOVER` — wrathplus-app/src/ui_script/mod.rs
-- `WOW_CAPTURE_STABLE` — wrathplus-app/src/capture/mod.rs
-- `WOW_CAPTURE_UI` — wrathplus-app/src/capture/scenarios.rs, wrathplus-app/src/ui_script/mod.rs, wrathplus-app/src/ui_script/wrath_native.rs, wrathplus-app/src/video.rs
-- `WOW_CAST_TRACE` — wrathplus-app/src/net.rs
-- `WOW_CHAR` — wrathplus-app/src/capture/probe_mail.rs, wrathplus-app/src/game_plugins/client_tests/cvars.rs, wrathplus-app/src/launch_plan.rs, wrathplus-app/src/login/mod.rs, wrathplus-app/src/net.rs, wrathplus-app/src/realm_select/smoke.rs, wrathplus-app/src/run_mode.rs
-- `WOW_CHARCREATE_DIALS` — wrathplus-app/src/char_create/mod.rs
-- `WOW_CHARCREATE_NAME` — wrathplus-app/src/char_create/mod.rs
-- `WOW_CHARCREATE_PICK` — wrathplus-app/src/capture/mod.rs, wrathplus-app/src/char_create/mod.rs
-- `WOW_CHARCREATE_SHOT` — wrathplus-app/src/char_create/mod.rs, wrathplus-world/src/bgwin.rs
-- `WOW_CHARCREATE_SHOT_OUT` — wrathplus-app/src/char_create/mod.rs
-- `WOW_CHARSELECT_ADDONS` — wrathplus-app/src/char_select/mod.rs
-- `WOW_CHARSELECT_DIALOG` — wrathplus-app/src/char_select/mod.rs
-- `WOW_CHARSELECT_PICK` — wrathplus-app/src/char_select/mod.rs, wrathplus-app/src/game_plugins/client_tests/cvars.rs
+- `WOW_CAM_CHANGED` — wrathplus-app-tools/src/perf/mod.rs
+- `WOW_CAM_DUMP` — wrathplus-app-world/src/player/camera.rs
+- `WOW_CAPTURE` — wrathplus-app-core/src/local_state.rs, wrathplus-app-core/src/local_state_tests.rs, wrathplus-app-core/src/run_mode.rs, wrathplus-app-net/src/name_persist.rs, wrathplus-app-net/src/net.rs, wrathplus-app-tools/src/capture/mod.rs, wrathplus-app-tools/src/capture/scenarios.rs, wrathplus-app-tools/src/showcase_capture/driver.rs, wrathplus-app-ui/src/char_select/addons.rs, wrathplus-app-ui/src/login/mod.rs, wrathplus-app-ui/src/ui_chat/settings.rs, wrathplus-app-ui/src/ui_chat/tests.rs, wrathplus-app-ui/src/ui_macro/tests.rs, wrathplus-app-ui/src/ui_script/addons.rs, wrathplus-app-ui/src/ui_script/production_load.rs, wrathplus-app-ui/src/ui_script/world_entry_tests.rs, wrathplus-app-ui/src/ui_script/wrath_native.rs, wrathplus-app-world/src/player/camera_saved.rs, wrathplus-app-world/src/sound/mod.rs, wrathplus-app-world/src/video.rs, wrathplus-app/src/game_plugins/client_tests/cvars.rs, wrathplus-app/src/lib.rs, wrathplus-world/src/bgwin.rs, wrathplus-world/src/clouds/mod.rs, wrathplus-world/src/dev_state.rs
+- `WOW_CAPTURE_AGE` — wrathplus-app-tools/src/capture/mod.rs
+- `WOW_CAPTURE_DEADLINE` — wrathplus-app-tools/src/capture/mod.rs
+- `WOW_CAPTURE_OUT` — wrathplus-app-tools/src/capture/mod.rs
+- `WOW_CAPTURE_STABLE` — wrathplus-app-tools/src/capture/mod.rs
+- `WOW_CAPTURE_UI` — wrathplus-app-tools/src/capture/scenarios.rs, wrathplus-app-ui/src/ui_script/wrath_native.rs, wrathplus-app-world/src/video.rs
+- `WOW_CAST_TRACE` — wrathplus-app-net/src/net.rs
+- `WOW_CHAR` — wrathplus-app-core/src/launch_plan.rs, wrathplus-app-core/src/run_mode.rs, wrathplus-app-net/src/net.rs, wrathplus-app-tools/src/capture/probe_mail.rs, wrathplus-app-ui/src/login/mod.rs, wrathplus-app-ui/src/realm_select/smoke.rs, wrathplus-app/src/game_plugins/client_tests/cvars.rs
+- `WOW_CHARCREATE_DIALS` — wrathplus-app-ui/src/char_create/mod.rs
+- `WOW_CHARCREATE_NAME` — wrathplus-app-ui/src/char_create/mod.rs
+- `WOW_CHARCREATE_PICK` — wrathplus-app-tools/src/capture/mod.rs, wrathplus-app-ui/src/char_create/mod.rs
+- `WOW_CHARCREATE_SHOT` — wrathplus-app-ui/src/char_create/mod.rs, wrathplus-world/src/bgwin.rs
+- `WOW_CHARCREATE_SHOT_OUT` — wrathplus-app-ui/src/char_create/mod.rs
+- `WOW_CHARSELECT_ADDONS` — wrathplus-app-ui/src/char_select/mod.rs
+- `WOW_CHARSELECT_DIALOG` — wrathplus-app-ui/src/char_select/mod.rs
+- `WOW_CHARSELECT_PICK` — wrathplus-app-ui/src/char_select/mod.rs, wrathplus-app/src/game_plugins/client_tests/cvars.rs
 - `WOW_CHARSELECT_SHOT` — wrathplus-world/src/bgwin.rs
-- `WOW_CHARSELECT_SHOT_AT` — wrathplus-app/src/char_select/mod.rs
-- `WOW_CHARSELECT_SHOT_OUT` — wrathplus-app/src/char_select/mod.rs
-- `WOW_CHARSELECT_WALK` — wrathplus-app/src/char_select/mod.rs
-- `WOW_CLAMP_COST` — wrathplus-app/src/motion/spline.rs
-- `WOW_CLAMP_SEAT` — wrathplus-app/src/motion/spline.rs
-- `WOW_CLAMP_TRACE` — wrathplus-app/src/motion/spline.rs
-- `WOW_CLIENT_PROFILE` — wrathplus-formats/src/game_tables.rs, wrathplus-formats/src/profile.rs, wrathplus-formats/src/quest_rewards.rs, wrathplus-formats/src/wrath_layouts.rs, wrathplus-formats/tests/wrath_achievements.rs, wrathplus-formats/tests/wrath_animation_data.rs, wrathplus-formats/tests/wrath_asset_route.rs, wrathplus-formats/tests/wrath_beams.rs, wrathplus-formats/tests/wrath_currencies.rs, wrathplus-formats/tests/wrath_effect_scale.rs, wrathplus-formats/tests/wrath_effects.rs, wrathplus-formats/tests/wrath_enchantments.rs, wrathplus-formats/tests/wrath_glyphs_vehicles.rs, wrathplus-formats/tests/wrath_ground_effects.rs, wrathplus-formats/tests/wrath_heirlooms.rs, wrathplus-formats/tests/wrath_item_limit_category.rs, wrathplus-formats/tests/wrath_lfg.rs, wrathplus-formats/tests/wrath_liquid_catalogs.rs, wrathplus-formats/tests/wrath_material.rs, wrathplus-formats/tests/wrath_mh2o.rs, wrathplus-formats/tests/wrath_multitexture.rs, wrathplus-formats/tests/wrath_ranges.rs, wrathplus-formats/tests/wrath_remaining_dbc.rs, wrathplus-formats/tests/wrath_ribbons.rs, wrathplus-formats/tests/wrath_sound_entries.rs, wrathplus-formats/tests/wrath_spell_family.rs, wrathplus-formats/tests/wrath_spell_visuals.rs, wrathplus-formats/tests/wrath_stage_gap_census.rs, wrathplus-formats/tests/wrath_voice_barber.rs
+- `WOW_CHARSELECT_SHOT_AT` — wrathplus-app-ui/src/char_select/mod.rs
+- `WOW_CHARSELECT_SHOT_OUT` — wrathplus-app-ui/src/char_select/mod.rs
+- `WOW_CHARSELECT_WALK` — wrathplus-app-ui/src/char_select/mod.rs
+- `WOW_CLAMP_COST` — wrathplus-app-world/src/motion/spline.rs
+- `WOW_CLAMP_SEAT` — wrathplus-app-world/src/motion/spline.rs
+- `WOW_CLAMP_TRACE` — wrathplus-app-world/src/motion/spline.rs
+- `WOW_CLIENT_PROFILE` — wrathplus-formats/src/game_tables.rs, wrathplus-formats/src/profile.rs, wrathplus-formats/src/quest_rewards.rs, wrathplus-formats/src/wrath_layouts.rs, wrathplus-formats/tests/wrath_achievements.rs, wrathplus-formats/tests/wrath_animation_data.rs, wrathplus-formats/tests/wrath_asset_route.rs, wrathplus-formats/tests/wrath_beams.rs, wrathplus-formats/tests/wrath_currencies.rs, wrathplus-formats/tests/wrath_effect_scale.rs, wrathplus-formats/tests/wrath_effects.rs, wrathplus-formats/tests/wrath_enchantments.rs, wrathplus-formats/tests/wrath_glyphs_vehicles.rs, wrathplus-formats/tests/wrath_ground_effects.rs, wrathplus-formats/tests/wrath_heirlooms.rs, wrathplus-formats/tests/wrath_item_limit_category.rs, wrathplus-formats/tests/wrath_lfg.rs, wrathplus-formats/tests/wrath_liquid_catalogs.rs, wrathplus-formats/tests/wrath_material.rs, wrathplus-formats/tests/wrath_mh2o.rs, wrathplus-formats/tests/wrath_multitexture.rs, wrathplus-formats/tests/wrath_ranges.rs, wrathplus-formats/tests/wrath_remaining_dbc.rs, wrathplus-formats/tests/wrath_ribbons.rs, wrathplus-formats/tests/wrath_sound_entries.rs, wrathplus-formats/tests/wrath_spell_family.rs, wrathplus-formats/tests/wrath_spell_visuals.rs, wrathplus-formats/tests/wrath_stage_gap_census.rs, wrathplus-formats/tests/wrath_voice_barber.rs, wrathplus-manager/src/setup.rs, wrathplus-manager/src/setup_tests.rs
 - `WOW_CLOCK` — wrathplus-world/src/dev_state.rs
 - `WOW_CLOUD_DUMP` — wrathplus-world/src/clouds/mod.rs
-- `WOW_CLUSTERS` — wrathplus-app/src/player/setup.rs
+- `WOW_CLUSTERS` — wrathplus-app-world/src/player/setup.rs
 - `WOW_CLUTTER_ALPHA` — wrathplus-world/src/clutter.rs
-- `WOW_CLUTTER_DENSITY` — wrathplus-app/src/cvars/mod.rs, wrathplus-app/src/game_plugins/client_tests/cvars.rs, wrathplus-app/src/game_plugins/client_tests/shipped_cvars.rs, wrathplus-app/src/lib.rs, wrathplus-world/src/clutter.rs
+- `WOW_CLUTTER_DENSITY` — wrathplus-app-core/src/cvars/mod.rs, wrathplus-app/src/game_plugins/client_tests/cvars.rs, wrathplus-app/src/game_plugins/client_tests/shipped_cvars.rs, wrathplus-app/src/lib.rs, wrathplus-world/src/clutter.rs
 - `WOW_CLUTTER_FADE` — wrathplus-world/src/clutter.rs
 - `WOW_COLUMN_COST` — wrathplus-assets/src/column_grid.rs
-- `WOW_CPU_CENSUS` — wrathplus-app/src/perf/census.rs
-- `WOW_CRASH_INJECT` — wrathplus-app/src/perf/crash_inject.rs
-- `WOW_CREATE_SPLINE` — wrathplus-app/src/motion/spline.rs
-- `WOW_CREATE_TEST` — wrathplus-app/src/portrait/glue_booth.rs, wrathplus-world/src/bgwin.rs
+- `WOW_CPU_CENSUS` — wrathplus-app-tools/src/perf/census.rs
+- `WOW_CRASH_INJECT` — wrathplus-app-tools/src/perf/crash_inject.rs
+- `WOW_CREATE_SPLINE` — wrathplus-app-world/src/motion/spline.rs
+- `WOW_CREATE_TEST` — wrathplus-app-world/src/portrait/glue_booth.rs, wrathplus-world/src/bgwin.rs
 - `WOW_CULLDUMP` — wrathplus-world/src/wmo_portal/mod.rs
 - `WOW_CULL_TRACE` — wrathplus-world/src/exterior_cull.rs
-- `WOW_CURSOR_TRACE` — wrathplus-app/src/cursor.rs
-- `WOW_DATA` — wrathplus-app/src/local_state.rs, wrathplus-app/src/minimap/blips/quest_status_tests.rs, wrathplus-app/src/ui_script/wrath_framexml_tests.rs, wrathplus-assets/examples/wrath_model.rs, wrathplus-formats/src/game_tables.rs, wrathplus-formats/src/install.rs, wrathplus-formats/src/quest_rewards.rs, wrathplus-formats/src/wrath_layouts.rs, wrathplus-formats/tests/project_folder.rs, wrathplus-formats/tests/wow_data_env.rs, wrathplus-formats/tests/wow_data_none.rs, wrathplus-formats/tests/wrath_achievements.rs, wrathplus-formats/tests/wrath_animation_data.rs, wrathplus-formats/tests/wrath_asset_route.rs, wrathplus-formats/tests/wrath_beams.rs, wrathplus-formats/tests/wrath_currencies.rs, wrathplus-formats/tests/wrath_effect_scale.rs, wrathplus-formats/tests/wrath_effects.rs, wrathplus-formats/tests/wrath_enchantments.rs, wrathplus-formats/tests/wrath_glyphs_vehicles.rs, wrathplus-formats/tests/wrath_ground_effects.rs, wrathplus-formats/tests/wrath_heirlooms.rs, wrathplus-formats/tests/wrath_item_limit_category.rs, wrathplus-formats/tests/wrath_lfg.rs, wrathplus-formats/tests/wrath_liquid_catalogs.rs, wrathplus-formats/tests/wrath_material.rs, wrathplus-formats/tests/wrath_mh2o.rs, wrathplus-formats/tests/wrath_multitexture.rs, wrathplus-formats/tests/wrath_ranges.rs, wrathplus-formats/tests/wrath_remaining_dbc.rs, wrathplus-formats/tests/wrath_ribbons.rs, wrathplus-formats/tests/wrath_sound_entries.rs, wrathplus-formats/tests/wrath_spell_family.rs, wrathplus-formats/tests/wrath_spell_visuals.rs, wrathplus-formats/tests/wrath_stage_gap_census.rs, wrathplus-formats/tests/wrath_voice_barber.rs
-- `WOW_DEMO_BOTTOM_BARS` — wrathplus-app/src/ui_script/mod.rs
-- `WOW_DEPTH` — wrathplus-app/src/capture/depth_probe.rs, wrathplus-app/src/dev.rs, wrathplus-world/src/bgwin.rs
-- `WOW_DEPTH_AFTER` — wrathplus-app/src/capture/depth_probe.rs
-- `WOW_DEPTH_AT` — wrathplus-app/src/capture/depth_probe.rs
-- `WOW_DEPTH_COUNT` — wrathplus-app/src/capture/depth_probe.rs
-- `WOW_DEPTH_QUADS` — wrathplus-app/src/capture/depth_probe.rs, wrathplus-app/src/dev.rs
+- `WOW_CURSOR_TRACE` — wrathplus-app-world/src/cursor.rs
+- `WOW_DATA` — wrathplus-app-core/src/local_state_tests.rs, wrathplus-app-ui/src/ui_script/wrath_framexml_tests.rs, wrathplus-app-ui/src/ui_trainer/wrath_tests.rs, wrathplus-app-world/src/minimap/blips/quest_status_tests.rs, wrathplus-assets/examples/wrath_model.rs, wrathplus-formats/src/game_tables.rs, wrathplus-formats/src/install.rs, wrathplus-formats/src/quest_rewards.rs, wrathplus-formats/src/wrath_layouts.rs, wrathplus-formats/tests/project_folder.rs, wrathplus-formats/tests/wow_data_env.rs, wrathplus-formats/tests/wow_data_none.rs, wrathplus-formats/tests/wrath_achievements.rs, wrathplus-formats/tests/wrath_animation_data.rs, wrathplus-formats/tests/wrath_asset_route.rs, wrathplus-formats/tests/wrath_beams.rs, wrathplus-formats/tests/wrath_currencies.rs, wrathplus-formats/tests/wrath_effect_scale.rs, wrathplus-formats/tests/wrath_effects.rs, wrathplus-formats/tests/wrath_enchantments.rs, wrathplus-formats/tests/wrath_glyphs_vehicles.rs, wrathplus-formats/tests/wrath_ground_effects.rs, wrathplus-formats/tests/wrath_heirlooms.rs, wrathplus-formats/tests/wrath_item_limit_category.rs, wrathplus-formats/tests/wrath_lfg.rs, wrathplus-formats/tests/wrath_liquid_catalogs.rs, wrathplus-formats/tests/wrath_material.rs, wrathplus-formats/tests/wrath_mh2o.rs, wrathplus-formats/tests/wrath_multitexture.rs, wrathplus-formats/tests/wrath_ranges.rs, wrathplus-formats/tests/wrath_remaining_dbc.rs, wrathplus-formats/tests/wrath_ribbons.rs, wrathplus-formats/tests/wrath_sound_entries.rs, wrathplus-formats/tests/wrath_spell_family.rs, wrathplus-formats/tests/wrath_spell_visuals.rs, wrathplus-formats/tests/wrath_stage_gap_census.rs, wrathplus-formats/tests/wrath_voice_barber.rs, wrathplus-manager/src/setup.rs, wrathplus-manager/src/setup_tests.rs
+- `WOW_DEPTH` — wrathplus-app-tools/src/capture/depth_probe.rs, wrathplus-app-tools/src/dev.rs, wrathplus-world/src/bgwin.rs
+- `WOW_DEPTH_AFTER` — wrathplus-app-tools/src/capture/depth_probe.rs
+- `WOW_DEPTH_AT` — wrathplus-app-tools/src/capture/depth_probe.rs
+- `WOW_DEPTH_COUNT` — wrathplus-app-tools/src/capture/depth_probe.rs
+- `WOW_DEPTH_QUADS` — wrathplus-app-tools/src/capture/depth_probe.rs, wrathplus-app-tools/src/dev.rs
 - `WOW_DITHER` — wrathplus-world/src/ffx_glow.rs
-- `WOW_DPI` — wrathplus-app/src/video.rs
-- `WOW_DRESS_CENSUS` — wrathplus-app/src/capture/probes/dress_census.rs, wrathplus-app/src/dev.rs
-- `WOW_DRESS_CENSUS_RADIUS` — wrathplus-app/src/capture/probes/dress_census.rs
+- `WOW_DPI` — wrathplus-app-world/src/video.rs
+- `WOW_DRESS_CENSUS` — wrathplus-app-tools/src/capture/probes/dress_census.rs, wrathplus-app-tools/src/dev.rs
+- `WOW_DRESS_CENSUS_RADIUS` — wrathplus-app-tools/src/capture/probes/dress_census.rs
 - `WOW_DRIFT_DUMP` — wrathplus-world/src/liquid/drift.rs
 - `WOW_DUMP_TILE` — wrathplus-world/src/wmo_portal/audit/light_probe.rs
 - `WOW_EFFECT_TRACE` — wrathplus-world/src/particles/render.rs
 - `WOW_EMIT_DUMP` — wrathplus-world/src/particles/emitdump.rs
-- `WOW_ENTITY_CENSUS` — wrathplus-app/src/capture/probes/world_census.rs, wrathplus-app/src/dev.rs
-- `WOW_EXPERIENCE` — wrathplus-app/src/experience.rs
+- `WOW_ENTITY_CENSUS` — wrathplus-app-tools/src/capture/probes/world_census.rs, wrathplus-app-tools/src/dev.rs
+- `WOW_EXPERIENCE` — wrathplus-app-world/src/experience.rs
 - `WOW_FADE_NEAR` — wrathplus-world/src/terrain_stream/spawn/mod.rs
-- `WOW_FARCLIP` — wrathplus-app/src/cvars/mod.rs, wrathplus-app/src/game_plugins/client_tests/cvars.rs, wrathplus-app/src/game_plugins/client_tests/shipped_cvars.rs, wrathplus-world/src/view.rs
-- `WOW_FEED_COST` — wrathplus-app/src/ui_items/feed.rs
-- `WOW_FEED_GATE_CHECK` — wrathplus-app/src/ui_script/gate.rs, wrathplus-world/src/bgwin.rs
-- `WOW_FEED_GATE_TRACE` — wrathplus-app/src/ui_script/gate.rs, wrathplus-world/src/bgwin.rs
+- `WOW_FARCLIP` — wrathplus-app-core/src/cvars/mod.rs, wrathplus-app/src/game_plugins/client_tests/cvars.rs, wrathplus-app/src/game_plugins/client_tests/shipped_cvars.rs, wrathplus-world/src/view.rs
+- `WOW_FEED_COST` — wrathplus-app-ui/src/ui_items/feed.rs
+- `WOW_FEED_GATE_CHECK` — wrathplus-app-ui/src/ui_script/gate.rs, wrathplus-world/src/bgwin.rs
+- `WOW_FEED_GATE_TRACE` — wrathplus-app-ui/src/ui_script/gate.rs, wrathplus-world/src/bgwin.rs
+- `WOW_FILL_ONLY` — wrathplus-app-core/src/launch_plan.rs, wrathplus-manager/src/setup/login.rs
 - `WOW_FIXED_DT` — wrathplus-world/src/frame_pace.rs
 - `WOW_FOG_DUMP` — wrathplus-world/src/lighting/resolve.rs, wrathplus-world/src/liquid/query.rs
-- `WOW_FOLLOW_TRACE` — wrathplus-app/src/player/follow.rs
+- `WOW_FOLLOW_TRACE` — wrathplus-app-world/src/player/follow.rs
 - `WOW_FORCE_SUB` — wrathplus-world/src/liquid/mod.rs
 - `WOW_FPS_` — wrathplus-world/src/bgwin.rs
-- `WOW_FPS_JOURNAL` — wrathplus-app/src/perf/journal.rs
-- `WOW_FPS_PROBE` — wrathplus-app/src/capture/mod.rs
-- `WOW_FRAME_PHASES` — wrathplus-app/src/perf/phases.rs
-- `WOW_FREEZE_UI_MESH` — wrathplus-app/src/ui_pass.rs
-- `WOW_FX_AGE` — wrathplus-app/src/capture/mod.rs
-- `WOW_FX_AT` — wrathplus-app/src/capture/mod.rs
-- `WOW_FX_AZ` — wrathplus-app/src/capture/mod.rs
-- `WOW_FX_CENSUS` — wrathplus-app/src/capture/probes/fx_draw_census.rs
-- `WOW_FX_DISPLAY` — wrathplus-app/src/capture/mod.rs
-- `WOW_FX_DIST` — wrathplus-app/src/capture/mod.rs
-- `WOW_FX_EL` — wrathplus-app/src/capture/mod.rs
-- `WOW_FX_FLY` — wrathplus-app/src/capture/mod.rs
-- `WOW_FX_GO` — wrathplus-app/src/capture/mod.rs
-- `WOW_FX_GO_STATE` — wrathplus-app/src/capture/mod.rs
-- `WOW_FX_GO_TYPE` — wrathplus-app/src/capture/mod.rs
-- `WOW_FX_GROUND` — wrathplus-app/src/capture/mod.rs
-- `WOW_FX_HOLD` — wrathplus-app/src/capture/mod.rs
-- `WOW_FX_MINUTE` — wrathplus-app/src/capture/mod.rs
-- `WOW_FX_MODEL` — wrathplus-app/src/capture/mod.rs
-- `WOW_FX_SCALE` — wrathplus-app/src/capture/mod.rs
-- `WOW_FX_TURN` — wrathplus-app/src/capture/mod.rs
-- `WOW_FX_UP` — wrathplus-app/src/capture/mod.rs
-- `WOW_FX_YAW` — wrathplus-app/src/capture/mod.rs
-- `WOW_GHOST_PROBE` — wrathplus-app/src/death/mod.rs
-- `WOW_GLUE_ROUNDTRIP` — wrathplus-app/src/char_select/mod.rs, wrathplus-world/src/bgwin.rs
-- `WOW_GLYPH_CACHE` — wrathplus-app/src/ui_text/engine/gpu.rs
-- `WOW_GM` — wrathplus-app/src/probe_shield.rs
-- `WOW_GOD` — wrathplus-app/src/preflight.rs, wrathplus-app/src/probe_shield.rs
-- `WOW_GPU_MS` — wrathplus-app/src/perf/gpu.rs
-- `WOW_GPU_PASSES` — wrathplus-app/src/perf/journal.rs
-- `WOW_GROUND_CENSUS` — wrathplus-app/src/capture/probes/ground_census.rs, wrathplus-app/src/dev.rs
-- `WOW_GROUND_CENSUS_RADIUS` — wrathplus-app/src/capture/probes/ground_census.rs
+- `WOW_FPS_JOURNAL` — wrathplus-app-tools/src/perf/journal.rs
+- `WOW_FPS_PROBE` — wrathplus-app-tools/src/capture/mod.rs
+- `WOW_FRAME_PHASES` — wrathplus-app-tools/src/perf/phases.rs
+- `WOW_FREEZE_UI_MESH` — wrathplus-app-ui/src/ui_pass.rs
+- `WOW_FX_AGE` — wrathplus-app-tools/src/capture/mod.rs
+- `WOW_FX_AT` — wrathplus-app-tools/src/capture/mod.rs
+- `WOW_FX_AZ` — wrathplus-app-tools/src/capture/mod.rs
+- `WOW_FX_CENSUS` — wrathplus-app-tools/src/capture/probes/fx_draw_census.rs
+- `WOW_FX_DISPLAY` — wrathplus-app-tools/src/capture/mod.rs
+- `WOW_FX_DIST` — wrathplus-app-tools/src/capture/mod.rs
+- `WOW_FX_EL` — wrathplus-app-tools/src/capture/mod.rs
+- `WOW_FX_FLY` — wrathplus-app-tools/src/capture/mod.rs
+- `WOW_FX_GO` — wrathplus-app-tools/src/capture/mod.rs
+- `WOW_FX_GO_STATE` — wrathplus-app-tools/src/capture/mod.rs
+- `WOW_FX_GO_TYPE` — wrathplus-app-tools/src/capture/mod.rs
+- `WOW_FX_GROUND` — wrathplus-app-tools/src/capture/mod.rs
+- `WOW_FX_HOLD` — wrathplus-app-tools/src/capture/mod.rs
+- `WOW_FX_MINUTE` — wrathplus-app-tools/src/capture/mod.rs
+- `WOW_FX_MODEL` — wrathplus-app-tools/src/capture/mod.rs
+- `WOW_FX_SCALE` — wrathplus-app-tools/src/capture/mod.rs
+- `WOW_FX_TURN` — wrathplus-app-tools/src/capture/mod.rs
+- `WOW_FX_UP` — wrathplus-app-tools/src/capture/mod.rs
+- `WOW_FX_YAW` — wrathplus-app-tools/src/capture/mod.rs
+- `WOW_GHOST_PROBE` — wrathplus-app-world/src/death/mod.rs
+- `WOW_GLUE_ROUNDTRIP` — wrathplus-app-ui/src/char_select/mod.rs, wrathplus-world/src/bgwin.rs
+- `WOW_GLYPH_CACHE` — wrathplus-app-world/src/ui_text/engine/gpu.rs
+- `WOW_GM` — wrathplus-app-tools/src/probe_shield.rs, wrathplus-manager/src/setup/login.rs
+- `WOW_GOD` — wrathplus-app-tools/src/preflight.rs, wrathplus-app-tools/src/probe_shield.rs, wrathplus-manager/src/setup/login.rs
+- `WOW_GPU_MS` — wrathplus-app-tools/src/perf/gpu.rs
+- `WOW_GPU_PASSES` — wrathplus-app-tools/src/perf/journal.rs
+- `WOW_GROUND_CENSUS` — wrathplus-app-tools/src/capture/probes/ground_census.rs, wrathplus-app-tools/src/dev.rs
+- `WOW_GROUND_CENSUS_RADIUS` — wrathplus-app-tools/src/capture/probes/ground_census.rs
 - `WOW_GX_CENSUS` — wrathplus-world/src/static_gx/cull.rs
 - `WOW_GX_FADE_TRACE` — wrathplus-world/src/static_gx/cull.rs
 - `WOW_GX_PERF` — wrathplus-world/src/static_gx/mod.rs
-- `WOW_HIT_COST` — wrathplus-app/src/ui_script/input.rs
-- `WOW_HOST` — wrathplus-app/src/game_plugins/client_tests/shipped_cvars.rs, wrathplus-app/src/launch_plan.rs, wrathplus-app/src/realmlist.rs
-- `WOW_HOVER_LOG` — wrathplus-app/src/hover_log.rs
+- `WOW_HIT_COST` — wrathplus-app-ui/src/ui_script/input.rs
+- `WOW_HOST` — wrathplus-app-core/src/launch_plan.rs, wrathplus-app-net/src/realmlist.rs, wrathplus-app/src/game_plugins/client_tests/shipped_cvars.rs, wrathplus-manager/src/setup.rs, wrathplus-manager/src/setup_tests.rs
+- `WOW_HOVER_LOG` — wrathplus-app-tools/src/hover_log.rs
 - `WOW_HOVER_LOG_REPORT` — wrathplus-app/src/lib.rs
-- `WOW_HOVER_PROBE` — wrathplus-app/src/target/hover_probe.rs
+- `WOW_HOVER_PROBE` — wrathplus-app-world/src/target/hover_probe.rs
 - `WOW_INDIRECT` — wrathplus-world/src/world_plugins.rs
 - `WOW_INTERIOR_COST` — wrathplus-world/src/interior.rs
 - `WOW_INTERIOR_LOG` — wrathplus-world/src/entity_shade.rs, wrathplus-world/src/interior.rs, wrathplus-world/src/model_fade.rs
-- `WOW_IO_BUFFER` — wrathplus-app/src/sound/mixer.rs
-- `WOW_JITTER` — wrathplus-app/src/capture/probes/jitter.rs, wrathplus-app/src/dev.rs
-- `WOW_JITTER_RAW` — wrathplus-app/src/capture/probes/jitter.rs
+- `WOW_IO_BUFFER` — wrathplus-app-world/src/sound/mixer.rs
+- `WOW_JITTER` — wrathplus-app-tools/src/capture/probes/jitter.rs, wrathplus-app-tools/src/dev.rs
+- `WOW_JITTER_RAW` — wrathplus-app-tools/src/capture/probes/jitter.rs
 - `WOW_LAYOUT_DERIVE_TRACE` — wrathplus-ui/src/script/model.rs
 - `WOW_LAYOUT_PROF` — wrathplus-ui/src/script/layout.rs
 - `WOW_LAYOUT_TOUCH_TRACE` — wrathplus-ui/src/script/model.rs
 - `WOW_LAYOUT_VERIFY` — wrathplus-ui/src/script/layout.rs
-- `WOW_LIFT_CENSUS` — wrathplus-app/src/capture/probes/lift_census.rs, wrathplus-app/src/dev.rs
+- `WOW_LIFT_CENSUS` — wrathplus-app-tools/src/capture/probes/lift_census.rs, wrathplus-app-tools/src/dev.rs
 - `WOW_LIGHT_AT` — wrathplus-world/src/wmo_portal/audit/light_probe.rs
 - `WOW_LIGHT_DUMP` — wrathplus-world/src/lighting/global_light.rs, wrathplus-world/src/lighting/resolve.rs
 - `WOW_LIGHT_GRID` — wrathplus-world/src/wmo_portal/audit/light_probe.rs
 - `WOW_LIQUID_DC` — wrathplus-assets/src/world_assets/images.rs
 - `WOW_LIVE_` — wrathplus-world/src/bgwin.rs
-- `WOW_LIVE_FPS` — wrathplus-app/src/capture/probes/live_fps.rs, wrathplus-app/src/dev.rs, wrathplus-world/src/bgwin.rs
-- `WOW_LIVE_FPS_AT` — wrathplus-app/src/capture/probes/live_fps.rs
-- `WOW_LIVE_FPS_MOVE` — wrathplus-app/src/capture/probes/live_fps.rs
-- `WOW_LIVE_SHOT` — wrathplus-app/src/capture/live_shot.rs, wrathplus-app/src/dev.rs
-- `WOW_LIVE_SHOT_AT` — wrathplus-app/src/capture/live_shot.rs
-- `WOW_LIVE_SHOT_COUNT` — wrathplus-app/src/capture/live_shot.rs
-- `WOW_LIVE_SHOT_EVERY` — wrathplus-app/src/capture/live_shot.rs
-- `WOW_LOCALE` — wrathplus-formats/src/profile.rs
+- `WOW_LIVE_FPS` — wrathplus-app-tools/src/capture/probes/live_fps.rs, wrathplus-app-tools/src/dev.rs, wrathplus-world/src/bgwin.rs
+- `WOW_LIVE_FPS_AT` — wrathplus-app-tools/src/capture/probes/live_fps.rs
+- `WOW_LIVE_FPS_MOVE` — wrathplus-app-tools/src/capture/probes/live_fps.rs
+- `WOW_LIVE_SHOT` — wrathplus-app-tools/src/capture/live_shot.rs, wrathplus-app-tools/src/dev.rs
+- `WOW_LIVE_SHOT_AT` — wrathplus-app-tools/src/capture/live_shot.rs
+- `WOW_LIVE_SHOT_COUNT` — wrathplus-app-tools/src/capture/live_shot.rs
+- `WOW_LIVE_SHOT_EVERY` — wrathplus-app-tools/src/capture/live_shot.rs
+- `WOW_LOCALE` — wrathplus-formats/src/profile.rs, wrathplus-manager/src/setup.rs, wrathplus-manager/src/setup_tests.rs
 - `WOW_LOGIN_SHOT` — wrathplus-world/src/bgwin.rs
-- `WOW_LOGIN_SHOT_OUT` — wrathplus-app/src/login/screen.rs
-- `WOW_LOGIN_SMOKE` — wrathplus-app/src/char_select/mod.rs, wrathplus-app/src/login/mod.rs, wrathplus-app/src/login/smoke.rs, wrathplus-world/src/bgwin.rs
-- `WOW_LOGIN_SMOKE_HOLD` — wrathplus-app/src/login/smoke.rs
-- `WOW_LOGOUT_SMOKE` — wrathplus-app/src/char_select/mod.rs, wrathplus-world/src/bgwin.rs
-- `WOW_MAP` — wrathplus-app/src/capture/mod.rs, wrathplus-app/src/showcase_capture/driver.rs, wrathplus-world/src/world_map.rs
+- `WOW_LOGIN_SHOT_OUT` — wrathplus-app-ui/src/login/screen.rs
+- `WOW_LOGIN_SMOKE` — wrathplus-app-ui/src/char_select/mod.rs, wrathplus-app-ui/src/login/mod.rs, wrathplus-app-ui/src/login/smoke.rs, wrathplus-world/src/bgwin.rs
+- `WOW_LOGIN_SMOKE_HOLD` — wrathplus-app-ui/src/login/smoke.rs
+- `WOW_LOGOUT_SMOKE` — wrathplus-app-ui/src/char_select/mod.rs, wrathplus-world/src/bgwin.rs
+- `WOW_MAP` — wrathplus-app-tools/src/capture/mod.rs, wrathplus-app-tools/src/showcase_capture/driver.rs, wrathplus-world/src/world_map.rs
 - `WOW_MATANIM_DUTY` — wrathplus-world/src/doodad_anim/mat_anim.rs
 - `WOW_MATANIM_LIVE` — wrathplus-world/src/doodad_anim/mat_anim.rs
 - `WOW_MATANIM_PROBE` — wrathplus-world/src/doodad_anim/mat_anim.rs
@@ -317,217 +529,218 @@
 - `WOW_MERGED_SLOT` — wrathplus-assets/src/materials.rs, wrathplus-world/src/shaders.rs
 - `WOW_MERGE_CENSUS` — wrathplus-world/src/static_merge.rs
 - `WOW_MERGE_FADERS` — wrathplus-world/src/terrain_stream/merge.rs
-- `WOW_MESH_EVENTS` — wrathplus-app/src/perf/mod.rs
-- `WOW_MESH_HOLDERS` — wrathplus-app/src/perf/mod.rs
-- `WOW_MESH_TOUCH` — wrathplus-app/src/perf/mod.rs
-- `WOW_MIX_TAP` — wrathplus-app/src/sound/mix_tap.rs
-- `WOW_MM_BLIP_PROBE` — wrathplus-app/src/minimap/mod.rs, wrathplus-world/src/bgwin.rs
-- `WOW_MM_PROBE` — wrathplus-app/src/capture/mod.rs, wrathplus-app/src/minimap/mod.rs, wrathplus-world/src/bgwin.rs
-- `WOW_MM_STATS` — wrathplus-app/src/minimap/mod.rs
-- `WOW_MM_ZOOM` — wrathplus-app/src/minimap/mod.rs
-- `WOW_MOVE_SPEED` — wrathplus-app/src/player/setup.rs
+- `WOW_MESH_EVENTS` — wrathplus-app-tools/src/perf/mod.rs
+- `WOW_MESH_HOLDERS` — wrathplus-app-tools/src/perf/mod.rs
+- `WOW_MESH_TOUCH` — wrathplus-app-tools/src/perf/mod.rs
+- `WOW_MIX_TAP` — wrathplus-app-world/src/sound/mix_tap.rs
+- `WOW_MM_BLIP_PROBE` — wrathplus-app-world/src/minimap/mod.rs, wrathplus-world/src/bgwin.rs
+- `WOW_MM_PROBE` — wrathplus-app-tools/src/capture/mod.rs, wrathplus-app-world/src/minimap/mod.rs, wrathplus-world/src/bgwin.rs
+- `WOW_MM_STATS` — wrathplus-app-world/src/minimap/mod.rs
+- `WOW_MM_ZOOM` — wrathplus-app-world/src/minimap/mod.rs
+- `WOW_MOVE_SPEED` — wrathplus-app-world/src/player/setup.rs
 - `WOW_MOVE_TRACE` — wrathplus-assets/src/trace.rs
 - `WOW_MOVE_TRACE_TAGS` — wrathplus-assets/src/trace.rs
-- `WOW_MSAA` — wrathplus-app/src/cvars/mod.rs, wrathplus-app/src/game_plugins/client_tests/cvars.rs, wrathplus-app/src/game_plugins/client_tests/shipped_cvars.rs, wrathplus-world/src/view.rs
+- `WOW_MSAA` — wrathplus-app-core/src/cvars/mod.rs, wrathplus-app/src/game_plugins/client_tests/cvars.rs, wrathplus-app/src/game_plugins/client_tests/shipped_cvars.rs, wrathplus-world/src/view.rs
 - `WOW_MT_EXTRACT` — wrathplus-app/src/lib.rs
 - `WOW_MT_POSTUPDATE` — wrathplus-app/src/lib.rs
 - `WOW_MT_UPDATE` — wrathplus-app/src/lib.rs
-- `WOW_NAME_AZ` — wrathplus-app/src/capture/mod.rs
-- `WOW_NAME_DIST` — wrathplus-app/src/capture/mod.rs
-- `WOW_NAME_EL` — wrathplus-app/src/capture/mod.rs
-- `WOW_NAME_H` — wrathplus-app/src/capture/mod.rs
-- `WOW_NATIVE_GLUE` — wrathplus-app/src/ui_script/glue/mod.rs
-- `WOW_NODE_PROBE` — wrathplus-app/src/capture/probes/world_census.rs, wrathplus-app/src/dev.rs, wrathplus-world/src/bgwin.rs
+- `WOW_NAME_AZ` — wrathplus-app-tools/src/capture/mod.rs
+- `WOW_NAME_DIST` — wrathplus-app-tools/src/capture/mod.rs
+- `WOW_NAME_EL` — wrathplus-app-tools/src/capture/mod.rs
+- `WOW_NAME_H` — wrathplus-app-tools/src/capture/mod.rs
+- `WOW_NATIVE_GLUE` — wrathplus-app-ui/src/ui_script/glue/click_tests.rs, wrathplus-app-ui/src/ui_script/glue/mod.rs
+- `WOW_NODE_PROBE` — wrathplus-app-tools/src/capture/probes/world_census.rs, wrathplus-app-tools/src/dev.rs, wrathplus-world/src/bgwin.rs
+- `WOW_NONSTOCK_PATCHES` — wrathplus-formats/src/chain.rs
 - `WOW_NOPORTALCULL` — wrathplus-world/src/dev_state.rs
-- `WOW_NOSOUND` — wrathplus-app/src/sound/mod.rs
-- `WOW_NOVSYNC` — wrathplus-app/src/video.rs, wrathplus-world/src/worldview.rs
+- `WOW_NOSOUND` — wrathplus-app-world/src/sound/mod.rs
+- `WOW_NOVSYNC` — wrathplus-app-world/src/video.rs, wrathplus-world/src/worldview.rs
 - `WOW_NO_ALPHATEST` — wrathplus-world/src/model_render.rs
-- `WOW_NO_ANIM_LOD` — wrathplus-app/src/creature_anim/lod.rs, wrathplus-app/src/lib.rs
+- `WOW_NO_ANIM_LOD` — wrathplus-app-world/src/creature_anim/lod.rs, wrathplus-app/src/lib.rs
 - `WOW_NO_BC` — wrathplus-assets/src/gpu_blp.rs
 - `WOW_NO_DOODAD_BODIES` — wrathplus-world/src/terrain_stream/collider.rs
 - `WOW_NO_DRAW_ELECTION` — wrathplus-world/src/exterior_cull.rs
 - `WOW_NO_FFX` — wrathplus-world/src/ffx_glow.rs
 - `WOW_NO_FRAME_PACE` — wrathplus-world/src/frame_pace.rs
 - `WOW_NO_HULL_WELD` — wrathplus-world/src/terrain_stream/weld.rs
-- `WOW_NO_INDIRECT` — wrathplus-app/src/player/setup.rs
+- `WOW_NO_INDIRECT` — wrathplus-app-world/src/player/setup.rs
 - `WOW_NO_LIQUID` — wrathplus-world/src/liquid/mod.rs
 - `WOW_NO_MESH_PARK` — wrathplus-world/src/model_render/park.rs
-- `WOW_NO_MOUNT_TILT` — wrathplus-app/src/entities/conform.rs
+- `WOW_NO_MOUNT_TILT` — wrathplus-app-world/src/entities/conform.rs
 - `WOW_NO_PARTICLES` — wrathplus-world/src/liquid/drift.rs, wrathplus-world/src/particles.rs, wrathplus-world/src/ribbons.rs
 - `WOW_NO_RIDE_FRAME` — wrathplus-world/src/ride_frame.rs
 - `WOW_NO_RIG_REBASE` — wrathplus-world/src/rig_palette.rs
-- `WOW_NO_ROOM_LOD` — wrathplus-app/src/creature_anim/lod.rs
+- `WOW_NO_ROOM_LOD` — wrathplus-app-world/src/creature_anim/lod.rs
 - `WOW_NO_TILE_CELLS` — wrathplus-world/src/terrain_stream/furnish.rs
 - `WOW_NO_TILE_DROP` — wrathplus-world/src/terrain_stream.rs
-- `WOW_NO_TWIST` — wrathplus-app/src/creature_anim/twist.rs
+- `WOW_NO_TWIST` — wrathplus-app-world/src/creature_anim/twist.rs
 - `WOW_OCEAN_DEPTH_DIV` — wrathplus-formats/src/liquid.rs
 - `WOW_PANEL` — wrathplus-world/src/dev_state.rs
-- `WOW_PARTICLE_CENSUS` — wrathplus-app/src/capture/probes/particle_census.rs, wrathplus-app/src/dev.rs, wrathplus-world/src/bgwin.rs
+- `WOW_PARTICLE_CENSUS` — wrathplus-app-tools/src/capture/probes/particle_census.rs, wrathplus-app-tools/src/dev.rs, wrathplus-world/src/bgwin.rs
 - `WOW_PARTICLE_DEPTHDUMP` — wrathplus-world/src/particles/depthdump.rs
 - `WOW_PARTICLE_DEPTHDUMP_BONES` — wrathplus-world/src/particles/depthdump.rs
 - `WOW_PARTICLE_FLAT` — wrathplus-world/src/particles/render.rs, wrathplus-world/src/shaders.rs
 - `WOW_PARTICLE_NODEPTH` — wrathplus-world/src/particles/render.rs
-- `WOW_PART_CHURN` — wrathplus-app/src/perf/mod.rs
-- `WOW_PASS` — wrathplus-app/src/launch_plan.rs, wrathplus-app/src/login/mod.rs, wrathplus-app/src/net.rs, wrathplus-app/src/run_mode.rs
-- `WOW_PERF_HUD` — wrathplus-app/src/perf/hud.rs
-- `WOW_PHASE` — wrathplus-app/src/capture/phase_probe.rs, wrathplus-app/src/dev.rs, wrathplus-world/src/bgwin.rs
-- `WOW_PHASE_AT` — wrathplus-app/src/capture/phase_probe.rs
-- `WOW_PHASE_COUNT` — wrathplus-app/src/capture/phase_probe.rs
+- `WOW_PART_CHURN` — wrathplus-app-tools/src/perf/mod.rs
+- `WOW_PASS` — wrathplus-app-core/src/launch_plan.rs, wrathplus-app-core/src/run_mode.rs, wrathplus-app-net/src/net.rs, wrathplus-app-ui/src/login/mod.rs, wrathplus-manager/src/setup/login.rs
+- `WOW_PERF_HUD` — wrathplus-app-tools/src/perf/hud.rs
+- `WOW_PHASE` — wrathplus-app-tools/src/capture/phase_probe.rs, wrathplus-app-tools/src/dev.rs, wrathplus-world/src/bgwin.rs
+- `WOW_PHASE_AT` — wrathplus-app-tools/src/capture/phase_probe.rs
+- `WOW_PHASE_COUNT` — wrathplus-app-tools/src/capture/phase_probe.rs
 - `WOW_PHYS_HZ` — wrathplus-world/src/world_plugins.rs
 - `WOW_PHYS_PREPROP` — wrathplus-world/src/world_plugins.rs
-- `WOW_PICK` — wrathplus-app/src/capture/pick_probe.rs, wrathplus-app/src/dev.rs, wrathplus-world/src/bgwin.rs
-- `WOW_PICK_AT` — wrathplus-app/src/capture/pick_probe.rs
-- `WOW_PICK_COUNT` — wrathplus-app/src/capture/pick_probe.rs
-- `WOW_PICK_EVERY` — wrathplus-app/src/capture/pick_probe.rs
+- `WOW_PICK` — wrathplus-app-tools/src/capture/pick_probe.rs, wrathplus-app-tools/src/dev.rs, wrathplus-world/src/bgwin.rs
+- `WOW_PICK_AT` — wrathplus-app-tools/src/capture/pick_probe.rs
+- `WOW_PICK_COUNT` — wrathplus-app-tools/src/capture/pick_probe.rs
+- `WOW_PICK_EVERY` — wrathplus-app-tools/src/capture/pick_probe.rs
 - `WOW_PIN_ASPECT` — wrathplus-world/src/wmo_portal/audit/pin.rs
 - `WOW_PIN_COL` — wrathplus-world/src/wmo_portal/audit/pin.rs
 - `WOW_PIN_EYE` — wrathplus-world/src/wmo_portal/audit/pin.rs
 - `WOW_PIN_FLOOR` — wrathplus-world/src/wmo_portal/audit/pin.rs
 - `WOW_PIN_FOVY` — wrathplus-world/src/wmo_portal/audit/pin.rs
 - `WOW_PIN_LOOK` — wrathplus-world/src/wmo_portal/audit/pin.rs
-- `WOW_PIN_MAP` — wrathplus-world/src/wmo_portal/audit/pin.rs
-- `WOW_PIN_SITE` — wrathplus-world/src/wmo_portal/audit/pin.rs
-- `WOW_PIN_TILE` — wrathplus-world/src/wmo_portal/audit/pin.rs
-- `WOW_PIN_UID` — wrathplus-world/src/wmo_portal/audit/pin.rs
-- `WOW_PIN_WMO` — wrathplus-world/src/wmo_portal/audit/pin.rs
-- `WOW_PIPE_TRACE` — wrathplus-app/src/pipe_warm/mod.rs
+- `WOW_PIN_MAP` — wrathplus-world/src/wmo_portal/audit/pin/site.rs
+- `WOW_PIN_SITE` — wrathplus-world/src/wmo_portal/audit/pin/site.rs
+- `WOW_PIN_TILE` — wrathplus-world/src/wmo_portal/audit/pin/site.rs
+- `WOW_PIN_UID` — wrathplus-world/src/wmo_portal/audit/pin/site.rs
+- `WOW_PIN_WMO` — wrathplus-world/src/wmo_portal/audit/pin/site.rs
+- `WOW_PIPE_TRACE` — wrathplus-app-world/src/pipe_warm/mod.rs
 - `WOW_POINTS_DUMP` — wrathplus-world/src/lighting/global_light.rs
-- `WOW_PORTRAIT_TEST` — wrathplus-app/src/portrait/mod.rs, wrathplus-app/src/portrait/test_bake.rs, wrathplus-world/src/bgwin.rs
-- `WOW_PORTRAIT_TEST_SKIN` — wrathplus-app/src/portrait/test_bake.rs
-- `WOW_PROBE` — wrathplus-app/src/dev.rs, wrathplus-app/src/lib.rs, wrathplus-world/src/bgwin.rs
-- `WOW_PROBE_AUCTION` — wrathplus-app/src/dev.rs
-- `WOW_PROBE_BANK` — wrathplus-app/src/dev.rs
-- `WOW_PROBE_BG` — wrathplus-app/src/capture/probe_bg.rs, wrathplus-app/src/dev.rs
-- `WOW_PROBE_BGQUEUE` — wrathplus-app/src/dev.rs
-- `WOW_PROBE_BG_SAMPLES` — wrathplus-app/src/capture/probe_bg.rs
-- `WOW_PROBE_BINDER` — wrathplus-app/src/dev.rs
-- `WOW_PROBE_BOOK` — wrathplus-app/src/dev.rs
-- `WOW_PROBE_CAM` — wrathplus-app/src/capture/probe_cam.rs
-- `WOW_PROBE_CHARCREATE` — wrathplus-app/src/capture/probe_charcreate.rs, wrathplus-app/src/dev.rs
-- `WOW_PROBE_CHARCREATE_KEEP` — wrathplus-app/src/capture/probe_charcreate.rs
-- `WOW_PROBE_CHARTER` — wrathplus-app/src/dev.rs
-- `WOW_PROBE_CHAT` — wrathplus-app/src/capture/probes/act.rs, wrathplus-app/src/dev.rs
-- `WOW_PROBE_CHAT_AT` — wrathplus-app/src/capture/probes/act.rs
-- `WOW_PROBE_CHAT_EVERY` — wrathplus-app/src/capture/probes/act.rs
-- `WOW_PROBE_CHEST` — wrathplus-app/src/capture/probe_chest.rs, wrathplus-app/src/dev.rs
-- `WOW_PROBE_CLAM` — wrathplus-app/src/capture/probe_clam.rs, wrathplus-app/src/dev.rs
-- `WOW_PROBE_DOCK` — wrathplus-app/src/capture/probe_crossing.rs
-- `WOW_PROBE_DRAG` — wrathplus-app/src/capture/probes/act.rs, wrathplus-app/src/dev.rs
-- `WOW_PROBE_DRAG_AT` — wrathplus-app/src/capture/probes/act.rs
-- `WOW_PROBE_DRAG_LUA` — wrathplus-app/src/capture/probes/act.rs
-- `WOW_PROBE_DRAG_STEP` — wrathplus-app/src/capture/probes/act.rs
-- `WOW_PROBE_EXIT_AT` — wrathplus-app/src/capture/probes/run.rs, wrathplus-app/src/dev.rs
-- `WOW_PROBE_GMTICKET` — wrathplus-app/src/dev.rs
-- `WOW_PROBE_GOQUEST` — wrathplus-app/src/capture/probe_goquest.rs, wrathplus-app/src/dev.rs
-- `WOW_PROBE_HOVER` — wrathplus-app/src/capture/probes/act.rs, wrathplus-app/src/dev.rs
-- `WOW_PROBE_HOVER_AT` — wrathplus-app/src/capture/probes/act.rs
-- `WOW_PROBE_HOVER_DUTY` — wrathplus-app/src/capture/probes/act.rs
-- `WOW_PROBE_HOVER_JITTER` — wrathplus-app/src/capture/probes/act.rs
-- `WOW_PROBE_HOVER_STEP` — wrathplus-app/src/capture/probes/act.rs
-- `WOW_PROBE_KEY` — wrathplus-app/src/capture/probes/act.rs, wrathplus-app/src/dev.rs
-- `WOW_PROBE_LOOK` — wrathplus-app/src/capture/probe_look.rs
-- `WOW_PROBE_LUA` — wrathplus-app/src/capture/probes/act.rs, wrathplus-app/src/dev.rs
-- `WOW_PROBE_LUA_AGAIN` — wrathplus-app/src/capture/probes/act.rs
-- `WOW_PROBE_LUA_AT` — wrathplus-app/src/capture/probes/act.rs
-- `WOW_PROBE_MAIL` — wrathplus-app/src/dev.rs
-- `WOW_PROBE_MODEL_CAMERA` — wrathplus-app/src/dev.rs
-- `WOW_PROBE_NAME_TRACE` — wrathplus-app/src/nameplates.rs
-- `WOW_PROBE_PARK` — wrathplus-app/src/capture/probes/run.rs
-- `WOW_PROBE_PITCH` — wrathplus-app/src/capture/probe_pitch.rs
-- `WOW_PROBE_RESIZE` — wrathplus-app/src/capture/probes/run.rs, wrathplus-app/src/dev.rs
-- `WOW_PROBE_SERVICE` — wrathplus-app/src/dev.rs
-- `WOW_PROBE_SHARED_SKIN` — wrathplus-app/src/entities/attach/char_skin.rs
-- `WOW_PROBE_UI_ONE_TEX` — wrathplus-app/src/ui_pass.rs
-- `WOW_PROBE_UNCAP` — wrathplus-app/src/capture/mod.rs
-- `WOW_PROBE_VENDOR_SWAP` — wrathplus-app/src/dev.rs
-- `WOW_PROBE_VSYNC` — wrathplus-app/src/capture/mod.rs
-- `WOW_REALM` — wrathplus-app/src/launch_plan.rs
-- `WOW_REALM_SMOKE` — wrathplus-app/src/realm_select/smoke.rs
-- `WOW_REMOTE_FLAT` — wrathplus-app/src/motion/remote.rs
-- `WOW_REMOTE_IDLE_GATE` — wrathplus-app/src/motion/remote.rs
-- `WOW_REMOTE_SNAP` — wrathplus-app/src/motion/remote.rs
-- `WOW_RENDER_SCALE` — wrathplus-app/src/game_plugins/client_tests/shipped_cvars.rs, wrathplus-app/src/world_backdrop.rs
+- `WOW_PORTRAIT_TEST` — wrathplus-app-world/src/portrait/mod.rs, wrathplus-app-world/src/portrait/test_bake.rs, wrathplus-world/src/bgwin.rs
+- `WOW_PORTRAIT_TEST_SKIN` — wrathplus-app-world/src/portrait/test_bake.rs
+- `WOW_PROBE` — wrathplus-app-tools/src/capture/probe_env.rs, wrathplus-app-tools/src/dev.rs, wrathplus-app/src/lib.rs, wrathplus-world/src/bgwin.rs
+- `WOW_PROBE_AUCTION` — wrathplus-app-tools/src/capture/probe_env.rs, wrathplus-app-tools/src/dev.rs
+- `WOW_PROBE_BANK` — wrathplus-app-tools/src/capture/probe_env.rs, wrathplus-app-tools/src/dev.rs
+- `WOW_PROBE_BG` — wrathplus-app-tools/src/capture/probe_bg.rs, wrathplus-app-tools/src/capture/probe_env.rs, wrathplus-app-tools/src/dev.rs
+- `WOW_PROBE_BGQUEUE` — wrathplus-app-tools/src/capture/probe_env.rs, wrathplus-app-tools/src/dev.rs
+- `WOW_PROBE_BG_SAMPLES` — wrathplus-app-tools/src/capture/probe_bg.rs, wrathplus-app-tools/src/capture/probe_env.rs
+- `WOW_PROBE_BINDER` — wrathplus-app-tools/src/capture/probe_env.rs, wrathplus-app-tools/src/dev.rs
+- `WOW_PROBE_BOOK` — wrathplus-app-tools/src/capture/probe_env.rs, wrathplus-app-tools/src/dev.rs
+- `WOW_PROBE_CAM` — wrathplus-app-tools/src/capture/probe_cam.rs, wrathplus-app-tools/src/capture/probe_env.rs
+- `WOW_PROBE_CHARCREATE` — wrathplus-app-tools/src/capture/probe_charcreate.rs, wrathplus-app-tools/src/capture/probe_env.rs, wrathplus-app-tools/src/dev.rs
+- `WOW_PROBE_CHARCREATE_KEEP` — wrathplus-app-tools/src/capture/probe_charcreate.rs, wrathplus-app-tools/src/capture/probe_env.rs
+- `WOW_PROBE_CHARTER` — wrathplus-app-tools/src/capture/probe_env.rs, wrathplus-app-tools/src/dev.rs
+- `WOW_PROBE_CHAT` — wrathplus-app-tools/src/capture/probe_env.rs, wrathplus-app-tools/src/capture/probes/act.rs, wrathplus-app-tools/src/dev.rs
+- `WOW_PROBE_CHAT_AT` — wrathplus-app-tools/src/capture/probe_env.rs, wrathplus-app-tools/src/capture/probes/act.rs
+- `WOW_PROBE_CHAT_EVERY` — wrathplus-app-tools/src/capture/probe_env.rs, wrathplus-app-tools/src/capture/probes/act.rs
+- `WOW_PROBE_CHEST` — wrathplus-app-tools/src/capture/probe_chest.rs, wrathplus-app-tools/src/capture/probe_env.rs, wrathplus-app-tools/src/dev.rs
+- `WOW_PROBE_CLAM` — wrathplus-app-tools/src/capture/probe_clam.rs, wrathplus-app-tools/src/capture/probe_env.rs, wrathplus-app-tools/src/dev.rs
+- `WOW_PROBE_DOCK` — wrathplus-app-tools/src/capture/probe_crossing.rs, wrathplus-app-tools/src/capture/probe_env.rs
+- `WOW_PROBE_DRAG` — wrathplus-app-tools/src/capture/probe_env.rs, wrathplus-app-tools/src/capture/probes/act.rs, wrathplus-app-tools/src/dev.rs
+- `WOW_PROBE_DRAG_AT` — wrathplus-app-tools/src/capture/probe_env.rs, wrathplus-app-tools/src/capture/probes/act.rs
+- `WOW_PROBE_DRAG_LUA` — wrathplus-app-tools/src/capture/probe_env.rs, wrathplus-app-tools/src/capture/probes/act.rs
+- `WOW_PROBE_DRAG_STEP` — wrathplus-app-tools/src/capture/probe_env.rs, wrathplus-app-tools/src/capture/probes/act.rs
+- `WOW_PROBE_EXIT_AT` — wrathplus-app-tools/src/capture/probe_env.rs, wrathplus-app-tools/src/capture/probes/run.rs, wrathplus-app-tools/src/dev.rs, wrathplus-manager/src/setup/login.rs
+- `WOW_PROBE_GMTICKET` — wrathplus-app-tools/src/capture/probe_env.rs, wrathplus-app-tools/src/dev.rs
+- `WOW_PROBE_GOQUEST` — wrathplus-app-tools/src/capture/probe_env.rs, wrathplus-app-tools/src/capture/probe_goquest.rs, wrathplus-app-tools/src/dev.rs
+- `WOW_PROBE_HOVER` — wrathplus-app-tools/src/capture/probe_env.rs, wrathplus-app-tools/src/capture/probes/act.rs, wrathplus-app-tools/src/dev.rs
+- `WOW_PROBE_HOVER_AT` — wrathplus-app-tools/src/capture/probe_env.rs, wrathplus-app-tools/src/capture/probes/act.rs
+- `WOW_PROBE_HOVER_DUTY` — wrathplus-app-tools/src/capture/probe_env.rs, wrathplus-app-tools/src/capture/probes/act.rs
+- `WOW_PROBE_HOVER_JITTER` — wrathplus-app-tools/src/capture/probe_env.rs, wrathplus-app-tools/src/capture/probes/act.rs
+- `WOW_PROBE_HOVER_STEP` — wrathplus-app-tools/src/capture/probe_env.rs, wrathplus-app-tools/src/capture/probes/act.rs
+- `WOW_PROBE_KEY` — wrathplus-app-tools/src/capture/probe_env.rs, wrathplus-app-tools/src/capture/probes/act.rs, wrathplus-app-tools/src/dev.rs
+- `WOW_PROBE_LOOK` — wrathplus-app-tools/src/capture/probe_env.rs, wrathplus-app-tools/src/capture/probe_look.rs
+- `WOW_PROBE_LUA` — wrathplus-app-tools/src/capture/probe_env.rs, wrathplus-app-tools/src/capture/probes/act.rs, wrathplus-app-tools/src/dev.rs
+- `WOW_PROBE_LUA_AGAIN` — wrathplus-app-tools/src/capture/probe_env.rs, wrathplus-app-tools/src/capture/probes/act.rs
+- `WOW_PROBE_LUA_AT` — wrathplus-app-tools/src/capture/probe_env.rs, wrathplus-app-tools/src/capture/probes/act.rs
+- `WOW_PROBE_MAIL` — wrathplus-app-tools/src/capture/probe_env.rs, wrathplus-app-tools/src/dev.rs
+- `WOW_PROBE_MODEL_CAMERA` — wrathplus-app-tools/src/capture/probe_env.rs, wrathplus-app-tools/src/dev.rs
+- `WOW_PROBE_NAME_TRACE` — wrathplus-app-tools/src/capture/probe_env.rs, wrathplus-app-world/src/nameplates.rs
+- `WOW_PROBE_PARK` — wrathplus-app-tools/src/capture/probe_env.rs, wrathplus-app-tools/src/capture/probes/run.rs
+- `WOW_PROBE_PITCH` — wrathplus-app-tools/src/capture/probe_env.rs, wrathplus-app-tools/src/capture/probe_pitch.rs
+- `WOW_PROBE_RESIZE` — wrathplus-app-tools/src/capture/probe_env.rs, wrathplus-app-tools/src/capture/probes/run.rs, wrathplus-app-tools/src/dev.rs
+- `WOW_PROBE_SERVICE` — wrathplus-app-tools/src/capture/probe_env.rs, wrathplus-app-tools/src/dev.rs
+- `WOW_PROBE_SHARED_SKIN` — wrathplus-app-tools/src/capture/probe_env.rs, wrathplus-app-world/src/entities/attach/char_skin.rs
+- `WOW_PROBE_UI_ONE_TEX` — wrathplus-app-tools/src/capture/probe_env.rs, wrathplus-app-ui/src/ui_pass.rs
+- `WOW_PROBE_UNCAP` — wrathplus-app-tools/src/capture/mod.rs, wrathplus-app-tools/src/capture/probe_env.rs
+- `WOW_PROBE_VENDOR_SWAP` — wrathplus-app-tools/src/capture/probe_env.rs, wrathplus-app-tools/src/dev.rs
+- `WOW_PROBE_VSYNC` — wrathplus-app-tools/src/capture/mod.rs, wrathplus-app-tools/src/capture/probe_env.rs
+- `WOW_REALM` — wrathplus-app-core/src/launch_plan.rs
+- `WOW_REALM_SMOKE` — wrathplus-app-ui/src/realm_select/smoke.rs
+- `WOW_REMOTE_FLAT` — wrathplus-app-world/src/motion/remote.rs
+- `WOW_REMOTE_IDLE_GATE` — wrathplus-app-world/src/motion/remote.rs
+- `WOW_REMOTE_SNAP` — wrathplus-app-world/src/motion/remote.rs
+- `WOW_RENDER_SCALE` — wrathplus-app-world/src/world_backdrop.rs, wrathplus-app/src/game_plugins/client_tests/shipped_cvars.rs
 - `WOW_REPLAY_CAPTURE` — wrathplus-app/src/game_plugins/client_tests/net_apply_motion_seam_tests.rs, wrathplus-app/src/game_plugins/client_tests/net_capture_replay_tests.rs
 - `WOW_REPLAY_POSES` — wrathplus-app/src/game_plugins/client_tests/net_apply_motion_seam_tests.rs
-- `WOW_RESIZE` — wrathplus-app/src/capture/mod.rs
-- `WOW_RES_CENSUS` — wrathplus-app/src/perf/census.rs
-- `WOW_REVEAL` — wrathplus-app/src/capture/probes/reveal.rs, wrathplus-app/src/dev.rs
-- `WOW_RIG` — wrathplus-app/src/capture/probe_rig.rs, wrathplus-app/src/dev.rs, wrathplus-app/src/login/mod.rs, wrathplus-app/src/net.rs, wrathplus-app/src/probe_shield.rs, wrathplus-app/src/realm_select/smoke.rs, wrathplus-app/src/run_mode.rs, wrathplus-world/src/bgwin.rs
+- `WOW_RESIZE` — wrathplus-app-tools/src/capture/mod.rs
+- `WOW_RES_CENSUS` — wrathplus-app-tools/src/perf/census.rs
+- `WOW_REVEAL` — wrathplus-app-tools/src/capture/probes/reveal.rs, wrathplus-app-tools/src/dev.rs
+- `WOW_RIG` — wrathplus-app-core/src/run_mode.rs, wrathplus-app-net/src/net.rs, wrathplus-app-tools/src/capture/probe_rig.rs, wrathplus-app-tools/src/dev.rs, wrathplus-app-tools/src/probe_shield.rs, wrathplus-app-ui/src/login/mod.rs, wrathplus-app-ui/src/realm_select/smoke.rs, wrathplus-world/src/bgwin.rs
 - `WOW_RIG_CENSUS` — wrathplus-world/src/rig_palette.rs
 - `WOW_RIG_COST` — wrathplus-world/src/rig_palette.rs
 - `WOW_RIG_SKIN` — wrathplus-assets/src/materials.rs, wrathplus-assets/src/shadow_material.rs, wrathplus-world/src/shaders.rs
-- `WOW_ROUTE_HIT` — wrathplus-app/src/player/route_real_data.rs
-- `WOW_ROUTE_PROBE` — wrathplus-app/src/player/route_real_data.rs
-- `WOW_ROUTE_WALK` — wrathplus-app/src/player/route_real_data.rs
-- `WOW_ROW_BLOAT` — wrathplus-app/src/perf/census.rs, wrathplus-app/src/perf/mod.rs
-- `WOW_SCHED_CENSUS` — wrathplus-app/src/dev.rs, wrathplus-world/src/bgwin.rs
+- `WOW_ROUTE_HIT` — wrathplus-app-world/src/player/route_real_data.rs
+- `WOW_ROUTE_PROBE` — wrathplus-app-world/src/player/route_real_data.rs
+- `WOW_ROUTE_WALK` — wrathplus-app-world/src/player/route_real_data.rs
+- `WOW_ROW_BLOAT` — wrathplus-app-tools/src/perf/census.rs, wrathplus-app-tools/src/perf/mod.rs
+- `WOW_SCHED_CENSUS` — wrathplus-app-tools/src/dev.rs, wrathplus-world/src/bgwin.rs
 - `WOW_SHADE_CENSUS` — wrathplus-world/src/entity_shade.rs
 - `WOW_SHADOW_EXCLUDE` — wrathplus-assets/src/materials.rs, wrathplus-assets/src/shadow_material.rs, wrathplus-world/src/shaders.rs
 - `WOW_SHADOW_FRAGMENT` — wrathplus-assets/src/shadow_material.rs, wrathplus-world/src/shaders.rs
 - `WOW_SHADOW_SOURCE_OPAQUE` — wrathplus-assets/src/shadow_material.rs
-- `WOW_SHOT_REQUIRE` — wrathplus-app/src/capture/live_shot.rs
-- `WOW_SHOT_REQUIRE_DIST` — wrathplus-app/src/capture/live_shot.rs
-- `WOW_SHOWCASE_OUT` — wrathplus-app/src/showcase_capture/driver.rs
-- `WOW_SHOWCASE_PATH` — wrathplus-app/src/run_mode.rs, wrathplus-app/src/showcase_capture/driver.rs, wrathplus-app/src/video.rs
+- `WOW_SHOT_REQUIRE` — wrathplus-app-tools/src/capture/live_shot.rs
+- `WOW_SHOT_REQUIRE_DIST` — wrathplus-app-tools/src/capture/live_shot.rs
+- `WOW_SHOWCASE_OUT` — wrathplus-app-tools/src/showcase_capture/driver.rs
+- `WOW_SHOWCASE_PATH` — wrathplus-app-core/src/run_mode.rs, wrathplus-app-tools/src/showcase_capture/driver.rs, wrathplus-app-world/src/video_tests.rs
 - `WOW_SKY_DEPTH` — wrathplus-assets/src/materials.rs, wrathplus-world/src/shaders.rs
-- `WOW_SOUND_PROBE` — wrathplus-app/src/sound/probe.rs
-- `WOW_STALL` — wrathplus-app/src/capture/probes/stall.rs, wrathplus-app/src/dev.rs
-- `WOW_STALL_INJECT` — wrathplus-app/src/perf/stall.rs
-- `WOW_STALL_SAMPLE` — wrathplus-app/src/perf/stall.rs
+- `WOW_SOUND_PROBE` — wrathplus-app-world/src/sound/probe.rs
+- `WOW_STALL` — wrathplus-app-tools/src/capture/probes/stall.rs, wrathplus-app-tools/src/dev.rs
+- `WOW_STALL_INJECT` — wrathplus-app-tools/src/perf/stall.rs
+- `WOW_STALL_SAMPLE` — wrathplus-app-tools/src/perf/stall.rs
 - `WOW_STATIC_GX` — wrathplus-world/src/static_gx/mod.rs
 - `WOW_STATIC_GX_FADE` — wrathplus-world/src/static_gx/mod.rs
 - `WOW_STATIC_GX_PROP` — wrathplus-world/src/static_gx/mod.rs
 - `WOW_STATIC_GX_WMO` — wrathplus-world/src/static_gx/mod.rs
 - `WOW_STATIC_MERGE` — wrathplus-world/src/terrain_stream/merge.rs
-- `WOW_STREAM_TRACE` — wrathplus-app/src/perf/mod.rs
-- `WOW_TABHOVER` — wrathplus-app/src/capture/fixtures.rs
-- `WOW_TAB_TRACE` — wrathplus-app/src/target/scan.rs
-- `WOW_TEARDOWN_INJECT` — wrathplus-app/src/perf/stall.rs
-- `WOW_TEXT_PROBE` — wrathplus-app/src/ui_script/extract/text.rs
+- `WOW_STREAM_TRACE` — wrathplus-app-tools/src/perf/mod.rs
+- `WOW_TABHOVER` — wrathplus-app-tools/src/capture/fixtures.rs
+- `WOW_TAB_TRACE` — wrathplus-app-world/src/target/scan.rs
+- `WOW_TEARDOWN_INJECT` — wrathplus-app-tools/src/perf/stall.rs
+- `WOW_TEXT_PROBE` — wrathplus-app-ui/src/ui_script/extract/text.rs
 - `WOW_THREADS` — wrathplus-world/src/boot.rs
-- `WOW_TILE_DUMP` — wrathplus-app/src/ui_models/mod.rs
-- `WOW_TILE_TRACE` — wrathplus-app/src/ui_models/mod.rs
+- `WOW_TILE_DUMP` — wrathplus-app-ui/src/ui_models/mod.rs
+- `WOW_TILE_TRACE` — wrathplus-app-ui/src/ui_models/mod.rs
 - `WOW_TILE_UNLOAD` — wrathplus-world/src/assets/mod.rs
-- `WOW_TINT_PROBE` — wrathplus-app/src/aura_visual.rs
-- `WOW_TRAIL_CENSUS` — wrathplus-app/src/capture/probes/trail_census.rs, wrathplus-app/src/dev.rs
-- `WOW_TRILINEAR` — wrathplus-app/src/cvars/mod.rs, wrathplus-app/src/game_plugins/client_tests/shipped_cvars.rs, wrathplus-assets/src/tex_filter.rs
-- `WOW_TWIST_GAP` — wrathplus-app/src/player/body_pose.rs
+- `WOW_TINT_PROBE` — wrathplus-app-world/src/aura_visual.rs
+- `WOW_TRAIL_CENSUS` — wrathplus-app-tools/src/capture/probes/trail_census.rs, wrathplus-app-tools/src/dev.rs
+- `WOW_TRILINEAR` — wrathplus-app-core/src/cvars/mod.rs, wrathplus-app/src/game_plugins/client_tests/shipped_cvars.rs, wrathplus-assets/src/tex_filter.rs
+- `WOW_TWIST_GAP` — wrathplus-app-world/src/player/body_pose.rs
 - `WOW_UISCRIPT_DUMP` — wrathplus-app/tests/ui_script_wall.rs
-- `WOW_UI_COST` — wrathplus-app/src/ui_script/extract/mod.rs
-- `WOW_UI_DIFF` — wrathplus-app/src/ui_pass.rs, wrathplus-app/src/ui_script/extract/mod.rs
-- `WOW_UI_GATE` — wrathplus-app/src/ui_script/extract/mod.rs
+- `WOW_UI_COST` — wrathplus-app-ui/src/ui_script/extract/mod.rs
+- `WOW_UI_DIFF` — wrathplus-app-ui/src/ui_pass.rs, wrathplus-app-ui/src/ui_script/extract/mod.rs
+- `WOW_UI_GATE` — wrathplus-app-ui/src/ui_script/extract/mod.rs
 - `WOW_UI_HANDLERS` — wrathplus-ui/src/script/handler_prof.rs
-- `WOW_UI_PICK` — wrathplus-app/src/ui_script/extract/mod.rs
-- `WOW_UI_PROBE` — wrathplus-app/src/ui_pass.rs
-- `WOW_UI_SCALE` — wrathplus-app/src/game_plugins/client_tests/cvars.rs, wrathplus-app/src/game_plugins/client_tests/shipped_cvars.rs, wrathplus-app/src/ui_script/mod.rs
-- `WOW_UI_SPLICE_VERIFY` — wrathplus-app/src/ui_script/extract/mod.rs
-- `WOW_UNATTENDED` — wrathplus-app/src/login/mod.rs, wrathplus-app/src/net.rs, wrathplus-app/src/run_mode.rs, wrathplus-world/src/bgwin.rs
-- `WOW_UNIT_VISUALS` — wrathplus-app/src/capture/probes/visual_census.rs, wrathplus-app/src/dev.rs
-- `WOW_UNIT_VISUALS_RADIUS` — wrathplus-app/src/capture/probes/visual_census.rs
+- `WOW_UI_PICK` — wrathplus-app-ui/src/ui_script/extract/mod.rs
+- `WOW_UI_PROBE` — wrathplus-app-ui/src/ui_pass.rs
+- `WOW_UI_SCALE` — wrathplus-app-ui/src/ui_script/mod.rs, wrathplus-app/src/game_plugins/client_tests/cvars.rs, wrathplus-app/src/game_plugins/client_tests/shipped_cvars.rs
+- `WOW_UI_SPLICE_VERIFY` — wrathplus-app-ui/src/ui_script/extract/mod.rs
+- `WOW_UNATTENDED` — wrathplus-app-core/src/run_mode.rs, wrathplus-app-net/src/net.rs, wrathplus-app-ui/src/login/mod.rs, wrathplus-world/src/bgwin.rs
+- `WOW_UNIT_VISUALS` — wrathplus-app-tools/src/capture/probes/visual_census.rs, wrathplus-app-tools/src/dev.rs
+- `WOW_UNIT_VISUALS_RADIUS` — wrathplus-app-tools/src/capture/probes/visual_census.rs
 - `WOW_UPLOAD_BUDGET` — wrathplus-world/src/world_plugins.rs
-- `WOW_USER` — wrathplus-app/src/launch_plan.rs, wrathplus-app/src/login/mod.rs, wrathplus-app/src/net.rs, wrathplus-app/src/run_mode.rs
-- `WOW_VISTA_AT` — wrathplus-app/src/capture/mod.rs
-- `WOW_VISTA_FACE` — wrathplus-app/src/capture/mod.rs
-- `WOW_VISTA_MIN` — wrathplus-app/src/capture/mod.rs
-- `WOW_VISTA_PITCH` — wrathplus-app/src/capture/mod.rs
-- `WOW_VIS_DUMP` — wrathplus-app/src/capture/probes/live_fps.rs
+- `WOW_USER` — wrathplus-app-core/src/launch_plan.rs, wrathplus-app-core/src/run_mode.rs, wrathplus-app-net/src/net.rs, wrathplus-app-ui/src/login/mod.rs, wrathplus-manager/src/setup/login.rs
+- `WOW_VISTA_AT` — wrathplus-app-tools/src/capture/mod.rs
+- `WOW_VISTA_FACE` — wrathplus-app-tools/src/capture/mod.rs
+- `WOW_VISTA_MIN` — wrathplus-app-tools/src/capture/mod.rs
+- `WOW_VISTA_PITCH` — wrathplus-app-tools/src/capture/mod.rs
+- `WOW_VIS_DUMP` — wrathplus-app-tools/src/capture/probes/live_fps.rs
 - `WOW_VIS_TRACE` — wrathplus-world/src/model_render/visibility.rs
-- `WOW_VPLATE_TRACE` — wrathplus-app/src/vplates.rs
-- `WOW_WARM_SLICE` — wrathplus-app/src/pipe_warm/mod.rs
+- `WOW_VPLATE_TRACE` — wrathplus-app-world/src/vplates.rs
+- `WOW_WARM_SLICE` — wrathplus-app-world/src/pipe_warm/mod.rs
 - `WOW_WATER_CLIP` — wrathplus-assets/src/materials.rs, wrathplus-world/src/shaders.rs
 - `WOW_WAVE_DUMP` — wrathplus-world/src/ffx_glow.rs
 - `WOW_WEATHER` — wrathplus-world/src/weather/mod.rs
 - `WOW_WEATHER_DUMP` — wrathplus-world/src/weather/mod.rs
-- `WOW_WFX_AGE` — wrathplus-app/src/capture/mod.rs
-- `WOW_WFX_AT` — wrathplus-app/src/capture/mod.rs
-- `WOW_WFX_AZ` — wrathplus-app/src/capture/mod.rs
-- `WOW_WFX_DEPTH` — wrathplus-app/src/capture/mod.rs
-- `WOW_WFX_DIST` — wrathplus-app/src/capture/mod.rs
-- `WOW_WFX_EL` — wrathplus-app/src/capture/mod.rs
-- `WOW_WFX_HEAD` — wrathplus-app/src/capture/mod.rs
-- `WOW_WFX_MODE` — wrathplus-app/src/capture/mod.rs
-- `WOW_WFX_SPEED` — wrathplus-app/src/capture/mod.rs
-- `WOW_WIN` — wrathplus-app/src/video.rs, wrathplus-world/src/worldview.rs
+- `WOW_WFX_AGE` — wrathplus-app-tools/src/capture/mod.rs
+- `WOW_WFX_AT` — wrathplus-app-tools/src/capture/mod.rs
+- `WOW_WFX_AZ` — wrathplus-app-tools/src/capture/mod.rs
+- `WOW_WFX_DEPTH` — wrathplus-app-tools/src/capture/mod.rs
+- `WOW_WFX_DIST` — wrathplus-app-tools/src/capture/mod.rs
+- `WOW_WFX_EL` — wrathplus-app-tools/src/capture/mod.rs
+- `WOW_WFX_HEAD` — wrathplus-app-tools/src/capture/mod.rs
+- `WOW_WFX_MODE` — wrathplus-app-tools/src/capture/mod.rs
+- `WOW_WFX_SPEED` — wrathplus-app-tools/src/capture/mod.rs
+- `WOW_WIN` — wrathplus-app-world/src/video.rs, wrathplus-world/src/worldview.rs
 - `WOW_WMO_BIAS` — wrathplus-world/src/model_render.rs, wrathplus-world/src/static_gx/mod.rs
 - `WOW_WORLDVIEW_` — wrathplus-world/src/bgwin.rs
 - `WOW_WORLDVIEW_AT` — wrathplus-world/src/worldview.rs
@@ -537,7 +750,7 @@
 - `WOW_WORLDVIEW_SURVEY` — wrathplus-world/src/worldview.rs
 - `WOW_WORLDVIEW_WRATH_SMOKE` — wrathplus-world/src/worldview.rs
 - `WOW_WORLDVIEW_WRATH_TIMEOUT` — wrathplus-world/src/worldview.rs
-- `WOW_WRATH_PACKET_RECORD` — wrathplus-app/src/net/io/wrath/recorder.rs
+- `WOW_WRATH_PACKET_RECORD` — wrathplus-app-net/src/net/io/wrath/recorder.rs
 
 ## Scripts (`scripts/`)
 
@@ -545,6 +758,7 @@
 - `mixsum.py` — Read a `$WOW_MIX_TAP` capture and say, in numbers, what the mix was doing when.
 - `pass-span-lint.py` — Refuse a second open `pass_span` on the same render pass (a wgpu validation error on Vulkan).
 - `soundprobe.py` — Read back a `$WOW_SOUND_PROBE` capture and name the mechanism behind a speaker-breaking sound.
+- `test_doc_links.py` — The doc-link gate must not report green when rustdoc itself failed.""" import importlib.util from pathlib import Path import subprocess import unittes…
 - `vplsum.py` — Read a `vpl`/`bub` overlay trace and say where the motion came from: projection, solve or snap.
 - `check.sh` — The in-loop verify: fmt everywhere, clippy and test on the changed crates and their dependents.
 - `cine.sh` — Play one cinematic on the probe and print what happened, as a timeline.

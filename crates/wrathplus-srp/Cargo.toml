@@ -3,7 +3,7 @@ name = "wrathplus-srp"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "WoW 1.12.1 (build 5875) SRP6 client and world-header crypto"
+description = "WoW 3.3.5a (build 12340) SRP6 client and world-header crypto"
 
 [lints]
 workspace = true
