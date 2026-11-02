@@ -11,8 +11,8 @@
 //! | `GET /view?token=…` | a read-only page for people: the live frame, the character, events and the agent's Lua |
 //! | `GET /files`, `GET|PUT|DELETE /files/<module>` | the agent's own Lua modules (see `env`) |
 //!
-//! In Lua, besides the stock API: `AgentNearby([yards])`, `AgentPosition()`, `AgentTarget(guid)`,
-//! `AgentInteract(guid)` (`world`), `AgentPath`, `AgentMoveTo`, `AgentStop`, `AgentWalk` (`nav`,
+//! In Lua, besides the stock API: `AgentNearby([yards])`, `AgentFindNpc(service [, yards])`,
+//! `AgentPosition()`, `AgentTarget(guid)`, `AgentInteract(guid)` (`world`), `AgentPath`, `AgentMoveTo`, `AgentStop`, `AgentWalk` (`nav`,
 //! over the realm's mmaps from `WOW_NAV_MMAPS`), and the module functions (`env`).
 //!
 //! With the port open, the UI's movement verbs run from any Lua (stock gates them on a key
