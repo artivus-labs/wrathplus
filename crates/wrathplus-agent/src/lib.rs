@@ -8,10 +8,13 @@
 //! | `POST /lua[?budget=N]` | run the body in the UI's Lua; values, `print` output or the error |
 //! | `GET /screenshot[?scale=0.5]` | the next rendered frame as PNG |
 //! | `GET /events?since=N[&wait_ms=M][&limit=K]` | every UI event since cursor `N`, long-polling |
+//! | `GET /view?token=…` | a read-only page for people: the live frame, the character, events and the agent's Lua |
 //!
 //! With the port open, the UI's movement verbs run from any Lua (stock gates them on a key
 //! binding), so an agent's scripts can walk. Everything else an agent does goes through the same
 //! Lua API the stock interface uses.
+//!
+//! Each Lua call is also logged on the event stream as `AGENT_LUA` (code, ok, error), for watchers.
 //!
 //! A headless client (`WOW_HEADLESS=1`, `wrathplus_world::headless`) answers screenshots from its
 //! offscreen frame.
@@ -39,7 +42,8 @@ const DEFAULT_BUDGET: u64 = 200_000_000;
 const STATUS_LUA: &str = r#"local x, y = GetPlayerMapPosition("player")
 return {
   name = UnitName("player"), level = UnitLevel("player"),
-  class = select(2, UnitClass("player")), race = select(2, UnitRace("player")),
+  class = select(2, UnitClass("player")), class_name = UnitClass("player"),
+  race = select(2, UnitRace("player")),
   health = UnitHealth("player"), health_max = UnitHealthMax("player"),
   power = UnitPower("player"), power_max = UnitPowerMax("player"),
   dead = UnitIsDeadOrGhost("player") and true or false,
@@ -142,6 +146,13 @@ fn serve_jobs(
                         json!({"ok": false, "error": "the UI is loading; try again", "output": []})
                     }
                 };
+                // Into the event log too, so a watcher (the web view) sees what the agent ran.
+                let shown: String = code.chars().take(2_000).collect();
+                link.events.push([json!({
+                    "time": link.started.elapsed().as_secs_f64(),
+                    "event": "AGENT_LUA",
+                    "args": [shown, answer["ok"], answer.get("error")],
+                })]);
                 let _ = reply.send(answer);
             }
             Job::Status { reply } => {
