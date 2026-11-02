@@ -140,6 +140,7 @@ mod merchant;
 mod messageframe;
 mod minimap;
 pub mod nameplate;
+mod player_facing;
 mod wrath_input_verbs;
 pub use nameplate::{PlateCast, PlateGeometry, PlateState};
 mod model;
@@ -716,6 +717,7 @@ impl UiScript {
         battlefield_positions::install(&lua)?;
         tutorial::install(&lua)?;
         worldmap_arrow::install(&lua)?;
+        player_facing::install(&lua)?;
         shapeshift::install(&lua)?;
         pet::install(&lua)?;
         gossip::install(&lua)?;

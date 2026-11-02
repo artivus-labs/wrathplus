@@ -11,6 +11,9 @@
 //! | `GET /view?token=…` | a read-only page for people: the live frame, the character, events and the agent's Lua |
 //! | `GET /files`, `GET|PUT|DELETE /files/<module>` | the agent's own Lua modules (see `env`) |
 //!
+//! In Lua, besides the stock API: `AgentNearby([yards])`, `AgentPosition()`, `AgentTarget(guid)`,
+//! `AgentInteract(guid)` (`world`), and the module functions (`env`).
+//!
 //! With the port open, the UI's movement verbs run from any Lua (stock gates them on a key
 //! binding), so an agent's scripts can walk. Everything else an agent does goes through the same
 //! Lua API the stock interface uses.
@@ -24,6 +27,7 @@ mod env;
 mod events;
 mod lua;
 mod server;
+mod world;
 
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, ScreenshotCaptured};
@@ -86,7 +90,9 @@ impl Plugin for AgentPlugin {
                 return;
             }
         }
+        let (world, world_link) = world::link();
         app.insert_resource(Link {
+            world,
             queue,
             events,
             started: Instant::now(),
@@ -94,7 +100,9 @@ impl Plugin for AgentPlugin {
             env_session: 0,
             autoexec_due: false,
         })
-        .add_systems(Update, (pump_events, serve_jobs).chain());
+        .insert_resource(world_link)
+        .add_systems(Update, (pump_events, serve_jobs).chain())
+        .add_systems(Update, (world::snapshot, world::apply_orders));
     }
 }
 
@@ -109,6 +117,8 @@ struct Link {
     env_session: u64,
     /// An `autoexec` module waits for this VM to reach the world.
     autoexec_due: bool,
+    /// The Lua side of the world snapshot and orders (`world`).
+    world: world::Handles,
 }
 
 /// Keep the VM's agent hooks on (a relog or `ReloadUI()` builds a fresh VM) and move this
@@ -128,6 +138,9 @@ fn pump_events(
         match env::install(&script, link.scripts.clone()) {
             Ok(autoexec) => link.autoexec_due = autoexec,
             Err(e) => error!("agent port: Lua environment: {e}"),
+        }
+        if let Err(e) = world::install(script.lua(), &link.world) {
+            error!("agent port: world functions: {e}");
         }
     }
     if link.autoexec_due && state.is_some_and(|s| *s.get() == ClientState::InWorld) {
