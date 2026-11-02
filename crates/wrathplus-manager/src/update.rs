@@ -4,6 +4,7 @@ impl Manager {
     pub(super) fn update(&mut self, message: Message) -> iced::Task<Message> {
         match message {
             Message::Server(input) => return self.server_update(input),
+            Message::Agents(input) => return self.agents_update(input),
             Message::Modules(input) => return self.module_update(input),
             Message::ModuleConfig(input) => return self.config_update(input),
             Message::ToggleBuildLog => self.build_feedback.expanded = !self.build_feedback.expanded,
@@ -146,6 +147,7 @@ impl Manager {
             Message::Poll => {
                 crate::branding::set_dock_icon();
                 let server_task = self.poll_server();
+                self.agents_poll();
                 if self.busy {
                     self.build_feedback.refresh();
                 }
