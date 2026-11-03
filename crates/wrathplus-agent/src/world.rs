@@ -52,6 +52,9 @@ pub(crate) struct Seen {
     pub title: Option<String>,
     /// The quest marker over it: "available", "incomplete" or "reward".
     pub quest: Option<&'static str>,
+    /// A player's quest log as the client has it (the server sends it for party members):
+    /// quest ids, and whether each is complete.
+    pub quests: Vec<(u32, bool)>,
     pub go_type: Option<i32>,
 }
 
@@ -192,6 +195,14 @@ pub(crate) fn snapshot(
                     .and_then(quest_marker),
                 ..default()
             };
+            if net.kind == EntityKind::Player {
+                s.quests = (0..fields.player_quest_log_slots())
+                    .filter_map(|slot| fields.player_quest_log(slot))
+                    .filter(|q| q.quest_id != 0)
+                    // QUEST_STATE_COMPLETE (AzerothCore QuestDef.h).
+                    .map(|q| (q.quest_id, q.state == 1))
+                    .collect();
+            }
             if unit {
                 s.name = names
                     .as_ref()
@@ -332,6 +343,16 @@ fn seen_table(lua: &Lua, s: &Seen) -> mlua::Result<Table> {
     }
     t.set("quest", s.quest)?;
     t.set("go_type", s.go_type)?;
+    if !s.quests.is_empty() {
+        let quests = lua.create_table()?;
+        for &(id, complete) in &s.quests {
+            let q = lua.create_table()?;
+            q.set("id", id)?;
+            q.set("complete", complete)?;
+            quests.push(q)?;
+        }
+        t.set("quests", quests)?;
+    }
     Ok(t)
 }
 

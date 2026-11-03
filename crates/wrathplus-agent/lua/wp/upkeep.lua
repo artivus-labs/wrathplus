@@ -150,6 +150,11 @@ local function upgrade(item)
   return false
 end
 
+-- For others (quest rewards): whether the item behind a link would be worn as an upgrade.
+function U.upgrade(link)
+  return upgrade(info(link))
+end
+
 -- 3.3.5 roll types: 0 pass, 1 need, 2 greed.
 local ROLL_NAMES = { [0] = "passed on", [1] = "needed", [2] = "greeded" }
 local rolled = {}

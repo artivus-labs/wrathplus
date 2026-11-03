@@ -63,6 +63,7 @@ const WAKE: Record<string, { reason: string; interrupt: boolean }> = {
   AGENT_DECISION: { reason: "decision opened", interrupt: false },
   AGENT_WALK_DONE: { reason: "walk ended", interrupt: false },
   AGENT_COMBAT_DONE: { reason: "fight ended", interrupt: false },
+  AGENT_PARTY_QUEST: { reason: "a party member's quests changed", interrupt: true },
   PLAYER_REGEN_DISABLED: { reason: "combat started", interrupt: true },
   PLAYER_REGEN_ENABLED: { reason: "combat ended", interrupt: false },
   PLAYER_DEAD: { reason: "died", interrupt: true },
