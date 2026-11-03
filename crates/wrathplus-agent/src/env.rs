@@ -3,10 +3,11 @@
 //!
 //! The UI VM is sandboxed (no `require`, `io`, `os`), as addons expect. This adds back exactly one
 //! door: `require(name)` reads `<scripts>/<name with dots as slashes>.lua`, or a built-in module
-//! (`wp.engine`, `wp.values`, `wp.agent`, `wp.revive`, `wp.upkeep`, `wp.combat`), and nothing else. `wp.agent` is preloaded as
+//! (`wp.engine`, `wp.values`, `wp.agent`, `wp.revive`, `wp.upkeep`, `wp.combat`, `wp.move`), and nothing else. `wp.agent` is preloaded as
 //! the global `Agent`: the registry of intents and decisions the fast tier chooses among; `wp.revive`
 //! as `Revive`, which gets a dead character back up; `wp.upkeep` as `Upkeep`, which wears upgrades,
-//! sells junk and trains; `wp.combat` as `Combat`, melee that chases its target. `AgentReload(name)` forgets a module and loads it
+//! sells junk and trains; `wp.combat` as `Combat`, melee that chases its target; `wp.move` as
+//! `Move`, going to a unit, following one and holding a spot. `AgentReload(name)` forgets a module and loads it
 //! again; `AgentModules()` lists the agent's files. If `autoexec.lua` exists, every new in-game
 //! VM runs it, so an agent's logic comes back after `ReloadUI()` or a restart.
 
@@ -22,6 +23,7 @@ const BUILT_IN: &[(&str, &str)] = &[
     ("wp.revive", include_str!("../lua/wp/revive.lua")),
     ("wp.upkeep", include_str!("../lua/wp/upkeep.lua")),
     ("wp.combat", include_str!("../lua/wp/combat.lua")),
+    ("wp.move", include_str!("../lua/wp/move.lua")),
 ];
 
 /// Where the agent's modules live: `WOW_AGENT_SCRIPTS`, else `<client home>/Agent/scripts`.
@@ -117,6 +119,9 @@ pub(crate) fn install(script: &UiScript, dir: PathBuf) -> mlua::Result<bool> {
     // Melee that keeps up with its target (`Combat.engage(guid)`).
     let combat = load_module(lua, &dir, "wp.combat")?;
     lua.globals().set("Combat", combat)?;
+    // Going to a unit, following one (with its fights), holding a spot.
+    let movement = load_module(lua, &dir, "wp.move")?;
+    lua.globals().set("Move", movement)?;
     Ok(module_path(&dir, "autoexec").is_file())
 }
 
@@ -161,6 +166,10 @@ mod upkeep_tests;
 #[cfg(test)]
 #[path = "combat_tests.rs"]
 mod combat_tests;
+
+#[cfg(test)]
+#[path = "move_tests.rs"]
+mod move_tests;
 
 #[cfg(test)]
 mod tests {

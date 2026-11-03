@@ -17,6 +17,7 @@ local zone, sub = GetZoneText() or "", GetSubZoneText() or ""
 out[#out + 1] = string.format("in %s%s%s", zone, sub ~= "" and (" / " .. sub) or "",
   p and string.format(" at (%.0f, %.0f, %.0f)", p.x, p.y, p.z) or "")
 if Revive and Revive.state then out[#out + 1] = "revive: " .. Revive.state end
+if Move and Move.mode then out[#out + 1] = "move: " .. (Move.mode == "follow" and "following" or Move.mode) .. (Move.state and (", " .. Move.state) or "") end
 if Combat and Combat.state then out[#out + 1] = "combat: " .. Combat.state end
 if Agent and Agent.steps and Agent.steps.at > 0 then
   local s = Agent.steps.list[Agent.steps.at]
