@@ -16,6 +16,7 @@ import { claudeAuth, loadEnv } from "./env.ts";
 import { Notes } from "./notes.ts";
 import { Policy } from "./policy.ts";
 import { kickoff } from "./prompt.ts";
+import { Triage } from "./triage.ts";
 import { statusLine, Waker } from "./wake.ts";
 import { watch } from "./watch.ts";
 
@@ -59,15 +60,19 @@ export async function runAgent(config: Config, options: RunOptions): Promise<voi
   const { abortController } = options;
   const inbox = new Inbox();
   const notes = new Notes(options.notesHome);
-  // Speech nearby that was not to us rides along with the next wake-up (the latest few lines).
+  // Speech nearby that was not to us rides along with the next wake-up (the latest few lines), and
+  // so do requests the fast tier carried out for the party.
   let heard: string[] = [];
+  let handled: string[] = [];
   // Everything that reaches the planner also goes in the session log, with the character's
   // status at that moment, so a wake-up needs no calls to see where things stand.
   const tell = (kind: string, text: string) => {
     void statusLine(config.url, config.token).then((status) => {
       const nearby = heard.length ? `\n\nHeard nearby (no need to answer):\n- ${heard.join("\n- ")}` : "";
+      const done = handled.length ? `\n\nDone for the party by the fast loop (already answered):\n- ${handled.join("\n- ")}` : "";
       heard = [];
-      const message = (status ? `${text}${nearby}\n\n[Now: ${status}]` : `${text}${nearby}`);
+      handled = [];
+      const message = status ? `${text}${done}${nearby}\n\n[Now: ${status}]` : `${text}${done}${nearby}`;
       notes.record(kind, message);
       inbox.push(message);
     });
@@ -85,6 +90,25 @@ export async function runAgent(config: Config, options: RunOptions): Promise<voi
       })
     : undefined;
   if (policy) void policy.run(abortController.signal);
+  // Requests from the party, sorted by Jev before the planner hears them (`triage.ts`).
+  const lua = async (code: string) => {
+    const response = await fetch(`${config.url}/lua`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${config.token}` },
+      body: code,
+    });
+    return (await response.json()) as { ok: boolean; values?: unknown[]; error?: string };
+  };
+  const triage =
+    policy && process.env.TYPESAFE_API_KEY && process.env.WRATHPLUS_AGENT_TRIAGE !== "0"
+      ? new Triage(
+          new Jev(process.env.TYPESAFE_API_KEY, process.env.WRATHPLUS_JEV_MODEL ?? "jev-latest"),
+          lua,
+          async (text, channel, to) => {
+            await lua(`SendChatMessage(${JSON.stringify(text)}, ${JSON.stringify(channel)}, nil, ${JSON.stringify(to)}) return true`);
+          },
+        )
+      : undefined;
   const opening = kickoff(config.goal, notes.briefing());
   inbox.push(opening);
   let self: string | undefined;
@@ -115,6 +139,10 @@ export async function runAgent(config: Config, options: RunOptions): Promise<voi
     self: () => self,
     party: () => party,
     npcReplies: process.env.WRATHPLUS_AGENT_NPC_REPLIES !== "0",
+    ...(triage ? { triage: async (request) => triage.handle(request, await statusLine(config.url, config.token)) } : {}),
+    onHandled: (note) => {
+      handled = [...handled, note].slice(-8);
+    },
     onOverheard: (lines) => {
       heard = [...heard, ...lines].slice(-8);
     },

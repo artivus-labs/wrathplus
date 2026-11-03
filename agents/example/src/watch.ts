@@ -2,6 +2,8 @@
 // would notice (a death, a whisper, an invite) into messages for the planner, batched so a burst
 // becomes one message.
 
+import type { Request, Triaged } from "./triage.ts";
+
 export interface GameEvent {
   seq: number;
   time: number;
@@ -151,6 +153,17 @@ export function describe(events: GameEvent[], self?: string, kinds?: Set<string>
   return lines.filter((line, i) => lines.indexOf(line) === i);
 }
 
+/** A message meant for us that may be a request the fast tier can do itself. */
+export function requestOf(e: GameEvent, self?: string, party?: Set<string>): Request | null {
+  const sender = String(e.args[1] ?? "");
+  if (!sender || sender === self) return null;
+  const text = String(e.args[0] ?? "");
+  if (e.event === "CHAT_MSG_PARTY" || e.event === "CHAT_MSG_PARTY_LEADER") return { sender, text, channel: "PARTY" };
+  if (e.event === "CHAT_MSG_WHISPER") return { sender, text, channel: "WHISPER" };
+  if (e.event === "CHAT_MSG_SAY" && party?.has(sender.toLowerCase())) return { sender, text, channel: "PARTY" };
+  return null;
+}
+
 export interface WatchOptions {
   url: string;
   token: string;
@@ -162,6 +175,10 @@ export interface WatchOptions {
   onOverheard?: (lines: string[]) => void;
   /** Wake the planner when an NPC addresses the character by name (default true). */
   npcReplies?: boolean;
+  /** Sort a request before the planner hears it (`triage.ts`); a handled one does not wake it. */
+  triage?: (request: Request) => Promise<Triaged>;
+  /** What the fast tier did for the party, to hand over with the next wake-up. */
+  onHandled?: (note: string) => void;
   /** Gather lines for this long after the first before sending (ms). */
   batchMs?: number;
   onMessage: (text: string) => void;
@@ -193,7 +210,24 @@ export async function watch(options: WatchOptions): Promise<void> {
       if (batch.events.length) options.onEvents?.(batch.events);
       const party = options.party?.();
       const npc = options.npcReplies ?? true;
-      const lines = [...describe(batch.events, options.self?.(), PLANNER_EVENTS, party, npc), ...errors.notice(batch.events)];
+      // Requests first: what the fast tier does itself does not wake the planner.
+      const handled = new Set<number>();
+      const notes: string[] = [];
+      if (options.triage) {
+        for (const e of batch.events) {
+          const request = requestOf(e, options.self?.(), party);
+          if (!request) continue;
+          const t = await options.triage(request);
+          if (t.handled) {
+            handled.add(e.seq);
+            options.onHandled?.(t.note);
+          } else if (t.note !== `${request.sender} said "${request.text}"`) {
+            notes.push(`(${t.note})`);
+          }
+        }
+      }
+      const kept = handled.size ? batch.events.filter((e) => !handled.has(e.seq)) : batch.events;
+      const lines = [...describe(kept, options.self?.(), PLANNER_EVENTS, party, npc), ...notes, ...errors.notice(batch.events)];
       const heard = overheard(batch.events, options.self?.(), party, npc);
       if (heard.length) options.onOverheard?.(heard);
       if (lines.length && !pending.length) flushAt = Date.now() + batchMs;
