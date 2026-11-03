@@ -115,8 +115,8 @@ fn grouped_the_fast_tier_is_offered_follow_and_stay() {
     };
     assert_eq!(
         offered(&script),
-        "follow_companion: In a party: follow Pallytest, staying close and fighting beside them. / \
-         stay_here: Wait at this spot: fight what attacks you, but don't wander."
+        // stay_here is only run on request, never offered.
+        "follow_companion: In a party: follow Pallytest, staying close and fighting beside them."
     );
     // Leading the party itself, it follows the first other member; a companion named wins.
     script

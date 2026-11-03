@@ -10,6 +10,8 @@ pally = { guid = "0xP", name = "Pallytest", kind = "player", distance = 3, quest
 offers = 2
 AgentNearby = function() return { remy, pally } end
 AgentInteract = function(g) calls[#calls + 1] = "interact " .. g end
+GetNumPartyMembers = function() return 1 end
+SendChatMessage = function(text, channel) calls[#calls + 1] = channel .. ": " .. text end
 UnitAffectingCombat = function() return false end
 GossipFrame = { IsShown = function() return false end }
 CloseGossip = function() calls[#calls + 1] = "close" end
@@ -55,8 +57,13 @@ fn it_takes_every_quest_a_giver_offers_then_stops() {
         calls(&script),
         "interact 0xR | select 1 | accept | interact 0xR | select 1 | accept"
     );
-    // Nothing more on offer: done.
+    // Done: one line to the party.
     script.tick(0.6);
+    assert!(
+        calls(&script).ends_with("PARTY: Picked up: Quest 1, Quest 2."),
+        "{}",
+        calls(&script)
+    );
     assert!(!script.eval::<bool>("return Quests.busy()").unwrap());
     let log: String = script
         .eval("return table.concat(Quests.log, '; ')")
@@ -93,4 +100,37 @@ fn a_shared_quest_is_accepted_and_the_companions_quests_are_watched() {
         .eval("local o = {} for _, i in ipairs(Agent.available()) do o[#o + 1] = i.name end return table.concat(o, ',')")
         .unwrap();
     assert!(offered.contains("pick_up_quests"), "{offered}");
+}
+
+#[test]
+fn a_visit_hands_in_then_takes_what_is_on_offer() {
+    let mut script = quests();
+    // Remy takes a finished quest back and offers one more.
+    script
+        .run(
+            "remy.quest = 'reward' \
+             GetGossipActiveQuests = function() return 'Old', 5, false, true end \
+             SelectGossipActiveQuest = function(i) calls[#calls + 1] = 'turn in ' .. i end \
+             IsQuestCompletable = function() return true end \
+             CompleteQuest = function() calls[#calls + 1] = 'complete' end \
+             GetNumQuestChoices = function() return 0 end \
+             GetQuestReward = function(i) calls[#calls + 1] = 'reward ' .. i remy.quest = 'available' offers = 1 end",
+        )
+        .unwrap();
+    assert!(script.eval::<bool>("return Quests.hand_in()").unwrap());
+    script.tick(0.6);
+    script.fire_event("GOSSIP_SHOW", vec![]);
+    script.fire_event("QUEST_PROGRESS", vec![]);
+    script.fire_event("QUEST_COMPLETE", vec![]);
+    // Nothing left to hand in, but Remy now has an offer: same visit, take it.
+    script.tick(0.6);
+    script.tick(0.6);
+    script.fire_event("GOSSIP_SHOW", vec![]);
+    script.fire_event("QUEST_DETAIL", vec![]);
+    script.tick(0.6);
+    assert!(!script.eval::<bool>("return Quests.busy()").unwrap());
+    assert_eq!(
+        calls(&script),
+        "interact 0xR | turn in 1 | complete | reward 1 | interact 0xR | select 1 | accept | PARTY: Handed in: Quest 1. Picked up: Quest 2."
+    );
 }

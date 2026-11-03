@@ -207,7 +207,8 @@ export class Policy {
       this.options.onNotify(ok ? "Your steps are all done." : `Your steps stopped: ${String(why)}. Fix that step or set a new plan.`);
       return;
     }
-    if (ok) {
+    // Replaced by another activity (a fight, a request) is not a failure.
+    if (ok || String(why ?? "").startsWith("replaced")) {
       this.#failures.delete(name);
       return;
     }

@@ -280,9 +280,12 @@ if Agent and Agent.intent then
     run = function() M.follow(M.companion_now()) end,
     done = function() return M.mode ~= "follow" end,
   })
+  -- Run when someone asks (the planner, or the party through triage), never offered to the fast
+  -- tier: at a fight's start "fight what attacks you" read like a combat choice and stopped it
+  -- following.
   Agent.intent("stay_here", {
-    when = "Wait at this spot: fight what attacks you, but don't wander.",
-    available = function() return (GetNumPartyMembers() or 0) > 0 end,
+    when = "Wait at this spot because you were asked to: fight what attacks you, but don't wander.",
+    available = function() return false end,
     run = function() M.stay() end,
     done = function() return M.mode ~= "stay" end,
   })

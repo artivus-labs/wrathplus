@@ -15,11 +15,14 @@
 -- The fast tier is offered both as intents (pick_up_quests, hand_in_quests) whenever such a quest
 -- giver is near. Keeping in step: when the companion (Move.companion_now) picks up a quest or
 -- hands one in, AGENT_PARTY_QUEST (name, "accepted" | "completed", quest id) wakes the fast tier;
--- a quest a party member shares is accepted (`accept_shared`).
+-- a quest a party member shares is accepted (`accept_shared`). In a party, a visit ends with a
+-- line in party chat of what it handed in and picked up (`announce`).
 
-local Q = { reach = 30, accept_shared = true, state = nil, log = {} }
+local Q = { reach = 30, accept_shared = true, announce = true, state = nil, log = {} }
 
 local job, npc, since, asked
+-- This visit's quests, for the line in party chat when it ends.
+local visit = { accepted = {}, handed = {} }
 
 function Q.where(id)
   local pois = AgentQuestPOI and AgentQuestPOI(id)
@@ -49,8 +52,22 @@ local function giver(kind)
   return best
 end
 
+-- In a party, say what the visit did, so the others need not ask: "Handed in: X. Picked up: Y."
+local function announce()
+  local parts = {}
+  if #visit.handed > 0 then parts[#parts + 1] = "Handed in: " .. table.concat(visit.handed, ", ") .. "." end
+  if #visit.accepted > 0 then parts[#parts + 1] = "Picked up: " .. table.concat(visit.accepted, ", ") .. "." end
+  if Q.announce and #parts > 0 and (GetNumPartyMembers() or 0) > 0 then
+    SendChatMessage(table.concat(parts, " "), "PARTY")
+  end
+  visit = { accepted = {}, handed = {} }
+end
+
 local function stop(why)
-  if job then did(why) end
+  if job then
+    did(why)
+    announce()
+  end
   job, npc, Q.state, asked = nil, nil, nil, nil
   if GossipFrame and GossipFrame:IsShown() and CloseGossip then CloseGossip() end
 end
@@ -125,6 +142,7 @@ frame:SetScript("OnEvent", function(_, event)
     local title = GetTitleText()
     AcceptQuest()
     did("accepted " .. tostring(title))
+    visit.accepted[#visit.accepted + 1] = tostring(title)
     asked = nil -- ask the giver again for the next one
   elseif event == "QUEST_PROGRESS" then
     if IsQuestCompletable() then CompleteQuest() end
@@ -132,6 +150,7 @@ frame:SetScript("OnEvent", function(_, event)
     local title = GetTitleText()
     GetQuestReward(reward())
     did("handed in " .. tostring(title))
+    visit.handed[#visit.handed + 1] = tostring(title)
     asked = nil
   end
 end)
@@ -183,6 +202,14 @@ frame:SetScript("OnUpdate", function(_, dt)
   end
   current = current or giver(job)
   if not current then
+    -- One visit does both, as a player would: hand in, then take what is on offer (or the other
+    -- way round) before leaving.
+    local other = job == "available" and "reward" or "available"
+    if giver(other) then
+      did(job == "available" and "picked up everything on offer" or "handed in everything finished")
+      job, npc, asked = other, nil, nil
+      return
+    end
     return stop(job == "available" and "picked up everything on offer" or "handed in everything finished")
   end
   if now - since > 90 then return stop("gave up on " .. tostring(current.name) .. " after 90 s") end
