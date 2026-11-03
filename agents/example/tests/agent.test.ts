@@ -1,7 +1,7 @@
 import { describe as group, expect, test } from "bun:test";
 import { Inbox, summarize, TOOLS } from "../src/brain.ts";
 import { configFromEnv } from "../src/index.ts";
-import { describe, PLANNER_EVENTS, watch, type GameEvent } from "../src/watch.ts";
+import { describe, PLANNER_EVENTS, RepeatedErrors, watch, type GameEvent } from "../src/watch.ts";
 
 const event = (seq: number, name: string, args: unknown[] = []): GameEvent => ({ seq, time: seq, event: name, args });
 
@@ -37,6 +37,18 @@ group("events a player would notice", () => {
       event(3, "CHAT_MSG_PARTY", ["pull the next one", "Shannon"]),
     ], "Agenttwo", PLANNER_EVENTS);
     expect(lines).toEqual(["Shannon says: agenttwo, follow me", "[Party] Shannon: pull the next one"]);
+  });
+
+  test("a game error that keeps coming back reaches the planner once, with its count", () => {
+    const errors = new RepeatedErrors(3, 15_000, 60_000);
+    const far = (seq: number) => event(seq, "UI_ERROR_MESSAGE", ["You are too far away!"]);
+    expect(errors.notice([far(1), far(2)], 0)).toEqual([]);
+    expect(errors.notice([far(3)], 5_000)).toEqual([
+      'Game error, 3 times in 15s: "You are too far away!". Your Lua keeps doing something the game refuses; fix it.',
+    ]);
+    expect(errors.notice([far(4), far(5)], 6_000)).toEqual([]);
+    expect(errors.notice([far(6), far(7), far(8)], 70_000)).toHaveLength(1);
+    expect(errors.notice([event(9, "UI_ERROR_MESSAGE", ["Not enough rage"])], 70_000)).toEqual([]);
   });
 
   test("the watcher batches a burst into one message", async () => {

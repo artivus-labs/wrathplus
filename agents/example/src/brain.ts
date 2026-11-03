@@ -173,9 +173,20 @@ export function planServer(policy: Policy) {
               }),
             )
             .max(254),
+          steps: z
+            .array(
+              z.object({
+                name: z.string().describe("What this step does, in a few words."),
+                lua: z.string().describe("Lua that starts it."),
+                until: z.string().optional().describe("Lua returning true once it has finished (and false as a second value if it failed). Without it the step is done as soon as its Lua returns."),
+                timeout: z.number().positive().optional().describe("Seconds before the step counts as failed."),
+              }),
+            )
+            .optional()
+            .describe("A sequence the client runs in order, by itself, as one activity (follow_steps): each step starts when the one before is done. You are woken when all are done or one fails or times out. Use it for anything with several legs (a route in waypoints, walk then talk then hand in) instead of doing one leg per turn."),
         },
-        async ({ plan, intents }) => ({
-          content: [{ type: "text", text: await policy.update(plan, intents) }],
+        async ({ plan, intents, steps }) => ({
+          content: [{ type: "text", text: await policy.update(plan, intents, steps ?? []) }],
         }),
       ),
       tool(

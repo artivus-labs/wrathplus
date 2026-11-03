@@ -52,6 +52,35 @@ export const PLANNER_EVENTS = new Set([
   "PLAYER_CAMPING",
 ]);
 
+/** Game errors that keep coming back (the same red line `times` times within `windowMs`): the
+ *  planner hears each once per `quietMs`, with the count. One error is noise; a stream of
+ *  "You are too far away!" means its Lua is doing something wrong. */
+export class RepeatedErrors {
+  #seen = new Map<string, number[]>();
+  #told = new Map<string, number>();
+  constructor(
+    readonly times = 3,
+    readonly windowMs = 15_000,
+    readonly quietMs = 60_000,
+  ) {}
+
+  notice(events: GameEvent[], now = Date.now()): string[] {
+    const out: string[] = [];
+    for (const e of events) {
+      if (e.event !== "UI_ERROR_MESSAGE" || typeof e.args[0] !== "string") continue;
+      const text = e.args[0];
+      const recent = (this.#seen.get(text) ?? []).filter((t) => now - t < this.windowMs);
+      recent.push(now);
+      this.#seen.set(text, recent);
+      if (recent.length >= this.times && now - (this.#told.get(text) ?? -Infinity) >= this.quietMs) {
+        this.#told.set(text, now);
+        out.push(`Game error, ${recent.length} times in ${Math.round(this.windowMs / 1000)}s: "${text}". Your Lua keeps doing something the game refuses; fix it.`);
+      }
+    }
+    return out;
+  }
+}
+
 /** Turn a batch of raw events into lines, skipping the ones a player wouldn't notice. */
 export function describe(events: GameEvent[], self?: string, kinds?: Set<string>): string[] {
   const lines: string[] = [];
@@ -89,6 +118,7 @@ export async function watch(options: WatchOptions): Promise<void> {
   let since = 0;
   let pending: string[] = [];
   let flushAt = 0;
+  const errors = new RepeatedErrors();
   // Start from now: old events are not news.
   try {
     const head = await read(url, token, 1_000_000_000, 0, signal);
@@ -102,7 +132,7 @@ export async function watch(options: WatchOptions): Promise<void> {
       const batch = await read(url, token, since, wait, signal);
       since = batch.next;
       if (batch.events.length) options.onEvents?.(batch.events);
-      const lines = describe(batch.events, options.self?.(), PLANNER_EVENTS);
+      const lines = [...describe(batch.events, options.self?.(), PLANNER_EVENTS), ...errors.notice(batch.events)];
       if (lines.length && !pending.length) flushAt = Date.now() + batchMs;
       pending.push(...lines);
       if (batch.missed) pending.push(`(${batch.missed} game events were missed.)`);

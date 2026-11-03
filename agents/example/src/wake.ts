@@ -17,6 +17,11 @@ local zone, sub = GetZoneText() or "", GetSubZoneText() or ""
 out[#out + 1] = string.format("in %s%s%s", zone, sub ~= "" and (" / " .. sub) or "",
   p and string.format(" at (%.0f, %.0f, %.0f)", p.x, p.y, p.z) or "")
 if Revive and Revive.state then out[#out + 1] = "revive: " .. Revive.state end
+if Combat and Combat.state then out[#out + 1] = "combat: " .. Combat.state end
+if Agent and Agent.steps and Agent.steps.at > 0 then
+  local s = Agent.steps.list[Agent.steps.at]
+  out[#out + 1] = string.format("steps: %d of %d, %s", Agent.steps.at, #Agent.steps.list, s and s.name or "?")
+end
 if Upkeep and #Upkeep.log > 0 then out[#out + 1] = "upkeep lately: " .. table.concat(Upkeep.log, "; ") end
 local asks = {}
 for i = 1, 4 do

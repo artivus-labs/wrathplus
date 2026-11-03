@@ -19,6 +19,14 @@ export interface Intent {
   timeout?: number;
 }
 
+/** One of the planner's steps: run in order by the client (`Agent.set_steps`). */
+export interface Step {
+  name: string;
+  lua: string;
+  until?: string;
+  timeout?: number;
+}
+
 /** An intent as `Agent.available()` lists it. */
 export interface Registered {
   name: string;
@@ -54,6 +62,7 @@ const WAKE: Record<string, { reason: string; interrupt: boolean }> = {
   AGENT_INTENT_DONE: { reason: "activity ended", interrupt: true },
   AGENT_DECISION: { reason: "decision opened", interrupt: false },
   AGENT_WALK_DONE: { reason: "walk ended", interrupt: false },
+  AGENT_COMBAT_DONE: { reason: "fight ended", interrupt: false },
   PLAYER_REGEN_DISABLED: { reason: "combat started", interrupt: true },
   PLAYER_REGEN_ENABLED: { reason: "combat ended", interrupt: false },
   PLAYER_DEAD: { reason: "died", interrupt: true },
@@ -104,7 +113,7 @@ export function luaString(text: string): string {
 }
 
 /** The Lua that registers the planner's intents (and removes ones it no longer lists). */
-export function registerLua(intents: Intent[]): string {
+export function registerLua(intents: Intent[], steps: Step[] = []): string {
   // Planner intents are tagged, so a new plan (or a new harness on the same client) replaces them
   // all, while intents the agent's own modules registered stay.
   const lines = ["for name, spec in pairs(Agent.intents) do if spec.plan then Agent.remove(name) end end"];
@@ -115,6 +124,14 @@ export function registerLua(intents: Intent[]): string {
       `Agent.intent(${JSON.stringify(i.name)}, { when = ${luaString(i.when)}, run = assert(loadstring(${luaString(i.lua)}))${done}${timeout}, plan = true })`,
     );
   }
+  // The steps run as one activity, started at once unless something else is running.
+  const list = steps.map((s) => {
+    const done = s.until ? `, done = assert(loadstring(${luaString(s.until)}))` : "";
+    const timeout = s.timeout ? `, timeout = ${Number(s.timeout)}` : "";
+    return `{ name = ${luaString(s.name)}, run = assert(loadstring(${luaString(s.lua)}))${done}${timeout} }`;
+  });
+  lines.push(`Agent.set_steps({ ${list.join(", ")} })`);
+  if (steps.length) lines.push(`if not Agent.current then Agent.run("follow_steps") end`);
   return lines.join("\n") + "\nreturn true";
 }
 
@@ -146,8 +163,8 @@ export class Policy {
   constructor(readonly options: PolicyOptions) {}
 
   /** The planner's plan and intents: registered in the client's Lua as activities. */
-  async update(plan: string, intents: Intent[]): Promise<string> {
-    const result = await this.#lua(registerLua(intents));
+  async update(plan: string, intents: Intent[], steps: Step[] = []): Promise<string> {
+    const result = await this.#lua(registerLua(intents, steps));
     if (!result.ok) return `Could not register the intents: ${result.error}`;
     this.plan = plan;
     this.intents = intents;
@@ -155,7 +172,7 @@ export class Policy {
     this.#doneStreak = 0;
     this.#told.clear();
     this.wake("new plan", true);
-    return `Plan set with ${intents.length} intents (+ wait).`;
+    return `Plan set with ${intents.length} intents (+ wait)${steps.length ? ` and ${steps.length} steps, started` : ""}.`;
   }
 
   /** Something happened that may need a choice. */
@@ -183,6 +200,12 @@ export class Policy {
   }
 
   #activityEnded(name: string, ok: boolean, why: unknown): void {
+    // The planner's steps ending is its business: all done, or one that failed (not a fight
+    // interrupting them, which Jev resumes).
+    if (name === "follow_steps" && !String(why ?? "").startsWith("replaced")) {
+      this.options.onNotify(ok ? "Your steps are all done." : `Your steps stopped: ${String(why)}. Fix that step or set a new plan.`);
+      return;
+    }
     if (ok) {
       this.#failures.delete(name);
       return;

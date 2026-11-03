@@ -32,6 +32,8 @@ pub(crate) struct Walk {
     retried: bool,
     /// Interact with this object on arrival (`AgentInteract` from afar).
     then_interact: Option<u64>,
+    /// A walk that failed in Lua (no route), to announce from the walker.
+    failed: bool,
 }
 
 pub(crate) struct Mesh {
@@ -106,6 +108,9 @@ pub(crate) fn walk(link: Res<NavLink>, mut auto: AutoMove) {
     let Ok(mut walk) = link.walk.lock() else {
         return;
     };
+    if std::mem::take(&mut walk.failed) {
+        announce(&link, "failed");
+    }
     if walk.stop {
         walk.stop = false;
         walk.queue.clear();
@@ -181,18 +186,20 @@ fn route_to(handles: &Handles, me: world::Me, to: [f32; 3]) -> Result<Route, Str
     mesh.mesh.as_mut().expect("opened above").route(me.pos, to)
 }
 
-/// The target point from Lua arguments: `x, y, z` or a `"0x…"` guid from `AgentNearby`.
+/// The target point from Lua arguments: `x, y[, z]` (no height: the player's, and the route search
+/// finds the ground) or a `"0x…"` guid from `AgentNearby`.
 fn target(args: &MultiValue, snapshot: &world::Snapshot) -> Result<[f32; 3], String> {
     let num = |i: usize| match args.get(i) {
         Some(Value::Number(n)) => Some(*n as f32),
         Some(Value::Integer(n)) => Some(*n as f32),
         _ => None,
     };
-    if let (Some(x), Some(y), Some(z)) = (num(0), num(1), num(2)) {
+    if let (Some(x), Some(y)) = (num(0), num(1)) {
+        let z = num(2).or(snapshot.me.map(|m| m.pos[2])).unwrap_or(0.0);
         return Ok([x, y, z]);
     }
     let Some(Value::String(text)) = args.front() else {
-        return Err("expected x, y, z or a guid".into());
+        return Err("expected x, y[, z] or a guid".into());
     };
     let text = text.to_string_lossy();
     let guid = world::parse_guid(&text).ok_or_else(|| format!("not a guid: {text}"))?;
@@ -278,7 +285,18 @@ pub(crate) fn install(lua: &Lua, nav: &Handles, world: &world::Handles) -> mlua:
         lua.create_function(move |lua, args: MultiValue| {
             let route = match plan(args, &n, &w) {
                 Ok(route) => route,
-                Err(e) => return Ok((None, Some(e))),
+                Err(e) => {
+                    // Announced like any walk's end, so whoever waits on it is woken.
+                    if let Ok(mut walk) = n.walk.lock() {
+                        walk.queue.clear();
+                        walk.corner = None;
+                        walk.then_interact = None;
+                        walk.status = "failed";
+                        walk.note = Some(e.clone());
+                        walk.failed = true;
+                    }
+                    return Ok((None, Some(e)));
+                }
             };
             start(lua, &n, &route, None);
             let summary = route_table(lua, &route)?;

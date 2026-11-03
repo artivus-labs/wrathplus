@@ -222,9 +222,12 @@ impl NavMesh {
                 &mut polys,
             )
         };
-        if status & DT_FAILURE != 0 {
-            // The server's second try: a taller box, for points above or below the mesh.
-            let tall = [3.0f32, 50.0, 3.0];
+        // The server's second try, a taller box for points above or below the mesh; then a much
+        // taller one, for a height that is simply wrong (an agent's guess).
+        for tall in [[3.0f32, 50.0, 3.0], [3.0f32, 400.0, 3.0]] {
+            if status & DT_FAILURE == 0 && count > 0 {
+                break;
+            }
             status = unsafe {
                 nav_find_straight_path(
                     self.shim.as_ptr(),
