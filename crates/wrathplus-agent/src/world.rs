@@ -4,7 +4,8 @@
 //! server sent this client, and reactions, quest markers and names are the client's own reading.
 //!
 //! Lua (installed by `env`): `AgentPosition()`, `AgentNearby([max_yards])`,
-//! `AgentFindNpc(service [, max_yards])`, `AgentCorpse()`, `AgentTarget(guid)`, `AgentInteract(guid)`. GUIDs travel as `"0x…"` hex strings. `AgentInteract` turns on click-to-move
+//! `AgentFindNpc(service [, max_yards])`, `AgentCorpse()`, `AgentTarget(guid)`, `AgentFace(guid)`,
+//! `AgentInteract(guid)`. GUIDs travel as `"0x…"` hex strings. `AgentInteract` turns on click-to-move
 //! (`autoInteract`), so the character walks to the object first, as a player's right-click would.
 
 use bevy::prelude::*;
@@ -85,6 +86,8 @@ pub(crate) struct Corpse {
 pub(crate) enum Order {
     Target(u64),
     Interact(u64),
+    /// Turn to face this point (world coordinates), without walking.
+    Face([f32; 3]),
 }
 
 /// What the Lua side holds: the latest snapshot and the way to send orders.
@@ -255,10 +258,15 @@ pub(crate) fn apply_orders(
     index: Option<Res<GuidIndex>>,
     mut select: SelectCommit,
     mut interact: MessageWriter<Interact>,
+    mut auto: wrathplus_app_world::player::AutoMove,
 ) {
     for order in link.orders.try_iter() {
         match order {
             Order::Target(guid) => select.select_unit(guid),
+            Order::Face(p) => {
+                // World to Bevy (x right, y up, z back), as `wrathplus_assets::coords::wow_to_bevy`.
+                auto.face(Vec3::new(-p[1], p[2], -p[0]));
+            }
             Order::Interact(guid) => {
                 if let Some(entity) = index.as_ref().and_then(|i| i.0.get(&guid).copied()) {
                     interact.write(Interact(entity));
@@ -433,6 +441,21 @@ pub(crate) fn install(lua: &Lua, handles: &Handles) -> mlua::Result<()> {
                 .min_by(|a, b| a.distance.total_cmp(&b.distance))
                 .map(|o| seen_table(lua, o))
                 .transpose()
+        })?,
+    )?;
+    let snap = handles.snapshot.clone();
+    let orders = handles.orders.clone();
+    g.set(
+        "AgentFace",
+        lua.create_function(move |_, guid: String| {
+            let Some(g) = parse_guid(&guid) else {
+                return Ok(false);
+            };
+            let pos = snap
+                .lock()
+                .ok()
+                .and_then(|s| s.objects.iter().find(|o| o.guid == g).map(|o| o.pos));
+            Ok(pos.is_some_and(|p| orders.send(Order::Face(p)).is_ok()))
         })?,
     )?;
     for (name, make) in [

@@ -3,10 +3,11 @@
 //!
 //! The UI VM is sandboxed (no `require`, `io`, `os`), as addons expect. This adds back exactly one
 //! door: `require(name)` reads `<scripts>/<name with dots as slashes>.lua`, or a built-in module
-//! (`wp.engine`, `wp.values`, `wp.agent`, `wp.revive`, `wp.upkeep`, `wp.combat`, `wp.move`, `wp.quest`), and nothing else. `wp.agent` is preloaded as
+//! (`wp.engine`, `wp.values`, `wp.agent`, `wp.revive`, `wp.upkeep`, `wp.rotation`, `wp.combat`, `wp.move`, `wp.quest`), and nothing else. `wp.agent` is preloaded as
 //! the global `Agent`: the registry of intents and decisions the fast tier chooses among; `wp.revive`
 //! as `Revive`, which gets a dead character back up; `wp.upkeep` as `Upkeep`, which wears upgrades,
-//! sells junk and trains; `wp.combat` as `Combat`, melee that chases its target; `wp.move` as
+//! sells junk and trains; `wp.rotation` as `Rotation`, a
+//! fight's priority list; `wp.combat` as `Combat`, fighting a target kept in range; `wp.move` as
 //! `Move`, going to a unit, following one and holding a spot; `wp.quest` as `Quests`, quest givers'
 //! dialogs and the party's quests. `AgentReload(name)` forgets a module and loads it
 //! again; `AgentModules()` lists the agent's files. If `autoexec.lua` exists, every new in-game
@@ -23,6 +24,7 @@ const BUILT_IN: &[(&str, &str)] = &[
     ("wp.agent", include_str!("../lua/wp/agent.lua")),
     ("wp.revive", include_str!("../lua/wp/revive.lua")),
     ("wp.upkeep", include_str!("../lua/wp/upkeep.lua")),
+    ("wp.rotation", include_str!("../lua/wp/rotation.lua")),
     ("wp.combat", include_str!("../lua/wp/combat.lua")),
     ("wp.move", include_str!("../lua/wp/move.lua")),
     ("wp.quest", include_str!("../lua/wp/quest.lua")),
@@ -118,7 +120,10 @@ pub(crate) fn install(script: &UiScript, dir: PathBuf) -> mlua::Result<bool> {
     // Chores: wear upgrades, sell junk and repair at merchants, train at class trainers.
     let upkeep = load_module(lua, &dir, "wp.upkeep")?;
     lua.globals().set("Upkeep", upkeep)?;
-    // Melee that keeps up with its target (`Combat.engage(guid)`).
+    // What to cast in a fight, as a priority list (`Rotation.list`), and fighting a target kept in
+    // range (`Combat.engage(guid)`), which runs it.
+    let rotation = load_module(lua, &dir, "wp.rotation")?;
+    lua.globals().set("Rotation", rotation)?;
     let combat = load_module(lua, &dir, "wp.combat")?;
     lua.globals().set("Combat", combat)?;
     // Going to a unit, following one (with its fights), holding a spot.
@@ -179,6 +184,10 @@ mod move_tests;
 #[cfg(test)]
 #[path = "quest_tests.rs"]
 mod quest_tests;
+
+#[cfg(test)]
+#[path = "rotation_tests.rs"]
+mod rotation_tests;
 
 #[cfg(test)]
 mod tests {

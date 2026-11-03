@@ -39,6 +39,7 @@ const NOTABLE: Record<string, (args: unknown[]) => string | null> = {
     a[0] === "stuck" || a[0] === "failed"
       ? `Your walk ended ${a[0]}: AgentWalk().note says why; route around it or pick another way.`
       : null,
+  AGENT_COMBAT_REVIEW: (a) => `${a[0]} Worth a look: is the rotation the right one, in the right order? Rework Rotation.list (and keep it in a module) if not.`,
   PLAYER_CAMPING: () => "The client is logging out (20 s): CancelLogout() to stay in the world.",
 };
 
@@ -62,6 +63,7 @@ export const PLANNER_EVENTS = new Set([
   "DUEL_REQUESTED",
   "AGENT_WALK_DONE",
   "PLAYER_CAMPING",
+  "AGENT_COMBAT_REVIEW",
 ]);
 
 /** Game errors that keep coming back (the same red line `times` times within `windowMs`): the
