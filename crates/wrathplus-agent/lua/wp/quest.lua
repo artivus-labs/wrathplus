@@ -8,6 +8,9 @@
 --                      "?"): complete it and take the reward that is an upgrade (Upkeep), else
 --                      the one that sells for most.
 --   Quests.state       what it is doing; Quests.busy() for an intent's `until`.
+--   Quests.where(id)   where a logged quest's objectives are and where it is handed in, from the
+--                      quest's map areas: { objectives = { { index, x, y }, ... }, hand_in = { x, y } }
+--                      (nil until the client has them). Move.to(x, y) gets there.
 --
 -- The fast tier is offered both as intents (pick_up_quests, hand_in_quests) whenever such a quest
 -- giver is near. Keeping in step: when the companion (Move.companion_now) picks up a quest or
@@ -17,6 +20,20 @@
 local Q = { reach = 30, accept_shared = true, state = nil, log = {} }
 
 local job, npc, since, asked
+
+function Q.where(id)
+  local pois = AgentQuestPOI and AgentQuestPOI(id)
+  if not pois then return nil end
+  local out = { objectives = {} }
+  for _, p in ipairs(pois) do
+    if p.objective == -1 then
+      out.hand_in = { x = p.x, y = p.y }
+    else
+      out.objectives[#out.objectives + 1] = { index = p.objective, x = p.x, y = p.y }
+    end
+  end
+  return out
+end
 
 local function did(text)
   Q.log[#Q.log + 1] = text

@@ -37,7 +37,7 @@ local w = AgentWalk and AgentWalk()
 if w and w.status ~= "idle" then out[#out + 1] = "walk " .. w.status end
 local quests = {}
 for i = 1, (GetNumQuestLogEntries() or 0) do
-  local title, _, _, _, header, _, complete = GetQuestLogTitle(i)
+  local title, _, _, _, header, _, complete, _, id = GetQuestLogTitle(i)
   if title and not header then
     local goals = {}
     for j = 1, (GetNumQuestLeaderBoards(i) or 0) do
@@ -45,6 +45,10 @@ for i = 1, (GetNumQuestLogEntries() or 0) do
       if text then goals[#goals + 1] = text end
     end
     local state = complete == 1 and "complete" or (complete == -1 and "failed" or table.concat(goals, ", "))
+    local where = complete == 1 and Quests and Quests.where and id and Quests.where(id)
+    if where and where.hand_in then
+      state = state .. string.format(", hand in near (%d, %d)", where.hand_in.x, where.hand_in.y)
+    end
     quests[#quests + 1] = title .. (state ~= "" and (" (" .. state .. ")") or "")
   end
 end

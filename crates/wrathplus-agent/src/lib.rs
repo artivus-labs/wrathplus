@@ -12,7 +12,8 @@
 //! | `GET /files`, `GET|PUT|DELETE /files/<module>` | the agent's own Lua modules (see `env`) |
 //!
 //! In Lua, besides the stock API: `AgentNearby([yards])`, `AgentFindNpc(service [, yards])`,
-//! `AgentPosition()`, `AgentTarget(guid)`, `AgentInteract(guid)` (`world`), `AgentPath`, `AgentMoveTo`, `AgentStop`, `AgentWalk` (`nav`,
+//! `AgentPosition()`, `AgentTarget(guid)`, `AgentInteract(guid)` (`world`), `AgentQuestPOI(quest)`
+//! (`quest_poi`), `AgentPath`, `AgentMoveTo`, `AgentStop`, `AgentWalk` (`nav`,
 //! over the realm's mmaps from `WOW_NAV_MMAPS`), and the module functions (`env`).
 //!
 //! With the port open, the UI's movement verbs run from any Lua (stock gates them on a key
@@ -29,6 +30,7 @@ mod env;
 mod events;
 mod lua;
 mod nav;
+mod quest_poi;
 mod server;
 mod world;
 
@@ -96,9 +98,11 @@ impl Plugin for AgentPlugin {
         let (world, world_link) = world::link();
         let started = Instant::now();
         let (nav, nav_link) = nav::link(events.clone(), started, world.orders.clone());
+        let (pois, poi_link) = quest_poi::link();
         app.insert_resource(Link {
             world,
             nav,
+            pois,
             queue,
             events,
             started,
@@ -108,8 +112,17 @@ impl Plugin for AgentPlugin {
         })
         .insert_resource(world_link)
         .insert_resource(nav_link)
+        .insert_resource(poi_link)
         .add_systems(Update, (pump_events, serve_jobs).chain())
-        .add_systems(Update, (world::snapshot, world::apply_orders, nav::walk));
+        .add_systems(
+            Update,
+            (
+                world::snapshot,
+                world::apply_orders,
+                nav::walk,
+                quest_poi::mirror,
+            ),
+        );
     }
 }
 
@@ -128,6 +141,8 @@ struct Link {
     world: world::Handles,
     /// Routes and the path walker (`nav`).
     nav: nav::Handles,
+    /// The quests' map areas (`quest_poi`).
+    pois: quest_poi::Handles,
 }
 
 /// Keep the VM's agent hooks on (a relog or `ReloadUI()` builds a fresh VM) and move this
@@ -150,6 +165,9 @@ fn pump_events(
         }
         if let Err(e) = world::install(script.lua(), &link.world) {
             error!("agent port: world functions: {e}");
+        }
+        if let Err(e) = quest_poi::install(script.lua(), &link.pois) {
+            error!("agent port: quest POIs: {e}");
         }
         if let Err(e) = nav::install(script.lua(), &link.nav, &link.world) {
             error!("agent port: navigation functions: {e}");
