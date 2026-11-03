@@ -116,7 +116,8 @@ fresh instance's backup/restore, not migration or recovery of the old realm.
 ## Our own modules
 
 `modules/` holds AzerothCore modules written for WrathPlus realms, kept here until they get
-repositories of their own. Add one as a local module folder on the Manager's Server modules page.
+repositories of their own. They appear among the standard modules on the Manager's Server modules
+page, and Add registers the folder from this checkout.
 
 - `mod-quest-minimap-points` fills the quest points AzerothCore's world database lacks, so a
   3.3.5a client shows the quest marker and its arrow on the minimap again.

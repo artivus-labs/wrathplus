@@ -22,11 +22,16 @@ impl Manager {
             return iced::Task::none();
         }
         let standard_add = matches!(input, Input::AddStandard(_));
-        // A standard module is the same import as a typed source, from its known repository.
+        // A standard module is the same import as a typed source: its known repository, or its
+        // folder in this checkout.
         let input = match input {
-            Input::AddStandard(slot) => match STANDARD.get(slot) {
-                Some(module) => {
-                    self.module_state.source = module.repository.into();
+            Input::AddStandard(slot) => match STANDARD.get(slot).map(|m| &m.origin) {
+                Some(standard::Origin::Github(repository)) => {
+                    self.module_state.source = (*repository).into();
+                    Input::Register
+                }
+                Some(standard::Origin::Bundled(folder)) => {
+                    self.module_state.source = self.config.repo.join(folder).display().to_string();
                     Input::Register
                 }
                 None => return iced::Task::none(),

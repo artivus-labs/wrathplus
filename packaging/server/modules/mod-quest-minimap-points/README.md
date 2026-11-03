@@ -33,13 +33,13 @@ No client change is involved: any 3.3.5a client gains the marker.
 
 ## Install
 
-Build it into the worldserver like any module. The update applies on the next start
-(`Updates.EnableDatabases` including the world database, the default), then restart so the
-quest templates are reloaded. Clients pick the points up when they next query a quest; a stock
+Build it into the worldserver like any module. The update applies when the worldserver next
+starts, before it loads quests (`Updates.EnableDatabases` including the world database, the
+default). Clients pick the points up when they next query a quest; a stock
 client keeps quest replies in `Cache/WDB`, so clear `questcache.wdb` once.
 
-In the WrathPlus Manager: on **Server modules**, under Custom modules, enter this folder's full
-path and press **Add source**, then rebuild the image and restart the server.
+In the WrathPlus Manager it is a standard module: on **Server modules**, press **Add** on
+"Quest minimap markers", then rebuild the image and restart the server.
 
 ## Removing it
 

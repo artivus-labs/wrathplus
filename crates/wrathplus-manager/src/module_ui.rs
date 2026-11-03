@@ -17,7 +17,8 @@ pub(crate) enum Input {
     Source(String),
     Refresh,
     Register,
-    /// Import one of the standard modules (index into `STANDARD`) from its GitHub repository.
+    /// Add one of the standard modules (index into `STANDARD`) from its GitHub repository or
+    /// its folder in this checkout.
     AddStandard(usize),
     OpenRepository(&'static str),
     Toggle(usize, bool),
@@ -74,14 +75,24 @@ impl Manager {
                     .on_press_maybe(editable.then_some(Message::Modules(Input::AddStandard(slot))))
                     .into(),
                 };
+                let (link, unadded): (Element<'_, Message>, _) = match module.origin {
+                    standard::Origin::Github(repository) => (
+                        button(text(format!("github.com/{repository}")).size(12))
+                            .style(link)
+                            .padding(0)
+                            .on_press(Message::Modules(Input::OpenRepository(repository)))
+                            .into(),
+                        "Not added yet · imported from GitHub when you press Add",
+                    ),
+                    standard::Origin::Bundled(_) => (
+                        text("Made for WrathPlus").size(12).into(),
+                        "Not added yet · ships with WrathPlus",
+                    ),
+                };
                 let source = found.map_or_else(
-                    || "Not added yet · imported from GitHub when you press Add".to_owned(),
+                    || unadded.to_owned(),
                     |(_, e)| standard::source_label(&e.source),
                 );
-                let link = button(text(format!("github.com/{}", module.repository)).size(12))
-                    .style(link)
-                    .padding(0)
-                    .on_press(Message::Modules(Input::OpenRepository(module.repository)));
                 let mut body = column![row![
                     column![
                         text(module.title).size(18),
