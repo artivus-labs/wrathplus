@@ -114,6 +114,7 @@ export async function runAgent(config: Config, options: RunOptions): Promise<voi
     token: config.token,
     self: () => self,
     party: () => party,
+    npcReplies: process.env.WRATHPLUS_AGENT_NPC_REPLIES !== "0",
     onOverheard: (lines) => {
       heard = [...heard, ...lines].slice(-8);
     },

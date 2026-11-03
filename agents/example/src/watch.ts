@@ -102,21 +102,34 @@ function addressed(e: GameEvent, self?: string, party?: Set<string>): boolean {
   return mentions || (party?.has(sender.toLowerCase()) ?? false);
 }
 
-/** What was said nearby but not to us, to pass on with the next wake-up rather than wake for. */
-export function overheard(events: GameEvent[], self?: string, party?: Set<string>): string[] {
+/** An NPC talking to us by name ("City folk never understand that, Agenttwo."). */
+function npcToUs(e: GameEvent, self?: string): boolean {
+  return (e.event === "CHAT_MSG_MONSTER_SAY" || e.event === "CHAT_MSG_MONSTER_YELL")
+    && self !== undefined && String(e.args[0]).toLowerCase().includes(self.toLowerCase());
+}
+
+/** What was said nearby but not to us, to pass on with the next wake-up rather than wake for.
+ *  With `npcReplies`, an NPC naming us is not overheard: it wakes the planner (describe). */
+export function overheard(events: GameEvent[], self?: string, party?: Set<string>, npcReplies = true): string[] {
   const lines: string[] = [];
   for (const e of events) {
     if (!NEARBY.has(e.event) || (self && e.args[1] === self)) continue;
     if ((e.event === "CHAT_MSG_SAY" || e.event === "CHAT_MSG_YELL") && addressed(e, self, party)) continue;
+    if (npcReplies && npcToUs(e, self)) continue;
     const line = NOTABLE[e.event]?.(e.args);
     if (line) lines.push(line);
   }
   return lines;
 }
 
-export function describe(events: GameEvent[], self?: string, kinds?: Set<string>, party?: Set<string>): string[] {
+export function describe(events: GameEvent[], self?: string, kinds?: Set<string>, party?: Set<string>, npcReplies = true): string[] {
   const lines: string[] = [];
   for (const e of events) {
+    // An NPC that names us may get an answer, for flavour.
+    if (kinds && npcReplies && npcToUs(e, self)) {
+      lines.push(`${e.args[1]} says to you: ${e.args[0]} (an NPC; a reply in /say is welcome, not required)`);
+      continue;
+    }
     // Your own chat comes back too; it isn't news.
     if (self && e.event.startsWith("CHAT_MSG_") && e.args[1] === self) continue;
     if (kinds && !kinds.has(e.event)) continue;
@@ -147,6 +160,8 @@ export interface WatchOptions {
   party?: () => Set<string>;
   /** Speech nearby that is not to us, to hand over with the next wake-up. */
   onOverheard?: (lines: string[]) => void;
+  /** Wake the planner when an NPC addresses the character by name (default true). */
+  npcReplies?: boolean;
   /** Gather lines for this long after the first before sending (ms). */
   batchMs?: number;
   onMessage: (text: string) => void;
@@ -177,8 +192,9 @@ export async function watch(options: WatchOptions): Promise<void> {
       since = batch.next;
       if (batch.events.length) options.onEvents?.(batch.events);
       const party = options.party?.();
-      const lines = [...describe(batch.events, options.self?.(), PLANNER_EVENTS, party), ...errors.notice(batch.events)];
-      const heard = overheard(batch.events, options.self?.(), party);
+      const npc = options.npcReplies ?? true;
+      const lines = [...describe(batch.events, options.self?.(), PLANNER_EVENTS, party, npc), ...errors.notice(batch.events)];
+      const heard = overheard(batch.events, options.self?.(), party, npc);
       if (heard.length) options.onOverheard?.(heard);
       if (lines.length && !pending.length) flushAt = Date.now() + batchMs;
       pending.push(...lines);

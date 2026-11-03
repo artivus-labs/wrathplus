@@ -64,6 +64,19 @@ group("events a player would notice", () => {
     ]);
   });
 
+  test("an NPC naming the character wakes the planner (unless switched off)", () => {
+    const events = [
+      event(1, "CHAT_MSG_MONSTER_SAY", ["Deep night, and the cows still want their milking. City folk never understand that, Agenttwo.", "Ma Stonefield"]),
+      event(2, "CHAT_MSG_MONSTER_SAY", ["Quiet now, love.", "Ma Stonefield"]),
+    ];
+    expect(describe(events, "Agenttwo", PLANNER_EVENTS)).toEqual([
+      "Ma Stonefield says to you: Deep night, and the cows still want their milking. City folk never understand that, Agenttwo. (an NPC; a reply in /say is welcome, not required)",
+    ]);
+    expect(overheard(events, "Agenttwo")).toEqual(["Ma Stonefield says: Quiet now, love."]);
+    expect(describe(events, "Agenttwo", PLANNER_EVENTS, undefined, false)).toEqual([]);
+    expect(overheard(events, "Agenttwo", undefined, false)).toHaveLength(2);
+  });
+
   test("a game error that keeps coming back reaches the planner once, with its count", () => {
     const errors = new RepeatedErrors(3, 15_000, 60_000);
     const far = (seq: number) => event(seq, "UI_ERROR_MESSAGE", ["You are too far away!"]);
