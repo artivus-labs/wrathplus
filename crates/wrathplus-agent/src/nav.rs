@@ -34,6 +34,10 @@ pub(crate) struct Walk {
     then_interact: Option<u64>,
     /// A walk that failed in Lua (no route), to announce from the walker.
     failed: bool,
+    /// The map the route is on, and how often a stuck walk has been routed again from where the
+    /// player stood.
+    map: u32,
+    replans: u8,
 }
 
 pub(crate) struct Mesh {
@@ -55,6 +59,8 @@ pub(crate) struct NavLink {
     started: std::time::Instant,
     /// The world's orders, for the interaction a walk ends in.
     orders: crossbeam_channel::Sender<world::Order>,
+    /// The navmesh, to route a stuck walk again from where the player stands.
+    mesh: Arc<Mutex<Mesh>>,
 }
 
 pub(crate) fn link(
@@ -73,13 +79,14 @@ pub(crate) fn link(
     (
         Handles {
             walk: walk.clone(),
-            mesh,
+            mesh: mesh.clone(),
         },
         NavLink {
             walk,
             events,
             started,
             orders,
+            mesh,
         },
     )
 }
@@ -88,6 +95,13 @@ pub(crate) fn link(
 fn to_bevy(p: [f32; 3]) -> Vec3 {
     Vec3::new(-p[1], p[2], -p[0])
 }
+
+fn to_wow(b: Vec3) -> [f32; 3] {
+    [-b.z, -b.x, b.y]
+}
+
+/// How often a stuck walk is routed again from where the player stands before it gives up.
+const REPLANS: u8 = 2;
 
 /// Put a walk's end on the event stream.
 fn announce(link: &NavLink, status: &str) {
@@ -131,11 +145,29 @@ pub(crate) fn walk(link: Res<NavLink>, mut auto: AutoMove) {
             if !walk.retried {
                 walk.retried = true;
                 walk.queue.push_front(corner);
+            } else if let Some(route) = (walk.replans < REPLANS)
+                .then_some(walk.goal)
+                .flatten()
+                .and_then(|goal| {
+                    let me = world::Me {
+                        pos: to_wow(at),
+                        facing: 0.0,
+                        map: walk.map,
+                    };
+                    route_in(&link.mesh, me, goal).ok()
+                })
+            {
+                // As a player clicks again after bumping a doorframe: a fresh route from here.
+                walk.replans += 1;
+                walk.retried = false;
+                walk.queue = route.points.iter().skip(1).copied().collect();
+                walk.corner = None;
+                return;
             } else {
                 walk.status = "stuck";
                 walk.note = Some(format!(
-                    "click-to-move stopped {short:.0} yd short of the corner at ({:.0}, {:.0}, {:.0}), twice",
-                    corner[0], corner[1], corner[2]
+                    "click-to-move stopped {short:.0} yd short of the corner at ({:.0}, {:.0}, {:.0}), twice, after {} fresh routes",
+                    corner[0], corner[1], corner[2], walk.replans
                 ));
                 walk.queue.clear();
                 walk.corner = None;
@@ -172,8 +204,14 @@ pub(crate) fn walk(link: Res<NavLink>, mut auto: AutoMove) {
 }
 
 fn route_to(handles: &Handles, me: world::Me, to: [f32; 3]) -> Result<Route, String> {
-    let mut mesh = handles
-        .mesh
+    if let Ok(mut walk) = handles.walk.lock() {
+        walk.map = me.map;
+    }
+    route_in(&handles.mesh, me, to)
+}
+
+fn route_in(mesh: &Mutex<Mesh>, me: world::Me, to: [f32; 3]) -> Result<Route, String> {
+    let mut mesh = mesh
         .lock()
         .map_err(|_| "navmesh lock poisoned".to_string())?;
     if mesh.mesh.as_ref().is_none_or(|m| m.map() != me.map) {
@@ -256,6 +294,7 @@ fn start(lua: &Lua, nav: &Handles, route: &Route, then_interact: Option<u64>) {
     walk.stop = false;
     walk.corner = None;
     walk.retried = false;
+    walk.replans = 0;
     walk.then_interact = then_interact;
 }
 
