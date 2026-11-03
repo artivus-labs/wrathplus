@@ -13,7 +13,8 @@ export interface GameEvent {
 const NOTABLE: Record<string, (args: unknown[]) => string | null> = {
   PLAYER_DEAD: () => "You died.",
   PLAYER_ALIVE: () => "You are alive again (released or resurrected).",
-  PLAYER_LEVEL_UP: (a) => `You reached level ${a[0]}.`,
+  PLAYER_LEVEL_UP: (a) =>
+    `You reached level ${a[0]}. New class skills may be waiting at your class trainer (AgentFindNpc("classtrainer")); Upkeep learns what you can afford when you open the trainer.`,
   CHAT_MSG_WHISPER: (a) => `${a[1]} whispers: ${a[0]}`,
   CHAT_MSG_PARTY: (a) => `[Party] ${a[1]}: ${a[0]}`,
   CHAT_MSG_PARTY_LEADER: (a) => `[Party leader] ${a[1]}: ${a[0]}`,
@@ -41,6 +42,7 @@ export const PLANNER_EVENTS = new Set([
   "CHAT_MSG_PARTY",
   "CHAT_MSG_PARTY_LEADER",
   "PARTY_INVITE_REQUEST",
+  "PLAYER_LEVEL_UP",
   "CHAT_MSG_SAY",
   "CHAT_MSG_RAID",
   "CHAT_MSG_RAID_LEADER",

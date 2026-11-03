@@ -3,9 +3,10 @@
 //!
 //! The UI VM is sandboxed (no `require`, `io`, `os`), as addons expect. This adds back exactly one
 //! door: `require(name)` reads `<scripts>/<name with dots as slashes>.lua`, or a built-in module
-//! (`wp.engine`, `wp.values`, `wp.agent`, `wp.revive`), and nothing else. `wp.agent` is preloaded as
+//! (`wp.engine`, `wp.values`, `wp.agent`, `wp.revive`, `wp.upkeep`), and nothing else. `wp.agent` is preloaded as
 //! the global `Agent`: the registry of intents and decisions the fast tier chooses among; `wp.revive`
-//! as `Revive`, which gets a dead character back up. `AgentReload(name)` forgets a module and loads it
+//! as `Revive`, which gets a dead character back up; `wp.upkeep` as `Upkeep`, which wears upgrades,
+//! sells junk and trains. `AgentReload(name)` forgets a module and loads it
 //! again; `AgentModules()` lists the agent's files. If `autoexec.lua` exists, every new in-game
 //! VM runs it, so an agent's logic comes back after `ReloadUI()` or a restart.
 
@@ -19,6 +20,7 @@ const BUILT_IN: &[(&str, &str)] = &[
     ("wp.values", include_str!("../lua/wp/values.lua")),
     ("wp.agent", include_str!("../lua/wp/agent.lua")),
     ("wp.revive", include_str!("../lua/wp/revive.lua")),
+    ("wp.upkeep", include_str!("../lua/wp/upkeep.lua")),
 ];
 
 /// Where the agent's modules live: `WOW_AGENT_SCRIPTS`, else `<client home>/Agent/scripts`.
@@ -108,6 +110,9 @@ pub(crate) fn install(script: &UiScript, dir: PathBuf) -> mlua::Result<bool> {
     // Death handling every agent has: release, corpse run, reclaim (`Revive.on = false` to opt out).
     let revive = load_module(lua, &dir, "wp.revive")?;
     lua.globals().set("Revive", revive)?;
+    // Chores: wear upgrades, sell junk and repair at merchants, train at class trainers.
+    let upkeep = load_module(lua, &dir, "wp.upkeep")?;
+    lua.globals().set("Upkeep", upkeep)?;
     Ok(module_path(&dir, "autoexec").is_file())
 }
 
@@ -144,6 +149,10 @@ fn load_module(lua: &Lua, dir: &Path, name: &str) -> mlua::Result<Value> {
 #[cfg(test)]
 #[path = "revive_tests.rs"]
 mod revive_tests;
+
+#[cfg(test)]
+#[path = "upkeep_tests.rs"]
+mod upkeep_tests;
 
 #[cfg(test)]
 mod tests {
