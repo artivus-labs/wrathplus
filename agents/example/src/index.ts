@@ -59,11 +59,15 @@ export async function runAgent(config: Config, options: RunOptions): Promise<voi
   const { abortController } = options;
   const inbox = new Inbox();
   const notes = new Notes(options.notesHome);
+  // Speech nearby that was not to us rides along with the next wake-up (the latest few lines).
+  let heard: string[] = [];
   // Everything that reaches the planner also goes in the session log, with the character's
   // status at that moment, so a wake-up needs no calls to see where things stand.
   const tell = (kind: string, text: string) => {
     void statusLine(config.url, config.token).then((status) => {
-      const message = status ? `${text}\n\n[Now: ${status}]` : text;
+      const nearby = heard.length ? `\n\nHeard nearby (no need to answer):\n- ${heard.join("\n- ")}` : "";
+      heard = [];
+      const message = (status ? `${text}${nearby}\n\n[Now: ${status}]` : `${text}${nearby}`);
       notes.record(kind, message);
       inbox.push(message);
     });
@@ -84,10 +88,35 @@ export async function runAgent(config: Config, options: RunOptions): Promise<voi
   const opening = kickoff(config.goal, notes.briefing());
   inbox.push(opening);
   let self: string | undefined;
+  // The party's names, refreshed every 15 s: their /say is meant for us.
+  let party = new Set<string>();
+  const partyLua = 'local t = {} for i = 1, 4 do local n = UnitName("party" .. i) if n then t[#t + 1] = n end end return t';
+  const refreshParty = async () => {
+    try {
+      const response = await fetch(`${config.url}/lua`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${config.token}` },
+        body: partyLua,
+        signal: AbortSignal.timeout(2000),
+      });
+      const answer = (await response.json()) as { values?: unknown[] };
+      const names = Array.isArray(answer.values?.[0]) ? (answer.values[0] as string[]) : [];
+      party = new Set(names.map((n) => n.toLowerCase()));
+    } catch {
+      // The client may be loading; keep the last list.
+    }
+  };
+  void refreshParty();
+  const partyTimer = setInterval(() => void refreshParty(), 15_000);
+  abortController.signal.addEventListener("abort", () => clearInterval(partyTimer));
   void watch({
     url: config.url,
     token: config.token,
     self: () => self,
+    party: () => party,
+    onOverheard: (lines) => {
+      heard = [...heard, ...lines].slice(-8);
+    },
     signal: abortController.signal,
     onEvents: (events) => {
       policy?.notice(events);

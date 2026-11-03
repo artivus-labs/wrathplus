@@ -1,7 +1,7 @@
 import { describe as group, expect, test } from "bun:test";
 import { Inbox, summarize, TOOLS } from "../src/brain.ts";
 import { configFromEnv } from "../src/index.ts";
-import { describe, PLANNER_EVENTS, RepeatedErrors, watch, type GameEvent } from "../src/watch.ts";
+import { describe, overheard, PLANNER_EVENTS, RepeatedErrors, watch, type GameEvent } from "../src/watch.ts";
 
 const event = (seq: number, name: string, args: unknown[] = []): GameEvent => ({ seq, time: seq, event: name, args });
 
@@ -30,13 +30,25 @@ group("events a player would notice", () => {
     ]);
   });
 
-  test("the planner hears /say only when it names the character", () => {
-    const lines = describe([
+  test("/say wakes the planner from the party or by name; the rest is overheard", () => {
+    const events = [
       event(1, "CHAT_MSG_SAY", ["anyone selling bread?", "Botty"]),
       event(2, "CHAT_MSG_SAY", ["agenttwo, follow me", "Shannon"]),
-      event(3, "CHAT_MSG_PARTY", ["pull the next one", "Shannon"]),
-    ], "Agenttwo", PLANNER_EVENTS);
-    expect(lines).toEqual(["Shannon says: agenttwo, follow me", "[Party] Shannon: pull the next one"]);
+      event(3, "CHAT_MSG_SAY", ["over here", "Pallytest"]),
+      event(4, "CHAT_MSG_PARTY", ["pull the next one", "Pallytest"]),
+      event(5, "CHAT_MSG_MONSTER_SAY", ["Fresh bread, baked this very morning!", "Kira Songshine"]),
+      event(6, "CHAT_MSG_SAY", ["hello", "Agenttwo"]),
+    ];
+    const party = new Set(["pallytest"]);
+    expect(describe(events, "Agenttwo", PLANNER_EVENTS, party)).toEqual([
+      "Shannon says: agenttwo, follow me",
+      "Pallytest says: over here",
+      "[Party] Pallytest: pull the next one",
+    ]);
+    expect(overheard(events, "Agenttwo", party)).toEqual([
+      "Botty says: anyone selling bread?",
+      "Kira Songshine says: Fresh bread, baked this very morning!",
+    ]);
   });
 
   test("the planner hears emotes aimed at it, not other people's or its own", () => {

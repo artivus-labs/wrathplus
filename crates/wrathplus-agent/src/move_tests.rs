@@ -155,3 +155,25 @@ fn going_to_a_place_or_a_name_not_in_sight() {
     let (over, arrived): (bool, bool) = script.eval("return Move.reached()").unwrap();
     assert!(over && arrived);
 }
+
+#[test]
+fn following_leaves_someone_elses_walk_and_an_open_window_alone() {
+    let mut script = moving();
+    script.run("Move.follow('Pallytest') pally.x = 20").unwrap();
+    // Another walk is running (the agent sent itself to an innkeeper): follow neither stops nor
+    // reroutes it.
+    script.run("walking = true").unwrap();
+    script.tick(0.3);
+    assert_eq!(calls(&script), "");
+    assert_eq!(state(&script), "letting another walk finish");
+    // At the innkeeper with his gossip open: it waits for the window to close.
+    script
+        .run("walking = false GossipFrame = { IsShown = function() return true end }")
+        .unwrap();
+    script.tick(0.3);
+    assert_eq!(calls(&script), "");
+    assert_eq!(state(&script), "talking to someone; following again after");
+    script.run("GossipFrame = nil").unwrap();
+    script.tick(0.3);
+    assert_eq!(calls(&script), "move 18,0");
+}

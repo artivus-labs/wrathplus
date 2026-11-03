@@ -84,8 +84,10 @@ local function close_in(u, within)
   end
 end
 
+-- Stop our own walk only: a walk someone else started (AgentInteract to an innkeeper while
+-- following) is theirs to finish.
 local function halt()
-  if AgentWalk().status == "walking" then AgentStop() end
+  if aimed and AgentWalk().status == "walking" then AgentStop() end
   aimed = nil
 end
 
@@ -137,8 +139,8 @@ function M.stay()
 end
 
 function M.free()
-  M.mode, M.state, who, guid, aimed = nil, nil, nil, nil, nil
   halt()
+  M.mode, M.state, who, guid, aimed = nil, nil, nil, nil, nil
 end
 
 -- For an intent's `until`: whether the last Move.to is over, and whether it arrived.
@@ -216,6 +218,19 @@ local function tick(now)
   end
   -- Follow.
   if fight(u) then return end
+  -- Something else is walking us (AgentInteract to an innkeeper) or we are talking to someone:
+  -- let it finish, as a player stops following to deal with an NPC.
+  if not aimed and AgentWalk().status == "walking" then
+    M.state = "letting another walk finish"
+    return
+  end
+  for _, frame in ipairs({ "GossipFrame", "MerchantFrame", "QuestFrame", "ClassTrainerFrame", "TaxiFrame" }) do
+    local f = _G[frame]
+    if f and f.IsShown and f:IsShown() then
+      M.state = "talking to someone; following again after"
+      return
+    end
+  end
   if u then
     if u.distance > M.follow_distance + M.slack or (aimed and u.distance > M.follow_distance) then
       close_in(u, M.follow_distance)

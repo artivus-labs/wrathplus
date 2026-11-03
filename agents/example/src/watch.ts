@@ -23,6 +23,10 @@ const NOTABLE: Record<string, (args: unknown[]) => string | null> = {
   CHAT_MSG_RAID: (a) => `[Raid] ${a[1]}: ${a[0]}`,
   CHAT_MSG_RAID_LEADER: (a) => `[Raid leader] ${a[1]}: ${a[0]}`,
   CHAT_MSG_SAY: (a) => (a[1] === undefined ? null : `${a[1]} says: ${a[0]}`),
+  CHAT_MSG_YELL: (a) => (a[1] === undefined ? null : `${a[1]} yells: ${a[0]}`),
+  CHAT_MSG_MONSTER_SAY: (a) => `${a[1]} says: ${a[0]}`,
+  CHAT_MSG_MONSTER_YELL: (a) => `${a[1]} yells: ${a[0]}`,
+  CHAT_MSG_MONSTER_WHISPER: (a) => `${a[1]} whispers: ${a[0]}`,
   PARTY_INVITE_REQUEST: (a) => `${a[0]} invites you to a party (AcceptGroup() or DeclineGroup()).`,
   TRADE_SHOW: () => "Someone opened a trade window with you.",
   DUEL_REQUESTED: (a) => `${a[0]} challenges you to a duel.`,
@@ -46,6 +50,8 @@ export const PLANNER_EVENTS = new Set([
   "PARTY_INVITE_REQUEST",
   "PLAYER_LEVEL_UP",
   "CHAT_MSG_SAY",
+  "CHAT_MSG_YELL",
+  "CHAT_MSG_MONSTER_WHISPER",
   "CHAT_MSG_TEXT_EMOTE",
   "CHAT_MSG_EMOTE",
   "CHAT_MSG_RAID",
@@ -86,14 +92,37 @@ export class RepeatedErrors {
 }
 
 /** Turn a batch of raw events into lines, skipping the ones a player wouldn't notice. */
-export function describe(events: GameEvent[], self?: string, kinds?: Set<string>): string[] {
+/** Speech that is not to us: other players' /say and /yell, NPC chatter. */
+const NEARBY = new Set(["CHAT_MSG_SAY", "CHAT_MSG_YELL", "CHAT_MSG_MONSTER_SAY", "CHAT_MSG_MONSTER_YELL"]);
+
+/** /say or /yell meant for us: from the party, or naming us. */
+function addressed(e: GameEvent, self?: string, party?: Set<string>): boolean {
+  const sender = String(e.args[1] ?? "");
+  const mentions = self !== undefined && String(e.args[0]).toLowerCase().includes(self.toLowerCase());
+  return mentions || (party?.has(sender.toLowerCase()) ?? false);
+}
+
+/** What was said nearby but not to us, to pass on with the next wake-up rather than wake for. */
+export function overheard(events: GameEvent[], self?: string, party?: Set<string>): string[] {
+  const lines: string[] = [];
+  for (const e of events) {
+    if (!NEARBY.has(e.event) || (self && e.args[1] === self)) continue;
+    if ((e.event === "CHAT_MSG_SAY" || e.event === "CHAT_MSG_YELL") && addressed(e, self, party)) continue;
+    const line = NOTABLE[e.event]?.(e.args);
+    if (line) lines.push(line);
+  }
+  return lines;
+}
+
+export function describe(events: GameEvent[], self?: string, kinds?: Set<string>, party?: Set<string>): string[] {
   const lines: string[] = [];
   for (const e of events) {
     // Your own chat comes back too; it isn't news.
     if (self && e.event.startsWith("CHAT_MSG_") && e.args[1] === self) continue;
     if (kinds && !kinds.has(e.event)) continue;
-    // Said nearby: the planner hears it only when it is addressed by name (bots chatter in /say).
-    if (kinds && e.event === "CHAT_MSG_SAY" && !(self && String(e.args[0]).toLowerCase().includes(self.toLowerCase()))) continue;
+    // Said nearby: the planner is woken only when it is meant for it, by the party or by name (bots
+    // chatter in /say); the rest is overheard.
+    if (kinds && (e.event === "CHAT_MSG_SAY" || e.event === "CHAT_MSG_YELL") && !addressed(e, self, party)) continue;
     // An emote counts when aimed at us ("Pallytest waves at you.", or our name in a custom one);
     // our own come back as "You wave at ...".
     if (kinds && (e.event === "CHAT_MSG_TEXT_EMOTE" || e.event === "CHAT_MSG_EMOTE")) {
@@ -114,6 +143,10 @@ export interface WatchOptions {
   token: string;
   /** The character's own name, so its chat is not reported back to it. */
   self?: () => string | undefined;
+  /** The party's names (lower case): their /say is meant for us. */
+  party?: () => Set<string>;
+  /** Speech nearby that is not to us, to hand over with the next wake-up. */
+  onOverheard?: (lines: string[]) => void;
   /** Gather lines for this long after the first before sending (ms). */
   batchMs?: number;
   onMessage: (text: string) => void;
@@ -143,7 +176,10 @@ export async function watch(options: WatchOptions): Promise<void> {
       const batch = await read(url, token, since, wait, signal);
       since = batch.next;
       if (batch.events.length) options.onEvents?.(batch.events);
-      const lines = [...describe(batch.events, options.self?.(), PLANNER_EVENTS), ...errors.notice(batch.events)];
+      const party = options.party?.();
+      const lines = [...describe(batch.events, options.self?.(), PLANNER_EVENTS, party), ...errors.notice(batch.events)];
+      const heard = overheard(batch.events, options.self?.(), party);
+      if (heard.length) options.onOverheard?.(heard);
       if (lines.length && !pending.length) flushAt = Date.now() + batchMs;
       pending.push(...lines);
       if (batch.missed) pending.push(`(${batch.missed} game events were missed.)`);
