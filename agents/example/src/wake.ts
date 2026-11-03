@@ -11,11 +11,18 @@ export const STATUS_LUA = `
 local out = {}
 local hp, max = UnitHealth("player"), UnitHealthMax("player")
 out[#out + 1] = string.format("level %d, health %d/%d%s%s", UnitLevel("player") or 0, hp or 0, max or 0,
-  UnitIsDeadOrGhost("player") and ", dead" or "", UnitAffectingCombat("player") and ", in combat" or "")
+  UnitIsGhost("player") and ", a ghost" or (UnitIsDeadOrGhost("player") and ", dead" or ""), UnitAffectingCombat("player") and ", in combat" or "")
 local p = AgentPosition and AgentPosition()
 local zone, sub = GetZoneText() or "", GetSubZoneText() or ""
 out[#out + 1] = string.format("in %s%s%s", zone, sub ~= "" and (" / " .. sub) or "",
   p and string.format(" at (%.0f, %.0f, %.0f)", p.x, p.y, p.z) or "")
+if Revive and Revive.state then out[#out + 1] = "revive: " .. Revive.state end
+local asks = {}
+for i = 1, 4 do
+  local f = _G["StaticPopup" .. i]
+  if f and f:IsShown() and f.which then asks[#asks + 1] = f.which end
+end
+if #asks > 0 then out[#out + 1] = "waiting on you: " .. table.concat(asks, ", ") end
 local a = Agent and Agent.activity and Agent.activity()
 out[#out + 1] = a and string.format("activity %s for %ds", a.name, a.seconds) or "no activity"
 local w = AgentWalk and AgentWalk()
