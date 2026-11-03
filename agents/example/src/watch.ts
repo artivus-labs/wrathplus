@@ -16,7 +16,7 @@ const NOTABLE: Record<string, (args: unknown[]) => string | null> = {
   PLAYER_DEAD: () => "You died.",
   PLAYER_ALIVE: () => "You are alive again (released or resurrected).",
   PLAYER_LEVEL_UP: (a) =>
-    `You reached level ${a[0]}. New class skills may be waiting at your class trainer (AgentFindNpc("classtrainer")); Upkeep learns what you can afford when you open the trainer.`,
+    `You reached level ${a[0]}. New class skills may be waiting at your class trainer: Upkeep.trainer() is your class's (AgentFindNpc("classtrainer") finds any class's), the fast loop is offered train_skills when it is in sight, and Upkeep learns what you can afford.`,
   CHAT_MSG_WHISPER: (a) => `${a[1]} whispers: ${a[0]}`,
   CHAT_MSG_PARTY: (a) => `[Party] ${a[1]}: ${a[0]}`,
   CHAT_MSG_PARTY_LEADER: (a) => `[Party leader] ${a[1]}: ${a[0]}`,
@@ -184,7 +184,7 @@ export interface WatchOptions {
   /** Gather lines for this long after the first before sending (ms). */
   batchMs?: number;
   onMessage: (text: string) => void;
-  /** Every batch of raw events, for the fast tier. */
+  /** Every batch of raw events (less requests triage carried out), for the fast tier. */
   onEvents?: (events: GameEvent[]) => void;
   signal: AbortSignal;
 }
@@ -209,7 +209,6 @@ export async function watch(options: WatchOptions): Promise<void> {
       const wait = pending.length ? Math.max(0, flushAt - Date.now()) : 25_000;
       const batch = await read(url, token, since, wait, signal);
       since = batch.next;
-      if (batch.events.length) options.onEvents?.(batch.events);
       const party = options.party?.();
       const npc = options.npcReplies ?? true;
       // Requests first: what the fast tier does itself does not wake the planner.
@@ -229,6 +228,8 @@ export async function watch(options: WatchOptions): Promise<void> {
         }
       }
       const kept = handled.size ? batch.events.filter((e) => !handled.has(e.seq)) : batch.events;
+      // The fast tier and wake-ups see what is left: a request done for the party wakes no one.
+      if (kept.length) options.onEvents?.(kept);
       const lines = [...describe(kept, options.self?.(), PLANNER_EVENTS, party, npc), ...notes, ...errors.notice(batch.events)];
       const heard = overheard(batch.events, options.self?.(), party, npc);
       if (heard.length) options.onOverheard?.(heard);

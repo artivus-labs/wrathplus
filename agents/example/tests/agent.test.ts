@@ -114,6 +114,49 @@ group("events a player would notice", () => {
     port.stop(true);
     expect(messages).toEqual(["Game events:\n- You died.\n- Dongle whispers: hi"]);
   });
+
+  test("a request triage carried out reaches neither the planner nor the fast tier's wake-ups", async () => {
+    let served = false;
+    const port = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      async fetch(request) {
+        const since = Number(new URL(request.url).searchParams.get("since"));
+        if (since >= 1_000_000) return Response.json({ events: [], next: 10, missed: 0 });
+        if (!served && since === 10) {
+          served = true;
+          return Response.json({
+            events: [event(10, "CHAT_MSG_PARTY", ["follow me", "Pallytest"]), event(11, "PLAYER_LEVEL_UP", [8])],
+            next: 12,
+            missed: 0,
+          });
+        }
+        await Bun.sleep(50);
+        return Response.json({ events: [], next: since, missed: 0 });
+      },
+    });
+    const abort = new AbortController();
+    const messages: string[] = [];
+    const seen: string[] = [];
+    const handled: string[] = [];
+    const done = watch({
+      url: port.url.href.replace(/\/$/, ""),
+      token: "t",
+      batchMs: 50,
+      signal: abort.signal,
+      onMessage: (m) => messages.push(m),
+      onEvents: (events) => seen.push(...events.map((e) => e.event)),
+      triage: async (r) => ({ handled: true, note: `${r.sender} said "${r.text}"; the fast loop followed them`, reply: false }),
+      onHandled: (note) => handled.push(note),
+    });
+    while (!messages.length) await Bun.sleep(20);
+    abort.abort();
+    await done;
+    port.stop(true);
+    expect(seen).toEqual(["PLAYER_LEVEL_UP"]);
+    expect(handled).toEqual(['Pallytest said "follow me"; the fast loop followed them']);
+    expect(messages[0]).not.toContain("follow me");
+  });
 });
 
 group("planner plumbing", () => {

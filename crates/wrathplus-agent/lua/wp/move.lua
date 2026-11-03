@@ -127,8 +127,34 @@ function M.to(unit, within, z)
   return true
 end
 
+-- The NPC windows following waits on, and how to close each.
+local WINDOWS = {
+  { "GossipFrame", "CloseGossip" }, { "MerchantFrame", "CloseMerchant" }, { "QuestFrame", "CloseQuest" },
+  { "ClassTrainerFrame", "CloseTrainer" }, { "TaxiFrame", "CloseTaxiMap" },
+}
+
+local function window_open()
+  for _, w in ipairs(WINDOWS) do
+    local f = _G[w[1]]
+    if f and f.IsShown and f:IsShown() then return true end
+  end
+  return false
+end
+
+local function close_windows()
+  for _, w in ipairs(WINDOWS) do
+    local f, close = _G[w[1]], _G[w[2]]
+    if f and f.IsShown and f:IsShown() and close then close() end
+  end
+end
+
+local window_since
+
+-- Asked to follow: leave whatever window is open and go.
 function M.follow(unit)
   set("follow", unit)
+  close_windows()
+  window_since = nil
   return guid ~= nil
 end
 
@@ -224,13 +250,17 @@ local function tick(now)
     M.state = "letting another walk finish"
     return
   end
-  for _, frame in ipairs({ "GossipFrame", "MerchantFrame", "QuestFrame", "ClassTrainerFrame", "TaxiFrame" }) do
-    local f = _G[frame]
-    if f and f.IsShown and f:IsShown() then
+  -- A window someone is using (quest work) holds following; one left open is closed after a
+  -- few seconds, or following would wait on it for ever (stuck at a trainer's window).
+  if window_open() then
+    window_since = window_since or now
+    if (Quests and Quests.busy and Quests.busy()) or now - window_since < 5 then
       M.state = "talking to someone; following again after"
       return
     end
+    close_windows()
   end
+  window_since = nil
   if u then
     if u.distance > M.follow_distance + M.slack or (aimed and u.distance > M.follow_distance) then
       close_in(u, M.follow_distance)

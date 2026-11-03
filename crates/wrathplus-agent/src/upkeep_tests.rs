@@ -168,3 +168,17 @@ fn it_needs_on_upgrades_greeds_on_the_rest_and_confirms_only_its_own_rolls() {
     );
     assert_eq!(calls(&script), "");
 }
+
+#[test]
+fn its_own_class_trainer_is_found_not_just_any() {
+    let script = upkeep();
+    script
+        .run(
+            "AgentNearby = function() return { \
+               { name = 'Priestess Josetta', title = 'Priest Trainer', npc = { 'trainer', 'classtrainer' }, distance = 4 }, \
+               { name = 'Lyria Du Lac', title = 'Warrior Trainer', npc = { 'trainer', 'classtrainer' }, distance = 12 } } end",
+        )
+        .unwrap();
+    let name: String = script.eval("return Upkeep.trainer().name").unwrap();
+    assert_eq!(name, "Lyria Du Lac");
+}

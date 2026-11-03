@@ -6,7 +6,9 @@
 --           shields only fill an empty slot (two-hander or sword and board is the agent's call),
 --           and a shield never goes on beside a two-hander.
 --   Sell:   at a merchant, sell grey (junk) items, and repair if the money covers it.
---   Train:  at a class trainer, learn every available rank the money covers.
+--   Train:  at a class trainer, learn every available rank the money covers, then close the
+--           window. Upkeep.trainer() is the nearest trainer of your own class ("Warrior
+--           Trainer"); after a level-up the fast tier is offered train_skills when one is in sight.
 --   Loot:   in a group roll, `loot` = "upgrades" (the default) needs on what it would wear as an
 --           upgrade and greeds on the rest; "greed" always greeds; "pass" passes; false leaves the
 --           roll to the agent (START_LOOT_ROLL, RollOnLoot). A bind-on-pickup roll it made is
@@ -126,8 +128,28 @@ local function sell_and_repair()
   end
 end
 
+-- The nearest trainer of our own class: a class trainer whose title names it ("Warrior Trainer").
+function U.trainer(yards)
+  local class = UnitClass("player")
+  if not class then return nil end
+  local best
+  for _, u in ipairs(AgentNearby(yards or 150)) do
+    local trains = false
+    for _, s in ipairs(u.npc or {}) do if s == "classtrainer" then trains = true end end
+    if trains and u.title and u.title:lower():find(class:lower(), 1, true) and (not best or u.distance < best.distance) then
+      best = u
+    end
+  end
+  return best
+end
+
+-- The level we last trained at; nil until a visit this session.
+U.trained_level = nil
+
 local function train()
   if IsTradeskillTrainer and IsTradeskillTrainer() then return end
+  -- Not ours (a priest trainer for a warrior): nothing to learn here.
+  if (GetNumTrainerServices() or 0) == 0 then return end
   local learned, money = {}, GetMoney() or 0
   for i = 1, (GetNumTrainerServices() or 0) do
     local name, rank, category = GetTrainerServiceInfo(i)
@@ -139,6 +161,9 @@ local function train()
     end
   end
   if #learned > 0 then did("trained " .. table.concat(learned, ", ")) end
+  U.trained_level = UnitLevel("player")
+  -- Done here: close the window, or follow mode waits on it.
+  if CloseTrainer then CloseTrainer() end
 end
 
 -- Would this item be worn as an upgrade in some slot?
@@ -203,5 +228,31 @@ frame:SetScript("OnUpdate", function(_, dt)
   -- Equip until nothing more fits; the bags settle between pieces.
   dirty = equip_pass()
 end)
+
+-- After a level-up, with our trainer in sight: go and train (the fast tier chooses it).
+if Agent and Agent.intent then
+  local talking_since
+  Agent.intent("train_skills", {
+    when = function()
+      local t = U.trainer(60)
+      return "You have levelled since you last trained: learn your new skills from "
+        .. (t and t.name or "your trainer") .. " (" .. (t and t.title or "") .. ")."
+    end,
+    available = function()
+      return U.train and (UnitLevel("player") or 1) > (U.trained_level or 1) and U.trainer(60) ~= nil
+    end,
+    run = function()
+      talking_since = GetTime()
+      local t = U.trainer(60)
+      if t then AgentInteract(t.guid) end
+    end,
+    -- Over once trained at this level, or after a minute.
+    done = function()
+      if U.trained_level == UnitLevel("player") then return true, true end
+      if talking_since and GetTime() - talking_since > 60 then return true, false, "could not reach the trainer" end
+      return false
+    end,
+  })
+end
 
 return U

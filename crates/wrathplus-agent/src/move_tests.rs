@@ -177,3 +177,27 @@ fn following_leaves_someone_elses_walk_and_an_open_window_alone() {
     script.tick(0.3);
     assert_eq!(calls(&script), "move 18,0");
 }
+
+#[test]
+fn a_window_left_open_is_closed_so_following_carries_on() {
+    let mut script = moving();
+    script
+        .run(
+            "ClassTrainerFrame = { IsShown = function() return trainer_open end } trainer_open = true \
+             CloseTrainer = function() calls[#calls + 1] = 'close trainer' trainer_open = false end",
+        )
+        .unwrap();
+    // Asked to follow while at a trainer: the window closes at once.
+    script.run("Move.follow('Pallytest')").unwrap();
+    assert_eq!(calls(&script), "close trainer");
+    // A window opened while following (not quest work) is waited on briefly, then closed.
+    script
+        .run("calls = {} trainer_open = true pally.x = 20")
+        .unwrap();
+    script.tick(0.3);
+    assert_eq!(calls(&script), "");
+    for _ in 0..20 {
+        script.tick(0.3);
+    }
+    assert_eq!(calls(&script), "close trainer | move 18,0");
+}

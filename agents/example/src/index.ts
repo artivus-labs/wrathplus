@@ -149,7 +149,8 @@ export async function runAgent(config: Config, options: RunOptions): Promise<voi
     signal: abortController.signal,
     onEvents: (events) => {
       policy?.notice(events);
-      waker.notice(events);
+      // Our own chat echoing back is not news to wake on.
+      waker.notice(events.filter((e) => !(e.event.startsWith("CHAT_MSG_") && self !== undefined && e.args[1] === self)));
     },
     onMessage: (text) => {
       console.log(`\n[events] ${text.replace(/\n/g, " ")}`);
