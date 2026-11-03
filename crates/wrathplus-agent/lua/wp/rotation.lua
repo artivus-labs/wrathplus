@@ -22,19 +22,23 @@ local R = { list = nil, gcd = 1.0, stats = {} }
 
 local failed = {} -- spell -> time it may be tried again
 local last_cast = 0
-local book, defaults -- the spellbook's names, and the class default made from it
+local book, defaults -- the spellbook's names (to their slots), and the class default made from it
 
--- The spells in the spellbook, rebuilt when they change (a level, a trainer).
-local function known(spell)
+-- The spells in the spellbook, name to slot (the highest rank's), rebuilt when they change.
+local function slot(spell)
   if not book then
     book = {}
     for i = 1, 1000 do
       local name = GetSpellName(i, "spell")
       if not name then break end
-      book[name] = true
+      book[name] = i
     end
   end
-  return book[spell] == true
+  return book[spell]
+end
+
+local function known(spell)
+  return slot(spell) ~= nil
 end
 
 local function aura(unit, name, filter)
@@ -82,10 +86,15 @@ local function ready(spell, c, on_self)
   if not known(spell) then return false end
   local name, _, _, cost, _, power_type, _, min_range, max_range = GetSpellInfo(spell)
   if not name then return false end
-  local start, duration = GetSpellCooldown(spell)
+  -- By slot: the client's GetSpellCooldown takes (slot, book), not a name.
+  local start, duration = GetSpellCooldown(slot(spell), "spell")
   if start and start > 0 and start + (duration or 0) > GetTime() then return false end
   if (failed[spell] or 0) > GetTime() then return false end
+  -- Queued already (Heroic Strike waits for the next swing): casting again wastes the tick.
+  if IsCurrentSpell and IsCurrentSpell(slot(spell), "spell") then return false end
   local my_type = UnitPowerType and UnitPowerType("player") or power_type
+  -- Rage and runic power costs come in tenths (Heroic Strike: 150 for 15 rage).
+  if cost and (power_type == 1 or power_type == 6) then cost = cost / 10 end
   if cost and cost > 0 and power_type == my_type and c.power < cost then return false end
   if not on_self and max_range and max_range > 0 then
     if c.distance > max_range + 2 or (min_range and min_range > 0 and c.distance < min_range) then return false end

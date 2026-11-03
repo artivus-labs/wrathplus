@@ -11,11 +11,11 @@ buffs, debuffs = {}, {}
 target_hp = 80
 cooldown = {}
 BOOK = { "Battle Shout", "Rend", "Heroic Strike", "Attack" }
-COST = { ["Battle Shout"] = 10, ["Rend"] = 10, ["Heroic Strike"] = 15 }
+COST = { ["Battle Shout"] = 100, ["Rend"] = 100, ["Heroic Strike"] = 150 }
 GetTime = function() return now end
 GetSpellName = function(i) return BOOK[i] end
 GetSpellInfo = function(s) if COST[s] or s == "Attack" then return s, "", "", COST[s] or 0, false, 1, 0, 0, s == "Heroic Strike" and 5 or 0 end end
-GetSpellCooldown = function(s) return cooldown[s] or 0, 10, 1 end
+GetSpellCooldown = function(i, book) assert(type(i) == "number" and book == "spell", "Invalid spell slot") return cooldown[BOOK[i]] or 0, 10, 1 end
 UnitPower = function() return rage end
 UnitPowerType = function() return 1 end
 UnitClass = function() return "Warrior", "WARRIOR" end
@@ -99,7 +99,7 @@ fn a_list_of_its_own_and_a_failing_spell_backing_off() {
     assert_eq!(failed, 1);
     // Learning a spell is noticed (the default list is rebuilt), and a list of its own is kept.
     script
-        .run("BOOK[#BOOK + 1] = 'Execute' COST['Execute'] = 15")
+        .run("BOOK[#BOOK + 1] = 'Execute' COST['Execute'] = 150")
         .unwrap();
     script.fire_event("LEARNED_SPELL_IN_TAB", vec![]);
     let own: String = script.eval("return Rotation.describe()").unwrap();

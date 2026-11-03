@@ -148,7 +148,13 @@ local function tick(now)
     swung = now
     AgentInteract(C.active)
   end
-  local cast = Rotation and Rotation.tick(u, started)
+  -- A rotation's bug must not stop the fight: keep swinging, and say what broke.
+  local ok, cast = true, nil
+  if Rotation then ok, cast = pcall(Rotation.tick, u, started) end
+  if not ok then
+    C.rotation_error = tostring(cast)
+    cast = nil
+  end
   C.state = "fighting " .. (u.name or "the target") .. (cast and (": " .. cast) or "")
 end
 
