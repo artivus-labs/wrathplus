@@ -1,6 +1,6 @@
 //! `wp.upkeep` against a stubbed character: what it wears, sells, repairs and trains.
 
-use wrathplus_ui::script::UiScript;
+use wrathplus_ui::script::{ScriptValue, UiScript};
 
 /// A level 4 warrior with a two-hander, and bags from the playtest. Items are links to a table.
 const GAME: &str = r#"
@@ -109,5 +109,62 @@ fn nothing_is_equipped_in_combat_and_switches_turn_it_off() {
     assert_eq!(calls(&script), "");
     script.run("combat = false Upkeep.sell = false").unwrap();
     script.fire_event("MERCHANT_SHOW", vec![]);
+    assert_eq!(calls(&script), "");
+}
+
+/// Group loot: rolls offered on the Journeyman's Pants (cloth, an upgrade over the recruit's) and
+/// a sword it would not wear over its greatsword.
+const ROLLS: &str = r#"
+ITEMS.pants = { "Journeyman's Pants", 1, 5, 1, "Armor", "Cloth", "INVTYPE_LEGS", 8 }
+ITEMS.rpants = { "Recruit's Pants", 1, 1, 1, "Armor", "Cloth", "INVTYPE_LEGS", 1 }
+ITEMS.blade = { "Rusty Blade", 1, 4, 1, "Weapon", "One-Handed Swords", "INVTYPE_WEAPON", 9 }
+worn[7] = "rpants"
+bags = { [0] = {} }
+ROLL = { [11] = "pants", [12] = "blade" }
+GetLootRollItemInfo = function(id)
+  local i = ITEMS[ROLL[id]]
+  return "icon", i[1], 1, i[2], id == 12, true, true
+end
+GetLootRollItemLink = function(id) return ROLL[id] end
+RollOnLoot = function(id, kind) calls[#calls + 1] = "roll " .. id .. " " .. kind end
+ConfirmLootRoll = function(id, kind) calls[#calls + 1] = "confirm " .. id .. " " .. kind end
+"#;
+
+#[test]
+fn it_needs_on_upgrades_greeds_on_the_rest_and_confirms_only_its_own_rolls() {
+    let mut script = upkeep();
+    script.run(ROLLS).unwrap();
+    script.fire_event(
+        "START_LOOT_ROLL",
+        vec![ScriptValue::Int(11), ScriptValue::Int(60000)],
+    );
+    script.fire_event(
+        "START_LOOT_ROLL",
+        vec![ScriptValue::Int(12), ScriptValue::Int(60000)],
+    );
+    assert_eq!(calls(&script), "roll 11 1 | roll 12 2");
+    // The blade binds on pickup: its confirmation is for the greed it rolled, not a need.
+    script.fire_event(
+        "CONFIRM_LOOT_ROLL",
+        vec![ScriptValue::Int(12), ScriptValue::Int(1)],
+    );
+    script.fire_event(
+        "CONFIRM_LOOT_ROLL",
+        vec![ScriptValue::Int(12), ScriptValue::Int(2)],
+    );
+    assert_eq!(calls(&script), "roll 11 1 | roll 12 2 | confirm 12 2");
+    let log: String = script
+        .eval("return table.concat(Upkeep.log, '; ')")
+        .unwrap();
+    assert_eq!(
+        log,
+        "needed Journeyman's Pants (an upgrade); greeded Rusty Blade"
+    );
+    // Left to the agent: no roll at all.
+    script.run("Upkeep.loot = false calls = {}").unwrap();
+    script.fire_event(
+        "START_LOOT_ROLL",
+        vec![ScriptValue::Int(11), ScriptValue::Int(60000)],
+    );
     assert_eq!(calls(&script), "");
 }

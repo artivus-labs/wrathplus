@@ -7,10 +7,14 @@
 --           and a shield never goes on beside a two-hander.
 --   Sell:   at a merchant, sell grey (junk) items, and repair if the money covers it.
 --   Train:  at a class trainer, learn every available rank the money covers.
+--   Loot:   in a group roll, `loot` = "upgrades" (the default) needs on what it would wear as an
+--           upgrade and greeds on the rest; "greed" always greeds; "pass" passes; false leaves the
+--           roll to the agent (START_LOOT_ROLL, RollOnLoot). A bind-on-pickup roll it made is
+--           confirmed.
 --
 -- `Upkeep.log` keeps the last few things it did ("equipped Outfitter Belt", ...).
 
-local U = { on = true, equip = true, sell = true, train = true, log = {} }
+local U = { on = true, equip = true, sell = true, train = true, loot = "upgrades", log = {} }
 
 local function did(text)
   U.log[#U.log + 1] = text
@@ -137,14 +141,47 @@ local function train()
   if #learned > 0 then did("trained " .. table.concat(learned, ", ")) end
 end
 
+-- Would this item be worn as an upgrade in some slot?
+local function upgrade(item)
+  if not item or not wearable(item) then return false end
+  for _, inv in ipairs(SLOTS[item.equip]) do
+    if better(item, info(GetInventoryItemLink("player", inv))) then return true end
+  end
+  return false
+end
+
+-- 3.3.5 roll types: 0 pass, 1 need, 2 greed.
+local ROLL_NAMES = { [0] = "passed on", [1] = "needed", [2] = "greeded" }
+local rolled = {}
+
+local function roll(id)
+  local _, name, _, _, _, can_need, can_greed = GetLootRollItemInfo(id)
+  if not name then return end
+  local choice = 0
+  if U.loot == "upgrades" and can_need and upgrade(info(GetLootRollItemLink(id))) then
+    choice = 1
+  elseif (U.loot == "upgrades" or U.loot == "greed") and can_greed then
+    choice = 2
+  end
+  rolled[id] = choice
+  RollOnLoot(id, choice)
+  did(ROLL_NAMES[choice] .. " " .. name .. (choice == 1 and " (an upgrade)" or ""))
+end
+
 local frame = CreateFrame("Frame")
 local since, dirty = 0, true
-for _, event in ipairs({ "BAG_UPDATE", "PLAYER_LEVEL_UP", "MERCHANT_SHOW", "TRAINER_SHOW", "PLAYER_REGEN_ENABLED" }) do
+for _, event in ipairs({ "BAG_UPDATE", "PLAYER_LEVEL_UP", "MERCHANT_SHOW", "TRAINER_SHOW", "PLAYER_REGEN_ENABLED",
+  "START_LOOT_ROLL", "CONFIRM_LOOT_ROLL" }) do
   frame:RegisterEvent(event)
 end
-frame:SetScript("OnEvent", function(_, event)
+frame:SetScript("OnEvent", function(_, event, a1, a2)
   if not U.on then return end
-  if event == "MERCHANT_SHOW" and U.sell then
+  if event == "START_LOOT_ROLL" and U.loot then
+    roll(a1)
+  elseif event == "CONFIRM_LOOT_ROLL" and rolled[a1] == a2 then
+    -- Bind on pickup: confirm only a roll this module made.
+    ConfirmLootRoll(a1, a2)
+  elseif event == "MERCHANT_SHOW" and U.sell then
     sell_and_repair()
   elseif event == "TRAINER_SHOW" and U.train then
     train()
