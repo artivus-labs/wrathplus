@@ -18,6 +18,8 @@ const NOTABLE: Record<string, (args: unknown[]) => string | null> = {
   CHAT_MSG_WHISPER: (a) => `${a[1]} whispers: ${a[0]}`,
   CHAT_MSG_PARTY: (a) => `[Party] ${a[1]}: ${a[0]}`,
   CHAT_MSG_PARTY_LEADER: (a) => `[Party leader] ${a[1]}: ${a[0]}`,
+  CHAT_MSG_TEXT_EMOTE: (a) => `${a[0]} (an emote; answer with DoEmote("wave", "${a[1]}") or in chat)`,
+  CHAT_MSG_EMOTE: (a) => `${a[1]} ${a[0]} (an emote)`,
   CHAT_MSG_RAID: (a) => `[Raid] ${a[1]}: ${a[0]}`,
   CHAT_MSG_RAID_LEADER: (a) => `[Raid leader] ${a[1]}: ${a[0]}`,
   CHAT_MSG_SAY: (a) => (a[1] === undefined ? null : `${a[1]} says: ${a[0]}`),
@@ -44,6 +46,8 @@ export const PLANNER_EVENTS = new Set([
   "PARTY_INVITE_REQUEST",
   "PLAYER_LEVEL_UP",
   "CHAT_MSG_SAY",
+  "CHAT_MSG_TEXT_EMOTE",
+  "CHAT_MSG_EMOTE",
   "CHAT_MSG_RAID",
   "CHAT_MSG_RAID_LEADER",
   "TRADE_SHOW",
@@ -90,6 +94,13 @@ export function describe(events: GameEvent[], self?: string, kinds?: Set<string>
     if (kinds && !kinds.has(e.event)) continue;
     // Said nearby: the planner hears it only when it is addressed by name (bots chatter in /say).
     if (kinds && e.event === "CHAT_MSG_SAY" && !(self && String(e.args[0]).toLowerCase().includes(self.toLowerCase()))) continue;
+    // An emote counts when aimed at us ("Pallytest waves at you.", or our name in a custom one);
+    // our own come back as "You wave at ...".
+    if (kinds && (e.event === "CHAT_MSG_TEXT_EMOTE" || e.event === "CHAT_MSG_EMOTE")) {
+      const text = String(e.args[0]);
+      const atUs = /\byou\b/i.test(text) || (self !== undefined && text.toLowerCase().includes(self.toLowerCase()));
+      if (!atUs || text.startsWith("You ") || (self && e.args[1] === self)) continue;
+    }
     const say = NOTABLE[e.event];
     const line = say?.(e.args);
     if (line) lines.push(line);

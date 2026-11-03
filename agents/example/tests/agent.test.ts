@@ -39,6 +39,19 @@ group("events a player would notice", () => {
     expect(lines).toEqual(["Shannon says: agenttwo, follow me", "[Party] Shannon: pull the next one"]);
   });
 
+  test("the planner hears emotes aimed at it, not other people's or its own", () => {
+    const lines = describe([
+      event(1, "CHAT_MSG_TEXT_EMOTE", ["Kobold Worker ponders Pallytest's actions.", "Kobold Worker"]),
+      event(2, "CHAT_MSG_TEXT_EMOTE", ["Pallytest waves at you.", "Pallytest"]),
+      event(3, "CHAT_MSG_TEXT_EMOTE", ["You wave at Pallytest.", "Agenttwo"]),
+      event(4, "CHAT_MSG_EMOTE", ["pokes Agenttwo with a stick.", "Pallytest"]),
+    ], "Agenttwo", PLANNER_EVENTS);
+    expect(lines).toEqual([
+      'Pallytest waves at you. (an emote; answer with DoEmote("wave", "Pallytest") or in chat)',
+      "Pallytest pokes Agenttwo with a stick. (an emote)",
+    ]);
+  });
+
   test("a game error that keeps coming back reaches the planner once, with its count", () => {
     const errors = new RepeatedErrors(3, 15_000, 60_000);
     const far = (seq: number) => event(seq, "UI_ERROR_MESSAGE", ["You are too far away!"]);

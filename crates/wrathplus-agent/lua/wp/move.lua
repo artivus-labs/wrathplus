@@ -1,10 +1,13 @@
 -- wp.move: getting to someone and staying with them, so the tiers above say who and where, not
 -- how. Loaded for every agent as the global `Move`. A unit is a party token ("party1"), a name
--- ("Pallytest") or a guid from AgentNearby.
+-- ("Pallytest", "Marshal Dughan") or a guid from AgentNearby.
 --
 --   Move.to(unit [, within])    walk up to a unit, even a moving one (routing again as it moves),
 --                               and stop within `within` yards (default: close enough to talk or
---                               trade). Ends as AGENT_MOVE_DONE (unit, "arrived" | "lost" | "failed").
+--                               trade). Ends as AGENT_MOVE_DONE (target, "arrived" | "lost" | "failed").
+--   Move.to(x, y [, z])         the same for a place (or a table { x =, y = [, z =] }): the navmesh
+--                               route, ending as AGENT_MOVE_DONE too. A name not in sight fails at
+--                               once (false, why): the client only knows what it can see.
 --   Move.follow(unit)           follow mode: keep within `follow_distance` of them (moving only
 --                               once they are `slack` yards further, as players do), go to where
 --                               they were last seen if they leave sight, and fight beside them:
@@ -15,7 +18,8 @@
 --   Move.mode, Move.state       "follow Pallytest" / "stay" / "to Marshal Dughan", and what it is
 --                               doing right now; Move.reached() for an intent's `until`.
 --
--- Grouped, the fast tier is offered two intents: follow_party_leader and stay_here.
+-- Grouped, the fast tier is offered two intents: follow_companion (Move.companion if set, else the
+-- party leader, else, when this agent leads, the first other member) and stay_here.
 
 local M = {
   mode = nil,
@@ -28,9 +32,11 @@ local M = {
   -- Out of sight this long (seconds) while going to them: lost.
   lose_after = 30,
   last = nil,
+  -- Whom the group's follow intent follows (a name); nil: the leader, or the first other member.
+  companion = nil,
 }
 
-local who, guid, anchor, aimed, seen, seen_at, started
+local who, guid, anchor, aimed, seen, seen_at, started, point
 
 local function far(a, b)
   return math.sqrt((a.x - b.x) ^ 2 + (a.y - b.y) ^ 2)
@@ -85,7 +91,7 @@ end
 
 local function finish(outcome)
   local name = who
-  M.mode, M.state, who, guid, aimed = nil, nil, nil, nil, nil
+  M.mode, M.state, who, guid, aimed, point = nil, nil, nil, nil, nil, nil
   M.last = { unit = name, outcome = outcome }
   halt()
   signal("MOVE_DONE", name, outcome)
@@ -97,10 +103,26 @@ local function set(mode, unit)
   M.mode, M.last = mode, nil
 end
 
-function M.to(unit, within)
+function M.to(unit, within, z)
+  -- A place: Move.to(x, y [, z]) or Move.to({ x =, y = [, z =] }).
+  if type(unit) == "number" or (type(unit) == "table" and unit.x) then
+    local p = type(unit) == "table" and unit or { x = unit, y = within, z = z }
+    set("to", string.format("(%d, %d)", p.x, p.y))
+    point, M.to_within = p, 3
+    local route, why = AgentMoveTo(p.x, p.y, p.z)
+    if not route then
+      finish("failed")
+      return false, why
+    end
+    return true
+  end
   set("to", unit)
-  M.to_within = within or M.within
-  return guid ~= nil
+  point, M.to_within = nil, within or M.within
+  if not guid then
+    finish("failed")
+    return false, tostring(unit) .. " is not in sight: walk closer, or give coordinates"
+  end
+  return true
 end
 
 function M.follow(unit)
@@ -167,6 +189,15 @@ local function tick(now)
     end
     return
   end
+  if M.mode == "to" and point then
+    local walk = AgentWalk()
+    local me = AgentPosition()
+    if me and far(me, point) <= M.to_within then return finish("arrived") end
+    if walk.status == "arrived" then return finish("arrived") end
+    if walk.status == "stuck" or walk.status == "failed" then return finish("failed") end
+    M.state = string.format("going to %s (%d yd)", who, me and far(me, point) or 0)
+    return
+  end
   guid = guid or resolve(who)
   local u = find(guid)
   if u then seen, seen_at = { x = u.x, y = u.y, z = u.z }, now end
@@ -210,19 +241,28 @@ frame:SetScript("OnUpdate", function(_, dt)
   if M.mode then tick(GetTime()) end
 end)
 
+-- Whom the group follows: the companion named, else the leader, else (leading ourselves) the
+-- first other member.
+function M.companion_now()
+  if (GetNumPartyMembers() or 0) == 0 then return nil end
+  if M.companion then
+    for i = 1, 4 do
+      if same(UnitName("party" .. i), M.companion) then return UnitName("party" .. i) end
+    end
+  end
+  local i = GetPartyLeaderIndex and GetPartyLeaderIndex() or 0
+  return UnitName("party" .. (i > 0 and i or 1))
+end
+
 -- Grouped, the fast tier may put the agent in follow mode or have it hold a spot by itself.
 if Agent and Agent.intent then
-  local function leader()
-    local i = GetPartyLeaderIndex and GetPartyLeaderIndex() or 0
-    if (GetNumPartyMembers() or 0) > 0 and i > 0 then return "party" .. i end
-  end
-  Agent.intent("follow_party_leader", {
+  Agent.intent("follow_companion", {
     when = function()
-      return "In a party: follow the leader (" .. tostring(UnitName(leader() or "") or "?")
-        .. "), staying close and fighting beside them."
+      return "In a party: follow " .. tostring(M.companion_now() or "?")
+        .. ", staying close and fighting beside them."
     end,
-    available = function() return leader() ~= nil end,
-    run = function() M.follow(UnitName(leader())) end,
+    available = function() return M.companion_now() ~= nil end,
+    run = function() M.follow(M.companion_now()) end,
     done = function() return M.mode ~= "follow" end,
   })
   Agent.intent("stay_here", {

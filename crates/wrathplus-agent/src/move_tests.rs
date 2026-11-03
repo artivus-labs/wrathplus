@@ -17,7 +17,7 @@ AgentNearby = function()
 end
 AgentPosition = function() return me end
 AgentWalk = function() return { status = walking and "walking" or "arrived" } end
-AgentMoveTo = function(x, y) calls[#calls + 1] = string.format("move %d,%d", x, y) walking = true end
+AgentMoveTo = function(x, y) calls[#calls + 1] = string.format("move %d,%d", x, y) walking = true return {} end
 AgentStop = function() calls[#calls + 1] = "stop" walking = false end
 UnitExists = function(u) return u == "party1" or u == "player" end
 UnitGUID = function(u) if u == "party1" then return "0xP" elseif u == "player" then return "0xME" end end
@@ -105,15 +105,53 @@ fn going_to_a_moving_unit_arrives_within_reach() {
 #[test]
 fn grouped_the_fast_tier_is_offered_follow_and_stay() {
     let script = moving();
-    let offered: String = script
-        .eval(
-            "local out = {} for _, i in ipairs(Agent.available()) do out[#out + 1] = i.name .. ': ' .. i.when end \
-             return table.concat(out, ' / ')",
-        )
-        .unwrap();
+    let offered = |script: &UiScript| -> String {
+        script
+            .eval(
+                "local out = {} for _, i in ipairs(Agent.available()) do out[#out + 1] = i.name .. ': ' .. i.when end \
+                 return table.concat(out, ' / ')",
+            )
+            .unwrap()
+    };
     assert_eq!(
-        offered,
-        "follow_party_leader: In a party: follow the leader (Pallytest), staying close and fighting beside them. / \
+        offered(&script),
+        "follow_companion: In a party: follow Pallytest, staying close and fighting beside them. / \
          stay_here: Wait at this spot: fight what attacks you, but don't wander."
     );
+    // Leading the party itself, it follows the first other member; a companion named wins.
+    script
+        .run(
+            "GetPartyLeaderIndex = function() return 0 end GetNumPartyMembers = function() return 2 end \
+             UnitName = function(u) return ({ party1 = 'Pallytest', party2 = 'Agentone' })[u] end",
+        )
+        .unwrap();
+    assert!(offered(&script).starts_with("follow_companion: In a party: follow Pallytest,"));
+    script.run("Move.companion = 'agentone'").unwrap();
+    assert!(offered(&script).starts_with("follow_companion: In a party: follow Agentone,"));
+}
+
+#[test]
+fn going_to_a_place_or_a_name_not_in_sight() {
+    let mut script = moving();
+    let (ok, why): (bool, Option<String>) =
+        script.eval("return Move.to('Marshal Dughan')").unwrap();
+    assert!(!ok);
+    assert_eq!(
+        why.as_deref(),
+        Some("Marshal Dughan is not in sight: walk closer, or give coordinates")
+    );
+    assert!(script.eval::<bool>("return Move.mode == nil").unwrap());
+    // A place: the route, then arrival when the walk does.
+    assert!(script.eval::<bool>("return Move.to(-9460, 64)").unwrap());
+    assert!(
+        calls(&script).ends_with("move -9460,64"),
+        "{}",
+        calls(&script)
+    );
+    script.tick(0.3);
+    assert_eq!(state(&script), "going to (-9460, 64) (9460 yd)");
+    script.run("walking = false").unwrap();
+    script.tick(0.3);
+    let (over, arrived): (bool, bool) = script.eval("return Move.reached()").unwrap();
+    assert!(over && arrived);
 }
