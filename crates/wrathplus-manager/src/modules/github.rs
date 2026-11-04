@@ -28,7 +28,7 @@ pub(super) fn normalize(input: &str) -> Result<String> {
     validate_name(repo)?;
     Ok(format!("{}/{repo}", parts[0]))
 }
-fn git(home: &Path) -> Command {
+pub(super) fn git(home: &Path) -> Command {
     let mut cmd = Command::new("git");
     // Inherited GIT_CONFIG_COUNT, URL rewrites, credentials, askpass, proxies and
     // loader variables must not reach the import process. Only PATH is retained.

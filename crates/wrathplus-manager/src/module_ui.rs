@@ -1,9 +1,11 @@
 //! Native server-module catalog UI. Selection changes the next build, never a running realm.
 mod actions;
+mod presets;
 mod standard;
 use crate::{modules, style, Manager, Message};
 use iced::widget::{button, checkbox, column, container, row, text, text_input, Column};
 use iced::{Element, Fill};
+pub(crate) use presets::Preset;
 pub(crate) use standard::STANDARD;
 
 #[derive(Default)]
@@ -22,6 +24,8 @@ pub(crate) enum Input {
     AddStandard(usize),
     OpenRepository(&'static str),
     Toggle(usize, bool),
+    /// Select a server type's modules for the next build, adding standard ones it lacks.
+    Preset(Preset),
     Finished(Result<String, String>),
 }
 impl Manager {

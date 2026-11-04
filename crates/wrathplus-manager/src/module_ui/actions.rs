@@ -21,6 +21,9 @@ impl Manager {
         if self.module_state.busy || !self.server_state.module_editable() {
             return iced::Task::none();
         }
+        if let Input::Preset(preset) = input {
+            return self.apply_preset(preset);
+        }
         let standard_add = matches!(input, Input::AddStandard(_));
         // A standard module is the same import as a typed source: its known repository, or its
         // folder in this checkout.
@@ -83,5 +86,59 @@ impl Manager {
                 iced::Task::none()
             }
         }
+    }
+}
+
+impl Manager {
+    /// Make the catalog match a server type, off the UI thread: adding a standard module may import
+    /// it from GitHub. The selection changes the next build, never a running realm.
+    fn apply_preset(&mut self, preset: Preset) -> iced::Task<Message> {
+        let config = self.config.clone();
+        let core = self.server_state.module_source().to_owned();
+        if core.as_os_str().is_empty() {
+            self.module_state.notice =
+                "Get the server source first; a server type selects modules from it.".into();
+            return iced::Task::none();
+        }
+        self.module_state.busy = true;
+        self.module_state.notice = format!("Selecting {}…", preset.title());
+        let (sender, receiver) = iced::futures::channel::oneshot::channel();
+        std::thread::spawn(move || {
+            let result = std::panic::catch_unwind(|| -> Result<String, String> {
+                let mut catalog = modules::Catalog::load(&config, &core)?;
+                let change = presets::plan(catalog.entries(), preset);
+                for name in &change.add {
+                    match STANDARD.iter().find(|m| m.name == *name).map(|m| &m.origin) {
+                        Some(standard::Origin::Github(repository)) => {
+                            catalog.import_github(&config, repository)?
+                        }
+                        Some(standard::Origin::Bundled(folder)) => {
+                            catalog.register_local(&config.repo.join(folder))?
+                        }
+                        None => return Err(format!("{name} is not a standard module")),
+                    }
+                    // Keep each import recorded even if a later one fails.
+                    catalog.save(&config)?;
+                }
+                for name in &change.enable {
+                    catalog.set_enabled(name, true)?;
+                }
+                for name in &change.disable {
+                    catalog.set_enabled(name, false)?;
+                }
+                catalog.save(&config)?;
+                Ok(preset.saved().into())
+            })
+            .unwrap_or_else(|_| Err("Selecting the server type stopped unexpectedly".into()));
+            let _ = sender.send(result);
+        });
+        iced::Task::perform(
+            async {
+                receiver
+                    .await
+                    .unwrap_or_else(|_| Err("Selecting the server type stopped".into()))
+            },
+            |r| Message::Modules(Input::Finished(r)),
+        )
     }
 }

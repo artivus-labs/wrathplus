@@ -185,12 +185,24 @@ The **Server** page builds and runs a private AzerothCore 3.3.5a realm with Play
 from any other server on the machine. It needs **Docker Desktop** (or Docker Engine with Compose
 v2 on Linux); if Docker is missing or stopped the page says so, and **Start Docker** opens it.
 
-1. Choose an AzerothCore source folder (the Playerbot branch) and your extracted server data
-   (`dbc`, `maps`, `vmaps`, optionally `mmaps`; not the client MPQs).
-2. Pick modules under **Addons → Server modules**: the standard ones are one click each.
+Its *Set up your own server* card walks a fresh install through these steps in order:
+
+1. **Get server source** downloads the Playerbot branch of AzerothCore and mod-playerbots, at the
+   revisions the build checks, into the Manager's state folder and selects it.
+2. Choose a **server type**: *Playerbots (recommended)*, *Playerbots + Chatter* (bots talk through
+   a language model you configure under **Addons → Server modules**) or *Plain AzerothCore*.
+   **Advanced** opens the full module list, where the standard modules are one click each.
 3. **Build** the server image. The first build can take over an hour.
-4. **Start**. The realm listens on `127.0.0.1:13724`; **Use this server for the client** points
+4. **Prepare server data** runs AzerothCore's own extractors from the built image on your client's
+   Data folder (mounted read-only, no network) and selects the result (`dbc`, `maps`, `vmaps`).
+   **Make navigation meshes** adds `mmaps` afterwards; it takes hours, the realm can run meanwhile,
+   and a stopped run continues where it left off. Restart the server to use them.
+5. **Start**. The realm listens on `127.0.0.1:13724`; **Use this server for the client** points
    the client at it. Stopping keeps characters, progress and the database.
+
+Already have a clean checkout or extracted data? Enter the folders under **Server files
+(advanced)** instead. Without the window, `wrathplus-manager --get-server-source`,
+`--prepare-server-data` and `--make-navmesh [MAP[,X,Y]]` run the same steps.
 
 The recipe behind the page, its isolation and credential handling are in
 [`packaging/server/README.md`](../packaging/server/README.md).

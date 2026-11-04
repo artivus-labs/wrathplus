@@ -103,7 +103,8 @@ impl Manager {
             status = status.push(text(error).color(style::GOLD));
         }
         let settings = column![
-            text("Server files").size(18),
+            text("Server files (advanced)").size(18),
+            text("Set up by the steps above. Already have a clean AzerothCore Playerbot checkout or extracted server data? Enter their folders here instead.").size(13).color(style::MUTED),
             text("Source folder").size(13),
             text_input("AzerothCore source folder", &state.source)
                 .on_input_maybe(editable.then_some(|v| Message::Server(Input::Source(v))))
@@ -131,14 +132,16 @@ impl Manager {
             button(state.build.label())
                 .on_press_maybe(state.build.input(editable).map(Message::Server)),
         );
-        column![
-            card(status),
-            self.transfer_card(),
-            card(settings),
-            card(build),
-            state.build_feedback_view()
-        ]
-        .spacing(14)
-        .into()
+        let mut page = iced::widget::Column::new().spacing(14);
+        if let Some(guide) = self.server_guide() {
+            page = page.push(guide);
+        }
+        page.push(card(status))
+            .push(self.transfer_card())
+            .push(card(self.server_types()))
+            .push(card(build))
+            .push(state.build_feedback_view())
+            .push(card(settings))
+            .into()
     }
 }

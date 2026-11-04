@@ -7,8 +7,12 @@ mod characters_tests;
 mod characters_ui;
 mod chatter;
 mod command;
+mod data_prep;
 mod docker;
+mod guide;
 mod settings;
+mod setup_job;
+mod source;
 mod status;
 #[cfg(test)]
 mod status_tests;
@@ -18,7 +22,9 @@ mod ui;
 mod worker;
 
 use crate::{Manager, Message};
+pub(crate) use data_prep::Navmesh;
 use settings::Settings;
+pub use setup_job::SetupTask;
 use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
 use std::time::Instant;
@@ -45,6 +51,9 @@ pub enum Input {
     ToggleLogs,
     BuildLogs,
     Transfer(characters_ui::TransferInput),
+    /// Start a first-install task (source, data or navigation meshes).
+    Setup(SetupTask),
+    SetupFinished(SetupTask, Result<String, String>),
 }
 pub struct Server {
     settings: Settings,
@@ -71,6 +80,10 @@ pub struct Server {
     /// An action pressed while a status check was in flight; it runs when the check returns.
     queued: Option<Action>,
     transfer: characters_ui::Transfer,
+    /// The first-install task running beside server operations, if any.
+    job: Option<setup_job::Job>,
+    /// How the last first-install task ended.
+    job_result: Option<setup_job::Finished>,
 }
 impl Default for Server {
     fn default() -> Self {
@@ -99,6 +112,8 @@ impl Default for Server {
             next_refresh: None,
             queued: None,
             transfer: characters_ui::Transfer::default(),
+            job: None,
+            job_result: None,
         }
     }
 }
@@ -128,9 +143,11 @@ impl Server {
                     worker::Event::Health(health) => self.health = health,
                     worker::Event::Build(build) => self.build = build,
                     worker::Event::Docker(docker) => self.docker = docker,
+                    worker::Event::Source(_) | worker::Event::Data(_) => {}
                 }
             }
         }
+        self.refresh_job();
         self.pulse = (self.pulse + 1) % 20;
         if let Some(path) = &self.log_path {
             match worker::tail(path) {
@@ -285,6 +302,8 @@ impl Manager {
                 state.next_refresh = Some(Instant::now() + std::time::Duration::from_secs(3));
             }
             Input::Transfer(input) => return self.transfer_update(input),
+            Input::Setup(task) => return self.setup_start(task, Navmesh::All),
+            Input::SetupFinished(task, result) => self.setup_finished(task, result),
             Input::BuildLogs => state.build_feedback.toggle(),
             Input::ToggleLogs => state.show_logs = !state.show_logs,
             Input::Connect => {
@@ -316,4 +335,13 @@ pub(crate) fn mmaps(config: &crate::setup::Config) -> Option<std::path::PathBuf>
     let data = settings::Settings::load(config).ok()?.data;
     let dir = data.join("mmaps");
     (!data.as_os_str().is_empty() && dir.is_dir()).then_some(dir)
+}
+
+/// Run a first-install task from the command line (see `--get-server-source`).
+pub(crate) fn run_setup_cli(
+    config: crate::setup::Config,
+    task: SetupTask,
+    scope: Navmesh,
+) -> Result<String, String> {
+    setup_job::run_cli(config, task, scope)
 }

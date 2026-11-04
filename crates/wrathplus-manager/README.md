@@ -1,5 +1,28 @@
 # WrathPlus Manager
 
+## First run
+
+1. **Install.** Build and open the Manager: `make launcher`, then `make run`. The platform
+   prerequisites (Rust, Git, a C toolchain; Docker for a local server) are in
+   [`docs/CLIENT-SETUP.md`](../../docs/CLIENT-SETUP.md).
+2. **Client assets.** On **Client**, choose the **Data** folder of your own WoW 3.3.5a
+   (build 12340) install and validate it, then **Build client**. No game files are supplied.
+3. **Local server** (optional; skip it to play on an existing realm). Start Docker, open
+   **Server** and follow *Set up your own server* from the top:
+   - **Get server source** downloads AzerothCore with Playerbots (about 1 GB, a minute or two).
+   - Choose a **server type** (*Playerbots* is recommended) and **Build**; the first build takes
+     about an hour.
+   - **Prepare server data** reads maps from your client (a few minutes, about 1 GB).
+   - **Start**, then **Use this server for the client**.
+   - Optionally **Make navigation meshes** so bots and agents find their way (several hours;
+     you can play meanwhile, then restart the server).
+4. **Play.** On **Play**, press **Launch game** and log in with an account on that realm. (The
+   Manager cannot yet create a player account on the local realm.)
+
+The rest of this page is detail for each part.
+
+## Detail
+
 Native Rust/Iced desktop Manager. **Client setup is operational**: validate a user-provided,
 legally obtained 3.3.5a/build 12340 Data folder, compile the player client, persist setup and launch
 it on an explicit click. The GUI and `--setup` CLI use the same Rust setup operations.

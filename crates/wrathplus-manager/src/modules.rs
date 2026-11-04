@@ -214,6 +214,11 @@ impl Catalog {
 pub(crate) fn normalize_repository(input: &str) -> Result<String> {
     github::normalize(input)
 }
+/// A `git` command with the import isolation (no inherited config, credentials, hooks or
+/// protocols other than HTTPS), for the server source download. `home` is its private HOME.
+pub(crate) fn isolated_git(home: &Path) -> std::process::Command {
+    github::git(home)
+}
 /// Reload persisted choices for each build. Does not write, fetch, stage or execute code.
 pub(crate) fn prepare(config: &Config, core_path: &Path) -> Result<BuildPlan> {
     Catalog::load(config, core_path)?.build_plan()
