@@ -437,8 +437,14 @@ fn traceback_frame(d: &mlua::Debug) -> String {
     // A tail call has nothing to name it from and takes the `" ?"` arm, known by its `what` or as
     // the `(tail call)` pseudo-frame.
     let tail_call = src.what == "t" || short == "(tail call)";
+    // Named only for a global, local, method or field (`0x817b1f`, `namewhat`'s first byte); an
+    // upvalue call takes the `<file:line>` arm.
+    let named = matches!(
+        names.name_what.and_then(|w| w.bytes().next()),
+        Some(b'f' | b'g' | b'l' | b'm')
+    );
     match names.name.as_deref() {
-        Some(name) if !name.is_empty() && !tail_call => {
+        Some(name) if !name.is_empty() && named && !tail_call => {
             line.push_str(" in function `");
             line.push_str(name);
             line.push('\'');

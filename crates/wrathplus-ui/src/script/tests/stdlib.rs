@@ -82,6 +82,10 @@ fn stdlib_aliases_and_helpers() {
         is("false|bad argument #1 to 'strjoin' (string expected, got nil)", pcall(strjoin, nil, "a"))
         is("false|bad argument #2 to 'strsplit' (string expected, got no value)", pcall(strsplit, ","))
         is("nil|nil", fastrandom, bit.tobit)
+        -- `debugstack` names a global, local, method or field call (`0x817b1f`), not an upvalue's.
+        local function f() local t = debugstack(1, 1, 0) return t end
+        local function g() local t = f() return t end
+        is("true", g():find("^[^\n]* in function <[^\n]*>\n") ~= nil)
         "#,
     );
     assert_eq!(misses, "");
