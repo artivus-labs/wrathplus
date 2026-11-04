@@ -9,7 +9,8 @@
 --   Combat.engaged(guid) for an intent's done: true once that fight is over (and the outcome).
 --   Combat.defend        (default true) with no fight of its own, engage whatever is attacking you;
 --                        and while chasing a target out of reach, turn on one already hitting you.
---                        Set it false to run away (Combat.stop() alone would be re-engaged).
+--                        Set it false to run away (Combat.stop() alone would be re-engaged). A
+--                        walk such a fight broke off is walked on once it is won.
 --
 -- The end of a fight is signalled as AGENT_COMBAT_DONE (guid, "killed" | "lost" | "stopped" |
 -- "died"). Combat.history keeps the last fights ({ name, outcome, seconds, hp_lost }); every
@@ -71,6 +72,9 @@ local function review(reason)
   return text
 end
 
+-- The goal of a walk a defensive fight broke off, to walk on to after it.
+local resume
+
 local function done(outcome)
   local guid = C.active
   local seconds = started and math.floor(GetTime() - started) or 0
@@ -83,6 +87,10 @@ local function done(outcome)
     C.fights = C.fights + 1
   end
   if AgentStop then AgentStop() end
+  if resume and (outcome == "killed" or outcome == "lost") then
+    AgentMoveTo(resume[1], resume[2], resume[3])
+  end
+  resume = nil
   if Agent and Agent.signal then
     Agent.signal("COMBAT_DONE", guid, outcome)
     if outcome == "died" then
@@ -146,8 +154,10 @@ local function tick(now)
     -- Something else is already hitting us while we chase: fight that one first.
     local other = attacker(C.reach + 1, C.active)
     if other then
+      local walk_on = resume
       done("stopped")
       C.engage(other.guid)
+      resume = walk_on
       return
     end
   end
@@ -202,7 +212,11 @@ frame:SetScript("OnUpdate", function(_, dt)
   elseif C.defend and not UnitIsDeadOrGhost("player") then
     -- Attacked with no fight of our own (resting, walking, between pulls): fight back.
     local foe = attacker(30)
-    if foe then C.engage(foe.guid) end
+    if foe then
+      local walk = AgentWalk()
+      C.engage(foe.guid)
+      resume = walk and walk.status == "walking" and walk.goal or nil
+    end
   end
 end)
 

@@ -109,3 +109,20 @@ fn attacked_with_no_fight_of_its_own_it_fights_back_and_turns_on_a_closer_attack
         "0xW"
     );
 }
+
+#[test]
+fn a_walk_a_defensive_fight_broke_off_is_walked_on_after_it() {
+    let mut script = combat();
+    script
+        .run(
+            "UnitGUID = function() return '0xME' end \
+             walking = true AgentWalk = function() return { status = walking and 'walking' or 'arrived', goal = { -8880, 600, 90 } } end \
+             wolf.distance, wolf.in_combat, wolf.target, wolf.reaction = 2, true, '0xME', 'hostile'",
+        )
+        .unwrap();
+    script.tick(0.25);
+    script.tick(0.25);
+    script.run("calls = {} wolf.dead = true").unwrap();
+    script.tick(0.25);
+    assert_eq!(calls(&script), "stop | move -8880");
+}
