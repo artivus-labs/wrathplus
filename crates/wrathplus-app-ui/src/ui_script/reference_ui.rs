@@ -172,6 +172,18 @@ pub(super) mod fixture {
     }
 }
 
+/// The defaults' modes 2-4: [`DEFAULT_BINDINGS`]'s lines after a `BINDINGMODE` line
+/// (`0x5641c0`), none when the chain lacks the file.
+pub(crate) fn default_binding_layers() -> Vec<(u32, String, String)> {
+    read(DEFAULT_BINDINGS)
+        .map(|bytes| {
+            wrathplus_ui::script::keybind::parse_bindings_wtf_layers(&String::from_utf8_lossy(
+                &bytes,
+            ))
+        })
+        .unwrap_or_default()
+}
+
 #[cfg(test)]
 #[path = "reference_ui_producers.rs"]
 mod producers;

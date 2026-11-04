@@ -223,21 +223,25 @@ fn save_dirty_macros(script: Option<NonSendMut<UiScript>>, files: Res<MacroFiles
     }
 }
 
-/// Recompute every macro's bound spell when the macro table or the spell book changes: gated on
-/// the engine's macro generation and on change detection over the action store.
+/// Recompute every macro's bound spell when the macro table, a `SetMacroSpell`/`SetMacroItem` pair
+/// or the spell book changes: gated on the engine's two generations and on change detection over
+/// the action store.
 fn rebind_macro_spells(
     script: Option<NonSendMut<UiScript>>,
     actions: Res<crate::app_core::state::PlayerActions>,
     table: Option<Res<crate::ui_chat::commands::SlashCommands>>,
     mut bound: ResMut<MacroBoundSpells>,
-    mut last_generation: Local<crate::app_core::vm_memo::VmMemo<Option<u64>>>,
+    mut last_generation: Local<crate::app_core::vm_memo::VmMemo<Option<(u64, u64)>>>,
 ) {
     let (Some(mut script), Some(table)) = (script, table) else {
         return;
     };
     // Per VM: a fresh VM restarts its generation at 0, which a bare memo would gate off for good.
     let last_generation = last_generation.get(&script);
-    let generation = script.macros_generation();
+    let generation = (
+        script.macros_generation(),
+        script.macro_explicit_generation(),
+    );
     if *last_generation == Some(generation) && !actions.is_changed() {
         return;
     }
@@ -250,7 +254,7 @@ fn rebind_macro_spells(
         fresh.insert(m.id, run::bound_spell(&table, &m.body, &book));
     }
     // A `SetMacroSpell`/`SetMacroItem` pair replaces the body's (the record leaves the re-derive
-    // list, `0x565ad0`), and both setters refresh the bar's slots for the macro (`0x5aa920`).
+    // list, `0x565ad0`); the setters fire their slots' `ACTIONBAR_SLOT_CHANGED` (`0x5aa920`).
     let explicit = script.macro_explicit_binds();
     for (id, e) in &explicit {
         if let Some(b) = fresh.get_mut(id) {

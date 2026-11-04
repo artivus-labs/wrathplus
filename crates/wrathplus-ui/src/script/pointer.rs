@@ -562,7 +562,7 @@ impl UiScript {
         // the same click sound: its firer `0x779650` is the twin of `OnClick`'s `0x779540` and
         // passes only the button name of the completing release.
         if let Some(id) = double_id {
-            if let Err(e) = button::fire_clicked(&self.lua, id, "OnDoubleClick", button, &btn) {
+            if let Err(e) = button::double_click(&self.lua, id, button, &btn) {
                 self.push_error(e);
             }
         }

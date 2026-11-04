@@ -3,10 +3,9 @@
 //! `SetBindingClick`, `SetBindingSpell`, `SetBindingItem` and `SetBindingMacro` format a command
 //! (`CLICK %s:%s`, `SPELL %s`, `ITEM %s`, `MACRO %s`) and store it as `SetBinding` does
 //! (`0x562ed0`), so the key runs it through the dispatcher's form runner ([`run_form`],
-//! the binding runner `0x563150`). Each answers 1 on a stored key, else nil; the reference then
-//! fires `UPDATE_BINDINGS` (`0x81b530(0x177)`), which here the app fires when it re-derives
-//! dispatch. Labelled: the trailing `mode` (1..=4, a binding set) is read and ignored, as
-//! `GetBinding`'s is, since this VM keeps one set; and the protected gate (`0x5191c0(0xd)`) has
+//! the binding runner `0x563150`). Each stores in the trailing `mode` (1-4, default 1,
+//! [`super::wrath_binding_modes`]) and on a stored key fires `UPDATE_BINDINGS` in the call
+//! (`0x81b530(0x177)`) and answers 1, else nil. Labelled: the protected gate (`0x5191c0(0xd)`) has
 //! no counterpart in this trusted UI.
 
 use mlua::{Lua, MultiValue, Value};
@@ -38,10 +37,11 @@ fn text(lua: &Lua, v: Option<&Value>) -> mlua::Result<Option<String>> {
 }
 
 /// One setter: keys and the name argument must be strings or numbers, else `usage`; `form` builds
-/// the command from the arguments.
+/// the command from the arguments, and argument `mode_at` (0-based) picks the mode, default 1.
 fn install_form(
     lua: &Lua,
     name: &str,
+    mode_at: usize,
     usage: &'static str,
     form: fn(&Lua, &MultiValue, String) -> mlua::Result<String>,
 ) -> mlua::Result<()> {
@@ -52,9 +52,13 @@ fn install_form(
                 return Err(mlua::Error::runtime(usage));
             };
             let command = form(lua, &args, arg)?;
-            let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-            let stored = model.keybinds.set_binding(&key, Some(&command));
-            Ok(super::binding_abi::flag(stored))
+            let mode = super::wrath_binding_modes::mode_arg(lua, args.get(mode_at), 0);
+            Ok(super::wrath_binding_modes::store_and_announce(
+                lua,
+                mode,
+                &key,
+                Some(&command),
+            ))
         })?,
     )
 }
@@ -245,6 +249,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     install_form(
         lua,
         "SetBindingClick",
+        3,
         "Usage: SetBindingClick(\"KEY\", \"buttonName\"[, \"mouseButton\"][, mode])",
         |lua, args, button| {
             let mouse = text(lua, args.get(2))?.unwrap_or_else(|| "LeftButton".into());
@@ -255,6 +260,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     install_form(
         lua,
         "SetBindingSpell",
+        2,
         "Usage: SetBindingSpell(\"KEY\", \"spellname\"[, mode])",
         |_, _, spell| Ok(format!("SPELL {spell}")),
     )?;
@@ -262,6 +268,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     install_form(
         lua,
         "SetBindingItem",
+        2,
         "Usage: SetBindingItem(\"KEY\", \"itemname\"[, mode])",
         |_, _, item| Ok(format!("ITEM {item}")),
     )?;
@@ -270,15 +277,19 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     install_form(
         lua,
         "SetBindingMacro",
+        2,
         "Usage: SetBindingMacro(\"KEY\", \"macroname\"|macroid[, mode])",
         |_, _, m| Ok(format!("MACRO {m}")),
     )?;
 
     // `SetMouselookOverrideBinding("key", "binding" or nil)` (`0x5fd550` → `0x5fd440`): set the
-    // key's command in the mouselook table, or with no command drop it; no results. Inferred:
-    // dispatch probes the table first while mouselooking (its reader is not decompiled). The key
-    // is stored upper-cased, unvalidated, as the reference stores the raw string. Deviation: a
-    // change bumps the binding generation, so the app's re-derive fires `UPDATE_BINDINGS`.
+    // key's command in the mouselook table, or with no command drop it; no results and no
+    // `UPDATE_BINDINGS` (neither function fires one). The key is stored upper-cased, unvalidated,
+    // as the reference stores the raw string; a change bumps the binding generation so dispatch
+    // re-derives. Inferred: dispatch probes the table first while mouselooking. Its reader was not
+    // found: the setter is the only caller of the table's find-or-insert (`0x5fd370`) and the only
+    // `[0xc24954]+0x1c` lookup through `0x55f4d0`, and no read of `[0xc24954]` (in a function or
+    // not) nor the mouse pre-binding handlers (`0x51fb00`, `0x8e5250`) touch it.
     lua.globals().set(
         "SetMouselookOverrideBinding",
         lua.create_function(|lua, args: MultiValue| {
@@ -333,7 +344,12 @@ mod tests {
         let keys = s.binding_keys();
         let bound = |key: &str| keys.iter().find(|(k, _)| k == key).map(|(_, c)| c.clone());
         assert_eq!(bound("F").as_deref(), Some("CLICK MyButton:LeftButton"));
-        assert_eq!(bound("G").as_deref(), Some("CLICK MyButton:RightButton"));
+        assert_eq!(bound("G"), None, "mode 2 is not mode 1");
+        assert_eq!(
+            s.eval::<String>("return GetBindingAction('G', nil, 2)")
+                .unwrap(),
+            "CLICK MyButton:RightButton"
+        );
         assert_eq!(bound("CTRL-H").as_deref(), Some("SPELL Holy Light"));
         assert_eq!(bound("J").as_deref(), Some("ITEM Hearthstone"));
         assert_eq!(bound("K").as_deref(), Some("MACRO 3"));

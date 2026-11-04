@@ -136,6 +136,13 @@ mod tests {
     #[test]
     fn overrides_lay_over_the_live_keys_by_priority_and_clear_per_owner() {
         let s = UiScript::new().unwrap();
+        // Dispatch keeps a declared command or a form only (`0x562140`).
+        s.register_bindings(
+            &crate::bindings_xml::parse(
+                r#"<Bindings><Binding name="TOGGLEAUTORUN">x()</Binding></Bindings>"#,
+            )
+            .unwrap(),
+        );
         s.run("A = CreateFrame('Frame') B = CreateFrame('Frame')")
             .unwrap();
         let before = s.keybinds_generation();

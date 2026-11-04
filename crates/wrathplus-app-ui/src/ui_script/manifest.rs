@@ -543,9 +543,9 @@ mod tests {
             );
         }
         assert_eq!(
-            s.eval::<String>(r#"return GetBindingAction("CTRL-Y")"#)
+            s.eval::<String>(r#"return GetBindingKey("TOGGLESTATS")"#)
                 .unwrap(),
-            "TOGGLESTATS",
+            "CTRL-Y",
             "a default key on a command the file never declared is still the key table's"
         );
     }

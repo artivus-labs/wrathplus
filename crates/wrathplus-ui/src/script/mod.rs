@@ -207,6 +207,7 @@ mod worn_display;
 mod wrath_achievements;
 mod wrath_base_helpers;
 mod wrath_binding_forms;
+mod wrath_binding_modes;
 mod wrath_currency;
 mod wrath_cvar_flags;
 mod wrath_equipment;
@@ -715,6 +716,7 @@ impl UiScript {
         cvars::install(&lua)?;
         saved::install(&lua)?;
         keybind::install(&lua)?;
+        wrath_binding_modes::install(&lua)?;
         sound::install(&lua)?;
         ui_errors::install(&lua)?;
         pointer::install(&lua)?;
