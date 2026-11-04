@@ -295,3 +295,65 @@ fn dismount_clears_the_mount_locally_until_the_display_moves() {
         .eval::<bool>("Dismount() return IsMounted() == 1")
         .unwrap());
 }
+
+#[test]
+fn a_name_splits_at_target_and_pet_suffixes_only() {
+    assert_eq!(split_name("Bob-target"), ("Bob", "-target"));
+    assert_eq!(split_name("Bob-PET"), ("Bob", "-PET"));
+    assert_eq!(split_name("Bob-pet-target"), ("Bob", "-pet-target"));
+    assert_eq!(split_name("Bob-Realm-target-"), ("Bob-Realm", "-target-"));
+    // `-targettarget` is neither the whole `-target` nor `-target-`, so it stays in the name.
+    assert_eq!(split_name("Bob-targettarget"), ("Bob-targettarget", ""));
+    let long = "x".repeat(60);
+    assert_eq!(split_name(&long), (&long[..48], &long[48..]));
+    assert_eq!(
+        suffix_hops("-target-pettarget"),
+        Some(vec![Hop::Target, Hop::Pet, Hop::Target])
+    );
+    assert_eq!(suffix_hops("TARGETpet"), Some(vec![Hop::Target, Hop::Pet]));
+    assert_eq!(suffix_hops(""), Some(vec![]));
+    assert_eq!(suffix_hops("-"), None);
+    assert_eq!(suffix_hops("-focus"), None);
+}
+
+#[test]
+fn a_pet_hop_names_our_or_a_group_members_pet_only() {
+    let mut s = vm();
+    let named = |guid, name: &str| UnitState {
+        name: Some(name.into()),
+        ..unit(guid, 80)
+    };
+    s.set_unit("player", Some(named(1, "Me")));
+    s.set_unit("pet", Some(named(2, "Fido")));
+    s.set_unit("party1", Some(named(0x21, "Bob")));
+    s.set_unit("partypet1", Some(named(0x22, "Rex")));
+    s.set_unit("party2", Some(named(0x31, "Ann-Realm")));
+    s.set_party(PartyState {
+        own_guid: 1,
+        members: [0x21, 0x31]
+            .map(|guid| PartyMemberInfo {
+                guid,
+                ..Default::default()
+            })
+            .to_vec(),
+        ..Default::default()
+    });
+    let speed = |speed| WrathUnitExtra {
+        speed,
+        ..Default::default()
+    };
+    s.set_wrath_unit_extras(HashMap::from([
+        (2, speed(9.0)),
+        (0x22, speed(6.0)),
+        (0x31, speed(3.0)),
+    ]));
+    assert_eq!(
+        s.eval::<(f64, f64, f64, f64, f64, f64)>(
+            "return GetUnitSpeed('me-pet'), GetUnitSpeed('BOB-PET'), GetUnitSpeed('ann-realm'), \
+             GetUnitSpeed('Fido-pet'), GetUnitSpeed('Bob-pets'), GetUnitSpeed('Ann-Realm-pet')"
+        )
+        .unwrap(),
+        // A pet has no pet hop (not a group member), `-pets` is no hop, and Ann has no pet.
+        (9.0, 6.0, 3.0, 0.0, 0.0, 0.0)
+    );
+}
