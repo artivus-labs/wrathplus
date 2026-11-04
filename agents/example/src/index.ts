@@ -102,6 +102,7 @@ export async function runAgent(config: Config, options: RunOptions): Promise<voi
         token: config.token,
         jev: new Jev(process.env.TYPESAFE_API_KEY, process.env.WRATHPLUS_JEV_MODEL ?? "jev-latest"),
         heartbeatMs: Number(process.env.WRATHPLUS_JEV_HEARTBEAT_MS ?? 20_000),
+        goal: config.goal,
         onNotify: (summary) => tell("fast loop", summary),
         log: (line) => console.log(line),
       })
@@ -156,7 +157,7 @@ export async function runAgent(config: Config, options: RunOptions): Promise<voi
     self: () => self,
     party: () => party,
     npcReplies: process.env.WRATHPLUS_AGENT_NPC_REPLIES !== "0",
-    ...(triage ? { triage: async (request) => triage.handle(request, await statusLine(config.url, config.token)) } : {}),
+    ...(triage ? { triage: async (request) => triage.handle(request, await statusLine(config.url, config.token), policy?.plan) } : {}),
     onHandled: (note) => {
       handled = [...handled, note].slice(-8);
     },

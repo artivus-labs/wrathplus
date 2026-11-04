@@ -81,7 +81,25 @@ const WAKE: Record<string, { reason: string; interrupt: boolean }> = {
 
 /** A compact state for Jev, read through the client's Lua in one call. */
 export const STATE_LUA = `local V = require("wp.values")
-local near = {}
+local near, seen = {}, {}
+for _, o in ipairs(AgentNearby(100)) do if o.name then seen[o.name] = o end end
+local quests = {}
+for _, q in ipairs(Quests and Quests.list and Quests.list() or {}) do
+  local goals = {}
+  for _, o in ipairs(q.objectives) do goals[#goals + 1] = o.text end
+  quests[#quests + 1] = { title = q.title, level = q.level, complete = q.complete or nil, objectives = goals }
+end
+local party = {}
+for i = 1, (GetNumPartyMembers() or 0) do
+  local unit = "party" .. i
+  local name = UnitName(unit)
+  if name then
+    local o = seen[name]
+    party[#party + 1] = { name = name, online = not UnitIsConnected or UnitIsConnected(unit) and true or false,
+      yards = o and math.floor(o.distance) or nil, health = V.health(unit),
+      combat = UnitAffectingCombat(unit) and true or nil }
+  end
+end
 for i, o in ipairs(AgentNearby(60)) do
   if #near >= 15 then break end
   if o.kind ~= "gameobject" or o.name then
@@ -97,7 +115,7 @@ return { level = UnitLevel("player"), health = V.health("player"), power = V.pow
   casting = UnitCastingInfo("player") and true or false,
   target = UnitName("target"), target_health = V.health("target"),
   zone = GetRealZoneText(), subzone = GetSubZoneText(), position = AgentPosition(),
-  quest_log = GetNumQuestLogEntries(), free_bag_slots = V.free_bag_slots(),
+  quests = quests, party = party, free_bag_slots = V.free_bag_slots(),
   gossip_open = GossipFrame and GossipFrame:IsShown() and true or false,
   quest_window_open = QuestFrame and QuestFrame:IsShown() and true or false,
   loot_open = LootFrame and LootFrame:IsShown() and true or false,
@@ -143,6 +161,8 @@ export interface PolicyOptions {
   jev: Jev;
   /** With nothing happening, check anyway this often (ms). */
   heartbeatMs?: number;
+  /** The operator's goal, which Jev reads beside the planner's plan. */
+  goal?: string;
   /** Told when the plan stalls, looks complete, or an intent keeps failing. */
   onNotify: (summary: string) => void;
   log?: (line: string) => void;
@@ -260,6 +280,7 @@ export class Policy {
     if (!choose && !decisions.length) return null;
     const response = await this.options.jev.ask(
       {
+        goal: this.options.goal,
         plan: this.plan || "No plan from the planner yet: follow the agent's own registered intents.",
         woke_because: reasons,
         game: game as never,

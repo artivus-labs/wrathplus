@@ -94,14 +94,14 @@ export class Triage {
     private readonly confidence = 0.75,
   ) {}
 
-  async handle(request: Request, game: unknown): Promise<Triaged> {
+  async handle(request: Request, game: unknown, plan?: string): Promise<Triaged> {
     const ask = `${request.sender} said "${request.text}"`;
     const criteria: Record<string, string> = { [OTHER.name]: OTHER.when };
     for (const [name, action] of Object.entries(ACTIONS)) criteria[name] = action.when;
     let response;
     try {
       response = await this.jev.ask(
-        { message: { from: request.sender, text: request.text, channel: request.channel }, game },
+        { message: { from: request.sender, text: request.text, channel: request.channel }, game, plan },
         {
           wants: choice(
             "A player in the game agent's party sent it this message. What does the message ask the agent to do?",
