@@ -276,7 +276,7 @@ pub(crate) fn apply_orders(
     }
 }
 
-fn guid_text(guid: u64) -> String {
+pub(crate) fn guid_text(guid: u64) -> String {
     format!("0x{guid:016X}")
 }
 

@@ -28,6 +28,7 @@ const BUILT_IN: &[(&str, &str)] = &[
     ("wp.combat", include_str!("../lua/wp/combat.lua")),
     ("wp.move", include_str!("../lua/wp/move.lua")),
     ("wp.quest", include_str!("../lua/wp/quest.lua")),
+    ("wp.avoid", include_str!("../lua/wp/avoid.lua")),
 ];
 
 /// Where the agent's modules live: `WOW_AGENT_SCRIPTS`, else `<client home>/Agent/scripts`.
@@ -132,6 +133,9 @@ pub(crate) fn install(script: &UiScript, dir: PathBuf) -> mlua::Result<bool> {
     // Quest givers' dialogs, and keeping in step with the party's quests.
     let quests = load_module(lua, &dir, "wp.quest")?;
     lua.globals().set("Quests", quests)?;
+    // Walks kept clear of hostile mobs in sight, unless the fast tier says to fight through.
+    let avoid = load_module(lua, &dir, "wp.avoid")?;
+    lua.globals().set("Avoid", avoid)?;
     Ok(module_path(&dir, "autoexec").is_file())
 }
 
@@ -188,6 +192,10 @@ mod quest_tests;
 #[cfg(test)]
 #[path = "rotation_tests.rs"]
 mod rotation_tests;
+
+#[cfg(test)]
+#[path = "avoid_tests.rs"]
+mod avoid_tests;
 
 #[cfg(test)]
 mod tests {
