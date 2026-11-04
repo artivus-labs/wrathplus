@@ -31,6 +31,21 @@ for i = 1, 4 do
   if f and f:IsShown() and f.which then asks[#asks + 1] = f.which end
 end
 if #asks > 0 then out[#out + 1] = "waiting on you: " .. table.concat(asks, ", ") end
+local party = {}
+for i = 1, (GetNumPartyMembers() or 0) do
+  local unit = "party" .. i
+  local name = UnitName(unit)
+  if name and UnitIsConnected and not UnitIsConnected(unit) then
+    party[#party + 1] = name .. " (offline)"
+  elseif name then
+    local d
+    for _, u in ipairs(AgentNearby and AgentNearby(100) or {}) do
+      if u.name == name then d = u.distance end
+    end
+    party[#party + 1] = name .. (d and string.format(" %d yd away", d) or " (out of sight)")
+  end
+end
+if #party > 0 then out[#out + 1] = "party: " .. table.concat(party, ", ") end
 local a = Agent and Agent.activity and Agent.activity()
 out[#out + 1] = a and string.format("activity %s for %ds", a.name, a.seconds) or "no activity"
 local w = AgentWalk and AgentWalk()
