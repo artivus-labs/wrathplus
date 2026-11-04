@@ -175,7 +175,7 @@ pub(crate) fn bool_or_default(v: Option<&Value>, default: bool) -> bool {
         Value::LightUserData(_) => default,
         // Truncated like `0x40a2b0`, testing only the low dword.
         Value::Integer(i) => (*i as i32) != 0,
-        Value::Number(n) => n.abs() < 9.223_372_036_854_775_808e18 && (*n as i64 as i32) != 0,
+        Value::Number(n) => n.abs() < -(i64::MIN as f64) && (*n as i64 as i32) != 0,
         Value::String(s) => {
             let bytes = s.as_bytes();
             match bytes.first() {
