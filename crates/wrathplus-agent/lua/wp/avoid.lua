@@ -4,7 +4,8 @@
 -- Every second the hostile (red) mobs in sight become circles of their aggro radius (20 yards at
 -- the same level, a yard more or less per level of difference, 5 to 45, plus `margin`), which
 -- every route then goes round when a fair detour exists (AgentAvoid). The mob Combat is fighting
--- is never avoided. When a walk is under way and mobs not seen before sit on what is left of its
+-- is never avoided, nor mobs whose circle holds the walk's goal: those are where it is going (a
+-- grinding spot, a quest camp), not in its way. When a walk is under way and mobs not seen before sit on what is left of its
 -- route, the fast tier is asked (Agent.decide "pass_hostiles"): "around" re-routes the walk now,
 -- "fight" leaves those mobs out of the circles for `fight_for` seconds, so the walk goes through
 -- and Combat (Combat.defend) takes them on as they come. With no answer in time, it goes round.
@@ -27,12 +28,17 @@ local function radius(level)
 end
 
 -- The hostile, living, not-yet-fought mobs in sight, as circles.
-local function circles(now)
+local function circles(now, goal)
   local out = {}
   for _, u in ipairs(AgentNearby(M.range)) do
     if u.kind == "unit" and u.reaction == "hostile" and not u.dead and u.x
       and u.guid ~= (Combat and Combat.active) and (fighting[u.guid] or 0) < now then
-      out[#out + 1] = { x = u.x, y = u.y, r = radius(u.level), guid = u.guid, name = u.name, level = u.level }
+      local r = radius(u.level)
+      local to_goal = goal and math.sqrt((u.x - goal[1]) ^ 2 + (u.y - goal[2]) ^ 2)
+      if not (to_goal and to_goal < r) then
+        out[#out + 1] = { x = u.x, y = u.y, r = r, guid = u.guid, name = u.name, level = u.level,
+          from_goal = to_goal and math.floor(to_goal) }
+      end
     end
   end
   return out
@@ -68,8 +74,10 @@ local function ask(threats, walk)
     guids[#guids + 1] = z.guid
     asked[z.guid] = true
   end
-  local question = string.format("Your walk passes %d hostile mob%s: %s. Go round them, or fight through?",
-    #threats, #threats == 1 and "" or "s", table.concat(names, ", "))
+  local goal = walk.goal
+  local question = string.format(
+    "Your walk to (%d, %d) passes %d hostile mob%s on the way, not at the destination: %s. Go round them, or fight through?",
+    goal and goal[1] or 0, goal and goal[2] or 0, #threats, #threats == 1 and "" or "s", table.concat(names, ", "))
   decided = Agent.decide("pass_hostiles", {
     question = question,
     options = {
@@ -105,11 +113,11 @@ local function tick(now)
     if #M.zones > 0 then M.zones = {} AgentAvoid({}) end
     return
   end
-  local zones = circles(now)
+  local walk = AgentWalk()
+  local zones = circles(now, walk.status == "walking" and walk.goal or nil)
   M.zones = zones
   AgentAvoid(zones)
   if decided or not (Agent and Agent.decide) then return end
-  local walk = AgentWalk()
   local me = AgentPosition()
   if walk.status ~= "walking" or not walk.route or not me then return end
   local threats = {}

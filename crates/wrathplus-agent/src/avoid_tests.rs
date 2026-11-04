@@ -49,7 +49,7 @@ fn hostile_mobs_become_circles_and_one_on_the_route_is_asked_about() {
         .unwrap();
     assert_eq!(
         asked,
-        "1 pass_hostiles: Your walk passes 1 hostile mob: Mangy Wolf (level 6). Go round them, or fight through?"
+        "1 pass_hostiles: Your walk to (120, 0) passes 1 hostile mob on the way, not at the destination: Mangy Wolf (level 6). Go round them, or fight through?"
     );
     // Round: the walk is routed again, now round the circle.
     script
@@ -84,4 +84,16 @@ fn told_to_fight_it_walks_through_and_a_fought_mob_is_never_avoided() {
     script.run("Avoid.on = false").unwrap();
     script.tick(1.1);
     assert_eq!(avoided(&script), "");
+}
+
+#[test]
+fn mobs_at_the_walks_goal_are_where_it_is_going_not_in_its_way() {
+    let mut script = avoiding();
+    // Walking to the wolf's camp: it is the destination, so no circle and no question.
+    script
+        .run("AgentWalk = function() return { status = 'walking', goal = { 62, 5, 0 }, route = { { 62, 5, 0 } } } end")
+        .unwrap();
+    script.tick(1.1);
+    assert_eq!(avoided(&script), "0xB 21");
+    assert_eq!(script.eval::<i64>("return #Agent.questions()").unwrap(), 0);
 }
