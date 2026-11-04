@@ -152,7 +152,6 @@ pub(super) fn sandbox(lua: &Lua) -> mlua::Result<()> {
 pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     install_error_handler(lua)?;
     time::install_time(lua)?;
-    // Before the Lua layer, whose `debugprofile*` pair keeps its own `GetTime`.
     super::clock::install(lua)?;
     super::zone_text::install(lua)?;
     install_bit(lua)?;
@@ -242,16 +241,11 @@ function setglobal(name, value) _G[name] = value end
 function GetLocale() return "enUS" end
 -- debug*: debuginfo, debugload, debugprint, debugdump, debugbreak and debugtimestamp all bind the
 -- shared `return 0` stub `0x8e5250`, answering nothing (`/tmp/azb-app-mig/ghidra/debugfam*.log`);
--- 3.3.5's `_ERRORMESSAGE` calls debuginfo() unguarded. debugprofilestop (`0x817370`) answers the
--- milliseconds since debugprofilestart (`0x817350`) latched, on `GetTime`'s clock here.
+-- 3.3.5's `_ERRORMESSAGE` calls debuginfo() unguarded.
 do
-    local GetTime = GetTime
     local function noop() end
     debuginfo, debugload, debugprint = noop, noop, noop
     debugdump, debugbreak, debugtimestamp = noop, noop, noop
-    local profileStart = 0
-    function debugprofilestart() profileStart = GetTime() end
-    function debugprofilestop() return (GetTime() - profileStart) * 1000 end
 end
 "##;
 

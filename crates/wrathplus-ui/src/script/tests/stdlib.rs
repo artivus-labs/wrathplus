@@ -404,10 +404,11 @@ fn a_runscript_error_reaches_the_handler_and_not_the_caller() {
 }
 
 /// Build 12340's debug family: six bind the `return 0` stub `0x8e5250` and answer nothing; the
-/// profile pair answers elapsed milliseconds.
+/// profile pair answers elapsed milliseconds, read live (`0x817370`), as a live `GetTime` is
+/// (`0x6081f0`): both move inside one Lua call, with no frame tick.
 #[test]
 fn the_wrath_debug_stubs_answer_nothing_and_the_profile_pair_counts_up() {
-    let s = script();
+    let mut s = script();
     for name in [
         "debuginfo",
         "debugload",
@@ -425,4 +426,23 @@ fn the_wrath_debug_stubs_answer_nothing_and_the_profile_pair_counts_up() {
     assert!(s
         .eval::<bool>("debugprofilestart() local ms = debugprofilestop() return type(ms) == 'number' and ms >= 0")
         .unwrap());
+    let moves = |s: &crate::script::UiScript, clock: &str| {
+        s.eval::<bool>(&format!(
+            "local a = {clock}() for i = 1, 1e6 do if {clock}() > a then return true end end"
+        ))
+        .unwrap_or(false)
+    };
+    assert!(moves(&s, "debugprofilestop"));
+    assert!(
+        !moves(&s, "GetTime"),
+        "the frame clock, until the host turns it live"
+    );
+    s.set_live_clock(true);
+    assert!(moves(&s, "GetTime"));
+    let before = s.eval::<f64>("return GetTime()").unwrap();
+    s.tick(0.0);
+    assert!(
+        s.eval::<f64>("return GetTime()").unwrap() >= before,
+        "never backwards"
+    );
 }

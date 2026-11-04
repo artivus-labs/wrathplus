@@ -77,7 +77,11 @@ impl super::UiScript {
     /// EditBox its flush and caret blink after it; then the engine's own fades, model panes and
     /// hover.
     pub fn tick(&mut self, elapsed: f32) {
-        self.model_mut().now += f64::from(elapsed);
+        {
+            let mut model = self.model_mut();
+            model.now += f64::from(elapsed);
+        }
+        super::clock::reanchor(&self.lua);
         if let Err(e) = super::animation::tick(&self.lua, elapsed) {
             eprintln!("animation: {e}");
         }
