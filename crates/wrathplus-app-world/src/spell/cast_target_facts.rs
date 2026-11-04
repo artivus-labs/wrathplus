@@ -36,7 +36,7 @@ impl CastTargeting<'_, '_> {
         };
         let is_self = self.self_guid.0 == Some(guid);
         let lenient = is_self
-            || crate::target::can_assist_in(
+            || crate::target::relations::can_assist_in(
                 rel.target_store,
                 rel.factions,
                 rel.reputations,

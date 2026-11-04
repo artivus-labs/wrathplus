@@ -394,7 +394,6 @@ fn spell_start(r: &mut Cursor<&[u8]>) -> io::Result<Vec<SessionEvent>> {
     let t = targets(r)?;
     Ok(vec![SessionEvent::SpellStart {
         caster: if caster == 0 { item_or_caster } else { caster },
-        item_caster: (caster != 0 && item_or_caster != caster).then_some(item_or_caster),
         spell_id,
         cast_flags: cast_flags as u16,
         cast_time_ms,

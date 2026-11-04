@@ -38,7 +38,7 @@ pub fn hover_probe_armed() -> bool {
 }
 pub mod lock;
 mod price_discount;
-mod relations;
+pub(crate) mod relations;
 mod reticle;
 mod wrath_relations;
 // `pub(crate)` for the hover inspector too: its faction catalog feeds `go_highlightable`.
@@ -67,8 +67,7 @@ pub use price_discount::vendor_price_discount;
 #[cfg(any(test, feature = "test-support"))]
 pub use price_discount::{human_warrior_player, stormwind_fixture, HUMAN_WARRIOR};
 pub use relations::{
-    can_assist, can_assist_in, can_attack, can_interact, corpse_friendly, is_possessed_by,
-    UNIT_FLAG_POSSESSED,
+    can_assist, can_attack, can_interact, corpse_friendly, is_possessed_by, UNIT_FLAG_POSSESSED,
 };
 // `CanAttack`/`CanAssist`'s live inputs: the creature template cache and the guid lookup.
 pub use wrath_relations::{

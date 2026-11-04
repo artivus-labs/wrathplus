@@ -239,6 +239,7 @@ mod wrath_talent_preview;
 pub use wrath_currency::{WrathCurrencyEntry, WrathCurrencySnapshot};
 pub use wrath_tutorial::WrathTutorialRequest;
 mod wrath_achievement_progress;
+mod wrath_item_count;
 mod wrath_item_services;
 mod wrath_item_spell;
 mod wrath_item_use;

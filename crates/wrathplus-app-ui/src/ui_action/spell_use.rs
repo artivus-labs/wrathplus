@@ -178,6 +178,7 @@ pub(super) fn feed_spell_use(
         Res<crate::spell::ActiveChannel>,
         Query<&crate::creature_anim::Casting, With<SelfPlayer>>,
         Res<crate::app_core::session::SelfGuid>,
+        Res<crate::spell::PendingCast>,
     ),
     stores: Query<&ObjectStore>,
     objects: crate::net::Objects,
@@ -299,7 +300,7 @@ pub(super) fn feed_spell_use(
             .map(|t| t.ranged_mod_range);
     let range = (units, range_mods, ranged_mod);
 
-    let (auto_repeat, last_item, channel, casting, _) = &casts;
+    let (auto_repeat, last_item, channel, casting, _, pending) = &casts;
     // `0xd397cc` is the autoRangedCombat queue (`0x7fe140` from `0x6e2be0`), which the client
     // does not run, so it stays empty.
     let auto = [auto_repeat.0, None];
@@ -308,12 +309,16 @@ pub(super) fn feed_spell_use(
         .next()
         .map(|c| c.spell_id)
         .or(channel.current(now));
-    let cast_items: Vec<u32> = last_item
-        .0
-        .filter(|&(spell, _)| current == Some(spell))
-        .and_then(|(_, guid)| objects.object(guid)?.object_entry())
+    // The client's spell object holds the item from the `CMSG_USE_ITEM` send until the reply
+    // ([`crate::spell::PendingCast::item_use`]), then through the cast bar or channel the
+    // `SMSG_SPELL_START` named it for.
+    let mut cast_items: Vec<u32> = pending
+        .item_use(now)
         .into_iter()
+        .chain(last_item.0.filter(|&(spell, _)| current == Some(spell)))
+        .filter_map(|(_, guid)| objects.object(guid)?.object_entry())
         .collect();
+    cast_items.dedup();
 
     if memory.spells.as_ref() != Some(&book) {
         script.set_wrath_spell_use(book.0.clone(), book.1.clone());
@@ -387,7 +392,7 @@ fn item_views(i: &ItemInputs<'_, '_, '_>) -> HashMap<u32, ItemUseView> {
         } else {
             category
         };
-        // `0x80ac10`: an on-hold record refuses; a spell with no record is usable (`0x51c5d9`).
+        // `0x80ac10`: an on-hold record refuses; a spell with no record is usable (`0x51c450`).
         let (usable, not_enough_mana) = match (spell, d) {
             (Some(s), _) if i.cooldowns.has_on_hold_record(s, entry, category) => (false, false),
             (Some(s), Some(d)) => (i.usable)(s, d),

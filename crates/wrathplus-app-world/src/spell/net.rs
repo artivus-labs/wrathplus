@@ -98,8 +98,8 @@ pub(crate) struct Scene<'w, 's> {
     last_item_cast: ResMut<'w, LastItemCast>,
 }
 
-/// The player's last cast start, `(spell, item guid)` when it came from an item (`SMSG_SPELL_START`'s
-/// first guid): what `IsCurrentItem` (`0x805fc0`) reads while that spell is still being cast.
+/// The player's last cast start, `(spell, item guid)` when our `CMSG_USE_ITEM` sent it: what
+/// `IsCurrentItem` (`0x805fc0`) reads through the cast bar or channel of that spell.
 #[derive(Resource, Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LastItemCast(pub Option<(u32, u64)>);
 
@@ -238,11 +238,14 @@ fn on_spell_start(In(ev): In<SessionEvent>, mut l: Lifecycle, mut sc: Scene) {
         target,
         ammo_display_id,
         cast_count,
-        item_caster,
     } = ev
     {
         if l.self_guid.0 == Some(caster) {
-            let now = item_caster.map(|item| (spell_id, item));
+            // The item comes from our own `CMSG_USE_ITEM` send, still pending for this spell.
+            let now = l
+                .pending
+                .item_use(Instant::now())
+                .filter(|&(spell, _)| spell == spell_id);
             if sc.last_item_cast.0 != now {
                 sc.last_item_cast.0 = now;
             }
