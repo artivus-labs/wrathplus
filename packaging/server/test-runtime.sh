@@ -57,6 +57,7 @@ check_policy() {
 }
 check_policy managed_core_config "$work/core-policy"
 for bot_count in 0 1 2 3 4 5; do
+    addclass_pool=$((bot_count * 10))
     bot_autologin=0
     if [ "$bot_count" -gt 0 ]; then bot_autologin=1; fi
     cat > "$work/bot-policy" <<EOF
@@ -65,7 +66,7 @@ Playerbots.RandomBotAutologin = $bot_autologin
 Playerbots.MinRandomBots = $bot_count
 Playerbots.MaxRandomBots = $bot_count
 Playerbots.EnablePeriodicOnlineOffline = 0
-Playerbots.AddClassAccountPoolSize = 0
+Playerbots.AddClassAccountPoolSize = $addclass_pool
 Playerbots.RandomBotGuildCount = 0
 EOF
     check_policy managed_playerbots_config "$work/bot-policy"

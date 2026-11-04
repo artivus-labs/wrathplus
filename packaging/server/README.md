@@ -60,8 +60,10 @@ Without a saved override the seller is also switched on. If a player already too
 
 Auth publishes only `127.0.0.1:13724`, world only `127.0.0.1:18085`; realmlist
 advertises the latter. Extracted server data is mounted read-only. The managed qualification population defaults to five online random bots
-(`MANAGED_BOT_COUNT=0..5`, zero disables autologin). Periodic population inflation,
-AddClass pool creation and random guild creation remain disabled. Upstream may
+(`MANAGED_BOT_COUNT=0..5`, zero disables autologin). The addclass command's pool of ready-made
+bots (`.playerbots bot addclass <class>`, a levelled, geared bot of that class for your party) keeps
+upstream's 50 accounts (`MANAGED_ADDCLASS_POOL`, 0 turns it off). Periodic population inflation
+and random guild creation remain disabled. Upstream may
 create ten characters per bot account; online population is bounded to five. Health requires actual
 TCP listeners, not just successful container spawn. Setup/start can take minutes.
 
