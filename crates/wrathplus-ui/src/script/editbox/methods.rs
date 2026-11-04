@@ -205,9 +205,7 @@ pub(in crate::script) fn install(lua: &Lua) -> mlua::Result<()> {
         lua.create_function(|lua, (this, args): (Table, mlua::MultiValue)| {
             let args: Vec<Value> = args.into_iter().collect();
             if args.len() != 1 {
-                return Err(mlua::Error::runtime(
-                    "Usage: <unnamed>:SetMaxBytes(maxBytes)",
-                ));
+                return Err(mlua::Error::runtime("Usage: <unnamed>:SetMaxBytes(max)"));
             }
             let n = crate::script::binding_abi::coerced_number(lua, args.first().cloned());
             let n = n as i64;
@@ -231,9 +229,7 @@ pub(in crate::script) fn install(lua: &Lua) -> mlua::Result<()> {
         lua.create_function(|lua, (this, args): (Table, mlua::MultiValue)| {
             let args: Vec<Value> = args.into_iter().collect();
             if args.len() != 1 {
-                return Err(mlua::Error::runtime(
-                    "Usage: <unnamed>:SetMaxLetters(maxLetters)",
-                ));
+                return Err(mlua::Error::runtime("Usage: <unnamed>:SetMaxLetters(max)"));
             }
             let n = crate::script::binding_abi::coerced_number(lua, args.first().cloned());
             // Truncated toward zero like `__ftol`; the reference stores a negative as is, but its

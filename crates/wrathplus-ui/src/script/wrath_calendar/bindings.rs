@@ -465,7 +465,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     })?;
     set(lua, "CalendarGetDayEventSequenceInfo", |lua, args| {
         if !has3(lua, &args) {
-            return usage("Usage: CalendarGetDayEventSequenceInfo([-1,0,1], monthDay, index)");
+            return usage("Usage: CalendarGetDayEventSequenceInfo([-1.0.1], monthDay, index)");
         }
         match row_at(lua, &args).filter(|r| r.kind == K::Holiday) {
             Some(r) => many(vec![
@@ -740,7 +740,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     }
     set(lua, "CalendarNewArenaTeamEvent", |lua, args| {
         let Some(slot) = int_arg(lua, &args, 0) else {
-            return usage("Usage: CalendarNewArenaTeamEvent(teamIndex)");
+            return usage("Usage: CalendarNewArenaTeamEvent(index)");
         };
         new_draft(lua, 0, u8::try_from(slot).ok());
         many(vec![])

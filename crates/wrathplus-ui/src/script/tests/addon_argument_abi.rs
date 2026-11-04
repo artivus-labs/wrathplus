@@ -66,6 +66,28 @@ fn a_bad_argument_type_raises_each_verbs_own_usage_string() {
             "Usage: IsAddOnLoaded(index or \"name\")",
         ),
         ("LoadAddOn({})", "Usage: LoadAddOn(index or \"name\")"),
+        // Other verbs' literals, as the exe spells them (`0xa110a4`, `0xa16070`, `0x9ff508`,
+        // `0xa16dd4`, `0xa188d8` with its own `[-1.0.1]`).
+        (
+            "SetRaidSubgroup({}, 1)",
+            "Usage: SetRaidSubgroup(index, subgroup)",
+        ),
+        (
+            "WithdrawGuildBankMoney({})",
+            "Usage: WithdrawGuildBankMoney(money)",
+        ),
+        (
+            "GetMirrorTimerInfo()",
+            "Usage: GetMirrorTimerInfo(\"timer\")",
+        ),
+        (
+            "GetEquipmentSetItemIDs({})",
+            "Usage: GetEquipmentSetItemIDs(\"setName\" [, returnTable])",
+        ),
+        (
+            "CalendarGetDayEventSequenceInfo()",
+            "Usage: CalendarGetDayEventSequenceInfo([-1.0.1], monthDay, index)",
+        ),
     ] {
         // A string, as `luaL_error` (`0x84f280`) raises, prefixed by `luaL_where(L, 1)`
         // (`0x84f210`): the Lua function on line 1 that called the verb.

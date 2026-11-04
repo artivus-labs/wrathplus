@@ -95,13 +95,13 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     lua.globals().set(
         "PlayMusic",
         lua.create_function(|lua, args: mlua::MultiValue| {
-            // `0x458720`: `lua_isstring` (`0x6f3510`), then `lua_tostring` (`0x6f3690`), so a
-            // number becomes a file name and anything else raises this literal (`0x835f7c`,
-            // `0x458758`); the path goes to the file layer verbatim.
+            // `0x985950`: `lua_isstring` (`0x84df60`), then `lua_tolstring` (`0x84e0e0`), so a
+            // number becomes a file name and anything else raises this literal (`0xaa31a4`,
+            // `0x985966`); the path goes to the file layer verbatim.
             let path = super::binding_abi::string_arg(
                 lua,
                 args.front().cloned().unwrap_or(Value::Nil),
-                "Usage: PlayMusic(\"music\")",
+                "Usage: PlayMusic(\"musicfile\")",
             )?;
             lua.app_data_mut::<Model>()
                 .expect("model app_data")
@@ -164,6 +164,7 @@ mod tests {
             ("PlaySound(true)", r#"Usage: PlaySound("sound")"#),
             ("PlaySoundFile()", r#"Usage: PlaySoundFile("soundfile")"#),
             ("PlaySoundFile(nil)", r#"Usage: PlaySoundFile("soundfile")"#),
+            ("PlayMusic({})", r#"Usage: PlayMusic("musicfile")"#),
         ] {
             let e = s.run(call).expect_err(call).to_string();
             assert!(e.contains(usage), "{call}: {e}");

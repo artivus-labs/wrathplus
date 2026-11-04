@@ -359,7 +359,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     set("GetNumArenaTeamMembers", |lua, args| {
         let Some(i) = index(&arg(&args, 0)) else {
             return Err(mlua::Error::runtime(
-                "Usage: GetNumArenaTeamMembers(team[, showOffline])",
+                "Usage: GetNumArenaTeamMembers(team [,showOffline])",
             ));
         };
         let model = lua.app_data_ref::<Model>().expect("model");

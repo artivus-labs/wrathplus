@@ -466,7 +466,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 .map(|n| n as i64 - 1)
                 .and_then(|i| usize::try_from(i).ok())
                 .filter(|&i| i < 3)
-                .ok_or_else(|| mlua::Error::runtime("Usage: GetMirrorTimerInfo(index)"))?;
+                .ok_or_else(|| mlua::Error::runtime("Usage: GetMirrorTimerInfo(\"timer\")"))?;
             let timer = lua
                 .app_data_ref::<Model>()
                 .expect("model app_data")
@@ -684,7 +684,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         lua.create_function(|lua, args: MultiValue| {
             let (Some(bag), Some(slot)) = (number(lua, &args, 0), number(lua, &args, 1)) else {
                 return Err(mlua::Error::runtime(
-                    "Usage: GetContainerItemQuestInfo(bag, slot)",
+                    "Usage: GetContainerItemQuestInfo(index, slot)",
                 ));
             };
             let model = lua.app_data_ref::<Model>().expect("model app_data");

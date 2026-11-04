@@ -188,7 +188,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     g.set(
         "GetLFDLockInfo",
         lua.create_function(|lua, (id, index): (Value, Value)| {
-            const USAGE: &str = "Usage: GetLFDLockInfo(dungeonID, index)";
+            const USAGE: &str = "Usage: GetLFDLockInfo(dungeonID, playerIndex)";
             let id = number_arg(lua, id, USAGE)?;
             let index = number_arg(lua, index, USAGE)?;
             if id < 0 {

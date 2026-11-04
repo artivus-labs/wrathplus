@@ -179,9 +179,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             // 0x5AF120 uses an unguarded tonumber, truncates, then checks 1..10.
             let index = binding_abi::coerced_number(lua, Some(index)) as i64 as i32;
             if !(1..=10).contains(&index) {
-                return Err(mlua::Error::RuntimeError(
-                    "Usage: GetEquipmentSetInfo(index)".into(),
-                ));
+                return Err(mlua::Error::runtime("Usage: GetEquipmentSetInfo(setIndex)"));
             }
             let set = lua
                 .app_data_ref::<State>()
@@ -200,7 +198,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     globals.set(
         "GetEquipmentSetInfoByName",
         lua.create_function(|lua, name: Value| {
-            let usage = "Usage: GetEquipmentSetInfoByName(name)";
+            let usage = "Usage: GetEquipmentSetInfoByName(\"setName\")";
             let name = binding_abi::string_arg(lua, name, usage)?;
             match find(lua, &name) {
                 Some((i, set)) => Ok(MultiValue::from_vec(vec![
@@ -214,7 +212,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     globals.set(
         "GetEquipmentSetItemIDs",
         lua.create_function(|lua, (name, out): (Value, Option<Table>)| {
-            let usage = "Usage: GetEquipmentSetItemIDs(name)";
+            let usage = "Usage: GetEquipmentSetItemIDs(\"setName\" [, returnTable])";
             let name = binding_abi::string_arg(lua, name, usage)?;
             // A missing set must not touch a caller's table (0x5AEF90).
             let Some((_, set)) = find(lua, &name) else {
@@ -233,7 +231,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     globals.set(
         "EquipmentSetContainsLockedItems",
         lua.create_function(|lua, name: Value| {
-            let usage = "Usage: EquipmentSetContainsLockedItems(name)";
+            let usage = "Usage: EquipmentSetContainsLockedItems(\"setName\")";
             let name = binding_abi::string_arg(lua, name, usage)?;
             Ok(match find(lua, &name) {
                 Some((_, set)) => MultiValue::from_vec(vec![Value::Boolean(set.locked)]),
@@ -244,7 +242,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     globals.set(
         "SaveEquipmentSet",
         lua.create_function(|lua, (name, icon): (Value, Value)| {
-            let usage = "Usage: SaveEquipmentSet(name, iconIndex)";
+            let usage = "Usage: SaveEquipmentSet(\"setName\", iconIndex)";
             let name = binding_abi::string_arg(lua, name, usage)?;
             let icon = icon_name(lua, binding_abi::coerced_number(lua, Some(icon)) as i64)?;
             let ignored = lua
@@ -262,9 +260,10 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             Ok(())
         })?,
     )?;
+    const DELETE: &str = r#"Usage: DeleteEquipmentSet("setName")"#;
     for (global, usage) in [
-        ("DeleteEquipmentSet", "Usage: DeleteEquipmentSet(name)"),
-        ("UseEquipmentSet", "Usage: UseEquipmentSet(name)"),
+        ("DeleteEquipmentSet", DELETE),
+        ("UseEquipmentSet", r#"Usage: UseEquipmentSet("setName")"#),
     ] {
         globals.set(
             global,
@@ -285,7 +284,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     globals.set(
         "PickupEquipmentSetByName",
         lua.create_function(|lua, name: Value| {
-            binding_abi::string_arg(lua, name, "Usage: PickupEquipmentSetByName(name)")?;
+            binding_abi::string_arg(lua, name, "Usage: PickupEquipmentSetByName(\"setName\")")?;
             Ok(())
         })?,
     )?;
@@ -330,7 +329,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     tooltip.set(
         "SetEquipmentSet",
         lua.create_function(|lua, (this, name): (Table, Value)| {
-            let usage = "Usage: GameTooltip:SetEquipmentSet(name)";
+            let usage = "Usage: GameTooltip:SetEquipmentSet(\"setName\")";
             let name = binding_abi::string_arg(lua, name, usage)?;
             if let Some((_, set)) = find(lua, &name) {
                 this.call_method::<()>("SetText", set.name)?;

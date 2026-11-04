@@ -541,8 +541,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     g.set(
         "SetRaidSubgroup",
         lua.create_function(|lua, (index, group): (Value, Value)| {
-            let index = number_arg(lua, index, "Usage: SetRaidSubgroup(index, group)")?;
-            let group = number_arg(lua, group, "Usage: SetRaidSubgroup(index, group)")?;
+            let index = number_arg(lua, index, "Usage: SetRaidSubgroup(index, subgroup)")?;
+            let group = number_arg(lua, group, "Usage: SetRaidSubgroup(index, subgroup)")?;
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
             model.party_requests.push(PartyRequest::SetSubgroup {
                 index: index.max(0) as u32,
