@@ -4,8 +4,8 @@
 //! The host registers the vars it backs and drains Lua's writes from a change queue; its own
 //! writes do not queue. The table dies with the VM, where the reference's outlives every
 //! `ReloadUI`, so the host seeds each new VM with the saved values before anything registers.
-//! An unknown name warns once and is ignored (`GetCVar` answers nil), where the reference's
-//! `GetCVar`, `SetCVar` and `GetCVarDefault` raise `Couldn't find CVar named '%s'` (`0x842310`).
+//! An unknown name warns once and is ignored, nil to `GetCVar` as in 12340 (`0x5100a0`). Labelled:
+//! 12340's `SetCVar` and `GetCVarDefault` raise `Couldn't find CVar named '%s'` (`0x514d24`).
 
 use mlua::{Lua, Value};
 

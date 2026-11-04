@@ -262,21 +262,19 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             Ok(attack)
         })?,
     )?;
-    // GetCVarBool("cvar") (`0x5100c0`, the in-game table's): 1 when the CVar exists and its value
-    // reads non-zero, else nil; a non-string raises. Labelled: its flag `0x40` (hidden from this
-    // table) is not modelled.
+    // GetCVarBool("cvar") (`0x5100c0`): 1 when the CVar exists and its value reads true
+    // (`0x815400`), else nil; a name failing `lua_isstring` raises; flag `0x40` is not modelled.
     g.set(
         "GetCVarBool",
         lua.create_function(|lua, name: Value| {
-            let Value::String(name) = name else {
+            let Some(name) = super::binding_abi::optional_string(lua, &name) else {
                 return Err(mlua::Error::runtime("Usage: GetCVarBool(\"cvar\")"));
             };
-            let key = name.to_str()?.to_ascii_lowercase();
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             let on = model
                 .cvars
-                .get(&key)
-                .is_some_and(|slot| slot.value.trim().parse::<f64>().is_ok_and(|n| n != 0.0));
+                .get(&name.to_ascii_lowercase())
+                .is_some_and(|slot| super::wrath_cvar_flags::value_is_true(&slot.value));
             Ok(on.then_some(1))
         })?,
     )?;
@@ -758,7 +756,9 @@ mod tests {
                  and GetCVarBool('nosuchcvar') == nil"
             )
             .unwrap());
-        assert!(s.run("GetCVarBool(1)").is_err());
+        let parsed = "SetCVar('autoLootDefault', 'yes') return GetCVarBool('autoLootDefault')";
+        assert_eq!(s.eval::<Option<i64>>(parsed).unwrap(), Some(1));
+        assert!(s.run("GetCVarBool(1)").is_ok() && s.run("GetCVarBool()").is_err());
         assert!(s
             .eval::<bool>("return IsPetAttackAction(1) == false")
             .unwrap());
