@@ -90,7 +90,7 @@ pub(crate) struct InputState {
     binding_depth: u32,
     /// `[InputControl+4] & 1`, the TurnOrAction channel `IsMouselooking` tests (`0x514278`), as
     /// the app pushed it or a `MouselookStart`/`Stop` since moved it.
-    turn_or_action: bool,
+    pub(super) turn_or_action: bool,
     /// The `MouselookStart` (`true`) and `MouselookStop` calls since the app last drained them.
     mouselook: Vec<bool>,
 }

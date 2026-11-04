@@ -927,4 +927,4 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
 
 #[path = "button_click.rs"]
 mod click;
-pub(super) use click::{click_button, wants_click, wants_press_visual};
+pub(super) use click::*;

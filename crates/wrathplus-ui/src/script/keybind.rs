@@ -146,7 +146,7 @@ pub(crate) struct KeybindState {
     current_set: u32,
     /// Bumped by every change to the live table or the commands: the app's signal to re-derive
     /// dispatch.
-    generation: u64,
+    pub(super) generation: u64,
     requests: Vec<KeybindRequest>,
     /// Build 12340's override bindings (`SetOverrideBinding` `0x563a90` and its kin), in set
     /// order: a layer over [`Self::live`] that dispatch reads, never saved.
@@ -270,7 +270,7 @@ impl KeybindState {
     /// `SetBinding(key[, command])` on the live set: refused only for a key string the validator
     /// rejects (`0x4b762c`). The command is never read (`0x4b7490`), so a name no `Bindings.xml`
     /// declared is stored and answered like any other.
-    fn set_binding(&mut self, key: &str, command: Option<&str>) -> bool {
+    pub(super) fn set_binding(&mut self, key: &str, command: Option<&str>) -> bool {
         let Some(key) = normalize_binding_key(key) else {
             return false;
         };
@@ -487,7 +487,7 @@ pub(crate) fn run_command(lua: &Lua, command: &str, down: bool) -> mlua::Result<
         let kb = &model.keybinds;
         let Some(&i) = kb.by_name.get(&command.to_ascii_uppercase()) else {
             drop(model);
-            return run_command_form(lua, command, down);
+            return super::wrath_binding_forms::run_form(lua, command, down);
         };
         let e = &kb.entries[i];
         if !down && !e.run_on_up {
@@ -504,45 +504,6 @@ pub(crate) fn run_command(lua: &Lua, command: &str, down: bool) -> mlua::Result<
         .exec();
     g.set("keystate", Value::Nil)?;
     ran.map(|()| true)
-}
-
-/// Build 12340's command forms beside a named command, which `SetBindingClick`, `SetBindingSpell`,
-/// `SetBindingItem`, `SetBindingMacro` and their override twins write: `CLICK button[:mouse]`,
-/// `SPELL name`, `ITEM name` and `MACRO name`, each run on the press through its Lua verb.
-/// Labelled: the native runner for these forms is untraced, and a release runs none of them.
-fn run_command_form(lua: &Lua, command: &str, down: bool) -> mlua::Result<bool> {
-    let Some((form, arg)) = command.split_once(' ') else {
-        return Ok(false);
-    };
-    if !down {
-        return Ok(false);
-    }
-    let verb = |name: &str| lua.globals().get::<Option<mlua::Function>>(name);
-    match form.to_ascii_uppercase().as_str() {
-        "CLICK" => {
-            let (name, button) = arg.split_once(':').unwrap_or((arg, "LeftButton"));
-            let Value::Table(frame) = lua.globals().get::<Value>(name)? else {
-                return Ok(false);
-            };
-            let Some(click) = frame.get::<Option<mlua::Function>>("Click")? else {
-                return Ok(false);
-            };
-            click.call::<()>((frame, button))?;
-        }
-        "SPELL" | "ITEM" | "MACRO" => {
-            let name = match form.to_ascii_uppercase().as_str() {
-                "SPELL" => "CastSpellByName",
-                "ITEM" => "UseItemByName",
-                _ => "RunMacro",
-            };
-            let Some(f) = verb(name)? else {
-                return Ok(false);
-            };
-            f.call::<()>(arg)?;
-        }
-        _ => return Ok(false),
-    }
-    Ok(true)
 }
 
 /// The binding globals. `GetBinding(i)` answers the row's name and then every key bound to it

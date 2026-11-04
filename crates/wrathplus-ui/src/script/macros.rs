@@ -251,7 +251,7 @@ fn create_macro(
 }
 
 /// The record a macro argument names (`0x566df0`): a number is a slot, else a string a name.
-fn macro_arg(model: &Model, v: Option<&Value>) -> Option<u32> {
+pub(super) fn macro_arg(model: &Model, v: Option<&Value>) -> Option<u32> {
     match v? {
         Value::String(s) if s.to_str().ok()?.trim().parse::<f64>().is_err() => {
             let index = model.macros.index_by_name(&s.to_string_lossy());
@@ -405,6 +405,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 m.texture = icon;
             }
             if let Some(body) = body {
+                super::wrath_macro_api::forget_explicit(lua, id);
                 m.body = clamp_chars(&body, MAX_MACRO_BODY);
             }
             changed(&mut model);
@@ -419,6 +420,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         lua.create_function(|lua, args: MultiValue| {
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
             if let Some(id) = macro_arg(&model, args.front()) {
+                super::wrath_macro_api::forget_explicit(lua, id);
                 model.macros.account.retain(|m| m.id != id);
                 model.macros.character.retain(|m| m.id != id);
                 changed(&mut model);

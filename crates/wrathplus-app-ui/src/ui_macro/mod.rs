@@ -4,7 +4,7 @@
 
 use bevy::prelude::*;
 
-use wrathplus_ui::script::{MacroState, ScriptValue, UiScript};
+use wrathplus_ui::script::{MacroState, RunningMacro, ScriptValue, UiScript};
 
 use crate::app_core::schedule::InWorldGated;
 use wrathplus_assets::{LockRecover, WorldAssets};
@@ -249,14 +249,22 @@ fn rebind_macro_spells(
     for m in macros.account.iter().chain(&macros.character) {
         fresh.insert(m.id, run::bound_spell(&table, &m.body, &book));
     }
+    // A `SetMacroSpell`/`SetMacroItem` pair replaces the body's (the record leaves the re-derive
+    // list, `0x565ad0`), and both setters refresh the bar's slots for the macro (`0x5aa920`).
+    let explicit = script.macro_explicit_binds();
+    for (id, e) in &explicit {
+        if let Some(b) = fresh.get_mut(id) {
+            *b = run::explicit_bound(e);
+        }
+    }
     // The engine's copy, for `GetActionAutocast`, re-pushed on every recompute so a fresh VM has
-    // it. The book flag stays the player's: `run::bound_spell` resolves the player's book only.
+    // it. The book flag is the player's unless a `SetMacroSpell` found the spell in the pet's.
     script.set_macro_bindings(
         fresh
             .iter()
             .map(|(&id, b)| {
                 let spell = match *b {
-                    BoundSpell::None => 0,
+                    BoundSpell::None | BoundSpell::Item(_) => 0,
                     BoundSpell::Unresolved => -1,
                     BoundSpell::Spell(id) => id as i32,
                 };
@@ -264,7 +272,7 @@ fn rebind_macro_spells(
                     id,
                     wrathplus_ui::script::MacroBinding {
                         spell,
-                        pet_book: false,
+                        pet_book: explicit.get(&id).is_some_and(|e| e.pet_book),
                     },
                 )
             })
@@ -288,22 +296,29 @@ fn rebind_macro_spells(
 const EXECUTE_CHAT_LINE: &str = "EXECUTE_CHAT_LINE";
 
 /// Run free macro text, `RunMacroText`'s body (`0x566400` → `0x564db0`, the macro runner), as a
-/// macro body's lines run.
-pub(crate) fn run_macro_text(script: &mut UiScript, text: &str) {
-    for line in run::macro_lines(text)
-        .map(str::to_string)
-        .collect::<Vec<_>>()
-    {
+/// macro body's lines run: a scratch record with no id, so `GetRunningMacro` answers nil and
+/// `GetRunningMacroButton` the button.
+pub(crate) fn run_macro_text(script: &mut UiScript, text: &str, button: Option<String>) {
+    let lines: Vec<String> = run::macro_lines(text).map(str::to_string).collect();
+    let previous = script.begin_running_macro(RunningMacro { id: None, button });
+    for line in lines {
         script.fire_event(EXECUTE_CHAT_LINE, vec![ScriptValue::Str(line)]);
     }
+    script.end_running_macro(previous);
 }
 
 /// Run a macro by its 1-based index; returns whether anything ran. Like the reference's runner
 /// (`0x4f14e0`, reached only from `UseAction` at `0x4e6098`), it fires `EXECUTE_CHAT_LINE` per
 /// non-empty line and nothing else: the stock `ChatFrame1` sends each through its edit box
 /// (`ChatFrame.lua:1343`), and an addon registered for the event sees every macro line.
-pub(crate) fn run_macro(script: &mut UiScript, index: u32) -> bool {
-    let Some(body) = script.macros().get(index as usize).map(|m| m.body.clone()) else {
+/// `GetRunningMacro` and `GetRunningMacroButton` answer the macro and `button` while its lines
+/// run, and the caller's run after (`0x564db0` saves and restores both).
+pub(crate) fn run_macro(script: &mut UiScript, index: u32, button: Option<String>) -> bool {
+    let Some((id, body)) = script
+        .macros()
+        .get(index as usize)
+        .map(|m| (m.id, m.body.clone()))
+    else {
         return false;
     };
     let lines: Vec<String> = run::macro_lines(&body).map(str::to_string).collect();
@@ -311,8 +326,13 @@ pub(crate) fn run_macro(script: &mut UiScript, index: u32) -> bool {
         return false;
     }
     debug!("ui_macro: running macro {index} ({} line(s))", lines.len());
+    let previous = script.begin_running_macro(RunningMacro {
+        id: Some(id),
+        button,
+    });
     for line in lines {
         script.fire_event(EXECUTE_CHAT_LINE, vec![ScriptValue::Str(line)]);
     }
+    script.end_running_macro(previous);
     true
 }

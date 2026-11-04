@@ -95,6 +95,8 @@ pub(crate) fn click_button(lua: &Lua, id: u32, button: &str, down: bool, scripte
         Ok(s) => Value::String(s),
         Err(_) => return,
     };
+    // The click's button for its handlers, as the Button's click wrapper swaps it (`0x96fd70`).
+    let outer = swap_clicked(lua, Some(button.to_string()));
     for script in ["PreClick", "OnClick", "PostClick"] {
         let args = vec![btn.clone(), Value::Boolean(down)];
         if let Err(e) = event::fire_widget_handler(lua, id, script, args) {
@@ -103,6 +105,7 @@ pub(crate) fn click_button(lua: &Lua, id: u32, button: &str, down: bool, scripte
                 .record_script_error(e.to_string());
         }
     }
+    swap_clicked(lua, outer);
     // A nameplate click selects its unit, from the pointer or `Click()` alike (the plate's
     // override `0x7cb910` chains the base), after the handler so an erroring hook cannot eat it. A
     // press selects nothing: the plate registers Up clicks only (`0x7cb637`).
@@ -118,4 +121,30 @@ pub(crate) fn click_button(lua: &Lua, id: u32, button: &str, down: bool, scripte
             .loot_picks
             .push(slot + 1);
     }
+}
+
+/// Set `[[0xb499a8]+0x1234]`, the button of the click being dispatched, answering the old one:
+/// what `GetMouseButtonClicked` (`0x50f950`), `IsModifiedClick` and the macro `[button]` option
+/// read. The reference sets it around `OnMouseDown`/`OnMouseUp` (`0x48fc30`, `0x48fce0`) and a
+/// Button's click and double-click (`0x96fd70`, `0x96fdd0`, inferred the double-click), and puts
+/// the outer value back after, so it is nil outside those handlers.
+pub(crate) fn swap_clicked(lua: &Lua, button: Option<String>) -> Option<String> {
+    let mut model = lua.app_data_mut::<Model>().expect("model app_data");
+    std::mem::replace(&mut model.last_mouse_button, button)
+}
+
+/// Fire `script` on frame `id` with the button name `btn` as its argument, `button` the clicked
+/// button meanwhile ([`swap_clicked`]): the pointer's `OnMouseDown`, `OnMouseUp` and
+/// `OnDoubleClick`.
+pub(crate) fn fire_clicked(
+    lua: &Lua,
+    id: u32,
+    script: &str,
+    button: &str,
+    btn: &Value,
+) -> mlua::Result<()> {
+    let outer = swap_clicked(lua, Some(button.to_string()));
+    let fired = event::fire_widget_handler(lua, id, script, vec![btn.clone()]);
+    swap_clicked(lua, outer);
+    fired
 }
