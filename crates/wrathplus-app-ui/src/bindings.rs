@@ -51,6 +51,9 @@ pub(crate) use script_input::Input;
 #[derive(Resource, Default)]
 struct BindingDispatch {
     map: std::collections::HashMap<Chord, String>,
+    /// `SetMouselookOverrideBinding`'s keys, probed first while [`Self::looking`] (inferred).
+    mouselook: std::collections::HashMap<Chord, String>,
+    looking: bool,
     /// The engine table's generation this map was built from, keyed per VM: a fresh VM restarts
     /// its counter at 0.
     seen_generation: crate::app_core::vm_memo::VmMemo<Option<u64>>,
@@ -95,7 +98,8 @@ impl BindingDispatch {
     /// `Ctrl`+`Shift`+`P` would otherwise fall back to `SHIFT-P` (`TOGGLECHARACTER3`). An exact
     /// `CTRL-SHIFT-` binding still dispatches; mouse and wheel are never suppressed.
     fn resolve(&self, chord: Chord, dev_plane: bool) -> Option<&str> {
-        if let Some(command) = self.map.get(&chord) {
+        let looked = self.looking.then(|| self.mouselook.get(&chord)).flatten();
+        if let Some(command) = looked.or_else(|| self.map.get(&chord)) {
             return Some(command);
         }
         if dev_plane {
@@ -256,6 +260,7 @@ fn sync_dispatch(
         return;
     }
     let Some(mut script) = script else { return };
+    dispatch.looking = script.mouselooking();
     let generation = script.keybinds_generation();
     if *dispatch.seen_generation.get(&script) == Some(generation) {
         return;
@@ -271,6 +276,10 @@ fn sync_dispatch(
             None => warn!("bindings: {command}: unpressable chord '{key}' (unknown token)"),
         }
     }
+    let looks = script.mouselook_binding_keys().into_iter();
+    dispatch.mouselook = looks
+        .filter_map(|(k, c)| Some((Chord::parse(&k)?, c)))
+        .collect();
     script.fire_event("UPDATE_BINDINGS", vec![]);
 }
 
@@ -693,6 +702,7 @@ mod tests {
         app.world_mut().resource_mut::<UiKeyboardCapture>().consumed = keys.to_vec();
     }
 
+    mod mouselook;
     mod wheel;
 
     /// One addon's `Bindings.xml` in the reference's shape: a `runOnUp` binding forking on

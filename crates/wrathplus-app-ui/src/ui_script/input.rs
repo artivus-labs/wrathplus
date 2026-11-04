@@ -139,7 +139,15 @@ pub(super) fn feed_ui_input(
     let shift = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
     let ctrl = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
     let alt = keys.pressed(KeyCode::AltLeft) || keys.pressed(KeyCode::AltRight);
-    script.set_modifiers(shift, ctrl, alt);
+    // Each side apart, for `IsLeftShiftKeyDown` and its kin; the pairs follow from them.
+    script.set_modifier_sides(wrathplus_ui::script::ModifierKeys {
+        left_shift: keys.pressed(KeyCode::ShiftLeft),
+        right_shift: keys.pressed(KeyCode::ShiftRight),
+        left_ctrl: keys.pressed(KeyCode::ControlLeft),
+        right_ctrl: keys.pressed(KeyCode::ControlRight),
+        left_alt: keys.pressed(KeyCode::AltLeft),
+        right_alt: keys.pressed(KeyCode::AltRight),
+    });
     // ── Mouse ── A cursor off the window skips only the mouse feed.
     // The headless hover probe's aim stands in for a missing cursor, so `PointerOverUi` rises and
     // falls over a panel in an automated run as it does for a person; a real pointer always wins.

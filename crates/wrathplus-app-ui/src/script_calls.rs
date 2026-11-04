@@ -152,10 +152,12 @@ pub fn apply_script_calls(
                 );
             }
             // `RunMacro`/`RunMacroText`: the lines run as a macro slot's do, in call order.
-            ScriptCall::RunMacro { index } => {
-                crate::ui_macro::run_macro(script, index);
+            ScriptCall::RunMacro { index, button } => {
+                crate::ui_macro::run_macro(script, index, button);
             }
-            ScriptCall::RunMacroText { text } => crate::ui_macro::run_macro_text(script, &text),
+            ScriptCall::RunMacroText { text, button } => {
+                crate::ui_macro::run_macro_text(script, &text, button)
+            }
             // `InteractUnit(unit)` (`0x5277b0`): the object's own interact, as a right-click on it
             // runs it, read by the target chain's interact leg next frame. Labelled: the
             // reference interacts inside the call; a guid not streamed does nothing.

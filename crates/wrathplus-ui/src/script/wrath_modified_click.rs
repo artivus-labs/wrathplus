@@ -94,17 +94,15 @@ fn chord_matches(chord: &str, held: (bool, bool, bool), last_button: Option<&str
 
 impl super::UiScript {
     /// A mouse button press or release at `(x, y)`; `button` is the WoW name (`"LeftButton"`, …).
-    /// The button is the click's own for the length of its dispatch, what `IsModifiedClick` and
-    /// the macro `[button]` option read, and no click's afterwards.
+    /// The button is the click's own inside its `OnMouseDown`/`OnMouseUp`, `OnClick` and
+    /// `OnDoubleClick` handlers, what `IsModifiedClick` and the macro `[button]` option read
+    /// ([`super::button::swap_clicked`]).
     pub fn mouse_button(&mut self, x: f32, y: f32, button: &str, down: bool) -> bool {
-        self.model_mut().last_mouse_button = Some(button.to_string());
-        let consumed = self.mouse_dispatch(x, y, button, down);
-        self.model_mut().last_mouse_button = None;
-        consumed
+        self.mouse_dispatch(x, y, button, down)
     }
 }
 
-fn is_modified_click(model: &Model, arg: Option<&str>) -> bool {
+pub(super) fn is_modified_click(model: &Model, arg: Option<&str>) -> bool {
     let held = model.modifiers;
     let last = model.last_mouse_button.as_deref();
     let actions = &model.wrath_modified_clicks.actions;

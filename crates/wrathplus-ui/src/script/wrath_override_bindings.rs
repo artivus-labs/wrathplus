@@ -182,8 +182,11 @@ mod tests {
              MyButton:SetScript('OnClick', function(self, button) Clicked = button end)",
         )
         .unwrap();
+        // The click fires on the transition the button registered (`LeftButtonUp` by default).
+        s.run("MyButton:RegisterForClicks('RightButtonUp')")
+            .unwrap();
         assert!(s
-            .execute_binding("CLICK MyButton:RightButton", true)
+            .execute_binding("CLICK MyButton:RightButton", false)
             .unwrap());
         assert_eq!(s.eval::<String>("return Clicked").unwrap(), "RightButton");
         assert!(!s.execute_binding("CLICK Nobody:LeftButton", true).unwrap());

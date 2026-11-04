@@ -52,8 +52,7 @@ enum SlotResolve {
 }
 
 /// Resolves a slot through its macro: every `Is*Action`/`GetActionCooldown` binding goes through
-/// `0x4e5a50`, so a macro that casts Fireball is the Fireball slot, its own icon aside. Spells
-/// only: 1.12 has no `/use`, so no macro names an item.
+/// `0x4e5a50`, so a macro bound to Fireball (or to an item) is that slot, its own icon aside.
 fn resolve_through_macro(
     kind: u8,
     action: u32,
@@ -63,6 +62,7 @@ fn resolve_through_macro(
     match wrathplus_ui::script::macro_action_id(kind, action) {
         Some(id) => match bound.0.get(&id) {
             Some(BoundSpell::Spell(s)) => SlotResolve::Action(ACTION_KIND_SPELL, *s),
+            Some(BoundSpell::Item(i)) => SlotResolve::Action(ACTION_KIND_ITEM, *i),
             Some(BoundSpell::None) => SlotResolve::BareMacro,
             Some(BoundSpell::Unresolved) | None => SlotResolve::Dead,
         },

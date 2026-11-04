@@ -384,7 +384,7 @@ pub(crate) fn use_action(
         Some(b) if wrathplus_ui::script::macro_action_id(b.kind, b.action).is_some() => {
             let id = wrathplus_ui::script::macro_action_id(b.kind, b.action).unwrap_or(0);
             let index = script.macros().index_of_id(id).unwrap_or(0);
-            if !crate::ui_macro::run_macro(script, index as u32) {
+            if !crate::ui_macro::run_macro(script, index as u32, None) {
                 debug!("ui_action: macro action {action} (macro id {id:#x}) is empty");
             }
         }

@@ -106,7 +106,7 @@ fn running_a_macro_runs_its_lines_through_the_references_edit_box() {
         character: Vec::new(),
     });
 
-    assert!(super::run_macro(&mut s, 1));
+    assert!(super::run_macro(&mut s, 1, None));
     let sends = s.take_chat_sends();
     assert_eq!(
         sends
@@ -132,8 +132,8 @@ fn running_a_macro_runs_its_lines_through_the_references_edit_box() {
         account: vec![macro_view("Blank", "   \n\n")],
         character: Vec::new(),
     });
-    assert!(!super::run_macro(&mut s, 1));
-    assert!(!super::run_macro(&mut s, 7));
+    assert!(!super::run_macro(&mut s, 1, None));
+    assert!(!super::run_macro(&mut s, 7, None));
     assert!(s.take_chat_sends().is_empty());
 }
 
@@ -146,7 +146,7 @@ fn a_character_macro_runs_by_its_own_index() {
         account: Vec::new(),
         character: vec![character_view("Charge", "/say Charge")],
     });
-    assert!(super::run_macro(&mut s, 37));
+    assert!(super::run_macro(&mut s, 37, None));
     assert_eq!(
         s.take_chat_sends()
             .iter()
@@ -212,7 +212,7 @@ fn a_registered_frame_sees_every_macro_line_as_an_event() {
         character: Vec::new(),
     });
 
-    assert!(super::run_macro(&mut s, 1));
+    assert!(super::run_macro(&mut s, 1, None));
     assert_eq!(
         s.eval::<(String, String, i64)>(
             "return MacroSpy.seen[1], MacroSpy.seen[2], table.getn(MacroSpy.seen)"
@@ -242,7 +242,7 @@ fn either_line_ending_splits_a_body() {
         account: vec![macro_view("Mixed", "/say Charge\r/say a\r\n/say b")],
         character: Vec::new(),
     });
-    assert!(super::run_macro(&mut s, 1));
+    assert!(super::run_macro(&mut s, 1, None));
     assert_eq!(
         s.take_chat_sends()
             .iter()
@@ -312,4 +312,97 @@ fn a_wrath_vm_gets_both_build_12340_lists_once_per_source() {
         panic!("a new VM on the same source uses the cache")
     });
     assert_eq!(second.eval::<i64>("return GetNumMacroIcons()").unwrap(), 2);
+}
+
+/// `GetRunningMacro`/`GetRunningMacroButton` (`0x564c10`/`0x564c70`) answer the run while its
+/// lines fire and the caller's after: nil outside, the index and button inside a `RunMacro`, nil
+/// and the button inside a `RunMacroText` (its scratch record has no id).
+#[test]
+fn the_running_macro_and_its_button_are_answered_only_while_its_lines_run() {
+    let mut s = UiScript::new().unwrap();
+    s.set_macros(MacroState {
+        account: vec![macro_view("Probe", "/a\n/b")],
+        character: Vec::new(),
+    });
+    s.run(
+        "SEEN = {} local f = CreateFrame('Frame') f:RegisterEvent('EXECUTE_CHAT_LINE') \
+         f:SetScript('OnEvent', function(_, _, line) \
+           SEEN[#SEEN + 1] = line .. '=' .. tostring(GetRunningMacro()) .. ',' \
+             .. tostring(GetRunningMacroButton()) end)",
+    )
+    .unwrap();
+    assert!(super::run_macro(&mut s, 1, Some("RightButton".into())));
+    super::run_macro_text(&mut s, "/c", None);
+    let seen = s.eval::<String>("return table.concat(SEEN, ' ')").unwrap();
+    assert_eq!(seen, "/a=1,RightButton /b=1,RightButton /c=nil,nil");
+    assert!(s
+        .eval::<bool>("return GetRunningMacro() == nil and GetRunningMacroButton() == nil")
+        .unwrap());
+}
+
+/// A `SetMacroItem`/`SetMacroSpell` pair replaces the body's bound spell in the bar's map and in
+/// the engine's copy until the body is edited (`0x565ad0`'s unlink, `0x5aa920`'s refresh).
+#[test]
+fn an_explicit_pair_rebinds_the_bar_until_the_body_changes() {
+    use super::{BoundSpell, MacroBoundSpells};
+    use bevy::prelude::*;
+    let mut s = UiScript::new().unwrap();
+    s.set_macros(MacroState {
+        account: vec![macro_view("Bolt", "/cast Fireball")],
+        character: Vec::new(),
+    });
+    s.set_item_template(
+        6948,
+        wrathplus_ui::script::ItemTemplateView {
+            name: "Hearthstone".into(),
+            ..Default::default()
+        },
+    );
+    let table = crate::ui_chat::commands::SlashCommands::build(
+        |name| (name == "SLASH_CAST1").then(|| "/cast".to_string()),
+        |_| None,
+    );
+    let mut app = App::new();
+    app.init_resource::<crate::app_core::state::PlayerActions>()
+        .init_resource::<MacroBoundSpells>()
+        .insert_resource(table)
+        .add_systems(Update, super::rebind_macro_spells);
+    app.insert_non_send_resource(s);
+    let bound = |app: &App| {
+        app.world()
+            .resource::<MacroBoundSpells>()
+            .0
+            .get(&1)
+            .copied()
+    };
+    app.update();
+    assert_eq!(
+        bound(&app),
+        Some(BoundSpell::Unresolved),
+        "no book: the /cast misses"
+    );
+
+    let lua = |app: &mut App, chunk: &str| {
+        app.world_mut()
+            .non_send_resource_mut::<UiScript>()
+            .run(chunk)
+            .unwrap()
+    };
+    lua(&mut app, "SetMacroItem(1, 'Hearthstone')");
+    app.update();
+    assert_eq!(bound(&app), Some(BoundSpell::Item(6948)));
+    lua(&mut app, "SetMacroItem(1, 'Nothing')");
+    app.update();
+    assert_eq!(
+        bound(&app),
+        Some(BoundSpell::Unresolved),
+        "a missed item greys the slot"
+    );
+    lua(&mut app, "EditMacro(1, nil, nil, '/say hi')");
+    app.update();
+    assert_eq!(
+        bound(&app),
+        Some(BoundSpell::None),
+        "the body's derivation again"
+    );
 }

@@ -205,9 +205,17 @@ mod worldmap;
 mod worldstate;
 mod worn_display;
 mod wrath_achievements;
+mod wrath_base_helpers;
+mod wrath_binding_forms;
 mod wrath_currency;
+mod wrath_cvar_flags;
 mod wrath_equipment;
+mod wrath_frame_queries;
+mod wrath_input_sides;
+mod wrath_macro_api;
 mod wrath_modifiers;
+pub use wrath_input_sides::ModifierKeys;
+pub use wrath_macro_api::{ExplicitMacroBind, RunningMacro};
 mod wrath_worldmap;
 pub use tooltip_links::{GlyphLinkCatalog, QuestLinkView, TalentLinkView};
 pub use wrath_achievements::{
@@ -806,6 +814,11 @@ impl UiScript {
             wrath_macro_icons::install(&lua)?;
             wrath_addon_api::install(&lua)?;
             wrath_override_bindings::install(&lua)?;
+            wrath_binding_forms::install(&lua)?;
+            wrath_macro_api::install(&lua)?;
+            wrath_input_sides::install(&lua)?;
+            wrath_frame_queries::install(&lua)?;
+            wrath_base_helpers::install(&lua)?;
             wrath_session::install(&lua)?;
             cursor::install_wrath(&lua)?;
             wrath_unit_popup::install(&lua)?;
@@ -908,8 +921,8 @@ impl UiScript {
     /// Push the modifier state behind `IsShiftKeyDown`/`IsControlKeyDown`/`IsAltKeyDown`; the app
     /// calls it before the frame's mouse events, so a click handler reads the state of its click.
     pub fn set_modifiers(&mut self, shift: bool, ctrl: bool, alt: bool) {
-        let mut model = self.model_mut();
-        model.modifiers = (shift, ctrl, alt);
+        self.model_mut().modifiers = (shift, ctrl, alt);
+        wrath_input_sides::fold(&self.lua, (shift, ctrl, alt));
     }
 
     /// Push the player's WMO-containment state (the client's `0xceaa60`) onto every Minimap: it

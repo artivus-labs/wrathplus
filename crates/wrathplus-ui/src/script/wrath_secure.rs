@@ -24,6 +24,16 @@ fn number(v: &Value) -> Option<f64> {
     }
 }
 
+/// A run's button argument as `lua_tostring` reads it: a string or a number, else none.
+fn button_text(lua: &Lua, v: Value) -> mlua::Result<Option<String>> {
+    Ok(match v {
+        Value::String(_) | Value::Integer(_) | Value::Number(_) => {
+            lua.coerce_string(v)?.map(|s| s.to_string_lossy())
+        }
+        _ => None,
+    })
+}
+
 pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     let g = lua.globals();
     // CastSpellByID(spellID[, target]): a spell in the player's book casts there, at the target
@@ -76,11 +86,12 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             Ok(())
         })?,
     )?;
-    // RunMacro(index or name[, button]): the macro's lines, as `UseAction` runs a macro slot.
+    // RunMacro(index or name[, button]): the macro's lines, as `UseAction` runs a macro slot; the
+    // button, argument 2 as a string (`0x566e80`), is what `GetRunningMacroButton` answers.
     // Unresolved, labelled: the `button` argument's conditional is not modelled.
     g.set(
         "RunMacro",
-        lua.create_function(|lua, (m, _button): (Value, Value)| {
+        lua.create_function(|lua, (m, button): (Value, Value)| {
             let index = {
                 let model = lua.app_data_ref::<Model>().expect("model app_data");
                 match &m {
@@ -98,6 +109,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                     lua,
                     ScriptCall::RunMacro {
                         index: index as u32,
+                        button: button_text(lua, button)?,
                     },
                 );
             }
@@ -106,7 +118,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     )?;
     g.set(
         "RunMacroText",
-        lua.create_function(|lua, (text, _button): (Value, Value)| {
+        lua.create_function(|lua, (text, button): (Value, Value)| {
             let Value::String(text) = text else {
                 return Err(mlua::Error::runtime(
                     r#"Usage: RunMacroText("text" [, "button"])"#,
@@ -117,7 +129,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             while text.len() > 1023 {
                 text.pop();
             }
-            push(lua, ScriptCall::RunMacroText { text });
+            let button = button_text(lua, button)?;
+            push(lua, ScriptCall::RunMacroText { text, button });
             Ok(())
         })?,
     )?;
@@ -221,7 +234,8 @@ mod tests {
                     unit: "focus".into()
                 },
                 ScriptCall::RunMacroText {
-                    text: "/say hi".into()
+                    text: "/say hi".into(),
+                    button: None,
                 },
                 ScriptCall::DestroyTotem { slot: 1 },
             ]

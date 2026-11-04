@@ -36,6 +36,19 @@ pub(crate) enum BoundSpell {
     Unresolved,
     /// A spell id: the slot shows that spell's state.
     Spell(u32),
+    /// An item id (`[rec+0x568]`, which `SetMacroItem` writes): the slot shows that item's.
+    Item(u32),
+}
+
+/// A `SetMacroSpell`/`SetMacroItem` pair as the bar reads it: the item first (`SetMacroItem`
+/// zeroes the spell), then the spell, -1 an unresolved one.
+pub(crate) fn explicit_bound(e: &wrathplus_ui::script::ExplicitMacroBind) -> BoundSpell {
+    match (e.item, e.spell) {
+        (item, _) if item > 0 => BoundSpell::Item(item),
+        (_, spell) if spell > 0 => BoundSpell::Spell(spell as u32),
+        (_, 0) => BoundSpell::None,
+        _ => BoundSpell::Unresolved,
+    }
 }
 
 /// A macro body's runnable lines: the reference's tokenizer (`0x64ae50`) splits on either `\r` or
