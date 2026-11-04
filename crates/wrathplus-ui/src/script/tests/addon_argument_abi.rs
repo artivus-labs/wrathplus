@@ -97,12 +97,23 @@ fn a_bad_argument_type_raises_each_verbs_own_usage_string() {
             "{call} must raise `{usage}`, got: {got}"
         );
     }
+    // A stand-in for a C verb, here `SetSize` over `SetWidth`, raises at its own caller, as the
+    // verb's `luaL_where` would.
+    assert_eq!(
+        raised(&s, "CreateFrame('Frame'):SetSize({}, 1)"),
+        raised(&s, "CreateFrame('Frame'):SetWidth({})")
+    );
     // Called by the C `pcall`, `luaL_where` finds no line, so the message is bare.
     assert_eq!(
         s.eval::<String>(
             "local ok, e = pcall(GetAddOnInfo, {}) return type(e) .. '|' .. tostring(e)"
         )
         .unwrap(),
+        "string|Usage: GetAddOnInfo(index or \"name\")"
+    );
+    // Nor does a stand-in for one of the reference's C functions, here `securecall`.
+    assert_eq!(
+        raised(&s, "securecall(GetAddOnInfo, {})"),
         "string|Usage: GetAddOnInfo(index or \"name\")"
     );
     // An `xpcall` handler and `coroutine.resume` see the same string.

@@ -121,14 +121,36 @@ fn stock_message(e: &mlua::Error) -> String {
     }
 }
 
+/// The chunks that stand in for the reference's C functions.
+const STAND_IN_CHUNKS: [&str; 2] = ["[WrathPlus ", "[AzerothBench "];
+
+/// The stand-ins whose reference is a C caller of Lua (`securecall`, `hooksecurefunc`'s wrapper,
+/// the protected calls): a verb they call has a C caller in the reference, so no position.
+const C_CALLER_CHUNKS: [&str; 2] = [
+    "[AzerothBench trusted secure environment]",
+    "[WrathPlus wrath budget guards]",
+];
+
 /// `luaL_where(L, 1)` read off mlua's traceback of the raising verb: line 0 is the header, line 1
 /// the verb's own C frame, line 2 its caller, written `\tsrc:line: in …` when that frame has a
 /// current line and `\t[C]: in …` (or a tail-call marker) when not. A source name may itself hold
-/// `:digits`, so the last `:digits: in ` ends the position.
+/// `:digits`, so the last `:digits: in ` ends the position. Any other stand-in is a C verb in the
+/// reference, which raises at its own caller, so its frames are passed over to the one below.
 fn caller_position(traceback: &str) -> &str {
-    let Some(frame) = traceback.lines().nth(2).and_then(|l| l.strip_prefix('\t')) else {
+    let Some(frame) = traceback
+        .lines()
+        .skip(2)
+        .filter_map(|l| l.strip_prefix('\t'))
+        .find(|f| {
+            C_CALLER_CHUNKS.iter().any(|p| f.starts_with(p))
+                || !STAND_IN_CHUNKS.iter().any(|p| f.starts_with(p))
+        })
+    else {
         return "";
     };
+    if C_CALLER_CHUNKS.iter().any(|p| frame.starts_with(p)) {
+        return "";
+    }
     frame
         .rmatch_indices(": in ")
         .map(|(at, _)| at)
