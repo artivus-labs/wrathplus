@@ -49,7 +49,7 @@ Playerbots.RandomBotAutologin = $bot_autologin
 Playerbots.MinRandomBots = $bot_count
 Playerbots.MaxRandomBots = $bot_count
 Playerbots.EnablePeriodicOnlineOffline = 0
-Playerbots.AddClassAccountPoolSize = 0
+Playerbots.AddClassAccountPoolSize = $addclass_pool
 Playerbots.RandomBotGuildCount = 0
 EOF
 }
@@ -85,6 +85,10 @@ bot_count=${MANAGED_BOT_COUNT:-5}
 case "$bot_count" in 0|1|2|3|4|5) ;; *) echo 'MANAGED_BOT_COUNT must be 0..5' >&2; exit 2;; esac
 bot_autologin=0
 if [ "$bot_count" -gt 0 ]; then bot_autologin=1; fi
+# Accounts of ready-made bots for the addclass command (upstream's default, 50); 0 turns it off.
+# Upstream creates their characters on the first start after this is raised.
+addclass_pool=${MANAGED_ADDCLASS_POOL:-50}
+case "$addclass_pool" in ''|*[!0-9]*) echo 'MANAGED_ADDCLASS_POOL must be a number' >&2; exit 2;; esac
 password=$(cat /run/instance-secrets/mysql-app)
 case "$password" in *[!0-9a-f]*|'') echo 'Invalid instance credential' >&2; exit 1;; esac
 # Private client file keeps the password out of mysql argv and ordinary logs.

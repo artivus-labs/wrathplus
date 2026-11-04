@@ -8,6 +8,7 @@ x-server: &server
   restart: "no"
   environment:
     MANAGED_BOT_COUNT: "${MANAGED_BOT_COUNT:-5}"
+    MANAGED_ADDCLASS_POOL: "${MANAGED_ADDCLASS_POOL:-50}"
   entrypoint: ["/bin/sh", "/recipe/runtime.sh"]
   volumes:
     - instance-secrets:/run/instance-secrets:ro
