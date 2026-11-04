@@ -465,11 +465,12 @@ fn legacy_setup_and_launch_home_stay_together_even_if_new_home_exists() {
     let legacy = f.config.repo.join("benilla-config");
     let new = f.config.repo.join("wrathplus-config");
     fs::create_dir(&legacy).unwrap();
+    // Both names from the start: the old home is not moved, and wins.
+    fs::create_dir(&new).unwrap();
     for name in ["account", "realmlist.wtf", "config.toml"] {
         fs::write(legacy.join(name), name).unwrap();
     }
     save_config(&f.config, &legacy.join("manager.json")).unwrap();
-    fs::create_dir(&new).unwrap();
     // An unrelated or partial new home cannot suppress old startup settings.
     fs::write(new.join("manager.json"), b"invalid partial settings").unwrap();
     let saved = load(&f.config).unwrap();
