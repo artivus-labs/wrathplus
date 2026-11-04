@@ -10,7 +10,6 @@ use std::ffi::c_void;
 
 use mlua::{LightUserData, Lua, ObjectLike, Table, Value};
 
-use super::binding_abi::optional_string;
 use super::{Model, REG_FRAME_META, REG_FRAME_METHODS, REG_SCRIPTS, REG_WRAPPERS};
 use crate::layout::Point;
 use crate::order::{DrawLayer, Strata};
@@ -19,6 +18,7 @@ use crate::widget::{FrameHandle, FrameKind};
 // The frame method clusters, split out for size.
 
 pub(crate) mod anchor_args;
+mod create_args;
 mod events_regions;
 pub(crate) mod frame_state;
 mod layout_methods;
@@ -517,72 +517,26 @@ fn kind_method_registries(kind: Option<FrameKind>) -> &'static [&'static str] {
     }
 }
 
-/// `CreateFrame(kind, name?, parent?, inherits?)` (`0x7060b0`), the runtime frame factory.
-/// `inherits` names one template, applied after the frame is made
-/// ([`crate::loader::apply_template`]) so its `OnLoad` sees the frame's real name and its `$parent`
-/// resolves against the caller's name. An unknown template raises `Couldn't find inherited node`
-/// and creates nothing (`0x7061dd`); a known but unusable one (not virtual, or the wrong shape)
-/// only warns, since the lookup itself succeeded.
-pub(super) fn create_frame(
-    lua: &Lua,
-    (kind, name, parent, inherits): (String, Option<Value>, Option<Value>, Option<Value>),
-) -> mlua::Result<Table> {
-    // An unknown type raises. The reference's message (`0x872fa8`) capitalises `Unknown`, and it
-    // tests the template first (`0x7061dd`), raising for the type only at `0x7062a0`.
+/// `CreateFrame(kind, name?, parent?, inherits?, id?)` (`0x81bb20`), the runtime frame factory.
+/// The arguments are read and checked first ([`create_args`]), templates included, so a raise
+/// leaves no partial widget and no global; then the type, last (`0x81bdef`). The templates apply
+/// after the frame is made ([`crate::loader::apply_template`]), so their `OnLoad` sees its real
+/// name, its `id` and the caller's `$parent`; the `id` sits on the node itself, so it overrides a
+/// template's `id=`.
+pub(super) fn create_frame(lua: &Lua, args: mlua::MultiValue) -> mlua::Result<Table> {
+    let create_args::CreateArgs {
+        kind,
+        name,
+        parent: parent_handle,
+        templates,
+        id: frame_id,
+    } = create_args::read(lua, &args)?;
+    // 1.12's `TaxiRouteFrame` is not among build 12340's types (`0x813df7`-`0x813ece`,
+    // `0x521047`-`0x5210c1`). Labelled: the glue's `ModelFFX` (`0x4dbb03`) stays, as the XML loader
+    // builds the glue screens through this verb and both share one VM type table.
     let frame_kind = registered_frame_kind(lua, &kind)
-        .ok_or_else(|| mlua::Error::runtime(format!("CreateFrame: unknown frame type '{kind}'")))?;
-    // `name` and `inherits` go through `lua_tostring` (`0x6f3690`) unguarded, so a number is a
-    // string: `CreateFrame("Frame", 5)` names the frame "5". For `inherits` the conversion runs
-    // before the string-type gate and retags the slot (`0x70613f`, `0x6f7cb1`), so a number there
-    // raises as a missing template, where `CreateTexture` ignores one.
-    let name: Option<String> = name.as_ref().and_then(|v| optional_string(lua, v));
-    let template: Option<String> = inherits.as_ref().and_then(|v| optional_string(lua, v));
-
-    // A table is the parent and a name string is looked up; anything else is no parent. The
-    // reference raises `Usage: CreateFrame(...)` (`0x872f60`) for anything but a table or nil
-    // (`0x706112`).
-    let parent_handle: Option<FrameHandle> = {
-        let model = lua.app_data_ref::<Model>().expect("model app_data");
-        match &parent {
-            Some(Value::Table(t)) => decode_id(t)
-                .ok()
-                .and_then(|id| model.id_to_frame.get(&id).copied()),
-            Some(Value::String(s)) => s.to_str().ok().and_then(|n| model.arena.lookup(n.as_ref())),
-            _ => None,
-        }
-    };
-
-    // The reference silently ignores a fourth argument that is neither string nor number
-    // (`0x7061cb`); the warning is ours and changes nothing.
-    if template.is_none() {
-        if let Some(v) = inherits.as_ref().filter(|v| !v.is_nil()) {
-            let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-            model.record_warning(format!(
-                "CreateFrame: the 4th argument (inherits) must be a template-name string, got {}; \
-                 ignored for '{}'",
-                v.type_name(),
-                name.as_deref().unwrap_or("<unnamed>")
-            ));
-        }
-    }
-
-    // The template lookup comes before anything is built: a miss (`0x7061dd` → `0x6ee6f0`) raises
-    // at `0x7061ed`, before the node build (`0x706208`) and the name store (`0x70622d`), so it
-    // leaves no partial widget and no global. The raise never returns and `pcall` catches it, as
-    // the widget dispatcher (`0x704f10`) does for every handler.
-    if let Some(t) = template.as_deref().filter(|t| !t.is_empty()) {
-        let known = {
-            let model = lua.app_data_ref::<Model>().expect("model app_data");
-            let templates = model.framexml_templates.borrow();
-            // One name, verbatim, case-folded, as `framexml::expand` resolves it.
-            templates.contains_key(t) || templates.keys().any(|k| k.eq_ignore_ascii_case(t))
-        };
-        if !known {
-            return Err(mlua::Error::runtime(format!(
-                "CreateFrame(): Couldn't find inherited node \"{t}\""
-            )));
-        }
-    }
+        .filter(|_| enum_token(&kind) != "TAXIROUTEFRAME")
+        .ok_or_else(|| mlua::Error::runtime(format!("CreateFrame: Unknown frame type '{kind}'")))?;
 
     // A leading `$parent` in the name expands as in XML: `CreateFrame` sets `name=` on a synthetic
     // node (`0x70622d`) for the XML builder `0x6ee280`, so the name reaches `SetName` (`0x76c650`),
@@ -615,8 +569,16 @@ pub(super) fn create_frame(
     // The wrapper exists, published under its name, before the template's `OnLoad` runs inside
     // this call, so the handler can reach the frame by name.
     let wrapper = frame_wrapper(lua, id)?;
-    if let Some(template) = template {
-        let messages = crate::loader::apply_template(lua, &wrapper, &kind, &template);
+    if templates.is_empty() {
+        // The loader's `id=` read (`loader/geometry.rs`), on a node with nothing to inherit.
+        if let Some(n) = frame_id.and_then(|t| t.parse::<i64>().ok()) {
+            wrapper.call_method::<()>("SetID", n)?;
+        }
+    } else {
+        // The `id` is the node's own attribute, so it overrides a template's `id=`.
+        let mut node = crate::framexml::inherits_node(&kind, &templates.join(","));
+        node.attrs.extend(frame_id.map(|id| ("id".to_string(), id)));
+        let messages = crate::loader::apply_template(lua, &wrapper, &node);
         if !messages.is_empty() {
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
             for m in messages {

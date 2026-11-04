@@ -139,13 +139,13 @@ fn load_into_under_owned(
     loader.report
 }
 
-/// Apply a template to an existing frame, `CreateFrame`'s fourth argument. Returns the warnings,
-/// then the errors. The frame always survives: an unknown name leaves it bare, as in the
-/// reference, and only virtual elements are registered. The frame's own name is the `$parent`
-/// base (`MyButton` makes `$parentText` `MyButtonText`). Runs inside the `CreateFrame` binding, so
-/// it enters at [`Loader::decorate`]: [`Loader::materialize`] would recurse.
-pub fn apply_template(lua: &mlua::Lua, wrapper: &Table, kind: &str, template: &str) -> Vec<String> {
-    let template = template.trim();
+/// Apply `CreateFrame`'s node ([`framexml::inherits_node`]) to an existing frame; returns the
+/// warnings, then the errors. The frame always survives: an unknown name leaves it bare, as in the
+/// reference. Its own name is the `$parent` base (`MyButton` makes `$parentText` `MyButtonText`).
+/// Inside the `CreateFrame` binding it enters at [`Loader::decorate`]: `materialize` would recurse.
+pub fn apply_template(lua: &mlua::Lua, wrapper: &Table, node: &Element) -> Vec<String> {
+    let Element { tag: kind, .. } = node;
+    let template = node.attr("inherits").unwrap_or_default().trim();
     if template.is_empty() {
         return Vec::new();
     }
@@ -178,7 +178,7 @@ pub fn apply_template(lua: &mlua::Lua, wrapper: &Table, kind: &str, template: &s
         let model = loader.model();
         let templates = model.framexml_templates.borrow();
         // Looked up as `framexml::expand` looks it up (exact, then case-folded); keep them in step.
-        for name in [template].into_iter().filter(|s| !s.is_empty()) {
+        for name in template.split(',').filter(|s| !s.is_empty()) {
             let Some(el) = templates.get(name).or_else(|| {
                 templates
                     .iter()
@@ -213,7 +213,7 @@ pub fn apply_template(lua: &mlua::Lua, wrapper: &Table, kind: &str, template: &s
 
     // The XML `inherits=` expansion; its warnings get the `CreateFrame` call as a prefix.
     let first = loader.report.warnings.len();
-    let expanded = loader.expand(&framexml::inherits_node(kind, template));
+    let expanded = loader.expand(node);
     for w in &mut loader.report.warnings[first..] {
         *w = format!("{dbg}: {w}");
     }

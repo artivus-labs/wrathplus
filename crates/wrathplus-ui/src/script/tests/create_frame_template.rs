@@ -129,10 +129,10 @@ fn a_nested_frames_child_is_named_against_the_caller() {
     assert!(s.take_warnings().is_empty());
 }
 
-/// The template argument is one name: 1.12's `CreateFrame` hands the string to the XML loader's
-/// lookup (`0x6ee6f0`, called at `0x7061dd`), which has no splitter; comma lists came later.
+/// The template argument is a list: `SStrTokenize` (`0x76f1e0`) splits it on the set `" ,"`
+/// (`0x9eb7ec`), each name is looked up (`0x812ce0`) and a miss raises with that name (`0x81bd30`).
 #[test]
-fn a_comma_list_is_one_name_and_a_single_name_still_chains() {
+fn a_template_list_applies_each_name_and_a_single_name_still_chains() {
     let mut s = script();
     register(
         &s,
@@ -162,18 +162,83 @@ fn a_comma_list_is_one_name_and_a_single_name_still_chains() {
     assert!(s.take_errors().is_empty());
     assert!(s.take_warnings().is_empty());
 
-    let err = s
-        .run(r#"Both = CreateFrame("Frame", "Both", nil, "TemplA, TemplB")"#)
-        .expect_err("a comma list is one name, and it misses");
-    let text = err.to_string();
-    assert!(
-        text.contains("TemplA, TemplB"),
-        "the miss must name the literal it looked up, unsplit: {text}"
+    s.run(r#"Both = CreateFrame("Frame", "Both", nil, "TemplA, TemplB")"#)
+        .unwrap();
+    assert_eq!(
+        s.eval::<(f32, bool)>("return Both:GetWidth(), BothBTex ~= nil")
+            .unwrap(),
+        (50.0, true),
+        "both templates apply"
+    );
+    assert_eq!(
+        s.eval::<String>(
+            r#"return select(2, pcall(CreateFrame, "Frame", "Neither", nil, "TemplA,,Nope TemplB"))"#
+        )
+        .unwrap(),
+        "CreateFrame(): Couldn't find inherited node \"Nope\""
     );
     assert!(
-        s.eval::<bool>(r#"return getglobal("Both") == nil"#)
+        s.eval::<bool>(r#"return getglobal("Neither") == nil"#)
             .unwrap(),
         "a missed template must leave no frame behind"
+    );
+}
+
+/// The argument checks, in `0x81bb20`'s order: the type and parent shapes raise the `Usage:`
+/// (`0x81be53`), then the parent object (`0x81bbcc`, `0x81bc0c`), then the type, last
+/// (`0x81bdef`); argument 5 is the frame's `id` (`0x81bda4`), set before the template's `OnLoad`.
+#[test]
+fn the_arguments_raise_in_the_references_order_and_the_fifth_is_the_id() {
+    let s = script();
+    register(
+        &s,
+        r#"<Ui><Frame name="IdProbe" virtual="true" id="3"><Scripts>
+             <OnLoad>SeenID = self:GetID()</OnLoad></Scripts></Frame></Ui>"#,
+    );
+    let usage = r#"Usage: CreateFrame("frameType" [, "name"] [, parent] [, "template"] [, id])"#;
+    for (args, want) in [
+        ("", usage),
+        ("{}", usage),
+        (r#""Frame", "P", "UIParent""#, usage),
+        (r#""Bogus", nil, 5"#, usage),
+        (
+            r#""Frame", nil, {}"#,
+            "CreateFrame: Couldn't find 'this' in parent object",
+        ),
+        (
+            r#""Frame", nil, CreateFrame("Frame"):CreateTexture()"#,
+            "CreateFrame: Wrong parent object type, expected frame",
+        ),
+        (
+            r#""Bogus", nil, {}"#,
+            "CreateFrame: Couldn't find 'this' in parent object",
+        ),
+        (r#""Bogus""#, "CreateFrame: Unknown frame type 'Bogus'"),
+        (
+            r#""TaxiRouteFrame""#,
+            "CreateFrame: Unknown frame type 'TaxiRouteFrame'",
+        ),
+    ] {
+        let got = s
+            .eval::<String>(&format!(
+                "return select(2, pcall(CreateFrame{}{args}))",
+                [", ", ""][usize::from(args.is_empty())]
+            ))
+            .unwrap();
+        assert_eq!(got, want, "CreateFrame({args})");
+    }
+    s.run(r#"Tab = CreateFrame("Button", "Tab", UIParent, "IdProbe", 7)"#)
+        .unwrap();
+    assert_eq!(
+        s.eval::<(i64, i64)>("return Tab:GetID(), SeenID").unwrap(),
+        (7, 7),
+        "the caller's id sits on the node and overrides the template's"
+    );
+    s.run(r#"Tab = CreateFrame("Button", "Tab2", UIParent, "IdProbe")"#)
+        .unwrap();
+    assert_eq!(
+        s.eval::<(i64, i64)>("return Tab:GetID(), SeenID").unwrap(),
+        (3, 3)
     );
 }
 

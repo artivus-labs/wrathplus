@@ -13,7 +13,7 @@ mod xml_bool;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Element {
     pub tag: String,
-    attrs: Vec<(String, String)>,
+    pub(crate) attrs: Vec<(String, String)>,
     pub children: Vec<Element>,
     /// The node's own direct text (the reference node's body text at `+0xc`): a handler or
     /// `<Script>` body.
