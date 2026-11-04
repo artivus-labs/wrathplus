@@ -88,10 +88,7 @@ pub(super) fn get_item_count(
         .get(&item)
         .and_then(|f| f.use_spells.first())
         .map(|s| (s.spell, s.charges));
-    let (spell, spell_charges) = match template.or(live.enchant_spell) {
-        Some(s) => s,
-        None => (0, 0),
-    };
+    let (spell, spell_charges) = template.or(live.enchant_spell).unwrap_or_default();
     let mut n = n;
     if spell_charges < 0 {
         n = live.charges[usize::from(bank)];
