@@ -178,8 +178,11 @@ pub(crate) fn with_char<T>(lua: &Lua, f: impl FnOnce(&WrathCharState) -> T) -> T
     f(&lua.app_data_ref::<State>().expect("char state").player)
 }
 
+/// A player predicate's field read.
+type Pick = fn(&WrathCharState) -> bool;
+
 /// A player predicate: nil without the player, else the field as 1 or nil.
-fn player_flag(lua: &Lua, pick: fn(&WrathCharState) -> bool) -> Value {
+fn player_flag(lua: &Lua, pick: Pick) -> Value {
     let s = lua.app_data_ref::<State>().expect("char state");
     flag(s.player.has_player && pick(&s.player))
 }
@@ -281,7 +284,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             ))
         })?,
     )?;
-    let predicates: [(&str, fn(&WrathCharState) -> bool); 5] = [
+    let predicates: [(&str, Pick); 5] = [
         ("IsFlying", |p| p.flying),
         ("IsSwimming", |p| p.swimming),
         ("IsIndoors", |p| !p.outdoors),
