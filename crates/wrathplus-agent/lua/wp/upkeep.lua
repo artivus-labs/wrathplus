@@ -151,6 +151,7 @@ local function train()
   -- Not ours (a priest trainer for a warrior): nothing to learn here.
   if (GetNumTrainerServices() or 0) == 0 then return end
   local learned, money = {}, GetMoney() or 0
+  local short, next_level = 0, nil -- what is too dear now, and when something new comes
   for i = 1, (GetNumTrainerServices() or 0) do
     local name, rank, category = GetTrainerServiceInfo(i)
     local cost = GetTrainerServiceCost(i) or 0
@@ -158,9 +159,21 @@ local function train()
       BuyTrainerService(i)
       money = money - cost
       learned[#learned + 1] = name .. (rank and rank ~= "" and (" (" .. rank .. ")") or "")
+    elseif category == "available" then
+      short = short + cost
+    elseif category == "unavailable" and GetTrainerServiceLevelReq then
+      local level = GetTrainerServiceLevelReq(i) or 0
+      if level > (UnitLevel("player") or 0) and (not next_level or level < next_level) then next_level = level end
     end
   end
-  if #learned > 0 then did("trained " .. table.concat(learned, ", ")) end
+  local who = UnitName("npc") or "the trainer"
+  if #learned > 0 then
+    did("trained " .. table.concat(learned, ", "))
+  elseif short > 0 then
+    did(string.format("nothing affordable at %s: %dc of skills, %dc in hand", who, short, money))
+  else
+    did("nothing new at " .. who .. (next_level and (" until level " .. next_level) or ""))
+  end
   U.trained_level = UnitLevel("player")
   -- Done here: close the window, or follow mode waits on it.
   if CloseTrainer then CloseTrainer() end

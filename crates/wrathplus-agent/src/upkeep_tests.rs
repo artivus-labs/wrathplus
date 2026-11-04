@@ -182,3 +182,23 @@ fn its_own_class_trainer_is_found_not_just_any() {
     let name: String = script.eval("return Upkeep.trainer().name").unwrap();
     assert_eq!(name, "Lyria Du Lac");
 }
+
+#[test]
+fn a_visit_with_nothing_bought_says_why() {
+    let mut script = upkeep();
+    // 5c in hand: Charge and Rend (10c each) are too dear.
+    script.run("money = 5").unwrap();
+    script.fire_event("TRAINER_SHOW", vec![]);
+    // All bought already: nothing new, until Thunder Clap's level.
+    script
+        .run("TRAINER = { { 'Thunder Clap', '', 'unavailable', 100 } } GetTrainerServiceLevelReq = function() return 6 end")
+        .unwrap();
+    script.fire_event("TRAINER_SHOW", vec![]);
+    let log: String = script
+        .eval("return table.concat(Upkeep.log, '; ')")
+        .unwrap();
+    assert_eq!(
+        log,
+        "nothing affordable at the trainer: 20c of skills, 5c in hand; nothing new at the trainer until level 6"
+    );
+}
