@@ -213,9 +213,9 @@ fn no_user_facing_sentence_is_written_in_rust_when_the_reference_ships_one() {
         }
     }
 
-    // `BENILLA_REFSTRINGS_REPORT=1` with `--nocapture` prints every hit (key, function, literal),
+    // `WRATHPLUS_REFSTRINGS_REPORT=1` with `--nocapture` prints every hit (key, function, literal),
     // biggest file first.
-    if std::env::var_os("BENILLA_REFSTRINGS_REPORT").is_some() {
+    if std::env::var_os("WRATHPLUS_REFSTRINGS_REPORT").is_some() {
         let mut files: Vec<(&String, &Vec<String>)> = found.iter().collect();
         files.sort_by_key(|(f, h)| (std::cmp::Reverse(h.len()), (*f).clone()));
         let total: usize = files.iter().map(|(_, h)| h.len()).sum();

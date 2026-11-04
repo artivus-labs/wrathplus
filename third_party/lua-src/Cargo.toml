@@ -8,7 +8,7 @@
 # opcode's 5.0 behaviour, which Lua shipped as "for compatibility only", so every other 5.1 fix and
 # mlua's whole surface stay intact.
 #
-# What changes: `BENILLA.md` lists every hunk against upstream's `lua-5.1.5/` tree
+# What changes: `WRATHPLUS.md` lists every hunk against upstream's `lua-5.1.5/` tree
 # (eight, in three files) and the one command that verifies the sources against the registry copy.
 #
 # The crate's own `src/lib.rs` is upstream's, with Lua 5.2 to 5.5 stripped from the `Version` enum
@@ -22,7 +22,7 @@ edition = "2024"
 repository = "https://github.com/mlua-rs/lua-src-rs"
 license = "MIT"
 description = """
-Sources of Lua 5.1 and logic to build them — benilla's fork, see the header and BENILLA.md.
+Sources of Lua 5.1 and logic to build them — WrathPlus's fork, see the header and WRATHPLUS.md.
 """
 
 [features]

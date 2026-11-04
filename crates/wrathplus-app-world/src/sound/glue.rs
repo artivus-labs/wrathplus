@@ -122,7 +122,7 @@ fn start_glue_music(
 ///
 /// The reference's trigger: `CGlueMgr::Update` state 8 spins each frame after entry
 /// (`[0xb41d94] == 1`) while the AsyncFileLoader (`0x443e20`) has reads outstanding; the frame it
-/// drains it calls `0x45aeb0(NULL)` → `0x45b050(3.0f)`, then sends `CMSG_PLAYER_LOGIN`. benilla's
+/// drains it calls `0x45aeb0(NULL)` → `0x45b050(3.0f)`, then sends `CMSG_PLAYER_LOGIN`. WrathPlus's
 /// analogue is `world_hold`'s falling edge ([`crate::loading_screen`]), acted on only in the world
 /// so the logout blackout's drop does not fade the theme the glue just restarted.
 fn hand_off_glue_music(

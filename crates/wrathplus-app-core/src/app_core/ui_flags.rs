@@ -115,7 +115,7 @@ pub struct Realms {
     /// `GetRealmInfo`'s `currentRealm`, the row highlighted when nothing else is. The reference
     /// case-folds the `realmName` CVar (`0x46ef9e`, via `0x5ab7d0` on the handle from `0x63db90`)
     /// against the realm name, and `ConnectToRealm` (`0x46b217`) writes the CVar before it dials.
-    /// Ours is set when we answer a park and seeded from the persisted CVar, because benilla
+    /// Ours is set when we answer a park and seeded from the persisted CVar, because WrathPlus
     /// writes `realmName` only at world entry (the VM's `set_realm_name`).
     pub current: Option<String>,
     /// Seconds until the next refresh request.

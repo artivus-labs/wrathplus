@@ -1,4 +1,4 @@
-//! The `MovieFrame` methods and build 12340's `GameMovieFinished`. benilla has no movie playback
+//! The `MovieFrame` methods and build 12340's `GameMovieFinished`. WrathPlus has no movie playback
 //! path, so `StartMovie` answers as the reference does when the file cannot open (`0x970660`:
 //! `0x95eb30` fails, nil returned), and the stock `MovieFrame_PlayMovie` then hides the frame and
 //! calls `GameMovieFinished` (`MovieFrame.lua:17-23`). Wow.exe pass: Experience's
@@ -7,7 +7,7 @@
 use mlua::{Lua, Table, Value};
 
 /// Registry key of the MovieFrame method table.
-pub(super) const REG_MOVIEFRAME_METHODS: &str = "__benilla_movieframe_methods";
+pub(super) const REG_MOVIEFRAME_METHODS: &str = "__wrathplus_movieframe_methods";
 
 /// The movie module's VM state.
 #[derive(Default)]

@@ -34,16 +34,16 @@
 //! ([`ChatWindowLook::stock`]), and a file older than `ADDEDVERSION 13` gets the `defaultOn` groups
 //! added since: general groups into window 1, combat-log groups into window 2. Label: the 12340
 //! back-fill rule is inferred from the group table's version words, not audited.
-//! A cache benilla wrote under the 1.12 grammar says `ADDEDVERSION 2`, so its first load under
+//! A cache WrathPlus wrote under the 1.12 grammar says `ADDEDVERSION 2`, so its first load under
 //! the 12340 tables back-fills every `defaultOn` group newer than version 2 and drops names the
 //! 46-entry table lacks: a one-time migration that can bring back groups a player had switched off. `LOCKED` is an `i32` (`CHATWINDOW+0x8c`) written
 //! through `setne`, so only 0 and 1 round-trip. Deviation: `set_chat_window_looks` drops an
 //! out-of-range window, where the reference's `WINDOW` bound is off by one (`0x498d1c`, `ja` where
 //! the array needs `jae`), because that write would land past the array.
 //!
-//! Ours is `benilla-config/chat/<realm>-<character>.txt`
+//! Ours is `wrathplus-config/chat/<realm>-<character>.txt`
 //! ([`crate::local_state::chat_character_path`]); its reader is as lenient as the reference's
-//! (keys case-insensitive, unknown keys and blank lines skipped) and also reads benilla's older
+//! (keys case-insensitive, unknown keys and blank lines skipped) and also reads WrathPlus's older
 //! one-line `WINDOW 1  SIZE 0  COLOR …` rows. `UPDATE_CHAT_WINDOWS`, then `UPDATE_CHAT_COLOR` per
 //! registry entry, fire file or no file (`0x4996b9`, `0x499934`). Saves wait one quiet second, as
 //! the opacity slider writes on every drag step, and flush at the session end and at `AppExit`.
@@ -65,7 +65,7 @@ const SAVE_QUIET: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// The file's header, as comment lines: the reference's reader has no comments, ours skips them.
 const HEADER: &str = "\
-# benilla chat cache, in the reference's chat-cache.txt grammar (written by
+# WrathPlus chat cache, in the reference's chat-cache.txt grammar (written by
 # 0x499a80, read by 0x498a60): the custom channels to re-join, the joined zone channels as bits, the
 # per-type COLORS table (r g b and the Y/N colorNameByClass), then one WINDOW block per chat frame —
 # NAME (when one was set), SIZE, COLOR r g b a as bytes, LOCKED, UNINTERACTABLE, DOCKED, SHOWN, the
@@ -74,11 +74,11 @@ const HEADER: &str = "\
 # Written whole; the tab menu, /join and ChangeChatColor are what move it.
 ";
 
-/// benilla's repair marker, a header comment line, not the reference's grammar. A file without it
+/// WrathPlus's repair marker, a header comment line, not the reference's grammar. A file without it
 /// may hold `ZONECHANNELS 0` words from an empty roster, which strip window 1 of its channels;
 /// [`restore_chat_looks`] re-seeds such a file once, and the next save stamps the marker. It is
 /// matched with `contains`, so a marker line with more text after it still counts.
-const WRITER_GENERATION: &str = "# benilla-writer 2";
+const WRITER_GENERATION: &str = "# wrathplus-writer 2";
 
 /// Which character's file we are on, where it lives, and whether it is owed a write.
 #[derive(Resource, Default)]
@@ -288,7 +288,7 @@ fn parse(text: &str, rows: &[(u32, String)]) -> Parsed {
                 continue;
             }
             let mut look = ChatWindowLook::stock(index - 1);
-            // benilla's older one-line row: the keys follow on the same line.
+            // WrathPlus's older one-line row: the keys follow on the same line.
             while let Some(key) = it.next() {
                 apply_key(&mut look, key, &mut it, rows);
             }
@@ -460,10 +460,10 @@ pub(crate) fn restore_chat_looks(world: &mut World, script: &mut UiScript) {
                 }
             });
         let had_file = text.is_some();
-        // No marker: its `ZONECHANNELS` words may come from an empty roster. Repaired below, once.
+        // No marker (old `benilla-writer` counts too): `ZONECHANNELS` may be empty. Repaired once.
         let damaged = text
             .as_deref()
-            .is_some_and(|t| !t.contains(WRITER_GENERATION));
+            .is_some_and(|t| !t.contains(WRITER_GENERATION) && !t.contains("# benilla-writer 2"));
         parsed = text.map(|t| parse(&t, &rows)).unwrap_or_default();
         if !had_file {
             // The loader's no-file path (`0x4997ad`): window 1 gets each seed row as
@@ -900,7 +900,7 @@ mod tests {
         assert_eq!(parse(HEADER, &rows()), Parsed::default());
     }
 
-    /// benilla's older one-line rows (no `ADDEDVERSION`): the back-fill leaves the stock sets.
+    /// WrathPlus's older one-line rows (no `ADDEDVERSION`): the back-fill leaves the stock sets.
     #[test]
     fn one_line_rows_without_addedversion_still_parse() {
         let got = parse(
@@ -1096,13 +1096,13 @@ mod tests {
         let _l = crate::local_state::test_env::ENV_LOCK
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let tmp = std::env::temp_dir().join(format!("benilla-chat-custom-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("wp-chat-custom-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
-        std::fs::create_dir_all(tmp.join("benilla-config")).expect("hermetic home");
+        std::fs::create_dir_all(tmp.join("wrathplus-config")).expect("hermetic home");
         let _capture = crate::local_state::test_env::EnvGuard::unset("WOW_CAPTURE");
         let _home = crate::local_state::test_env::EnvGuard::set(
-            "BENILLA_HOME",
-            tmp.join("benilla-config")
+            "WRATHPLUS_HOME",
+            tmp.join("wrathplus-config")
                 .to_str()
                 .expect("utf-8 temp path"),
         );

@@ -15,7 +15,7 @@ struct Fixtures(PathBuf);
 impl Fixtures {
     fn new(tag: &str) -> Self {
         let root = std::env::temp_dir().join(format!(
-            "benilla-use-{tag}-{}-{:?}",
+            "wrathplus-use-{tag}-{}-{:?}",
             std::process::id(),
             std::thread::current().id()
         ));

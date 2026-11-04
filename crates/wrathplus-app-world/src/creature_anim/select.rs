@@ -33,7 +33,7 @@ pub(super) const STEALTH_WALK: u16 = 119;
 pub(super) const STEALTH_STAND: u16 = 120;
 
 /// Mount (91), the rider's seat whatever the unit does: the client arms it outside the selector
-/// (`0x607a00`, `0x5fe2f0`); benilla pins the gait slot, and the locomotion plays on the mount.
+/// (`0x607a00`, `0x5fe2f0`); WrathPlus pins the gait slot, and the locomotion plays on the mount.
 pub(super) const MOUNT: u16 = 91;
 
 /// Loot (50), the kneel while a loot window is open: the loot leg `0x5fd260`, after locomotion

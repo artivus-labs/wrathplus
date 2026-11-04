@@ -1,6 +1,6 @@
 //! World entry and exit through [`super::load_ingame_ui_on_world_entry`] and
 //! [`super::end_ui_session`]: each login runs addon file scope in a fresh VM, and each exit root
-//! writes what the session owes. Each test writes its probe addon into a hermetic `BENILLA_HOME`.
+//! writes what the session owes. Each test writes its probe addon into a hermetic `WRATHPLUS_HOME`.
 
 use bevy::prelude::*;
 
@@ -69,17 +69,19 @@ fn hermetic_addon(
     lua: &str,
 ) -> (std::path::PathBuf, EnvGuard, EnvGuard) {
     // The pid keeps concurrent test binaries out of each other's tree.
-    let tmp =
-        std::env::temp_dir().join(format!("benilla-world-entry-{tag}-{}", std::process::id()));
+    let tmp = std::env::temp_dir().join(format!(
+        "wrathplus-world-entry-{tag}-{}",
+        std::process::id()
+    ));
     let _ = std::fs::remove_dir_all(&tmp);
-    let home = tmp.join("benilla-config");
+    let home = tmp.join("wrathplus-config");
     let dir = home.join("AddOns").join(name);
     std::fs::create_dir_all(&dir).expect("probe addon dir");
     std::fs::write(dir.join(format!("{name}.toc")), toc).expect("probe toc");
     std::fs::write(dir.join(format!("{name}.lua")), lua).expect("probe lua");
     let capture = EnvGuard::unset("WOW_CAPTURE");
-    let benilla_home = EnvGuard::set("BENILLA_HOME", home.to_str().expect("utf-8 temp path"));
-    (tmp, capture, benilla_home)
+    let wrathplus_home = EnvGuard::set("WRATHPLUS_HOME", home.to_str().expect("utf-8 temp path"));
+    (tmp, capture, wrathplus_home)
 }
 
 /// The world after `Startup` ([`super::setup_script`]): a boot VM, no frames.
@@ -1012,7 +1014,7 @@ fn a_clean_world_entry_raises_only_the_warnings_we_have_named() {
         .expect("VM");
 
     // Deviation: the `OnInputLanguageChanged` script slot (`ChatFrame.xml:121`, the IME language
-    // indicator) is refused, because benilla has no IME to fire it.
+    // indicator) is refused, because WrathPlus has no IME to fire it.
     // The stock `text=` keys with no GlobalStrings global, which the client shows as written.
     const KNOWN: &str = "OnInputLanguageChanged,text=\"OPTIONS\",text=\"BATTLEGROUND_LORETEXT_1\",text=\"HONOR_THISWEEK\",text=\"TEST\",text=\"ARTICLE_COUNT\",text=\"ERROR\",text=\"CANHAZDUMMYTEXT\"";
 

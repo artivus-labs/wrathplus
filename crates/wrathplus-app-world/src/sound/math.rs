@@ -62,7 +62,7 @@ pub(crate) fn near_field_atten(d_sq: f32, maxdist: f32) -> f32 {
     1.0 - clamped / band
 }
 
-// NOTE: `0x457960` is the SFX-bus auto-duck, not a music crossfade, and benilla does not model
+// NOTE: `0x457960` is the SFX-bus auto-duck, not a music crossfade, and WrathPlus does not model
 // it. The music transition is a 4.0 s backend fade-stop (`sound::zone`).
 
 /// The global 3D rolloff factor: `FSOUND_3D_SetRolloffFactor(4.0)` at device init (`0x7a47b1`,

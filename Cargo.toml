@@ -38,11 +38,11 @@ clap = { version = "4.6.1", features = ["derive"] }
 sha1 = "0.10.6"
 
 # lua-src builds the addon VM's Lua 5.1.5, patched to accept exactly the 1.12 client's grammar;
-# the hunks and the command that checks them: `third_party/lua-src/BENILLA.md`.
+# the hunks and the command that checks them: `third_party/lua-src/WRATHPLUS.md`.
 [patch.crates-io]
 lua-src = { path = "third_party/lua-src" }
 # kira 0.12.4, patched to compute spatial gains and the volume tween per output chunk and
-# interpolate them, not per sample frame (`third_party/kira/BENILLA.md`).
+# interpolate them, not per sample frame (`third_party/kira/WRATHPLUS.md`).
 kira = { path = "third_party/kira" }
 
 # Dependencies at opt-level 3 in dev: at opt-level 0, avian/parry collision drops a run to <1 fps.

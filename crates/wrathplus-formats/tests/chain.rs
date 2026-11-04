@@ -140,7 +140,7 @@ fn decodes_a_blp_icon_to_png() {
         .expect("read spell icon BLP");
 
     // Keyed by pid: concurrent test runs would otherwise delete each other's file.
-    let out = std::env::temp_dir().join(format!("benilla-fmt-icon-{}.png", std::process::id()));
+    let out = std::env::temp_dir().join(format!("wrathplus-fmt-icon-{}.png", std::process::id()));
     let (w, h) = wrathplus_formats::blp_to_png(&bytes, &out).expect("decode BLP -> PNG");
 
     assert_eq!((w, h), (64, 64), "spell icons are 64x64");

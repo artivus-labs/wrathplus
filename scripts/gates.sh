@@ -5,7 +5,7 @@
 # enforcer-no-install. A failure prints the gate's log tail and exits nonzero; a green
 # run stamps the tree, which then re-greens without running. GATES_FORCE=1 runs the chain anyway,
 # WOW_DATA picks the install (set and empty: none) and TMPDIR holds the scratch files; the script
-# sets BENILLA_REQUIRE_DATA, BENILLA_ADDON_CORPUS, BENILLA_SKIP_LOG and WOW_WORLDVIEW_CHECK for
+# sets WRATHPLUS_REQUIRE_DATA, WRATHPLUS_ADDON_CORPUS, WRATHPLUS_SKIP_LOG and WOW_WORLDVIEW_CHECK for
 # its gates.
 # `.github/workflows/ci.yml` runs the gates that need neither the install nor a display on a fork's
 # pull request: a gate added here goes there too, if it can run on a bare Linux runner.
@@ -32,7 +32,7 @@ corpus=""
 [ -d "$root/wow-addons-vanilla" ] && corpus="+corpus"
 tree_key() {
     local tmpidx t
-    tmpidx="$(mktemp "${TMPDIR:-/tmp}/benilla-gates-idx.XXXXXX")" && rm -f "$tmpidx" || return 1
+    tmpidx="$(mktemp "${TMPDIR:-/tmp}/wrathplus-gates-idx.XXXXXX")" && rm -f "$tmpidx" || return 1
     t="$( (export GIT_INDEX_FILE="$tmpidx"
            git read-tree HEAD && git add -A . && git write-tree) 2>/dev/null )"
     rm -f "$tmpidx"
@@ -66,12 +66,12 @@ if [ "${GATES_FORCE:-}" != "1" ] && [ -n "$key_start" ] && [ -f "$stamp" ]; then
     fi
 fi
 
-log="$(mktemp "${TMPDIR:-/tmp}/benilla-gates.XXXXXX")"
-skips="$(mktemp "${TMPDIR:-/tmp}/benilla-gates-skips.XXXXXX")"
+log="$(mktemp "${TMPDIR:-/tmp}/wrathplus-gates.XXXXXX")"
+skips="$(mktemp "${TMPDIR:-/tmp}/wrathplus-gates-skips.XXXXXX")"
 trap 'rm -f "$log" "$skips"' EXIT
 
 # libtest hides a passing test's output, so `install.rs`'s `skipped` also appends each data-gated
-# skip to `$BENILLA_SKIP_LOG`; this prints them, grouped, after a test rung and empties the file.
+# skip to `$WRATHPLUS_SKIP_LOG`; this prints them, grouped, after a test rung and empties the file.
 report_skips() { # $1 = rung name
     [ -s "$skips" ] || return 0
     echo "  $1: $(wc -l <"$skips" | tr -d ' ') data-gated tests SKIPPED on this machine —"
@@ -117,7 +117,7 @@ run clippy env AZB_QUALITY_LOCKED=1 CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$root/
     scripts/quality/run.sh clippy --workspace
 
 # test: where the install resolves and the `wow-addons-vanilla` corpus link exists,
-# BENILLA_REQUIRE_DATA=1 refuses a data-gated test that skips; with the install alone it would
+# WRATHPLUS_REQUIRE_DATA=1 refuses a data-gated test that skips; with the install alone it would
 # fail every corpus test. `$wow_data` is resolved once, for player-tests and the stamp too.
 wow_data="$(resolve_wow)"
 require_data=""
@@ -128,12 +128,12 @@ else
          "corpus=$([ -d "$root/wow-addons-vanilla" ] && echo yes || echo no)):" \
          "data-gated tests skip silently on this machine"
 fi
-run test env ${require_data:+BENILLA_REQUIRE_DATA=1} BENILLA_SKIP_LOG="$skips" cargo test --workspace
+run test env ${require_data:+WRATHPLUS_REQUIRE_DATA=1} WRATHPLUS_SKIP_LOG="$skips" cargo test --workspace
 report_skips test
 
 # test-no-install: refuses a test that reads the install without `wow_data_or_skip!`. `WOW_DATA=`
 # (set, empty) is the resolver's "no install"; no build reads it, so the test binaries are reused.
-run test-no-install env -u BENILLA_REQUIRE_DATA WOW_DATA= cargo test --workspace
+run test-no-install env -u WRATHPLUS_REQUIRE_DATA WOW_DATA= cargo test --workspace
 
 # doc-links: refuses a doc link to a `crate::`, `super::`, `self::` or `Self::` path whose leaf is
 # declared nowhere in the workspace. Narrow on purpose: every other unresolved link is a convention.
@@ -145,16 +145,16 @@ run pass-span-lint scripts/pass-span-lint.py
 
 # player-tests: the player build, `wrathplus-app` without `dev`, which compiles out the debug panel,
 # perf HUD, inspector, capture harness and probes, so it fails when any other code names one of
-# them. Its test build compiles every line of the player graph but the `benilla` launcher, a shim
+# them. Its test build compiles every line of the player graph but the `wrathplus` launcher, a shim
 # with no `dev` seam, so a `cargo build -p wrathplus --no-default-features` would add only the shim
 # and a link. It runs the unit tests of the `cfg(not(feature = "dev"))` code (the resolver skips
 # the source tree; the state folder sits beside the binary), which no other gate runs. WOW_DATA, which
 # a player build reads too, goes in for the shipped-UI tests that read FrameXML off the install.
-# Without `dev` only $BENILLA_ADDON_CORPUS finds the addon corpus, so the link goes in by that name,
-# and BENILLA_REQUIRE_DATA refuses a skip here exactly where it does in `test`.
+# Without `dev` only $WRATHPLUS_ADDON_CORPUS finds the addon corpus, so the link goes in by that name,
+# and WRATHPLUS_REQUIRE_DATA refuses a skip here exactly where it does in `test`.
 run player-tests env ${wow_data:+WOW_DATA="$wow_data"} \
-    ${corpus:+BENILLA_ADDON_CORPUS="$root/wow-addons-vanilla"} \
-    ${require_data:+BENILLA_REQUIRE_DATA=1} BENILLA_SKIP_LOG="$skips" \
+    ${corpus:+WRATHPLUS_ADDON_CORPUS="$root/wow-addons-vanilla"} \
+    ${require_data:+WRATHPLUS_REQUIRE_DATA=1} WRATHPLUS_SKIP_LOG="$skips" \
     cargo test -p wrathplus-formats -p wrathplus-app-core -p wrathplus-app-net -p wrathplus-app-world -p wrathplus-app-ui -p wrathplus-app-tools -p wrathplus-app --no-default-features --lib
 report_skips player-tests
 

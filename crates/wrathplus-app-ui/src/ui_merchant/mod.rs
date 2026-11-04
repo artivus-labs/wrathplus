@@ -1019,10 +1019,10 @@ pub mod purse_fixture {
             .run(&format!(
                 r#"
                 ERR_NOT_ENOUGH_MONEY = "{NOT_ENOUGH_MONEY}"
-                BENILLA_TEST_LINES = {{}}
+                WRATHPLUS_TEST_LINES = {{}}
                 local f = CreateFrame("Frame")
                 f:RegisterEvent("UI_ERROR_MESSAGE")
-                f:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9) table.insert(BENILLA_TEST_LINES, arg1) end)
+                f:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9) table.insert(WRATHPLUS_TEST_LINES, arg1) end)
                 "#
             ))
             .unwrap();
@@ -1031,7 +1031,7 @@ pub mod purse_fixture {
     /// The `UI_ERROR_MESSAGE` lines since [`record_errors`].
     pub fn shown(script: &UiScript) -> Vec<String> {
         script
-            .eval::<Vec<String>>("return BENILLA_TEST_LINES")
+            .eval::<Vec<String>>("return WRATHPLUS_TEST_LINES")
             .unwrap()
     }
 

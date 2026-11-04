@@ -146,25 +146,25 @@ const FLAG_SAMPLES: u32 = 5;
 /// `CHAT_MSG_BG_SYSTEM_NEUTRAL` lines (`BattleGround.cpp:383-418`). Written in 1.12 dialect
 /// (`this`/`event`/`arg1` globals, no `ipairs` over a literal).
 const EVENT_TAP: &str = r#"
-BenillaBgLog = {};
-BenillaBgTap = CreateFrame("Frame");
-BenillaBgTap:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9)
-    table.insert(BenillaBgLog, event .. "(" .. tostring(arg1) .. ")");
+WrathPlusBgLog = {};
+WrathPlusBgTap = CreateFrame("Frame");
+WrathPlusBgTap:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9)
+    table.insert(WrathPlusBgLog, event .. "(" .. tostring(arg1) .. ")");
 end);
-BenillaBgTap:RegisterEvent("CHAT_MSG_BG_SYSTEM_NEUTRAL");
-BenillaBgTap:RegisterEvent("CHAT_MSG_BG_SYSTEM_ALLIANCE");
-BenillaBgTap:RegisterEvent("CHAT_MSG_BG_SYSTEM_HORDE");
-BenillaBgTap:RegisterEvent("CHAT_MSG_SYSTEM");
-BenillaBgTap:RegisterEvent("CHAT_MSG_MONSTER_YELL");
-BenillaBgTap:RegisterEvent("UPDATE_WORLD_STATES");
-BenillaBgTap:RegisterEvent("UPDATE_BATTLEFIELD_STATUS");
-BenillaBgTap:RegisterEvent("UPDATE_BATTLEFIELD_SCORE");
-BenillaBgTap:RegisterEvent("AREA_SPIRIT_HEALER_IN_RANGE");
-BenillaBgTap:RegisterEvent("AREA_SPIRIT_HEALER_OUT_OF_RANGE");
-BenillaBgTap:RegisterEvent("PLAYER_DEAD");
-BenillaBgTap:RegisterEvent("PLAYER_UNGHOST");
-BenillaBgTap:RegisterEvent("PLAYER_ALIVE");
-BenillaBgTap:RegisterEvent("ZONE_CHANGED_NEW_AREA");
+WrathPlusBgTap:RegisterEvent("CHAT_MSG_BG_SYSTEM_NEUTRAL");
+WrathPlusBgTap:RegisterEvent("CHAT_MSG_BG_SYSTEM_ALLIANCE");
+WrathPlusBgTap:RegisterEvent("CHAT_MSG_BG_SYSTEM_HORDE");
+WrathPlusBgTap:RegisterEvent("CHAT_MSG_SYSTEM");
+WrathPlusBgTap:RegisterEvent("CHAT_MSG_MONSTER_YELL");
+WrathPlusBgTap:RegisterEvent("UPDATE_WORLD_STATES");
+WrathPlusBgTap:RegisterEvent("UPDATE_BATTLEFIELD_STATUS");
+WrathPlusBgTap:RegisterEvent("UPDATE_BATTLEFIELD_SCORE");
+WrathPlusBgTap:RegisterEvent("AREA_SPIRIT_HEALER_IN_RANGE");
+WrathPlusBgTap:RegisterEvent("AREA_SPIRIT_HEALER_OUT_OF_RANGE");
+WrathPlusBgTap:RegisterEvent("PLAYER_DEAD");
+WrathPlusBgTap:RegisterEvent("PLAYER_UNGHOST");
+WrathPlusBgTap:RegisterEvent("PLAYER_ALIVE");
+WrathPlusBgTap:RegisterEvent("ZONE_CHANGED_NEW_AREA");
 "#;
 
 /// What the drain returns when the tap's globals are gone (the VM was minted fresh), so a dead tap
@@ -175,9 +175,9 @@ const TAP_GONE: &str = "<tap-gone>";
 /// receives and the table that holds.
 const EVENT_DRAIN: &str = r#"
 local out = "";
-if not BenillaBgLog or not BenillaBgTap then return "<tap-gone>" end
-for i = 1, table.getn(BenillaBgLog) do out = out .. "  " .. BenillaBgLog[i]; end
-BenillaBgLog = {};
+if not WrathPlusBgLog or not WrathPlusBgTap then return "<tap-gone>" end
+for i = 1, table.getn(WrathPlusBgLog) do out = out .. "  " .. WrathPlusBgLog[i]; end
+WrathPlusBgLog = {};
 return out;
 "#;
 

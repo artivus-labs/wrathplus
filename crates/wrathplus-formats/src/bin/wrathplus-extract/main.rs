@@ -212,7 +212,7 @@ enum Command {
     },
     /// Dump a WMO root's placed props: each MODD doodad with its MODS sets and the groups whose
     /// MODR names it. The reference creates props only from a group's MODR refs (`0x695aa0`), so
-    /// it never creates one no group names; benilla still spawns those.
+    /// it never creates one no group names; WrathPlus still spawns those.
     Wmodoodads {
         /// Internal path to the WMO root (forward or back slashes accepted).
         internal_path: String,

@@ -526,7 +526,7 @@ mod tests {
         );
     }
 
-    /// At 60 fps with the gain, benilla emits what a reference capped at 30 fps does.
+    /// At 60 fps with the gain, WrathPlus emits what a reference capped at 30 fps does.
     #[test]
     fn the_frame_cap_gain_matches_the_reference_installs_throughput() {
         // Nominal snow at wire grade 1.0 and weatherDensity 3 (K = 1): 14000/s.

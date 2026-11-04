@@ -236,7 +236,7 @@ pub(crate) fn bind_undeclared_prefixes(text: &str) -> String {
         // An inert URI, distinct per prefix so two stray prefixes stay two namespaces.
         out.insert_str(
             at,
-            &format!(" xmlns:{prefix}=\"urn:benilla:undeclared:{prefix}\""),
+            &format!(" xmlns:{prefix}=\"urn:wrathplus:undeclared:{prefix}\""),
         );
     }
     out

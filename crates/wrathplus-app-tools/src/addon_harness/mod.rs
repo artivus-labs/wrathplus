@@ -671,12 +671,12 @@ fn drive_ui_probe(script: &mut UiScript) -> Vec<String> {
         -- overrides correctly and swallowed every raise, so the corpus showed a spotless column
         -- forever. `the_ui_probe_records_what_an_override_raises` is the test that caught it, and
         -- it exists because a silent instrument is worse than no instrument.
-        BENILLA_PROBE_ERRORS = {}
+        WRATHPLUS_PROBE_ERRORS = {}
         local function try(fn)
             if type(fn) == "function" then
                 local ok, err = pcall(fn)
                 if not ok then
-                    table.insert(BENILLA_PROBE_ERRORS, tostring(err))
+                    table.insert(WRATHPLUS_PROBE_ERRORS, tostring(err))
                 end
             end
         end
@@ -713,9 +713,9 @@ fn drive_ui_probe(script: &mut UiScript) -> Vec<String> {
     );
     let mut out = script.errors().split_off(before);
     // The captured raises, in order.
-    if let Ok(n) = script.eval::<i64>("return table.getn(BENILLA_PROBE_ERRORS)") {
+    if let Ok(n) = script.eval::<i64>("return table.getn(WRATHPLUS_PROBE_ERRORS)") {
         for i in 1..=n {
-            if let Ok(e) = script.eval::<String>(&format!("return BENILLA_PROBE_ERRORS[{i}]")) {
+            if let Ok(e) = script.eval::<String>(&format!("return WRATHPLUS_PROBE_ERRORS[{i}]")) {
                 out.push(e);
             }
         }
@@ -2551,7 +2551,7 @@ mod dependency_tests {
     /// A dependency is loaded before its dependent, depth-first, as `AddOn_Load` (`0x51f240`) does.
     #[test]
     fn a_dependency_runs_before_the_addon_that_declares_it() {
-        let tmp = std::env::temp_dir().join(format!("benilla-harness-deps-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("wp-harness-deps-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         let write = |name: &str, toc: &str, file: &str, body: &str| {
             let dir = tmp.join(name);
@@ -2741,8 +2741,7 @@ mod dependency_tests {
     /// `OnUpdate` lands in `session_errors`, and `loaded` still counts load errors only.
     #[test]
     fn a_clean_load_is_not_a_working_addon() {
-        let tmp =
-            std::env::temp_dir().join(format!("benilla-harness-session-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("wp-harness-session-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         let write = |name: &str, body: &str| {
             let dir = tmp.join(name);
@@ -2804,8 +2803,7 @@ mod dependency_tests {
     /// (`AceAddon-2.0.lua:104-105`, `:230`). Attribution is by the raising chunk.
     #[test]
     fn a_consumers_raise_inside_a_dependency_window_is_the_consumers_row() {
-        let tmp =
-            std::env::temp_dir().join(format!("benilla-harness-attrib-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("wp-harness-attrib-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         let write = |name: &str, toc: &str, file: &str, body: &str| {
             let dir = tmp.join(name);
@@ -2856,10 +2854,8 @@ mod dependency_tests {
     /// dependency's row, never its consumers', since those events fire outside the error mark.
     #[test]
     fn each_loaded_addon_gets_its_own_addon_loaded_event() {
-        let tmp = std::env::temp_dir().join(format!(
-            "benilla-harness-addonloaded-{}",
-            std::process::id()
-        ));
+        let tmp =
+            std::env::temp_dir().join(format!("wp-harness-addonloaded-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         let write = |name: &str, toc: &str, file: &str, body: &str| {
             let dir = tmp.join(name);
@@ -2938,8 +2934,7 @@ mod dependency_tests {
     /// own event only.
     #[test]
     fn a_dependencys_addon_loaded_precedes_the_dependents_file_scope() {
-        let tmp =
-            std::env::temp_dir().join(format!("benilla-harness-eager-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("wp-harness-eager-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         let write = |name: &str, toc: &str, file: &str, body: &str| {
             let dir = tmp.join(name);
@@ -2993,7 +2988,7 @@ mod dependency_tests {
     /// `"Unseen" .. "ByConcat"` must not enter).
     #[test]
     fn the_template_census_resolves_a_local_and_says_what_it_still_cannot_see() {
-        let tmp = std::env::temp_dir().join(format!("benilla-harness-tpl-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("wp-harness-tpl-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         let dir = tmp.join("TplUser");
         std::fs::create_dir_all(&dir).unwrap();
@@ -3048,8 +3043,7 @@ mod dependency_tests {
     /// The two never merge.
     #[test]
     fn an_absent_manifest_entry_is_attributed_to_whose_package_is_short() {
-        let tmp =
-            std::env::temp_dir().join(format!("benilla-harness-absent-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("wp-harness-absent-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         let write = |name: &str, toc: &str, files: &[(&str, &str)]| {
             let dir = tmp.join(name);
@@ -3132,8 +3126,7 @@ mod dependency_tests {
     /// here and works on the 1.12 client, which shares one Lua state.
     #[test]
     fn a_sibling_addons_embedded_library_is_invisible() {
-        let tmp =
-            std::env::temp_dir().join(format!("benilla-harness-sibling-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("wp-harness-sibling-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         let write = |name: &str, toc: &str, file: &str, body: &str| {
             let dir = tmp.join(name);
@@ -3179,8 +3172,7 @@ mod dependency_tests {
     /// and an uninstalled one is silent: `missing_deps` is required-only.
     #[test]
     fn an_optional_dependency_loads_first_and_a_missing_one_is_silent() {
-        let tmp =
-            std::env::temp_dir().join(format!("benilla-harness-optdeps-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("wp-harness-optdeps-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         let write = |name: &str, toc: &str, file: &str, body: &str| {
             let dir = tmp.join(name);
@@ -3223,8 +3215,7 @@ mod dependency_tests {
     #[test]
     fn the_inherits_census_counts_templates_and_not_fonts() {
         wrathplus_formats::wow_data_or_skip!();
-        let tmp =
-            std::env::temp_dir().join(format!("benilla-harness-inherits-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("wp-harness-inherits-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         let dir = tmp.join("Inheritor");
         std::fs::create_dir_all(&dir).unwrap();
@@ -3278,8 +3269,7 @@ mod dependency_tests {
     /// A silent-empty oracle loses `NoSuchWidgetMethod`; a blanket-report one gains `SetWidth`.
     #[test]
     fn the_method_census_finds_a_method_no_widget_provides() {
-        let tmp =
-            std::env::temp_dir().join(format!("benilla-harness-methods-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("wp-harness-methods-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         let lib = tmp.join("MethodicalLib");
         std::fs::create_dir_all(&lib).unwrap();
@@ -3360,8 +3350,7 @@ mod dependency_tests {
     #[test]
     fn the_per_kind_census_finds_a_verb_wired_to_the_wrong_kind() {
         wrathplus_formats::wow_data_or_skip!();
-        let tmp =
-            std::env::temp_dir().join(format!("benilla-harness-perkind-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("wp-harness-perkind-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         let dir = tmp.join("PerKind");
         std::fs::create_dir_all(&dir).unwrap();
@@ -3774,13 +3763,13 @@ mod dependency_tests {
 
         // Bagnon's idiom, on the verb Bagnon replaces.
         script
-            .run("BENILLA_PROBE_HITS = 0 ToggleBackpack = function() BENILLA_PROBE_HITS = BENILLA_PROBE_HITS + 1 end")
+            .run("WRATHPLUS_PROBE_HITS = 0 ToggleBackpack = function() WRATHPLUS_PROBE_HITS = WRATHPLUS_PROBE_HITS + 1 end")
             .unwrap();
 
         let errs = drive_ui_probe(&mut script);
         assert!(errs.is_empty(), "the probe must not raise here: {errs:?}");
         assert_eq!(
-            script.eval::<i64>("return BENILLA_PROBE_HITS").ok(),
+            script.eval::<i64>("return WRATHPLUS_PROBE_HITS").ok(),
             Some(2),
             "the probe drives ToggleBackpack twice (open, then the override's close path)"
         );

@@ -12,7 +12,7 @@ use crate::widget::{KindState, ScrollingMessageState};
 
 /// Registry key of the ScrollingMessageFrame method table (the MAXCSTACK discipline).
 pub(crate) const REG_SCROLLINGMESSAGEFRAME_METHODS: &str =
-    "__benilla_scrollingmessageframe_methods";
+    "__wrathplus_scrollingmessageframe_methods";
 
 /// Run `f` over a ScrollingMessageFrame's state under one short borrow; any other frame, reachable
 /// only through a misapplied method table, is an error.
@@ -880,13 +880,13 @@ mod tests {
     fn the_addmessage_id_index_follows_the_rgb_leg() {
         let s = UiScript::new().unwrap();
         s.run(
-            "BenillaMF = CreateFrame('ScrollingMessageFrame') \
-             BenillaMF:AddMessage('shorthand', 5) \
-             BenillaMF:AddMessage('aceconsole', nil, nil, nil, nil, 5) \
-             BenillaMF:AddMessage('coloured', 1, 1, 1, 7)",
+            "WrathPlusMF = CreateFrame('ScrollingMessageFrame') \
+             WrathPlusMF:AddMessage('shorthand', 5) \
+             WrathPlusMF:AddMessage('aceconsole', nil, nil, nil, nil, 5) \
+             WrathPlusMF:AddMessage('coloured', 1, 1, 1, 7)",
         )
         .unwrap();
-        let frame: mlua::Table = s.eval("return BenillaMF").unwrap();
+        let frame: mlua::Table = s.eval("return WrathPlusMF").unwrap();
         let ids: Vec<u32> = super::with_smf(s.lua(), &frame, |smf| {
             smf.lines.iter().map(|l| l.id).collect()
         })
@@ -996,7 +996,7 @@ mod tests {
     #[test]
     fn disabled_hyperlinks_drop_the_frames_link_spans() {
         let mut s = wrath();
-        s.run("F = CreateFrame('ScrollingMessageFrame', 'BenillaLinks')")
+        s.run("F = CreateFrame('ScrollingMessageFrame', 'WrathPlusLinks')")
             .unwrap();
         let frame: mlua::Table = s.eval("return F").unwrap();
         let h = crate::script::object::frame_handle_of(s.lua(), &frame).unwrap();

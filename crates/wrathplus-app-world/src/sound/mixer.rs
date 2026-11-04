@@ -1069,7 +1069,7 @@ pub(super) mod tests {
         const COPIES: usize = 5;
 
         let dir =
-            std::env::temp_dir().join(format!("benilla-probe-selftest-{}", std::process::id()));
+            std::env::temp_dir().join(format!("wrathplus-probe-selftest-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("temp capture dir");
 

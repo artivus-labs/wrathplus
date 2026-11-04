@@ -96,7 +96,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
 /// `InteractUnit(unitToken[, exactMatch])` (`0x527f00`, table `0xac8350`): a string (or number)
 /// first argument, else the usage error. `"mouseover"` reads the mouseover global; another token
 /// resolves through `0x520190`. Then `0x5277b0` finds the object and runs its interact (the
-/// object's vtable `+0xb0`), answering 1, or nil with no object. benilla answers 1 for a token
+/// object's vtable `+0xb0`), answering 1, or nil with no object. WrathPlus answers 1 for a token
 /// naming a unit and queues [`ScriptCall::InteractUnit`], whose applier runs the world's interact
 /// on the object; nil for a token naming nobody.
 ///

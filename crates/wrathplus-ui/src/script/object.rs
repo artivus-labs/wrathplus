@@ -41,7 +41,7 @@ pub(crate) fn decode_id(this: &Table) -> mlua::Result<u32> {
     match this.raw_get::<Value>(0)? {
         Value::LightUserData(l) => Ok(l.0 as usize as u32),
         _ => Err(mlua::Error::runtime(
-            "not a benilla frame/region object (missing T[0] identity)",
+            "not a WrathPlus frame/region object (missing T[0] identity)",
         )),
     }
 }
@@ -433,7 +433,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
 
 /// Registry key of the per-kind frame metatables, each keyed by its kind's first method-table key,
 /// `""` for a kind with none.
-const REG_KIND_METAS: &str = "__benilla_frame_meta_by_kind";
+const REG_KIND_METAS: &str = "__wrathplus_frame_meta_by_kind";
 
 /// The metatable a frame of `kind` wears, built once per kind and cached in [`REG_KIND_METAS`].
 /// Its `__index` is a table, so a method lookup never leaves `luaV_gettable` for Rust. The kind's

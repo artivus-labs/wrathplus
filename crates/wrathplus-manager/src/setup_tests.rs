@@ -347,11 +347,11 @@ fn commands_keep_user_paths_as_single_arguments_and_clear_overrides() {
         "WOW_CLIENT_PROFILE",
         "WOW_LOCALE",
         "WOW_HOST",
-        "BENILLA_HOME",
+        "WRATHPLUS_HOME",
     ];
     for (key, value) in command.get_envs() {
         let upper = key.to_string_lossy().to_ascii_uppercase();
-        if upper.starts_with("WOW_") || upper.starts_with("BENILLA_") || upper.contains("PROBE") {
+        if upper.starts_with("WOW_") || upper.starts_with("WRATHPLUS_") || upper.contains("PROBE") {
             assert!(value.is_none() || allowed.contains(&upper.as_str()));
         }
     }
@@ -479,7 +479,7 @@ fn legacy_setup_and_launch_home_stay_together_even_if_new_home_exists() {
     assert_eq!(command.get_current_dir(), Some(legacy.as_path()));
     assert!(command
         .get_envs()
-        .any(|(k, v)| { k == "BENILLA_HOME" && v == Some(legacy.as_os_str()) }));
+        .any(|(k, v)| { k == "WRATHPLUS_HOME" && v == Some(legacy.as_os_str()) }));
     assert_eq!(
         fs::read_to_string(legacy.join("account")).unwrap(),
         "account"

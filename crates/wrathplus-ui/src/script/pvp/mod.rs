@@ -65,7 +65,7 @@ impl super::UiScript {
         std::mem::take(&mut self.model_mut().pvp_toggles)
     }
 
-    /// Queue a toggle for `/pvp`, which benilla parses in Rust; the reference's `/pvp` is Lua over
+    /// Queue a toggle for `/pvp`, which WrathPlus parses in Rust; the reference's `/pvp` is Lua over
     /// `TogglePVP`.
     pub fn queue_pvp_toggle(&mut self) {
         self.model_mut().pvp_toggles += 1;

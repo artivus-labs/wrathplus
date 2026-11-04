@@ -313,14 +313,14 @@ impl crate::query_cache::AskOnce for NameCache {
 /// The file's first line; any field that differs on load discards the whole file, the
 /// reference's rule for its `.wdb` header (`[FourCC | build 0x16f3 | locale | recordSize |
 /// version 1]`, no checksum, no timestamp, no TTL).
-const CACHE_MAGIC: &str = "benilla-namecache";
+const CACHE_MAGIC: &str = "wrathplus-namecache";
 /// Our record-layout version; bump it when a column changes. Version 2 holds creature records
 /// only.
 // 3: creature lines carry the Wrath HealthModifier/PowerModifier columns.
 const CACHE_FORMAT: u32 = 3;
 /// The client build, the reference's `0x16f3`.
 const CACHE_BUILD: u32 = 5875;
-/// In the header as in the reference's; benilla reads DBC locale slot 0 only.
+/// In the header as in the reference's; WrathPlus reads DBC locale slot 0 only.
 const CACHE_LOCALE: &str = "enUS";
 
 impl NameCache {

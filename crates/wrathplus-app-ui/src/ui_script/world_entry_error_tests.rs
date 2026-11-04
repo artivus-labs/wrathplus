@@ -44,7 +44,7 @@ fn an_addon_error_while_entering_world_reports_on_screen_and_the_sibling_loads()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let (tmp, _c, _h) = hermetic_probe("addon-error");
     // A second addon, first alphabetically, that dies at file scope.
-    let dir = tmp.join("benilla-config/AddOns/AaBroken");
+    let dir = tmp.join("wrathplus-config/AddOns/AaBroken");
     std::fs::create_dir_all(&dir).expect("broken addon dir");
     std::fs::write(dir.join("AaBroken.toc"), "## Interface: 30300\nboom.lua\n").expect("toc");
     std::fs::write(dir.join("boom.lua"), "error('file-scope boom')\n").expect("lua");
@@ -80,7 +80,7 @@ fn a_looping_addon_cannot_freeze_world_entry() {
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let (tmp, _c, _h) = hermetic_probe("addon-loop");
-    let dir = tmp.join("benilla-config/AddOns/AaSpin");
+    let dir = tmp.join("wrathplus-config/AddOns/AaSpin");
     std::fs::create_dir_all(&dir).expect("spin addon dir");
     std::fs::write(dir.join("AaSpin.toc"), "## Interface: 30300\nspin.lua\n").expect("toc");
     std::fs::write(dir.join("spin.lua"), "while true do end\n").expect("lua");

@@ -26,9 +26,9 @@ pub fn set_project_folder(dir: &str) {
     }
 }
 
-/// The folder a dev build keeps its `WoW` link, `benilla-config/` and `.probe-identity` in: the
-/// launcher's, when its entry point recorded one, else benilla's own checkout, so a crate built on
-/// top of benilla resolves from its folder and not from cargo's checkout of benilla. `None` in a
+/// The folder a dev build keeps its `WoW` link, `wrathplus-config/` and `.probe-identity` in: the
+/// launcher's, when its entry point recorded one, else WrathPlus's own checkout, so a crate built on
+/// top of WrathPlus resolves from its folder and not from cargo's checkout of wrathplus. `None` in a
 /// player build, which looks in no source tree.
 pub fn project_folder() -> Option<&'static Path> {
     #[cfg(feature = "dev")]
@@ -36,7 +36,7 @@ pub fn project_folder() -> Option<&'static Path> {
         LAUNCHER_FOLDER
             .get()
             .map(PathBuf::as_path)
-            .or_else(benilla_checkout)
+            .or_else(wrathplus_checkout)
     }
     #[cfg(not(feature = "dev"))]
     {
@@ -44,10 +44,10 @@ pub fn project_folder() -> Option<&'static Path> {
     }
 }
 
-/// benilla's own checkout: this crate's manifest dir, two levels up. The addon corpus always
-/// resolves here, since its tests are benilla's.
+/// WrathPlus's own checkout: this crate's manifest dir, two levels up. The addon corpus always
+/// resolves here, since its tests are WrathPlus's.
 #[cfg(feature = "dev")]
-fn benilla_checkout() -> Option<&'static Path> {
+fn wrathplus_checkout() -> Option<&'static Path> {
     Path::new(env!("CARGO_MANIFEST_DIR")).ancestors().nth(2)
 }
 
@@ -102,7 +102,7 @@ fn candidates_from(
 
 /// The install, or skip this test: `wow_data_or_skip!()` in a `-> ()` test,
 /// `wow_data_or_skip!(None)` in a helper returning `Option`. The skip names every path tried, and
-/// under `BENILLA_REQUIRE_DATA=1` it fails instead.
+/// under `WRATHPLUS_REQUIRE_DATA=1` it fails instead.
 #[macro_export]
 macro_rules! wow_data_or_skip {
     () => {
@@ -119,17 +119,17 @@ macro_rules! wow_data_or_skip {
     };
 }
 
-/// A data-gated test's skip, printed; a panic under `BENILLA_REQUIRE_DATA=1`, which the gate sets
+/// A data-gated test's skip, printed; a panic under `WRATHPLUS_REQUIRE_DATA=1`, which the gate sets
 /// where the data is, since libtest hides a passing test's stderr and a lost install reads green.
 #[doc(hidden)]
 pub fn skipped(what: &str, looked_in: &[PathBuf]) {
     skipped_under(
-        std::env::var_os("BENILLA_REQUIRE_DATA").is_some_and(|v| !v.is_empty() && v != "0"),
+        std::env::var_os("WRATHPLUS_REQUIRE_DATA").is_some_and(|v| !v.is_empty() && v != "0"),
         what,
         looked_in,
     );
-    // `$BENILLA_SKIP_LOG`: libtest hides the line above, so the gate counts skips from this file.
-    if let Some(log) = std::env::var_os("BENILLA_SKIP_LOG").filter(|p| !p.is_empty()) {
+    // `$WRATHPLUS_SKIP_LOG`: libtest hides the line above, so the gate counts skips from this file.
+    if let Some(log) = std::env::var_os("WRATHPLUS_SKIP_LOG").filter(|p| !p.is_empty()) {
         use std::io::Write;
         if let Ok(mut f) = std::fs::OpenOptions::new()
             .create(true)
@@ -147,14 +147,14 @@ fn skipped_under(required: bool, what: &str, looked_in: &[PathBuf]) {
     let msg = format!("skipping: {what} — looked in {looked_in:?}");
     assert!(
         !required,
-        "{msg} — and BENILLA_REQUIRE_DATA is set: the gate resolved this data on this machine, \
+        "{msg} — and WRATHPLUS_REQUIRE_DATA is set: the gate resolved this data on this machine, \
          so a skip here is a broken resolver or a missing link, not a missing install"
     );
     eprintln!("{msg}");
 }
 
 /// The third-party addon corpus the UI engine's real-addon tests run against, or `None`:
-/// `$BENILLA_ADDON_CORPUS`, then `<benilla's checkout>/wow-addons-vanilla` (`dev` only), a
+/// `$WRATHPLUS_ADDON_CORPUS`, then `<WrathPlus's checkout>/wow-addons-vanilla` (`dev` only), a
 /// gitignored link beside `WoW`. Never a folder beside the checkout, which depends on where the
 /// checkout sits.
 pub fn addon_corpus() -> Option<PathBuf> {
@@ -163,7 +163,7 @@ pub fn addon_corpus() -> Option<PathBuf> {
 
 /// Every place [`addon_corpus`] looks, in order, whether or not it exists, for the skip message.
 pub fn addon_corpus_candidates() -> Vec<PathBuf> {
-    addon_corpus_candidates_from(std::env::var_os("BENILLA_ADDON_CORPUS").map(PathBuf::from))
+    addon_corpus_candidates_from(std::env::var_os("WRATHPLUS_ADDON_CORPUS").map(PathBuf::from))
 }
 
 /// [`addon_corpus_candidates`] with the environment passed in, like [`candidates_from`].
@@ -172,9 +172,9 @@ fn addon_corpus_candidates_from(override_dir: Option<PathBuf>) -> Vec<PathBuf> {
     if let Some(over) = override_dir {
         out.push(over);
     }
-    // benilla's checkout, dev builds only, whoever the launcher is: the corpus tests are benilla's.
+    // WrathPlus's checkout, dev builds only, whoever the launcher is: the corpus tests are WrathPlus's.
     #[cfg(feature = "dev")]
-    if let Some(root) = benilla_checkout() {
+    if let Some(root) = wrathplus_checkout() {
         out.push(root.join("wow-addons-vanilla"));
     }
     out
@@ -191,7 +191,7 @@ macro_rules! addon_corpus_or_skip {
             Some(root) => root,
             None => {
                 $crate::skipped(
-                    "no vanilla addon corpus (set $BENILLA_ADDON_CORPUS)",
+                    "no vanilla addon corpus (set $WRATHPLUS_ADDON_CORPUS)",
                     &$crate::addon_corpus_candidates(),
                 );
                 return $ret;
@@ -216,18 +216,18 @@ mod tests {
 
     #[test]
     fn the_ladder_is_override_then_project_folder_then_beside_the_binary() {
-        let c = probe(Some("/opt/wow/Data"), Some("/games/benilla"));
+        let c = probe(Some("/opt/wow/Data"), Some("/games/wrathplus"));
         assert_eq!(c.first(), Some(&PathBuf::from("/opt/wow/Data")), "{c:?}");
-        assert!(c.contains(&PathBuf::from("/games/benilla/Data")), "{c:?}");
+        assert!(c.contains(&PathBuf::from("/games/wrathplus/Data")), "{c:?}");
         assert!(
-            c.contains(&PathBuf::from("/games/benilla/WoW/Data")),
+            c.contains(&PathBuf::from("/games/wrathplus/WoW/Data")),
             "{c:?}"
         );
 
         // Either input may be absent without shifting the rest.
         assert_eq!(
-            probe(None, Some("/games/benilla")).last(),
-            Some(&PathBuf::from("/games/benilla/WoW/Data"))
+            probe(None, Some("/games/wrathplus")).last(),
+            Some(&PathBuf::from("/games/wrathplus/WoW/Data"))
         );
         assert!(!probe(Some("/opt/wow/Data"), None)
             .iter()
@@ -236,7 +236,7 @@ mod tests {
 
     #[test]
     fn a_candidate_that_does_not_exist_is_never_chosen() {
-        let tmp = std::env::temp_dir().join(format!("benilla-wd-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("wrathplus-wd-{}", std::process::id()));
         std::fs::create_dir_all(tmp.join("Data")).unwrap();
         let ghost = tmp.join("nope");
 
@@ -261,7 +261,7 @@ mod tests {
     #[test]
     fn an_empty_override_means_there_is_no_install() {
         assert_eq!(
-            probe(Some(""), Some("/games/benilla")),
+            probe(Some(""), Some("/games/wrathplus")),
             Vec::<PathBuf>::new(),
             "`WOW_DATA=` must leave the ladder with no rungs at all"
         );
@@ -277,7 +277,7 @@ mod tests {
             "a player build has no project folder, whatever its launcher stamped"
         );
         let root = env!("CARGO_MANIFEST_DIR");
-        for c in probe(None, Some("/games/benilla")) {
+        for c in probe(None, Some("/games/wrathplus")) {
             assert!(
                 !c.starts_with(root),
                 "a player build looked inside the source tree at {}",
@@ -286,8 +286,8 @@ mod tests {
         }
     }
 
-    /// With no launcher folder recorded (a test, an example, a tool) the rung is benilla's own
-    /// checkout; with one, it is that folder's, and benilla's checkout is not looked in.
+    /// With no launcher folder recorded (a test, an example, a tool) the rung is WrathPlus's own
+    /// checkout; with one, it is that folder's, and WrathPlus's checkout is not looked in.
     #[cfg(feature = "dev")]
     #[test]
     fn a_dev_build_looks_in_the_project_folder() {
@@ -300,7 +300,7 @@ mod tests {
             Some(root),
             "nothing recorded: the checkout"
         );
-        let c = probe(None, Some("/games/benilla"));
+        let c = probe(None, Some("/games/wrathplus"));
         assert!(
             c.contains(&root.join("WoW/Data")),
             "the dev build lost its project-folder candidate ({}): {c:?}",
@@ -308,21 +308,25 @@ mod tests {
         );
 
         let launcher = Path::new("/home/player/hello-mod");
-        let c = candidates_from(None, Some(launcher), Some(PathBuf::from("/games/benilla")));
+        let c = candidates_from(
+            None,
+            Some(launcher),
+            Some(PathBuf::from("/games/wrathplus")),
+        );
         assert_eq!(
             c,
             vec![
                 launcher.join("WoW/Data"),
-                PathBuf::from("/games/benilla/Data"),
-                PathBuf::from("/games/benilla/WoW/Data"),
+                PathBuf::from("/games/wrathplus/Data"),
+                PathBuf::from("/games/wrathplus/WoW/Data"),
             ],
-            "a launcher's folder takes the rung, and nothing else looks in benilla's checkout"
+            "a launcher's folder takes the rung, and nothing else looks in WrathPlus's checkout"
         );
     }
 
     #[cfg(feature = "dev")]
     #[test]
-    fn the_corpus_ladder_is_override_then_benillas_checkout_and_nothing_outside_it() {
+    fn the_corpus_ladder_is_override_then_wrathpluss_checkout_and_nothing_outside_it() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"))
             .ancestors()
             .nth(2)
@@ -358,7 +362,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "BENILLA_REQUIRE_DATA is set")]
+    #[should_panic(expected = "WRATHPLUS_REQUIRE_DATA is set")]
     fn a_skip_is_refused_where_the_gate_says_the_data_is_present() {
         skipped_under(true, "no WoW install found", &[PathBuf::from("/nowhere")]);
     }

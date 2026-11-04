@@ -1832,7 +1832,7 @@ mod tests {
         let occupies = |layers: &[usize]| {
             let mut region_textures: [Option<String>; 8] = Default::default();
             for l in layers {
-                region_textures[*l] = Some("benilla-no-such-region".into());
+                region_textures[*l] = Some("wrathplus-no-such-region".into());
             }
             ItemDisplay {
                 region_textures,

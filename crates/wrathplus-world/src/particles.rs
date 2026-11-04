@@ -35,7 +35,7 @@ const MAX_PARTICLES: usize = 1024;
 
 /// The emission scalar `[0x87d5fc]`, which the `particleDensity` handler (`0x688fb0`) and the
 /// `spellEffectLevel` handler (`0x689510`) both write through `0x7adfb0`, the last write winning.
-/// benilla registers only `spellEffectLevel`.
+/// WrathPlus registers only `spellEffectLevel`.
 #[derive(Resource)]
 pub struct ParticleTuning {
     /// It scales emission rate only (its getter's two callers are the spawn-count `fmul`s), never

@@ -424,7 +424,7 @@ fn trace_ride(guid: u64, spline: &Spline, pos: [f32; 3], was: [f32; 3], now: Ins
     );
 }
 
-/// Whether benilla derives this body's Z and swim state, for both [`mark_swimming_creatures`] and
+/// Whether WrathPlus derives this body's Z and swim state, for both [`mark_swimming_creatures`] and
 /// [`ground_clamp_creatures`]. The reference never asks the kind: `0x6187a0` links any unit a
 /// `SMSG_MONSTER_MOVE` names (`0x619ca0`), and the per-frame vertical-zero gate
 /// (`0x616cec`-`0x616d03`) reads only the mover's flags. So: every `Unit`; a `Player` a server
@@ -474,7 +474,7 @@ pub fn grounded_y(seat_y: f32, floor: Option<f32>, water_floor: Option<f32>, hov
     y
 }
 
-/// Grounds every [`ground_derived`] body on benilla's world: the 1.12 client zeroes a ground
+/// Grounds every [`ground_derived`] body on WrathPlus's world: the 1.12 client zeroes a ground
 /// spline's Δz and takes Z from the world trace, and an idle unit reads grounded too, by an
 /// untraced path. Every probe starts at the body, measured from the seat (the Z the unit's
 /// position owner last wrote), never from the clamp's last answer, so a late floor takes the unit

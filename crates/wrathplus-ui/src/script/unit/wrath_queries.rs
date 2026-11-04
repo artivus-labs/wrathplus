@@ -133,7 +133,7 @@ const FRIENDLY_PLAYER_COLOR: (f64, f64, f64) = (0.0, 0.0, 1.0);
 
 /// `0x521bf0` with no party or friend tint, as `UnitSelectionColor` asks it: a player-controlled
 /// unit is red while either side can attack the other (`0x729740`), its reaction colour while
-/// PvP-flagged, else blue; any other unit its reaction colour; no unit blue. Labelled: benilla's
+/// PvP-flagged, else blue; any other unit its reaction colour; no unit blue. Labelled: WrathPlus's
 /// `can_attack` answers both directions alike, so the native's one-way yellow and blue legs fold
 /// into red, and the sanctuary terms (`UNIT_FIELD_BYTES_2` `0x08`) are not modelled.
 fn selection_color(unit: Option<&super::UnitState>) -> (f64, f64, f64) {

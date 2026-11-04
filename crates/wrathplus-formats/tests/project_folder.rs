@@ -1,17 +1,17 @@
 //! A launcher's recorded project folder is where a dev build looks for the install, in place of
-//! benilla's checkout, while the addon corpus stays benilla's. Recording is process-wide and every
+//! WrathPlus's checkout, while the addon corpus stays WrathPlus's. Recording is process-wide and every
 //! test resolves through it, so this one test has a file, and so a process, of its own.
 
 use std::path::Path;
 
 #[test]
 fn a_recorded_launcher_folder_is_where_a_dev_build_looks() {
-    let tmp = std::env::temp_dir().join(format!("benilla-project-{}", std::process::id()));
+    let tmp = std::env::temp_dir().join(format!("wrathplus-project-{}", std::process::id()));
     std::fs::create_dir_all(&tmp).unwrap();
     // This process's own environment: `WOW_DATA=` would empty the ladder, and an override would
     // move the corpus.
     std::env::remove_var("WOW_DATA");
-    std::env::remove_var("BENILLA_ADDON_CORPUS");
+    std::env::remove_var("WRATHPLUS_ADDON_CORPUS");
     let checkout = Path::new(env!("CARGO_MANIFEST_DIR"))
         .ancestors()
         .nth(2)
@@ -31,12 +31,12 @@ fn a_recorded_launcher_folder_is_where_a_dev_build_looks() {
         assert_eq!(c.first(), Some(&tmp.join("WoW/Data")), "{c:?}");
         assert!(
             !c.contains(&checkout.join("WoW/Data")),
-            "benilla's checkout is still looked in for the install: {c:?}"
+            "WrathPlus's checkout is still looked in for the install: {c:?}"
         );
         assert_eq!(
             wrathplus_formats::addon_corpus_candidates(),
             vec![checkout.join("wow-addons-vanilla")],
-            "the corpus is benilla's whoever the launcher is"
+            "the corpus is WrathPlus's whoever the launcher is"
         );
     } else {
         assert_eq!(wrathplus_formats::project_folder(), None);

@@ -34,7 +34,7 @@ probe_server_or_skip summon-live || exit 0
 echo "summon-live: building…"
 cargo build -q -p wrathplus || { echo "summon-live: the client did not build"; exit 1; }
 
-work="$(mktemp -d "${TMPDIR:-/tmp}/benilla-summon.XXXXXX")"
+work="$(mktemp -d "${TMPDIR:-/tmp}/wrathplus-summon.XXXXXX")"
 trap '[ -n "${SUMMON_LIVE_KEEP:-}" ] || rm -rf "$work"' EXIT
 
 # The receiver's Lua: `tostring` on every getter, so a missing dialog reports instead of raising.

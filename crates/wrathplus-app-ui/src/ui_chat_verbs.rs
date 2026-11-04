@@ -162,7 +162,7 @@ pub(crate) fn drain(script: &mut UiScript, store: Option<&ObjectStore>, commands
                 },
             ),
             // `Sound_GameSystem_RestartSoundSystem` (`0x985d30`) re-opens the sound device. Labelled
-            // no-op: benilla's audio output follows the system default device and has no restart.
+            // no-op: WrathPlus's audio output follows the system default device and has no restart.
             WrathChatVerbRequest::RestartSoundSystem => {
                 debug!("chat verb RestartSoundSystem: no audio restart (labelled no-op)");
                 continue;

@@ -82,4 +82,4 @@ the settings windows and script error log the client draws itself.
 World of Warcraft is a trademark of Blizzard Entertainment, Inc. Our own code is licensed under
 [MIT](LICENSE-MIT) or [Apache 2.0](LICENSE-APACHE), at your option. The two vendored components
 under `third_party/`, the kira audio engine and a patched Lua 5.1, keep their own upstream
-licenses, alongside each; their `BENILLA.md` files record what was changed and why.
+licenses, alongside each; their `WRATHPLUS.md` files record what was changed and why.

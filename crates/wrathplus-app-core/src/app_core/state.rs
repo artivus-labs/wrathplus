@@ -936,11 +936,11 @@ impl AuraDurations {
     }
 }
 
-/// The `BENILLA_AURA_TRACE` period in seconds; a set value that is not a positive number means 1 s.
+/// The `WRATHPLUS_AURA_TRACE` period in seconds; a set value that is not a positive number means 1 s.
 pub fn aura_trace_period() -> Option<f64> {
     static PERIOD: std::sync::OnceLock<Option<f64>> = std::sync::OnceLock::new();
     *PERIOD.get_or_init(|| {
-        let v = std::env::var("BENILLA_AURA_TRACE").ok()?;
+        let v = std::env::var("WRATHPLUS_AURA_TRACE").ok()?;
         Some(
             v.trim()
                 .parse::<f64>()

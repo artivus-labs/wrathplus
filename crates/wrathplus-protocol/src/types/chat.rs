@@ -2,7 +2,7 @@
 //! `u32 language`, a per-type sender prefix, `u32 len` (NUL included), the text, `u8 chatTag`.
 //! Also the small chat-adjacent bodies: player not found, notification, played time, random roll.
 
-// ChatMsg values (vmangos `SharedDefines.h:1191-1301`), only those benilla receives or sends.
+// ChatMsg values (vmangos `SharedDefines.h:1191-1301`), only those WrathPlus receives or sends.
 // Text emotes, channel notices and combat, skill, loot and money lines come from other opcodes.
 pub const CHAT_MSG_SAY: u8 = 0x00;
 pub const CHAT_MSG_PARTY: u8 = 0x01;

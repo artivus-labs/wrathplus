@@ -11,7 +11,7 @@
 //! - A latched row's write is staged in [`Row::pending`] until [`Cvars::commit_latched`], the
 //!   reference's `0x639ec0` inside `RestartGx`. A stage never committed is dropped at exit, as the
 //!   reference's `SaveConfig` writes only the applied value (`rec+0x20`).
-//! - Boot folds `benilla-config/config.toml` in and fires the observers before anything after
+//! - Boot folds `wrathplus-config/config.toml` in and fires the observers before anything after
 //!   [`CvarLoad`]; each frame drains the VM's writes in and pushes the registry's out; a dirty
 //!   registry saves after one quiet second or at exit, writing only values off their default and
 //!   keeping unknown keys verbatim.
@@ -78,7 +78,7 @@ impl CvarChanged {
     }
 }
 
-/// One row of the live registry: the parts of the reference's `CVar` record benilla keeps.
+/// One row of the live registry: the parts of the reference's `CVar` record WrathPlus keeps.
 #[derive(Clone, Debug)]
 pub struct Row {
     /// The registered spelling.
@@ -895,7 +895,7 @@ pub fn sync_cvars(
 
 /// The file's header comment.
 const HEADER: &str = "\
-# benilla local config — CVar values that moved off their defaults.
+# WrathPlus local config — CVar values that moved off their defaults.
 # Managed by the client; hand edits are read on next launch and preserved on save.
 ";
 

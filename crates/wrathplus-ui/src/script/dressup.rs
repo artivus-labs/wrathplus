@@ -11,7 +11,7 @@ use super::Model;
 use crate::widget::FrameKind;
 
 /// Registry key of the `DressUpModel` method table, its own three; the rest come by the chain.
-pub(super) const REG_DRESSUPMODEL_METHODS: &str = "__benilla_dressupmodel_methods";
+pub(super) const REG_DRESSUPMODEL_METHODS: &str = "__wrathplus_dressupmodel_methods";
 
 /// One queued dressing-room intent, applied in order.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

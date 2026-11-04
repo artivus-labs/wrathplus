@@ -3,7 +3,7 @@
 //! (`0x5224c0`) also takes a player's name with an exact-only flag, which the stock menu passes
 //! (`UnitPopup.lua:1324-1325`, `FollowUnit(fullname, 1)`), so it never prefix-matches someone
 //! else, while `/follow rag` may. Labelled: `FollowByName` keeps 1.12's reading (`0x489ec0`); its
-//! 12340 binding is untraced. benilla parses `/follow` in Rust, so these globals serve the stock
+//! 12340 binding is untraced. WrathPlus parses `/follow` in Rust, so these globals serve the stock
 //! UI and addons.
 
 use mlua::Lua;

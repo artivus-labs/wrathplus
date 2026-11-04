@@ -34,7 +34,7 @@ fn the_stock_account_login_opens_and_submits_on_the_installed_data() {
     // AzerothBench's Server field (`assets/ui/glue/ServerField.xml`): it shows the address,
     // and leaving it after an edit asks the host to keep the new one.
     script.set_glue_realmlist("127.0.0.1", false);
-    script.fire_event("BENILLA_REALMLIST_CHANGED", vec![]);
+    script.fire_event("WRATHPLUS_REALMLIST_CHANGED", vec![]);
     let field = |script: &UiScript| {
         script
             .eval::<String>(
@@ -57,10 +57,10 @@ fn the_stock_account_login_opens_and_submits_on_the_installed_data() {
     );
     // The host keeps it and says so; a launch pin shows, disabled.
     script.set_glue_realmlist("10.0.0.5:3724", false);
-    script.fire_event("BENILLA_REALMLIST_CHANGED", vec![]);
+    script.fire_event("WRATHPLUS_REALMLIST_CHANGED", vec![]);
     assert_eq!(field(&script), "1 true 10.0.0.5:3724 Server");
     script.set_glue_realmlist("vps.example:3724", true);
-    script.fire_event("BENILLA_REALMLIST_CHANGED", vec![]);
+    script.fire_event("WRATHPLUS_REALMLIST_CHANGED", vec![]);
     assert_eq!(
         field(&script),
         "1 false vps.example:3724 Server (set by the launch)"
@@ -81,7 +81,7 @@ fn the_stock_account_login_opens_and_submits_on_the_installed_data() {
         script.errors()
     );
     script.set_glue_realmlist("127.0.0.1", false);
-    script.fire_event("BENILLA_REALMLIST_CHANGED", vec![]);
+    script.fire_event("WRATHPLUS_REALMLIST_CHANGED", vec![]);
     // `--fill-only`: the launch's credentials wait in the boxes; nothing submits until Login.
     script.fill_login("Bob", "hunter2").unwrap();
     assert_eq!(
@@ -347,7 +347,7 @@ fn a_server_field_address_keeps_its_port_from_field_to_file_to_dial() {
     script.fire_event("SET_GLUE_SCREEN", vec![ScriptValue::Str("login".into())]);
     script.tick(0.1);
     script.set_glue_realmlist("127.0.0.1", false);
-    script.fire_event("BENILLA_REALMLIST_CHANGED", vec![]);
+    script.fire_event("WRATHPLUS_REALMLIST_CHANGED", vec![]);
 
     // Hovering the field explains the syntax.
     let hint = script
@@ -372,12 +372,13 @@ fn a_server_field_address_keeps_its_port_from_field_to_file_to_dial() {
     };
     assert_eq!(typed, "192.168.1.1:1337");
 
-    // The host's arm for that request (`host.rs`), into a scratch `BENILLA_HOME`.
+    // The host's arm for that request (`host.rs`), into a scratch `WRATHPLUS_HOME`.
     let _l = crate::local_state::test_env::ENV_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let dir = std::env::temp_dir().join(format!("azb-server-port-{}", std::process::id()));
-    let _home = crate::local_state::test_env::EnvGuard::set("BENILLA_HOME", dir.to_str().unwrap());
+    let _home =
+        crate::local_state::test_env::EnvGuard::set("WRATHPLUS_HOME", dir.to_str().unwrap());
     let mut realmlist = crate::realmlist::Realmlist::unpinned("127.0.0.1");
     assert!(crate::login::accept_realmlist(
         &typed,
@@ -396,7 +397,7 @@ fn a_server_field_address_keeps_its_port_from_field_to_file_to_dial() {
         ("192.168.1.1", 1337)
     );
     script.set_glue_realmlist(realmlist.address(), false);
-    script.fire_event("BENILLA_REALMLIST_CHANGED", vec![]);
+    script.fire_event("WRATHPLUS_REALMLIST_CHANGED", vec![]);
     assert_eq!(
         script
             .eval::<String>("return AccountLoginServerEdit:GetText()")

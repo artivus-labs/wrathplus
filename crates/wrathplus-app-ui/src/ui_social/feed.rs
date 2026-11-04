@@ -581,7 +581,7 @@ mod tests {
     }
 
     /// The comparator ties on an unresolved name (`0x5adbb2`). The reference's `GetWhoInfo`
-    /// (`0x5ad6e0`) shows `UNKNOWN` where benilla shows an empty cell; adopting it must carry the
+    /// (`0x5ad6e0`) shows `UNKNOWN` where WrathPlus shows an empty cell; adopting it must carry the
     /// miss to the comparator some other way than the string.
     #[test]
     fn an_unresolvable_id_leaves_the_name_empty_for_the_comparator() {

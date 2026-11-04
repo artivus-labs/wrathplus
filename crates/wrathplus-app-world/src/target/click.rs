@@ -1463,7 +1463,7 @@ pub enum ServiceAction {
     Silent(&'static str),
 }
 
-/// A taken arm → what benilla does. `cursor_sale` is the guid of a mode-1 item on the cursor, as
+/// A taken arm → what WrathPlus does. `cursor_sale` is the guid of a mode-1 item on the cursor, as
 /// the reference's `GetCursorItem 0x494c60`. The spirit arms are ghost-gated (`0x5df74a`,
 /// `0x5df962`: `PLAYER_FLAGS` bit 4), silent for the living. The tabard arm's shapeshift refusal
 /// (`ERR_EMBLEMERROR_NOTABARDGEOSET`) and same-vendor no-op are not built.

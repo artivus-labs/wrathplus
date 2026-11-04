@@ -1,4 +1,4 @@
-//! The creature-template half of [`crate::names::NameCache`], kept across sessions: benilla's
+//! The creature-template half of [`crate::names::NameCache`], kept across sessions: WrathPlus's
 //! `creaturecache.wdb`.
 //!
 //! The reference persists only `'WNPC'`; `'WNAM'` and `'WPNM'` (player and pet names) are built
@@ -11,7 +11,7 @@
 //! checksum or TTL, and a mismatch discards the file ([`NameCache::to_tsv`] writes ours).
 //! Eviction is explicit only: a high-bit key in a response, or `SMSG_INVALIDATE_PLAYER` (`0x31C`).
 //!
-//! Deviation: the file is `benilla-config/cache/<realm>.tsv` through [`crate::local_state`], not
+//! Deviation: the file is `wrathplus-config/cache/<realm>.tsv` through [`crate::local_state`], not
 //! `WDB/` in the install, because the install is read-only; and it is per realm, because another
 //! server may hold a different template under the same entry.
 
@@ -183,10 +183,10 @@ mod tests {
         let _l = ENV_LOCK
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let tmp = std::env::temp_dir().join(format!("benilla-namecache-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("wrathplus-namecache-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         let _capture = EnvGuard::unset("WOW_CAPTURE");
-        let _home = EnvGuard::set("BENILLA_HOME", tmp.to_str().expect("utf-8 temp path"));
+        let _home = EnvGuard::set("WRATHPLUS_HOME", tmp.to_str().expect("utf-8 temp path"));
 
         // A realm file with one creature template, written by the saver so the header matches.
         let mut on_disk = NameCache::default();

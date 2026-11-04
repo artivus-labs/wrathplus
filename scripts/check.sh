@@ -94,8 +94,8 @@ for p in $pkgs; do pflags="$pflags -p $p"; done
 echo "check: scope = $pkgs"
 echo "check:   (changed crates + everything that depends on them; the full chain runs once, at land)"
 
-log="$(mktemp "${TMPDIR:-/tmp}/benilla-check.XXXXXX")"
-skips="$(mktemp "${TMPDIR:-/tmp}/benilla-check-skips.XXXXXX")"
+log="$(mktemp "${TMPDIR:-/tmp}/wrathplus-check.XXXXXX")"
+skips="$(mktemp "${TMPDIR:-/tmp}/wrathplus-check-skips.XXXXXX")"
 trap 'rm -f "$log" "$skips"' EXIT
 # Each gate logs to a file tailed afterwards: piping through `tail` would mask its exit code.
 run() {
@@ -112,9 +112,9 @@ run fmt cargo fmt --all -- --check
 run loc scripts/quality/run.sh loc
 run clippy env AZB_QUALITY_LOCKED=1 CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$root/target}" \
     scripts/quality/run.sh clippy $pflags
-run test env BENILLA_SKIP_LOG="$skips" cargo test $pflags
+run test env WRATHPLUS_SKIP_LOG="$skips" cargo test $pflags
 # Data-gated tests skip without the install or the addon corpus and libtest swallows their line,
-# so each skip is also logged to $BENILLA_SKIP_LOG and counted here.
+# so each skip is also logged to $WRATHPLUS_SKIP_LOG and counted here.
 if [ -s "$skips" ]; then
     echo "  test: $(wc -l <"$skips" | tr -d ' ') data-gated tests SKIPPED on this machine —"
     sort "$skips" | uniq -c | sort -rn | sed 's/^ *\([0-9]*\) \(.*\)/    \1 × \2/'

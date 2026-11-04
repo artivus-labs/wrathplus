@@ -184,7 +184,7 @@ pub(crate) fn start(config: &Config, agent: &Agent) -> Result<Child> {
         .env("WOW_DATA", &config.data)
         .env("WOW_CLIENT_PROFILE", "wrath")
         .env("WOW_LOCALE", &config.locale)
-        .env("BENILLA_HOME", dir.join("home"))
+        .env("WRATHPLUS_HOME", dir.join("home"))
         .env("WOW_HEADLESS", "1")
         .env("WOW_AGENT_TOKEN", token)
         .env("WRATHPLUS_AGENT_PASSWORD", password)

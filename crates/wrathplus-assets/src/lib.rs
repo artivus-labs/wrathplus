@@ -252,7 +252,7 @@ pub fn register_mpq_source_overrides(
     Ok(())
 }
 
-/// Register benilla's asset loaders on `app`, after `AssetPlugin`, into its live `AssetServer`.
+/// Register WrathPlus's asset loaders on `app`, after `AssetPlugin`, into its live `AssetServer`.
 pub fn register_asset_loaders(app: &mut App) {
     app.init_asset::<M2Model>();
     app.init_asset::<WmoModel>();
@@ -319,7 +319,7 @@ mod tests {
 
     #[test]
     fn pack_texture_reaches_streamed_tile_and_doodad_consumers() {
-        let root = std::env::temp_dir().join(format!("benilla-pack-image-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("wp-pack-image-{}", std::process::id()));
         std::fs::create_dir_all(root.join("World")).unwrap();
         // One 4x4 DXT1 block, solid red, in a synthetic BLP2 envelope.
         let mut bytes = vec![0u8; 148 + 1024];

@@ -2,15 +2,15 @@
 //! player's own strings define, read off the UI VM's globals the way `ChatEdit_ParseText` walks
 //! them (`ChatFrame.lua:2164-2200`): `SLASH_<INDEX><n>` for the actions, `EMOTE<i>_CMD<j>` →
 //! `EMOTE<i>_TOKEN` for the emotes. An action wins over an emote alias of the same name, as the
-//! reference tries `SlashCmdList` first; benilla's dev instruments, literals, go in after both.
-//! benilla's player commands (`/reload`, `/errors`) are its layer's `SlashCmdList` rows, which a
+//! reference tries `SlashCmdList` first; WrathPlus's dev instruments, literals, go in after both.
+//! WrathPlus's player commands (`/reload`, `/errors`) are its layer's `SlashCmdList` rows, which a
 //! line this table does not know reaches through the drain's unknown-command arm.
 
 use std::collections::HashMap;
 
 use bevy::prelude::*;
 
-/// A command benilla implements, named by its `SlashCmdList` index, the `SLASH_<INDEX><n>` prefix.
+/// A command WrathPlus implements, named by its `SlashCmdList` index, the `SLASH_<INDEX><n>` prefix.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SlashIndex {
     Reply,
@@ -136,7 +136,7 @@ impl SlashIndex {
     ];
 }
 
-/// benilla's own diagnostic commands, in dev builds only; their aliases are literals.
+/// WrathPlus's own diagnostic commands, in dev builds only; their aliases are literals.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DevCmd {
     CastVis,
@@ -172,11 +172,11 @@ impl DevCmd {
 /// What a typed `/command` resolved to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Command {
-    /// A reference `SlashCmdList` command benilla implements.
+    /// A reference `SlashCmdList` command WrathPlus implements.
     Slash(SlashIndex),
     /// An emote alias, with its token's `EmotesText` id (`/lol` → LAUGH → 45).
     Emote { text_id: u32 },
-    /// One of benilla's own instruments.
+    /// One of WrathPlus's own instruments.
     Dev(DevCmd),
 }
 
@@ -263,7 +263,7 @@ fn insert(map: &mut HashMap<String, Command>, alias: &str, cmd: Command) {
     }
 }
 
-/// The dev instruments as `SlashCmdList` rows (`BENILLA_<COMMAND>`), so a typed one reaches the
+/// The dev instruments as `SlashCmdList` rows (`WRATHPLUS_<COMMAND>`), so a typed one reaches the
 /// drain through the stock `ChatEdit_ParseText`; registered on a freshly loaded VM in a build with
 /// dev affordances only, so a player build answers them `HELP_TEXT_SIMPLE`, as 1.12 does.
 pub(crate) fn register_dev_commands(script: &wrathplus_ui::script::UiScript, dev: bool) {
@@ -273,7 +273,7 @@ pub(crate) fn register_dev_commands(script: &wrathplus_ui::script::UiScript, dev
     for cmd in DevCmd::ALL {
         let aliases: Vec<String> = cmd.aliases().iter().map(|a| format!("/{a}")).collect();
         let aliases: Vec<&str> = aliases.iter().map(String::as_str).collect();
-        let key = format!("BENILLA_{}", cmd.aliases()[0].to_ascii_uppercase());
+        let key = format!("WRATHPLUS_{}", cmd.aliases()[0].to_ascii_uppercase());
         if let Err(e) = script.register_host_slash_command(&key, &aliases) {
             warn!("chat: registering /{}: {e}", cmd.aliases()[0]);
         }

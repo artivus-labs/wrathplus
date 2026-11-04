@@ -14,7 +14,7 @@ use super::binding_abi::flag;
 use super::Model;
 
 /// `CLootButton`'s own Lua method table (`0x847ce4`): one entry, per the registrar's `mov edx,1`.
-pub(super) const REG_LOOTBUTTON_METHODS: &str = "__benilla_lootbutton_methods";
+pub(super) const REG_LOOTBUTTON_METHODS: &str = "__wrathplus_lootbutton_methods";
 
 /// The quality `GetLootSlotInfo` answers on an item-cache miss: the reference's -1 (`0x4c23a0`),
 /// never nil. Stock `UIParent.lua:66` builds `ITEM_QUALITY_COLORS` from -1, and `LootFrame_Update`

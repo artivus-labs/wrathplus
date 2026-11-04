@@ -18,7 +18,7 @@ use crate::widget::{
     slider_fraction, slider_grab, FrameHandle, KindState, RegionKind, SliderState,
 };
 
-pub(super) const REG_SLIDER_METHODS: &str = "__benilla_slider_methods";
+pub(super) const REG_SLIDER_METHODS: &str = "__wrathplus_slider_methods";
 
 /// Run `f` over a frame's Slider state under one short write borrow; errors unless `this` is a live
 /// Slider, since a caller can lift the method table onto another frame.

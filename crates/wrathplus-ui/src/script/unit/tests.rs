@@ -8,7 +8,7 @@ mod is_unit;
 fn player() -> UnitState {
     UnitState {
         exists: true,
-        name: Some("Benilla".into()),
+        name: Some("WrathPlus".into()),
         health: 72,
         max_health: 100,
         level: 12,
@@ -399,7 +399,7 @@ fn set_unit_is_read_by_the_bindings() {
     assert_eq!(s.eval::<i64>(r#"return UnitExists("player")"#).unwrap(), 1);
     assert_eq!(
         s.eval::<String>(r#"return UnitName("player")"#).unwrap(),
-        "Benilla"
+        "WrathPlus"
     );
     assert_eq!(s.eval::<i64>(r#"return UnitHealth("player")"#).unwrap(), 72);
     assert_eq!(
@@ -988,7 +988,7 @@ fn a_unit_token_resolves_whatever_its_case() {
         assert_eq!(
             s.eval::<String>(&format!(r#"return UnitName("{spelling}")"#))
                 .unwrap(),
-            "Benilla",
+            "WrathPlus",
             "UnitName(\"{spelling}\") must resolve"
         );
         assert_eq!(
@@ -1151,7 +1151,7 @@ fn a_multibyte_unit_token_raises_rather_than_panicking() {
         .is_none());
     assert_eq!(
         s.eval::<String>(r#"return UnitName("player")"#).unwrap(),
-        "Benilla"
+        "WrathPlus"
     );
 }
 

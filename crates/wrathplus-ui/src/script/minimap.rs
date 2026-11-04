@@ -10,7 +10,7 @@ use super::Model;
 use crate::widget::{KindState, MinimapState, MINIMAP_ZOOM_LEVELS};
 
 /// Registry key of the Minimap method table.
-pub(super) const REG_MINIMAP_METHODS: &str = "__benilla_minimap_methods";
+pub(super) const REG_MINIMAP_METHODS: &str = "__wrathplus_minimap_methods";
 
 /// Run `f` over a frame's Minimap state; errors on any other receiver, since the method table is
 /// a plain Lua value a caller can misapply.

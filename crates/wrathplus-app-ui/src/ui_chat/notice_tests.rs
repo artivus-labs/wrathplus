@@ -32,7 +32,7 @@ impl Feed {
             r#"
             for _, e in ipairs({ "CHAT_MSG_CHANNEL_JOIN", "CHAT_MSG_CHANNEL_LEAVE",
                           "CHAT_MSG_CHANNEL_NOTICE", "CHAT_MSG_CHANNEL_NOTICE_USER" }) do
-                BenillaChatSpy:RegisterEvent(e)
+                WrathPlusChatSpy:RegisterEvent(e)
             end
             -- The text the stock handler hands the window, links and all.
             local add = ChatFrame1.AddMessage

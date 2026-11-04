@@ -9,7 +9,7 @@ fn owned(names: &[&str]) -> Vec<String> {
 fn synthetic_data_tree(root_names: &[&str], locale_dir: &str, locale_names: &[&str]) -> PathBuf {
     static NEXT: AtomicU64 = AtomicU64::new(0);
     let root = std::env::temp_dir().join(format!(
-        "benilla-wrath-chain-{}-{}",
+        "wrathplus-wrath-chain-{}-{}",
         std::process::id(),
         NEXT.fetch_add(1, Ordering::Relaxed)
     ));

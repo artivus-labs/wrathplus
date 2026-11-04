@@ -54,7 +54,7 @@ impl Default for UiGammaLane {
 /// no `Brightness` or `Contrast` CVar.
 ///
 /// Deviation: the reference skips that upload when windowed (`byte[dev+0x20b]` is `gxWindow`), and
-/// every benilla mode is windowed, so the same curve applies in the compositor, where the slider
+/// every WrathPlus mode is windowed, so the same curve applies in the compositor, where the slider
 /// can move pixels: [`UiGammaNode`] raises the gamma byte the RAMDAC would have read to `gamma`
 /// before its decode, the continuous form of the 256-entry ramp.
 #[derive(Resource, Debug, Clone, Copy, PartialEq)]
@@ -280,7 +280,7 @@ pub(crate) const CVARS: &[crate::cvars::Registered] = {
     &[
         // `gamma` (`0x402d70`: name `0x82e924` "Gamma", default `0x82e92c` "1.0", flags 0, callback
         // `0x4034d0`). The reference uploads `pow(i/255, gamma)` (`0x591680`) through
-        // `SetDeviceGammaRamp`, except when windowed (`byte[dev+0x20b]`). Deviation: benilla, which
+        // `SetDeviceGammaRamp`, except when windowed (`byte[dev+0x20b]`). Deviation: WrathPlus, which
         // has no exclusive mode, applies the same curve in the composite pass
         // ([`DisplayGamma`]), because the skipped upload would make a slider that
         // moves no pixel. Spelled "1.000000" because `SetGamma 0x4891f0` formats with `"%f"`, and

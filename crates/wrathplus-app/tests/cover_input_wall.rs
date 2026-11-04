@@ -84,7 +84,7 @@ const VERDICTS: &[(&str, Verdict)] = &[
     ),
     // ── Not input at all ────────────────────────────────────────────────────────────────────
     ("ButtonState", Plumbing),
-    // Cursor outputs benilla writes; nothing arrives through them.
+    // Cursor outputs WrathPlus writes; nothing arrives through them.
     ("CursorGrabMode", Plumbing),
     ("CursorIcon", Plumbing),
     ("CustomCursor", Plumbing),

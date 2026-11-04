@@ -1,4 +1,4 @@
-# benilla's `kira` fork — what differs from upstream, and how to check
+# WrathPlus's `kira` fork — what differs from upstream, and how to check
 
 Upstream: [`tesselode/kira`](https://github.com/tesselode/kira), MIT OR Apache-2.0, version
 `0.12.4` — the version the workspace lock resolves to. Wired in through `[patch.crates-io]` in
@@ -13,11 +13,11 @@ one fell silent at the real end. 0.6's MP3 decoder also matches mpg123 within 6e
 install's 200 MP3s and 1.4e-3 on the last, where 0.5's is off by more than 0.01, up to 0.15 of
 full scale, in some frames of 63; 0.6 ends 83 of them one silent MPEG frame (1152 samples)
 sooner than both.
-0.12.5 differs from 0.12.4 only in taking `rtrb` 0.4, which `benilla-app` shares with kira.
+0.12.5 differs from 0.12.4 only in taking `rtrb` 0.4, which `wrathplus-app` shares with kira.
 
 ## Why a fork exists at all
 
-The mixer runs on benilla's own audio render thread (`sound/output`), and with a raid buffing
+The mixer runs on WrathPlus's own audio render thread (`sound/output`), and with a raid buffing
 itself — a dozen live voices, most of them spatial — that thread cost **~1.5 ms of every 60 Hz
 frame** on an M2 Air (a sampled profile with a dozen spatial voices playing, `Track::process`
 two thirds of it). Upstream's sub-track `process` spatializes **every
@@ -54,5 +54,5 @@ without a Xing header from its first frames, and over-counts one of the install'
 
 For each patched file, `diff -u <(sed 's/\r$//' <registry>/kira-0.12.4/<file>)
 third_party/kira/<file>` shows the patch and nothing else; every other file is byte-identical to
-the registry crate. The mixer's own tests (`cargo test -p benilla-app sound::`) run against the
+the registry crate. The mixer's own tests (`cargo test -p wrathplus-app sound::`) run against the
 fork, `sound::mixer::tests::a_stream_that_runs_out_before_its_reported_length_stops` on patch 2.

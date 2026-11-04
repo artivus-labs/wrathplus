@@ -17,7 +17,7 @@ use crate::order::DrawLayer;
 use crate::widget::{ColorSelectState, FrameHandle, KindState, RegionHandle, RegionKind};
 
 /// Registry key of the ColorSelect method table (the MAXCSTACK discipline: a Lua-side root).
-pub(super) const REG_COLORSELECT_METHODS: &str = "__benilla_colorselect_methods";
+pub(super) const REG_COLORSELECT_METHODS: &str = "__wrathplus_colorselect_methods";
 
 /// Run `f` over a frame's ColorSelect state under one short write borrow; errors if `this` is not
 /// a live ColorSelect, as the method table is a plain Lua value a caller can misapply.

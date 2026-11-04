@@ -291,7 +291,7 @@ fn debug_panel_ui(
     let ctx = contexts.ctx_mut()?;
     // Full height, rather than auto-sized to the open sections.
     let panel_h = (ctx.content_rect().height() - 32.0).max(120.0);
-    egui::Window::new("benilla_debug")
+    egui::Window::new("wrathplus_debug")
         .title_bar(false)
         .resizable(false)
         .collapsible(false)
@@ -380,7 +380,7 @@ fn debug_panel_ui(
                                         cull_probe.dump_to = Some(dir.join("wmo-cull-trace.txt"));
                                     }
                                     None => bevy::log::warn!(
-                                        "wmo cull trace: no benilla-config folder to write into \
+                                        "wmo cull trace: no wrathplus-config folder to write into \
                                          (hermetic run) — set WOW_CULLDUMP=<path> to name one"
                                     ),
                                 }

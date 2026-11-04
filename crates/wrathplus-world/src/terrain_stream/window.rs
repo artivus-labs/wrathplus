@@ -4,7 +4,7 @@
 //! and the outer `idx ± max(r + 2, 8)` (requested ahead, built under 5 ms a frame). Eviction is
 //! membership in the outer window, by tile (`[area+0x88]` vs `bounds >> 4`).
 //!
-//! - Deviation: whole tiles, because benilla loads, spawns and releases ADT tiles, not chunks: a
+//! - Deviation: whole tiles, because WrathPlus loads, spawns and releases ADT tiles, not chunks: a
 //!   tile is wanted when any of its chunks lies in the outer window, so the resident edge is a
 //!   tile line where the reference's is a chunk line.
 //! - Deviation: a one-chunk keep band ([`KEEP_BAND_CHUNKS`]), because a tile reload re-decodes and

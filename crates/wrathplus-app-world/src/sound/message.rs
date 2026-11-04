@@ -38,7 +38,7 @@ impl MessageSounds {
     /// Queue one displayed message's sound.
     ///
     /// The reference sounds a message before deciding to draw it (`0x49673d`, ahead of the key
-    /// guard at `0x4967bd`/`0x4967c5` and the empty-text guard at `0x4945b4`), while benilla drops
+    /// guard at `0x4967bd`/`0x4967c5` and the empty-text guard at `0x4945b4`), while WrathPlus drops
     /// an empty line before it gets here. No sounding row in the shipped `GlobalStrings.lua` has
     /// empty text, so the two agree on 1.12.1's data.
     pub fn push(&mut self, record: &'static MessageRecord) {

@@ -9,7 +9,7 @@
 #
 # Logs in as `.probe-identity`, else WOW_USER/WOW_PASS/WOW_CHAR. The body parks on flat ground
 # first, and did-it-fall/did-it-move print beside the timeline: a wedged or falling body sends no
-# movement. Sound is live but muted through a BENILLA_HOME config (`MasterVolume = "0"`), because
+# movement. Sound is live but muted through a WRATHPLUS_HOME config (`MasterVolume = "0"`), because
 # under WOW_NOSOUND `zone::start_music_stream` returns before it logs.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -52,7 +52,7 @@ echo "cine.sh: cinematic $id as $char, parked at $px $py $pz (map $pmap)"
 [ -n "$key" ] && echo "cine.sh: holding $key for 3 s at t=${key_at}s"
 echo "cine.sh: this takes about $((exit_at + 20)) s — the shot is played in full so the END is measured too"
 
-env BENILLA_HOME="$cfg" WOW_UNATTENDED=1 \
+env WRATHPLUS_HOME="$cfg" WOW_UNATTENDED=1 \
     WOW_USER="$PROBE_USER" WOW_PASS="$PROBE_PASS" WOW_CHAR="$char" \
     WOW_PROBE_CHAT=".go xyz $px $py $pz $pmap;.debug play cinematic $id" \
     WOW_PROBE_CHAT_AT="$park_at" WOW_PROBE_CHAT_EVERY="$((play_at - park_at))" \

@@ -377,7 +377,7 @@ mod faux_scroll_tests;
 #[cfg(test)]
 mod panel_template_tests;
 
-/// The stock BasicControls.xml, which benilla never calls, entered from Lua as an addon does.
+/// The stock BasicControls.xml, which WrathPlus never calls, entered from Lua as an addon does.
 #[cfg(test)]
 mod basic_controls_tests;
 

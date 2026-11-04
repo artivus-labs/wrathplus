@@ -339,7 +339,7 @@ fn solo_target_inspect_click_reaches_inspect_unit() {
     s.set_screen_size(1024.0, 768.0);
     bake_strings(&s);
     load_popup_frames(&mut s);
-    s.run("BENILLA_TEST_INSPECTED = nil; function InspectUnit(unit) BENILLA_TEST_INSPECTED = unit end")
+    s.run("WRATHPLUS_TEST_INSPECTED = nil; function InspectUnit(unit) WRATHPLUS_TEST_INSPECTED = unit end")
         .unwrap();
 
     s.set_unit(
@@ -376,7 +376,7 @@ fn solo_target_inspect_click_reaches_inspect_unit() {
     s.resolve();
     click_label(&mut s, "Inspect");
     assert_eq!(
-        s.eval::<String>("return BENILLA_TEST_INSPECTED").unwrap(),
+        s.eval::<String>("return WRATHPLUS_TEST_INSPECTED").unwrap(),
         "target",
         "clicking Inspect calls InspectUnit against the target token"
     );
@@ -448,7 +448,7 @@ fn bake_pet_strings(s: &UiScript) {
         -- ToggleCharacter lives in CharacterFrame.xml, which the paperdoll row needs and this
         -- isolation prefix does not load. Recorded rather than stubbed away, so the row's click
         -- is still proven to reach the right panel name.
-        function ToggleCharacter(tab) BENILLA_TEST_TOGGLED = tab end
+        function ToggleCharacter(tab) WRATHPLUS_TEST_TOGGLED = tab end
     "#,
     )
     .unwrap();
@@ -674,7 +674,7 @@ fn the_pet_details_row_opens_the_pet_paper_doll() {
     bake_pet_strings(&s);
     load_pet_menu_frames(&mut s);
     // Recorded after the load, which brings the session's own `ToggleCharacter`.
-    s.run("function ToggleCharacter(tab) BENILLA_TEST_TOGGLED = tab end")
+    s.run("function ToggleCharacter(tab) WRATHPLUS_TEST_TOGGLED = tab end")
         .unwrap();
     a_pet(&mut s, "Bruce");
     s.set_pet_menu(true, true);
@@ -682,7 +682,7 @@ fn the_pet_details_row_opens_the_pet_paper_doll() {
     right_click_the_pet_frame(&mut s);
     click_label(&mut s, "Pet Details");
     assert_eq!(
-        s.eval::<String>("return BENILLA_TEST_TOGGLED").unwrap(),
+        s.eval::<String>("return WRATHPLUS_TEST_TOGGLED").unwrap(),
         "PetPaperDollFrame"
     );
     assert!(s.errors().is_empty(), "script errors: {:?}", s.errors());

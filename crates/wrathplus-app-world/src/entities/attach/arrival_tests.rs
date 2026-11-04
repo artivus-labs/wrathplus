@@ -289,7 +289,7 @@ fn a_body_that_waited_for_its_atlas_fades_from_its_arrival() {
     );
 }
 
-/// benilla's own palette heal rebuilds a body that was drawn: its composite is forced, so even a
+/// WrathPlus's own palette heal rebuilds a body that was drawn: its composite is forced, so even a
 /// look the cache has dropped rebuilds in the same frame and never drops out.
 #[test]
 fn a_healed_rig_rebuilds_its_body_in_the_same_frame() {

@@ -36,7 +36,7 @@ pub(crate) use parse::Block;
 use parse::{ELEMENT_NAMES, ELEM_P};
 
 /// Registry key of the SimpleHTML method table (the MAXCSTACK discipline).
-pub(super) const REG_SIMPLEHTML_METHODS: &str = "__benilla_simplehtml_methods";
+pub(super) const REG_SIMPLEHTML_METHODS: &str = "__wrathplus_simplehtml_methods";
 
 // ── State ────────────────────────────────────────────────────────────────────────────────────
 

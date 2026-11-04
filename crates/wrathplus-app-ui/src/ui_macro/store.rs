@@ -1,5 +1,5 @@
 //! The macro file format, the reference's own: a `MACRO %d "%s" %s` header carrying the macro's
-//! id, the body lines and a bare `END`, in `macros-cache.txt`, one file per scope. benilla ends
+//! id, the body lines and a bare `END`, in `macros-cache.txt`, one file per scope. WrathPlus ends
 //! lines with `\n` where the reference writes `\r\n`, and reads either. A name holding a `"` runs
 //! from the first quote to the last, since the reference's `"%s"` is unescaped.
 
@@ -10,7 +10,7 @@ pub(super) const ICON_PREFIX: &str = "Interface\\Icons\\";
 
 /// Parse one scope's file as build 12340's loader reads it (`0x567c10`): at most 36 records for
 /// either scope; an id of 0, a repeated id or an empty name loses its record; and an id below the
-/// scope's base (`base`, `0xa0f834`) gains it, so a file numbered from 1, as benilla's 1.12-era
+/// scope's base (`base`, `0xa0f834`) gains it, so a file numbered from 1, as WrathPlus's 1.12-era
 /// character files are, loads under the character ids. File order is kept; the engine sorts.
 pub(super) fn parse(text: &str, base: u32) -> Vec<MacroView> {
     let mut out: Vec<MacroView> = Vec::new();
@@ -131,7 +131,7 @@ mod tests {
         assert_eq!(macros[2].body, ".wchange 0 0");
     }
 
-    /// benilla's 1.12-era character files number from 1; the loader lifts an id under the base
+    /// WrathPlus's 1.12-era character files number from 1; the loader lifts an id under the base
     /// (`0x567c10`), so they load as character ids, and the write keeps them there.
     #[test]
     fn a_character_file_numbered_from_one_loads_under_the_character_base() {

@@ -13,7 +13,7 @@
 //!
 //! Metal vs wood is `Material.dbc`'s `Flags & 1` throughout (`0x457e80`). Untraced: whether the
 //! generic impact also plays under a clang (`0x624936`) and whether the natural-weapon column
-//! plays on a whiff; benilla plays neither. A `text_only` flush plays nothing. `$CPP` and `$CST`
+//! plays on a whiff; WrathPlus plays neither. A `text_only` flush plays nothing. `$CPP` and `$CST`
 //! are not audio.
 
 use bevy::ecs::entity::EntityHashMap;
@@ -477,7 +477,7 @@ fn combat_sounds(
 
             // `0x6247d0`'s weapon-sound block, before the victim dispatch: the `$AHn` column,
             // else the generic impact behind the `SWINGNOHITSOUND` latch. Under a parry or block
-            // benilla plays no generic impact; the reference's side (`0x624936`) is untraced.
+            // WrathPlus plays no generic impact; the reference's side (`0x624936`) is untraced.
             if let Some(n) = imp.natural {
                 // The natural-weapon sound replaces the generic weapon impact.
                 let vocal = attacker

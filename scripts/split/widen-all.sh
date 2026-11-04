@@ -10,7 +10,7 @@ set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 max="${1:-4}"
 # The root's prefix: `wrathplus` once scripts/rename-wrathplus.sh has run.
-P=benilla
+P=WrathPlus
 [ -d crates/wrathplus-app ] && P=wrathplus
 
 # A glob import (`use crate::ui_chat::feed::*;`) from another crate silently skips a crate-private

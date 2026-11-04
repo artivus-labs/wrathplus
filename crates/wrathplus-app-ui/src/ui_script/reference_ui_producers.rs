@@ -308,7 +308,7 @@ fn scan_tables(text: &str, fired: &mut HashSet<String>) {
 mod tests {
     /// The one event the host invents, with why it may: our own glue `ServerField.xml` (the custom
     /// server-address field) is its only listener, so no stock handler can hear it.
-    const HOST_EVENTS: &[&str] = &["BENILLA_REALMLIST_CHANGED"];
+    const HOST_EVENTS: &[&str] = &["WRATHPLUS_REALMLIST_CHANGED"];
 
     /// Every event name production code fires by literal is one 12340 has: the in-game table (its
     /// init writes each name into its slot, `0xc24ee0`.. plus the low block at `0x6088xx`) or the

@@ -186,7 +186,7 @@ impl ModelAnimations {
     /// PATH 2 (`0x711c1f`): follow `catalog.fallback` until the model has a clip for the id, with
     /// the reference's 208-row cycle guard. Exhaustion gives Stand (0), where the reference takes
     /// Stand only if the model authors it, else 147 if authored, else the first sequence's id
-    /// (`0x711c22`-`0x711c4e`); every id benilla requests resolves in PATH 1.
+    /// (`0x711c22`-`0x711c4e`); every id WrathPlus requests resolves in PATH 1.
     fn resolve_path2(&self, requested: u16, catalog: &AnimDataCatalog) -> ResolvedAnim {
         const STAND: ResolvedAnim = ResolvedAnim {
             id: 0,

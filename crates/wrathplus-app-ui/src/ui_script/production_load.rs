@@ -13,14 +13,14 @@ pub(super) fn production_load_with(
     before: &str,
     addons: impl FnOnce(&std::path::Path),
 ) -> (UiScript, Vec<String>) {
-    let tmp = std::env::temp_dir().join(format!("benilla-load-{tag}-{}", std::process::id()));
+    let tmp = std::env::temp_dir().join(format!("wrathplus-load-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&tmp);
-    let home = tmp.join("benilla-config");
+    let home = tmp.join("wrathplus-config");
     let root = home.join("AddOns");
     std::fs::create_dir_all(&root).unwrap();
     addons(&root);
     let _c = EnvGuard::unset("WOW_CAPTURE");
-    let _h = EnvGuard::set("BENILLA_HOME", home.to_str().unwrap());
+    let _h = EnvGuard::set("WRATHPLUS_HOME", home.to_str().unwrap());
 
     let mut s = UiScript::new().unwrap();
     // A reply that hid nothing, so `GetNumAddOns` counts the registry.

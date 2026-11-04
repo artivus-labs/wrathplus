@@ -264,13 +264,13 @@ pub fn on_cvar(ev: On<crate::cvars::CvarChanged>, mut scale: ResMut<RenderScale>
 pub const CVARS: &[crate::cvars::Registered] = {
     use crate::cvars::ours;
     &[
-        // benilla's own: the world renders at `window × this` while the UI stays native. The knob is
+        // WrathPlus's own: the world renders at `window × this` while the UI stays native. The knob is
         // [`RenderScale`], clamped to `RENDER_SCALE_RANGE`; at "1" nothing is
         // resampled. `$WOW_RENDER_SCALE` overrides it for the session.
         ours(
             "renderScale",
             "1",
-            "benilla's own — the reference has no off-screen buffer to hang a resolution dial \
+            "WrathPlus's own — the reference has no off-screen buffer to hang a resolution dial \
              on; its nearest equivalent, `gxResolution`, drops the interface with the world",
         ),
     ]

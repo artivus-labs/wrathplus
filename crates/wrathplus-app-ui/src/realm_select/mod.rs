@@ -142,7 +142,7 @@ fn apply_realm_policy(
 /// ladder in the module doc. Every arm requires the realm to be up.
 fn auto_answer(realms: &Realms, remembered: Option<&str>, unattended: bool) -> Option<String> {
     // Case-insensitive: vmangos does not normalise realm names. `current` outranks the persisted
-    // CVar, which benilla writes only at world entry, so a logout before it still returns here.
+    // CVar, which WrathPlus writes only at world entry, so a logout before it still returns here.
     let named = [
         realms.env_realm.as_deref(),
         realms.current.as_deref(),

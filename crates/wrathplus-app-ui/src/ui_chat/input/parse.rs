@@ -305,7 +305,7 @@ fn slash_command(index: SlashIndex, args: &str) -> ParsedChat {
     }
 }
 
-/// benilla's own instruments' grammar ([`DevCmd`]), in the command table only in a dev build.
+/// WrathPlus's own instruments' grammar ([`DevCmd`]), in the command table only in a dev build.
 fn dev_command(dev: DevCmd, args: &str) -> ParsedChat {
     match dev {
         // `/castvis <spell_id> [go|ground|fail]`: bare starts the precast, `go` releases at the

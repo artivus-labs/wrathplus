@@ -1,7 +1,7 @@
 //! The hover-cost recorder (`WOW_HOVER_LOG`): every frame to a CSV, tagged with what the tooltip
 //! showed, and a report at exit ranking cost by tooltip state.
 //!
-//! `WOW_HOVER_LOG=1` writes `benilla-config/Diagnostics/hover-log.csv`; any other value is a path.
+//! `WOW_HOVER_LOG=1` writes `wrathplus-config/Diagnostics/hover-log.csv`; any other value is a path.
 //! Columns per frame: wall time, process-CPU delta, the UI pass's phase split in microseconds
 //! (the `WOW_UI_COST=1` marks), the mesh rebuild's split, and the tooltip (owner, line count,
 //! first line). A spike with flat UI phases is not a UI-pass cost.
@@ -16,7 +16,7 @@ use wrathplus_ui::script::UiScript;
 use crate::ui_script::{UiCostWanted, UiFrameCost};
 
 /// Where to write, from `$WOW_HOVER_LOG`: unset or `0` is off, `1` is
-/// `benilla-config/Diagnostics/hover-log.csv` (off in a hermetic run), anything else a path.
+/// `wrathplus-config/Diagnostics/hover-log.csv` (off in a hermetic run), anything else a path.
 fn log_path() -> Option<String> {
     match std::env::var("WOW_HOVER_LOG") {
         Err(_) => None,
@@ -25,7 +25,7 @@ fn log_path() -> Option<String> {
             Some(dir) => Some(dir.join("hover-log.csv").to_string_lossy().into_owned()),
             None => {
                 warn!(
-                    "hover log: no benilla-config folder to write into (hermetic run) — set \
+                    "hover log: no wrathplus-config folder to write into (hermetic run) — set \
                      WOW_HOVER_LOG=<path> to name one. Not recording."
                 );
                 None

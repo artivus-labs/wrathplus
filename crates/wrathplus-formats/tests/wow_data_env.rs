@@ -4,7 +4,7 @@
 
 #[test]
 fn the_override_is_read_and_wins() {
-    let tmp = std::env::temp_dir().join(format!("benilla-wdenv-{}", std::process::id()));
+    let tmp = std::env::temp_dir().join(format!("wrathplus-wdenv-{}", std::process::id()));
     std::fs::create_dir_all(&tmp).unwrap();
 
     std::env::set_var("WOW_DATA", &tmp);

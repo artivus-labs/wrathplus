@@ -77,7 +77,7 @@ fn key(name: &str) -> String {
     name.replace('/', "\\").to_ascii_lowercase()
 }
 
-/// A name only for the MOGP bits benilla's own code tests as flags; the rest print blank.
+/// A name only for the MOGP bits WrathPlus's own code tests as flags; the rest print blank.
 fn known_name(bit: u32) -> &'static str {
     match bit {
         3 => "EXTERIOR (0x8)",

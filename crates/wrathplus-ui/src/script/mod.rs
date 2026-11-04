@@ -452,23 +452,23 @@ use crate::order::ZTarget;
 use crate::widget::{FrameHandle, KindState};
 
 // Registry keys, the only roots of Lua-side state (the `LUAI_MAXCSTACK` discipline).
-const REG_FRAME_META: &str = "__benilla_frame_meta";
-const REG_REGION_META: &str = "__benilla_region_meta";
-const REG_FRAME_METHODS: &str = "__benilla_frame_methods";
-const REG_REGION_METHODS: &str = "__benilla_region_methods";
+const REG_FRAME_META: &str = "__wrathplus_frame_meta";
+const REG_REGION_META: &str = "__wrathplus_region_meta";
+const REG_FRAME_METHODS: &str = "__wrathplus_frame_methods";
+const REG_REGION_METHODS: &str = "__wrathplus_region_methods";
 #[cfg(test)]
 pub(crate) const REG_REGION_METHODS_FOR_TEST: &str = REG_REGION_METHODS;
 /// The title region's method table and metatable: the 19 Region methods and nothing else.
-const REG_TITLE_METHODS: &str = "__benilla_title_methods";
-const REG_TITLE_META: &str = "__benilla_title_meta";
+const REG_TITLE_METHODS: &str = "__wrathplus_title_methods";
+const REG_TITLE_META: &str = "__wrathplus_title_meta";
 /// The region leaf tables and metatables: Texture and FontString each answer their own map.
-const REG_TEXTURE_METHODS: &str = "__benilla_texture_methods";
-const REG_TEXTURE_META: &str = "__benilla_texture_meta";
-const REG_FONTSTRING_METHODS: &str = "__benilla_fontstring_methods";
-const REG_FONTSTRING_META: &str = "__benilla_fontstring_meta";
+const REG_TEXTURE_METHODS: &str = "__wrathplus_texture_methods";
+const REG_TEXTURE_META: &str = "__wrathplus_texture_meta";
+const REG_FONTSTRING_METHODS: &str = "__wrathplus_fontstring_methods";
+const REG_FONTSTRING_META: &str = "__wrathplus_fontstring_meta";
 /// The error handler `seterrorhandler` holds, the reference's registry reference `[0x8722cc]`;
 /// unset until one is given, as the reference's starts at -1.
-const REG_ERRORHANDLER: &str = "__benilla_errorhandler";
+const REG_ERRORHANDLER: &str = "__wrathplus_errorhandler";
 
 /// Names on both region leaves, each leaf registering its own copy (Texture's `SetAlpha`
 /// `0x79b580`, FontString's `0x79cb70`), so they are not on the Region map and must not be hoisted
@@ -551,8 +551,8 @@ pub(crate) const REGION_MAP_METHODS: [&str; 19] = [
     "SetAllPoints",
     "ClearAllPoints",
 ];
-const REG_WRAPPERS: &str = "__benilla_wrappers";
-const REG_SCRIPTS: &str = "__benilla_scripts";
+const REG_WRAPPERS: &str = "__wrathplus_wrappers";
+const REG_SCRIPTS: &str = "__wrathplus_scripts";
 
 /// The layout handle of the screen root (the client's `CSimpleTop`, not the `UIParent` frame),
 /// which a top-level `SetPoint` without `relativeTo` anchors to; frame ids, from 1, are the rest.

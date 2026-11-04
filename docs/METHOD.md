@@ -1,6 +1,6 @@
-# METHOD — how benilla is built
+# METHOD — how WrathPlus is built
 
-This fork of benilla is a from-scratch World of Warcraft 3.3.5a (build 12340) client in Rust and
+This fork of WrathPlus is a from-scratch World of Warcraft 3.3.5a (build 12340) client in Rust and
 Bevy. It reads the game's data from the player's own install, speaks the build-12340 protocol to
 an AzerothCore server, and does not build a server or simulate the game. The reference client is
 the spec: in the default Classic preset the client does what 3.3.5a does, as a modern, idiomatic
@@ -11,8 +11,8 @@ client; the optional Plus preset (`docs/EXPERIENCE.md`) is the recorded exceptio
 A change is right when it makes the client more like 3.3.5a or fixes a bug, with evidence from the
 reference, in one small piece, with the gates green. A deviation from the reference is the
 maintainer's call alone, and each one is written down where it lives: a CVar's `Deviates` row, a
-comment naming the reference fact and why we differ. Anything else lives on top of benilla, in a
-crate of its own or a fork, and benilla opens a piece of itself to such a crate only when its own
+comment naming the reference fact and why we differ. Anything else lives on top of WrathPlus, in a
+crate of its own or a fork, and WrathPlus opens a piece of itself to such a crate only when its own
 3.3.5a work creates that piece (`docs/CONTRIBUTING.md`, "Building on top").
 
 ## The loop
@@ -43,16 +43,16 @@ crate of its own or a fork, and benilla opens a piece of itself to such a crate 
 - **Never commit anything from the install.** Art, models, sounds, maps, data: the install is
   read at runtime from a gitignored path, and everyone provides their own. Interface code is no
   exception: FrameXML and GlueXML run off the player's own patch chain, and `assets/ui` holds
-  only benilla's own files.
-- **The install is read-only.** benilla never writes into the WoW folder: no screenshot, log,
+  only WrathPlus's own files.
+- **The install is read-only.** WrathPlus never writes into the WoW folder: no screenshot, log,
   cache or scratch file. `scripts/smoke.sh` fails a run that leaves the install changed.
 - **Local state lives in one folder**, `wrathplus-config/`, at the repo root in a dev build and
   beside the binary in the player build; every path to it resolves through `crate::local_state`.
-  Existing `benilla-config/` homes take precedence without moving or merging state.
+  A home under the old name, `benilla-config/`, is renamed to it on first use.
   Player settings are CVars persisted as a diff in `wrathplus-config/config.toml`.
-- **The core UI is the stock UI; benilla's own is one layer on top.** The core loads the stock
+- **The core UI is the stock UI; WrathPlus's own is one layer on top.** The core loads the stock
   3.3.5a FrameXML off the player's own archives, byte for byte, and builds the engine verbs those
-  files call, never stubbing one to make a file load. benilla's own interface (its options
+  files call, never stubbing one to make a file load. WrathPlus's own interface (its options
   window, its game-menu look, its fixes to the stock Lua) is one layer that loads after the
   stock files and before third-party addons, the way an addon does: written against the stock API
   alone, listed in no addon list and always on, and offering nothing another addon can build on.
@@ -80,7 +80,7 @@ crate of its own or a fork, and benilla opens a piece of itself to such a crate 
   build without the `dev` feature with its own tests, and the engine boot checks, as
   `scripts/gates.sh`. It runs on the tree that lands, before it lands; it is memoized on the
   tree. The tests that read the install or the addon corpus skip where the data is absent, and
-  the gate prints the count; where the data is, a skip is a failure (`BENILLA_REQUIRE_DATA=1`).
+  the gate prints the count; where the data is, a skip is a failure (`WRATHPLUS_REQUIRE_DATA=1`).
   The workspace tests then run a second time with `WOW_DATA=` (no install), so a test that
   reads the install without opening with `wow_data_or_skip!` fails here and not on a clone.
 - **Per round**: `scripts/check.sh`, scoped to the changed crates and their dependents. Run each

@@ -25,7 +25,7 @@
 //! - Registration: units, players and corpses cast one; game objects and dynamic objects never do
 //!   (`0x670e94`, `0x613e10`). The reference's `shadowLOD` toggle is not built: always on.
 //! - Deviation: the shadow is gated on `InheritedVisibility`, though the reference draws one under
-//!   an undrawn body (`0x48161d`), because benilla's exterior-scene election hides units the
+//!   an undrawn body (`0x48161d`), because WrathPlus's exterior-scene election hides units the
 //!   reference never loads, and their shadows would stay on the floor below.
 //!
 //! Each shadow's triangles are rebuilt only when [`ShadowKey`] moves and copied onto the effect
@@ -179,7 +179,7 @@ fn update_shadows(
     mount_anims: Query<(&NetEntity, &ModelAnimations), With<crate::entities::mount::MountBody>>,
     mut shadows: Query<(&BlobShadow, &mut ShadowKey, &mut ShadowVerts)>,
     // A once-a-second census of shadows and why the hidden ones hid, at
-    // `RUST_LOG=wrathplus_app::blob_shadow=debug` (a `benilla::` filter matches nothing).
+    // `RUST_LOG=wrathplus_app::blob_shadow=debug` (a `wrathplus::` filter matches nothing).
     mut census_at: Local<f32>,
 ) {
     let now = time.elapsed_secs();

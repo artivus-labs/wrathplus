@@ -223,9 +223,9 @@ fn charter_tooltip_lines(script: &UiScript, pos: Option<(i64, u32)>) -> Vec<Stri
     };
     let chunk = format!(
         r#"
-        local a = getglobal("BenillaProbeTipAnchor")
+        local a = getglobal("WrathPlusProbeTipAnchor")
         if not a then
-            a = CreateFrame("Button", "BenillaProbeTipAnchor")
+            a = CreateFrame("Button", "WrathPlusProbeTipAnchor")
             a:SetPoint("CENTER", 0, 0); a:SetWidth(10); a:SetHeight(10)
         end
         GameTooltip:SetOwner(a, "ANCHOR_RIGHT")
@@ -244,11 +244,11 @@ fn charter_tooltip_lines(script: &UiScript, pos: Option<(i64, u32)>) -> Vec<Stri
         .unwrap_or_default()
 }
 
-/// `BENILLA_GOSSIP_ICONS.petition` in the live VM, `""` when absent. The stock
+/// `WRATHPLUS_GOSSIP_ICONS.petition` in the live VM, `""` when absent. The stock
 /// `GossipFrame.lua:123` builds the icon path from the type string and defines no such table.
 fn vm_petition_texture(script: &UiScript) -> String {
     script
-        .eval::<String>("return (BENILLA_GOSSIP_ICONS and BENILLA_GOSSIP_ICONS.petition) or \"\"")
+        .eval::<String>("local t = WRATHPLUS_GOSSIP_ICONS return t and t.petition or \"\"")
         .unwrap_or_default()
 }
 
@@ -1098,14 +1098,14 @@ fn assert_icon_and_select(
         probe.phase = Phase::Done;
         return;
     }
-    // The stock interface defines no `BENILLA_GOSSIP_ICONS` (see `vm_petition_texture`).
+    // The stock interface defines no `WRATHPLUS_GOSSIP_ICONS` (see `vm_petition_texture`).
     let texture = vm_petition_texture(script);
     if texture.is_empty() {
         probe.fail(
             3,
             "icon",
             format!(
-                "the app maps the row to {ICON_TYPE_PETITION:?} but BENILLA_GOSSIP_ICONS.petition \
+                "the app maps the row to {ICON_TYPE_PETITION:?} but WRATHPLUS_GOSSIP_ICONS.petition \
                  resolves to nothing in the live VM, so the row would still draw the fallback \
                  bubble"
             ),
@@ -1118,7 +1118,7 @@ fn assert_icon_and_select(
         "icon",
         format!(
             "row {} {:?}: wire icon={ICON_PETITION} index={} → type {ty:?}, \
-             BENILLA_GOSSIP_ICONS.petition = {texture:?}",
+             WRATHPLUS_GOSSIP_ICONS.petition = {texture:?}",
             pos + 1,
             opt.message,
             opt.index

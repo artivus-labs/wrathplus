@@ -12,7 +12,7 @@ pub(crate) use crate::app_core::movement::wrap_pi;
 
 /// The `(spine, head)` twist angles. The reference's full-share branch (`0x6103a0`) fires only for
 /// the local player during a click-to-move action (`[0xc4d888]` holds `0xc`, disabled, in
-/// ordinary play), which benilla does not have.
+/// ordinary play), which WrathPlus does not have.
 fn twist_shares(gap: f32) -> (f32, f32) {
     use std::f32::consts::FRAC_PI_4;
     let spine = (gap * 0.5).clamp(-FRAC_PI_4, FRAC_PI_4);

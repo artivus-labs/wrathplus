@@ -1,4 +1,4 @@
-//! `dump_widget_methods`: print benilla's widget method surface, asked of a real VM.
+//! `dump_widget_methods`: print WrathPlus's widget method surface, asked of a real VM.
 //!
 //! ```text
 //! cargo run -q -p wrathplus-ui --example dump_widget_methods    # class<TAB>method, one per line

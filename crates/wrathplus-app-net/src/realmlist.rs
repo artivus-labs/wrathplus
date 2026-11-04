@@ -1,14 +1,14 @@
-//! The realmlist: the `host[:port]` benilla dials for the logon handshake.
+//! The realmlist: the `host[:port]` WrathPlus dials for the logon handshake.
 //!
 //! Build 12340 loads `Config.wtf` first (`0x406c70` → `0x4067f0`), then registers `realmList`
 //! (help "Address of realm list server", `0x6b0bf0`) and runs `data\<locale>\realmlist.wtf`, else
 //! `realmlist.wtf` beside the executable, as a console script: that file's `set realmlist` wins
 //! over `Config.wtf`'s saved `SET realmList` at every launch. There is no UI for it.
 //!
-//! benilla keeps that order ([`realmlist_wtf`], [`apply_realmlist_wtf`]): `config.toml` holds the
+//! WrathPlus keeps that order ([`realmlist_wtf`], [`apply_realmlist_wtf`]): `config.toml` holds the
 //! saved CVar as `Config.wtf` does, and the first `realmlist.wtf` found overrides it. Deviation:
-//! the login screen edits it, and an edit writes `$BENILLA_HOME/realmlist.wtf`, searched first, so
-//! benilla never writes into the game install ([`write_realmlist_wtf`]).
+//! the login screen edits it, and an edit writes `$WRATHPLUS_HOME/realmlist.wtf`, searched first, so
+//! WrathPlus never writes into the game install ([`write_realmlist_wtf`]).
 //!
 //! `--server` (or `$WOW_HOST`) wins for the session, is never written to the file, and is taken
 //! verbatim, not through [`normalize`].
@@ -41,7 +41,7 @@ pub const CVARS: &[crate::cvars::Registered] = {
             DEFAULT_REALMLIST,
             "us.logon.worldofwarcraft.com:3724",
             "that host has not resolved since 2019, so shipping it makes every first launch a \
-             DNS failure; benilla dials the machine it is running on",
+             DNS failure; WrathPlus dials the machine it is running on",
         ),
     ]
 };
@@ -69,7 +69,7 @@ impl Plugin for RealmlistPlugin {
 /// The override file's name.
 const REALMLIST_WTF: &str = "realmlist.wtf";
 
-/// Where a `realmlist.wtf` is looked for, first found wins: benilla's own (the login edit's), then
+/// Where a `realmlist.wtf` is looked for, first found wins: WrathPlus's own (the login edit's), then
 /// the install's `Data\<locale>\realmlist.wtf` and the one beside its executable, 12340's order.
 fn realmlist_wtf_candidates() -> Vec<std::path::PathBuf> {
     let mut out = Vec::new();
@@ -123,7 +123,7 @@ fn apply_realmlist_wtf(mut realmlist: ResMut<Realmlist>) {
     }
 }
 
-/// The login edit's persistence: `$BENILLA_HOME/realmlist.wtf`, in the file's own syntax, so the
+/// The login edit's persistence: `$WRATHPLUS_HOME/realmlist.wtf`, in the file's own syntax, so the
 /// next launch finds it before the install's.
 pub fn write_realmlist_wtf(address: &str) -> std::io::Result<()> {
     let Some(home) = crate::local_state::home() else {
@@ -264,13 +264,13 @@ mod tests {
 
     #[test]
     fn the_login_edit_is_found_first_on_the_next_launch() {
-        // `BENILLA_HOME` is process-wide: hold the lock every env-overriding test shares.
+        // `WRATHPLUS_HOME` is process-wide: hold the lock every env-overriding test shares.
         let _l = crate::local_state::test_env::ENV_LOCK
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let dir = std::env::temp_dir().join(format!("azb-realmlist-{}", std::process::id()));
         let _home =
-            crate::local_state::test_env::EnvGuard::set("BENILLA_HOME", dir.to_str().unwrap());
+            crate::local_state::test_env::EnvGuard::set("WRATHPLUS_HOME", dir.to_str().unwrap());
         // A VPS's non-default logon port survives the file and reaches the dial.
         write_realmlist_wtf("192.168.1.1:1337").unwrap();
         assert_eq!(

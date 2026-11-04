@@ -129,7 +129,7 @@ fn lines_view(s: &UnitState) -> UnitState {
 /// opener, then green `0xc0d420`, for a key (`0x52ab29`) or no requirement (`0x52ab22`); `None`, a
 /// flag-locked object with no `Lock.dbc` row, is no requirement. A skill opener takes the
 /// reference's difficulty ramp `0x529fa0` (grey, green, yellow, orange, red at +0/25/50/100);
-/// benilla shows its green, since the resolver discards the margin.
+/// WrathPlus shows its green, since the resolver discards the margin.
 fn locked_line_tint(outcome: Option<crate::target::lock::LockOutcome>) -> TooltipTint {
     match outcome {
         Some(crate::target::lock::LockOutcome::Unmet) => TooltipTint::Red,

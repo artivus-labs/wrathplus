@@ -15,7 +15,7 @@ use crate::bindings_xml::Binding;
 
 use super::Model;
 
-/// A host request queued by Lua. `Save(set)` persists set 1 or 2 under `benilla-config/bindings/`;
+/// A host request queued by Lua. `Save(set)` persists set 1 or 2 under `wrathplus-config/bindings/`;
 /// `Save(1)` also deletes the character set's file.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum KeybindRequest {
@@ -353,7 +353,7 @@ impl KeybindState {
 }
 
 /// The `platform="…"` value that registers: `"windows"` (`0x846f98`), the PC build's, on every OS,
-/// since benilla answers as the PC build (`IsMacClient` nil, `client.rs`); the Mac build compares
+/// since WrathPlus answers as the PC build (`IsMacClient` nil, `client.rs`); the Mac build compares
 /// against `"mac"` (`0x4e28f8`) and so has the `ITUNES_*` rows.
 const THIS_PLATFORM: &str = "windows";
 
@@ -381,7 +381,7 @@ impl super::UiScript {
         self.model_mut().keybinds.defaults.clone()
     }
 
-    /// Seed stored set 1 (account) or 2 (character) from `benilla-config/bindings/`; `None` clears
+    /// Seed stored set 1 (account) or 2 (character) from `wrathplus-config/bindings/`; `None` clears
     /// it. The live table is untouched until [`Self::load_binding_set`].
     pub fn seed_binding_set(&mut self, set: u32, keys: Option<Vec<KeyBinding>>) {
         let keys = keys.map(key_list);

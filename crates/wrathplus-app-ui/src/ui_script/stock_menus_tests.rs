@@ -1,4 +1,4 @@
-//! The stock 3.3.5 windows the player reaches first, now that no benilla layer replaces them: the
+//! The stock 3.3.5 windows the player reaches first, now that no WrathPlus layer replaces them: the
 //! ESC menu (`GameMenuFrame`, through `ToggleGameMenu`, what the ESCAPE binding runs), and from it
 //! `VideoOptionsFrame`, `InterfaceOptionsFrame` and `Blizzard_BindingUI`'s `KeyBindingFrame`
 //! (loaded on demand by `KeyBindingFrame_LoadUI`). Each opens on the production load and raises

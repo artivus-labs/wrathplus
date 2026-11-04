@@ -1,5 +1,5 @@
 //! The app half of `wrathplus_ui::script::macros`: the icon chooser's catalog, the files under
-//! `benilla-config/macros/`, the runner, and the bound spell the action bar reads. 1.12 macros are
+//! `wrathplus-config/macros/`, the runner, and the bound spell the action bar reads. 1.12 macros are
 //! client state only: no opcode carries them, and the reference saves them to `macros-cache.txt`.
 
 use bevy::prelude::*;

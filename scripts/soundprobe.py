@@ -159,9 +159,7 @@ def main():
     d = args.dir
     if d is None:
         for root in (".", ".."):
-            legacy = os.path.join(root, "benilla-config")
-            home = legacy if os.path.lexists(legacy) else os.path.join(root, "wrathplus-config")
-            guess = os.path.join(home, "sound-probe")
+            guess = os.path.join(root, "wrathplus-config", "sound-probe")
             if os.path.isdir(guess):
                 d = guess
                 break

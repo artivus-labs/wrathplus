@@ -44,7 +44,7 @@ pub(super) enum Source {
 
 /// One loadable interface: a name, its parsed manifest, and where its files come from.
 pub(super) struct Addon {
-    /// The folder name (`"FrameXML"` for the core and `"benilla"` for the layer, which have no
+    /// The folder name (`"FrameXML"` for the core and `"wrathplus"` for the layer, which have no
     /// registry row): what the AddOn API keys on and what `ADDON_LOADED` carries.
     pub(super) name: String,
     /// The parsed `.toc`: the ordered file list plus every directive.
@@ -593,7 +593,7 @@ pub(crate) struct EnableStore {
 
 impl EnableStore {
     /// A node per character, each from its own `AddOns.txt`
-    /// (`benilla-config/addons/<Realm>-<Char>.txt`); a character with no file still gets one.
+    /// (`wrathplus-config/addons/<Realm>-<Char>.txt`); a character with no file still gets one.
     pub(crate) fn load(realm: &str, characters: &[String]) -> Self {
         let nodes = characters
             .iter()
@@ -767,12 +767,12 @@ pub(super) fn save_addon_variables(script: &mut UiScript, identity: Option<&(Str
 /// The per-addon file's header. Deviation: the reference writes none (its file opens with a blank
 /// line); ours names the file, because players open this folder.
 const SAVED_HEADER: &str = "\
--- benilla per-addon saved variables.
+-- WrathPlus per-addon saved variables.
 -- Written at logout/exit from the live globals; executed as a Lua chunk at addon load.
 ";
 
 /// The addon walk under the 30300 gate: the archive's Blizzard addons ([`chain_addons`]), then the
-/// player's from `benilla-config/AddOns`. No binding files are admitted on this route.
+/// player's from `wrathplus-config/AddOns`. No binding files are admitted on this route.
 pub(super) fn load_wrath_third_party(
     script: &mut UiScript,
     identity: Option<&(String, String)>,
@@ -1101,8 +1101,10 @@ mod tests {
     #[test]
     fn the_sandbox_is_the_addons_root_not_one_addon() {
         use wrathplus_ui::loader::join_ref;
-        let tmp =
-            std::env::temp_dir().join(format!("benilla-addon-escape-test-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!(
+            "wrathplus-addon-escape-test-{}",
+            std::process::id()
+        ));
         let _ = std::fs::remove_dir_all(&tmp);
         let root = tmp.join("AddOns");
         std::fs::create_dir_all(root.join("Probe/src")).unwrap();
@@ -1154,8 +1156,10 @@ mod tests {
     /// type, which the reference logs and carries on from (`0x6ee356`).
     #[test]
     fn a_toc_listed_bindings_xml_is_not_a_script_error() {
-        let tmp =
-            std::env::temp_dir().join(format!("benilla-addon-tocbindings-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!(
+            "wrathplus-addon-tocbindings-{}",
+            std::process::id()
+        ));
         let _ = std::fs::remove_dir_all(&tmp);
         let root = tmp.join("AddOns");
         std::fs::create_dir_all(root.join("Probe")).unwrap();
@@ -1192,7 +1196,7 @@ mod tests {
     #[test]
     fn an_addons_bindings_xml_registers_its_commands() {
         let tmp =
-            std::env::temp_dir().join(format!("benilla-addon-bindings-{}", std::process::id()));
+            std::env::temp_dir().join(format!("wrathplus-addon-bindings-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         let root = tmp.join("AddOns");
         std::fs::create_dir_all(root.join("Probe")).unwrap();
@@ -1234,7 +1238,7 @@ mod tests {
     #[test]
     fn an_xml_referenced_lua_is_named_like_a_toc_listed_one() {
         let tmp =
-            std::env::temp_dir().join(format!("benilla-addon-chunkname-{}", std::process::id()));
+            std::env::temp_dir().join(format!("wrathplus-addon-chunkname-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         let root = tmp.join("AddOns");
         std::fs::create_dir_all(root.join("Probe/Core")).unwrap();
@@ -1295,7 +1299,7 @@ mod tests {
     #[test]
     fn a_missing_required_dep_drops_only_its_dependent() {
         let tmp =
-            std::env::temp_dir().join(format!("benilla-addon-deps-test-{}", std::process::id()));
+            std::env::temp_dir().join(format!("wrathplus-addon-deps-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).unwrap();
         let all = vec![
@@ -1331,7 +1335,7 @@ mod tests {
     #[test]
     fn a_third_party_addon_loads_from_a_folder_with_no_rust() {
         let tmp =
-            std::env::temp_dir().join(format!("benilla-addon-e2e-test-{}", std::process::id()));
+            std::env::temp_dir().join(format!("wrathplus-addon-e2e-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         let dir = tmp.join("ProbeAddon");
         std::fs::create_dir_all(dir.join("src")).unwrap();
@@ -1430,7 +1434,7 @@ mod tests {
     #[test]
     fn a_dependency_named_in_another_case_loads_once() {
         let tmp = std::env::temp_dir().join(format!(
-            "benilla-addon-case-key-test-{}",
+            "wrathplus-addon-case-key-test-{}",
             std::process::id()
         ));
         let _ = std::fs::remove_dir_all(&tmp);
@@ -1471,7 +1475,7 @@ mod tests {
     #[test]
     fn a_dependency_cycle_is_caught() {
         let tmp =
-            std::env::temp_dir().join(format!("benilla-addon-cycle-test-{}", std::process::id()));
+            std::env::temp_dir().join(format!("wrathplus-addon-cycle-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).unwrap();
         let all = vec![
@@ -1507,7 +1511,7 @@ mod tests {
     #[test]
     fn discovery_matches_the_manifest_case_insensitively() {
         let tmp =
-            std::env::temp_dir().join(format!("benilla-addon-case-test-{}", std::process::id()));
+            std::env::temp_dir().join(format!("wrathplus-addon-case-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(tmp.join("Cased")).unwrap();
         std::fs::create_dir_all(tmp.join("Bare")).unwrap();
@@ -1549,8 +1553,10 @@ mod tests {
     /// the event never arriving.
     #[test]
     fn addon_loaded_carries_the_addons_own_name_and_fires_after_its_files() {
-        let tmp =
-            std::env::temp_dir().join(format!("benilla-addon-loaded-test-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!(
+            "wrathplus-addon-loaded-test-{}",
+            std::process::id()
+        ));
         let _ = std::fs::remove_dir_all(&tmp);
         let dir = tmp.join("EventProbe");
         std::fs::create_dir_all(&dir).unwrap();
@@ -1591,7 +1597,7 @@ mod tests {
     #[test]
     fn the_builtin_interface_never_fires_addon_loaded() {
         let tmp = std::env::temp_dir().join(format!(
-            "benilla-addon-builtin-silent-test-{}",
+            "wrathplus-addon-builtin-silent-test-{}",
             std::process::id()
         ));
         let _ = std::fs::remove_dir_all(&tmp);
@@ -1620,8 +1626,8 @@ mod tests {
 
         let log = event_log(&script);
         assert!(
-            !log.iter().any(|e| e.contains("benilla")),
-            "benilla must never appear in an ADDON_LOADED: {log:?}"
+            !log.iter().any(|e| e.contains("wrathplus")),
+            "WrathPlus must never appear in an ADDON_LOADED: {log:?}"
         );
         assert_eq!(
             log,
@@ -1639,9 +1645,9 @@ mod tests {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let tmp =
-            std::env::temp_dir().join(format!("benilla-addon-order-test-{}", std::process::id()));
+            std::env::temp_dir().join(format!("wrathplus-addon-order-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
-        let home = tmp.join("benilla-config");
+        let home = tmp.join("wrathplus-config");
         let dir = home.join("AddOns").join("EventProbe");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
@@ -1658,7 +1664,7 @@ mod tests {
         // Hermetic: the state folder is the tempdir, so discovery finds only this addon.
         let _c = crate::local_state::test_env::EnvGuard::unset("WOW_CAPTURE");
         let _h =
-            crate::local_state::test_env::EnvGuard::set("BENILLA_HOME", home.to_str().unwrap());
+            crate::local_state::test_env::EnvGuard::set("WRATHPLUS_HOME", home.to_str().unwrap());
 
         let mut script = UiScript::new().unwrap();
         script.set_screen_size(1024.0, 768.0);
@@ -1682,16 +1688,16 @@ mod tests {
 
     // ────────────────────────── the AddOn API and enable state ──────────────────────────
 
-    /// An AddOns root under a temp `benilla-config`, `BENILLA_HOME` on it while the guard lives.
+    /// An AddOns root under a temp `wrathplus-config`, `WRATHPLUS_HOME` on it while the guard lives.
     fn hermetic_root(tag: &str) -> (PathBuf, crate::local_state::test_env::EnvGuard) {
         // The pid keeps two test binaries running at once from wiping each other's tree.
         let tmp =
-            std::env::temp_dir().join(format!("benilla-addon-api-{tag}-{}", std::process::id()));
+            std::env::temp_dir().join(format!("wrathplus-addon-api-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
-        let home = tmp.join("benilla-config");
+        let home = tmp.join("wrathplus-config");
         std::fs::create_dir_all(home.join("AddOns")).unwrap();
         let guard =
-            crate::local_state::test_env::EnvGuard::set("BENILLA_HOME", home.to_str().unwrap());
+            crate::local_state::test_env::EnvGuard::set("WRATHPLUS_HOME", home.to_str().unwrap());
         (home, guard)
     }
 

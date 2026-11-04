@@ -646,11 +646,11 @@ mod tests {
         script
             .run(
                 r#"
-                BENILLA_SAW = "never fired"
+                WRATHPLUS_SAW = "never fired"
                 local f = CreateFrame("Frame")
                 f:RegisterEvent("UNIT_PET")
                 f:SetScript("OnEvent", function()
-                    BENILLA_SAW = HasPetUI() and "has pet UI" or "no pet UI"
+                    WRATHPLUS_SAW = HasPetUI() and "has pet UI" or "no pet UI"
                 end)
                 "#,
             )
@@ -662,7 +662,7 @@ mod tests {
         let saw: String = app
             .world_mut()
             .non_send_resource::<UiScript>()
-            .eval("return BENILLA_SAW")
+            .eval("return WRATHPLUS_SAW")
             .unwrap();
         assert_eq!(
             saw, "has pet UI",

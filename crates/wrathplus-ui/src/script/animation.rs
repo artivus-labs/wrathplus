@@ -5,7 +5,7 @@ use mlua::{Function, Lua, MultiValue, ObjectLike, Table, Value};
 #[path = "animation/lifecycle.rs"]
 mod lifecycle;
 pub(crate) mod transforms;
-const GROUPS: &str = "__benilla_animation_groups";
+const GROUPS: &str = "__wrathplus_animation_groups";
 
 fn fire(object: &Table, script: &str) -> mlua::Result<()> {
     let scripts: Table = object.raw_get("_scripts")?;

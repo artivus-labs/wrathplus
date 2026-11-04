@@ -12,7 +12,7 @@ use super::{event, Model};
 use crate::widget::{FrameHandle, KindState, ScrollFrameState};
 
 /// Registry key of the ScrollFrame method table.
-pub(super) const REG_SCROLLFRAME_METHODS: &str = "__benilla_scrollframe_methods";
+pub(super) const REG_SCROLLFRAME_METHODS: &str = "__wrathplus_scrollframe_methods";
 
 /// Run `f` over a frame's ScrollFrame state; errors when `this` is not a live ScrollFrame, which a
 /// script reaches only by applying a method taken off the table to another frame.

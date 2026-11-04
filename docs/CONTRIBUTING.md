@@ -39,11 +39,11 @@ does instead, and where. Work happens on a branch and lands by review.
 A feature 3.3.5a does not have lives in a crate of its own that adds its Bevy plugins through
 `wrathplus_app::run_with`, as `crates/wrathplus-app/examples/extended_launcher.rs` shows, or in a
 fork. A client started through `run_with` says `extended` in its build line, so its reports read
-apart from stock benilla's. The crate keeps its own settings, never rows in benilla's CVar table,
+apart from stock WrathPlus's. The crate keeps its own settings, never rows in WrathPlus's CVar table,
 which every addon reads.
 
-benilla opens a piece of itself to such a crate only when its own 3.3.5a work creates that piece,
-never for the crate alone, and promises no stable API: a crate pins the benilla revision it
+WrathPlus opens a piece of itself to such a crate only when its own 3.3.5a work creates that piece,
+never for the crate alone, and promises no stable API: a crate pins the WrathPlus revision it
 builds on. What a crate cannot reach stays a fork's.
 
 ## How a change is judged
@@ -85,9 +85,9 @@ out of scope is closed with the reason.
   archive dialect; the hermetic gates unset both.
 - **Without the install, green is hollow.** Well over a thousand tests read the install and skip
   when it is absent, and a few dozen more read a corpus of 1.12 addons for the 1.12 VM tests
-  (`BENILLA_ADDON_CORPUS=<a folder of addons>`, or a `wow-addons-vanilla` link at the root),
+  (`WRATHPLUS_ADDON_CORPUS=<a folder of addons>`, or a `wow-addons-vanilla` link at the root),
   third-party content that is not in this repo. `scripts/gates.sh` and `scripts/check.sh` print
-  how many tests skipped and why. Where the data is, `BENILLA_REQUIRE_DATA=1` turns a skip into a
+  how many tests skipped and why. Where the data is, `WRATHPLUS_REQUIRE_DATA=1` turns a skip into a
   failure, and the gates set it themselves when the install and the corpus both resolve.
 - **A server to test against.** An AzerothCore 3.3.5a server; `--server` or `WOW_HOST` names it
   for the session (default `127.0.0.1:3724`, or the install's `realmlist.wtf`; the launch flags
@@ -125,12 +125,12 @@ out of scope is closed with the reason.
 - **The loop.** `cargo play` builds and runs the play profile. `scripts/check.sh` verifies a
   round of work; `scripts/gates.sh` is the full chain, and it opens a window for the engine boot
   checks, so it needs a display. `WOW_STOCK_UI=1` boots a dev build on the stock interface
-  alone, without benilla's layer. Work on a branch.
+  alone, without WrathPlus's layer. Work on a branch.
 
 ## Reporting a bug
 
 Open a [GitHub issue](https://github.com/artivus-labs/wrathplus/issues): what you did, what you
-saw and what 3.3.5a does instead, with the `benilla build` line from the start of the terminal
+saw and what 3.3.5a does instead, with the `wrathplus build` line from the start of the terminal
 output, your platform and the server you ran on.
 
 ## Where notes go

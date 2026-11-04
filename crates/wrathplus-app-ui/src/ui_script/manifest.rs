@@ -1,6 +1,6 @@
 //! Th in-game interface: the core, the player's own stock FrameXML as their chain's
 //! `FrameXML.toc` lists it ([`reference_ui::core`]) and then its `Bindings.xml`
-//! ([`load_core_bindings`]), then benilla's layer, [`LAYER_MANIFEST`], every entry of which is
+//! ([`load_core_bindings`]), then WrathPlus's layer, [`LAYER_MANIFEST`], every entry of which is
 //! ours and loads after the whole core.
 
 use bevy::prelude::*;
@@ -166,7 +166,7 @@ pub(super) fn load_session_ui(script: &mut UiScript, addons: bool) -> Vec<String
 /// The core: every row of the chain's `FrameXML.toc`, in its order, each file in document order,
 /// then the chain's `Bindings.xml`. A chain without the toc builds no stock interface: the runner
 /// reports `"Couldn't open %s"` (`0x846ff4`) at severity 2 (`0x6edc3f`) and returns 0, which
-/// `UI_Init` never reads (`0x48fff2`), going on to `Bindings.xml` and the addons. benilla goes on
+/// `UI_Init` never reads (`0x48fff2`), going on to `Bindings.xml` and the addons. WrathPlus goes on
 /// the same way and reports it as a load failure, an `ERROR` line and a row in `/errors`.
 pub(super) fn load_core(script: &UiScript) -> Vec<String> {
     let Some(core) = reference_ui::core() else {
@@ -200,7 +200,7 @@ pub(super) fn load_core(script: &UiScript) -> Vec<String> {
 /// The stock key-binding commands, `UI_Init`'s next step after the toc walk: the chain's
 /// `Interface\FrameXML\Bindings.xml` (`0x842f9c`), when the chain has it (`0x48fff9`), through
 /// the loader addons' files go through (`0x4b6f70`, called at `0x490018` here and `0x51f443` for
-/// an addon). Every command benilla has is a row of this file, its body the file's own Lua.
+/// an addon). Every command WrathPlus has is a row of this file, its body the file's own Lua.
 pub(super) fn load_core_bindings(script: &UiScript) -> Vec<String> {
     let Some(bytes) = reference_ui::read(reference_ui::BINDINGS) else {
         warn!(
@@ -251,7 +251,7 @@ pub(crate) fn default_bindings() -> Vec<wrathplus_ui::script::keybind::KeyBindin
     }
 }
 
-/// The chain's `Bindings.xml` text, for the tests that hold benilla against it.
+/// The chain's `Bindings.xml` text, for the tests that hold WrathPlus against it.
 #[cfg(any(test, feature = "test-support"))]
 pub fn stock_bindings_file() -> Option<String> {
     reference_ui::read(reference_ui::BINDINGS)

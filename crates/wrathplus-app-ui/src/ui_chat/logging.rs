@@ -1,7 +1,7 @@
 //! The `LoggingChat`/`LoggingCombat` files, `WoWChatLog.txt` and `WoWCombatLog.txt`: the stock
 //! `/chatlog` and `/combatlog` flip the VM's flag and print the notice (`ChatFrame.lua:675-695`);
 //! this appends each line as the window shows it, stamped `M/D HH:MM:SS.mmm` in local time.
-//! Deviation: the files live in `benilla-config/Logs/`, not the install's `Logs`, because the
+//! Deviation: the files live in `wrathplus-config/Logs/`, not the install's `Logs`, because the
 //! install is read-only. A file that fails to open leaves the flag set: Lua already printed
 //! "enabled".
 

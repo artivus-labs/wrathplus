@@ -31,7 +31,7 @@ mod tests {
 
     /// A fresh AddOns root under the temp folder, unique to the test and the process.
     fn temp_root(test: &str) -> PathBuf {
-        let tmp = std::env::temp_dir().join(format!("benilla-{test}-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("wrathplus-{test}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(tmp.join("AddOns")).unwrap();
         tmp

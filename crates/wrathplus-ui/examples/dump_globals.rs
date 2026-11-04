@@ -1,4 +1,4 @@
-//! `dump_globals`: print benilla's Lua global namespace, asked of a real VM.
+//! `dump_globals`: print WrathPlus's Lua global namespace, asked of a real VM.
 //!
 //! ```text
 //! cargo run -q -p wrathplus-ui --example dump_globals            # name<TAB>type, one per line

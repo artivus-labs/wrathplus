@@ -1,4 +1,4 @@
-//! The engine-free core of benilla's UI: the `.toc`, FrameXML and `Bindings.xml` parsers, the
+//! The engine-free core of WrathPlus's UI: the `.toc`, FrameXML and `Bindings.xml` parsers, the
 //! layout resolver, the frame arena, draw order and the Lua host FrameXML runs in; no Bevy, no GPU.
 
 pub mod bindings_xml;

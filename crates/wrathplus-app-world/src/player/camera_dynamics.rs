@@ -1,6 +1,6 @@
 //! The mechanisms behind the four `UIOptionsFrame` camera checkboxes (`UIOptionsFrame.lua:32-35`).
 //!
-//! The reference's pitch is positive downward (`0x511f40`, `0x50de00`), benilla's
+//! The reference's pitch is positive downward (`0x511f40`, `0x50de00`), WrathPlus's
 //! [`super::camera::FlyCam::pitch`] positive upward, so every reference comparison is flipped.
 
 use bevy::prelude::*;
@@ -130,7 +130,7 @@ pub(super) struct SubjectState {
     pub(super) track: bool,
     /// The camera's `Fear` bit (`[cam+0x90] & 0x1000`): external control.
     pub(super) fear: bool,
-    /// Facing, radians, in benilla's yaw convention (`[obj+0xc98]`).
+    /// Facing, radians, in WrathPlus's yaw convention (`[obj+0xc98]`).
     pub(super) facing: f32,
     /// `UNIT_FIELD_MOUNTDISPLAYID > 0`.
     pub(super) mounted: bool,
@@ -157,7 +157,7 @@ use crate::app_core::movement::move_flags as mf;
 /// seated from the unbiased pitch (`0x50ee32`-`0x50ee58`); the body's aim is the sum (`0x5103e0`).
 ///
 /// The release's `0x511010` holds the bias while the Track latch is up and tracking is Never, or
-/// a move-type-0 click-to-move order is in flight (`[0xc4d888]`); benilla has no click-to-move,
+/// a move-type-0 click-to-move order is in flight (`[0xc4d888]`); WrathPlus has no click-to-move,
 /// so only the first is built.
 pub(super) struct SmartPivot {
     /// The bias channel `[cam+0x104]`; its armed bit is the reference's `[cam+0x90] & 0x8000000`.
@@ -444,7 +444,7 @@ pub(super) const PROBE_DROP: f32 = 64.0 / 9.0;
 /// disarm eases the offset to an exact zero (`0x511110`, `0x50f160`).
 ///
 /// Deviation: the reference sweeps the camera collision against the bobbed eye (`0x50ed47`);
-/// benilla adds the offset after the sweep, because it shares camera shake's accumulator there.
+/// WrathPlus adds the offset after the sweep, because it shares camera shake's accumulator there.
 pub(super) struct HeadBob {
     /// A session is armed (`[cam+0x90] & 0x200`).
     armed: bool,
@@ -1254,7 +1254,7 @@ mod tests {
             tilt.advance(|| 0.5, true, &moving, FollowStyle::Smart, &cfg, DT);
         }
         let lean = tilt.pitch();
-        assert!(lean > 0.0, "uphill leans the view UP in benilla's sign");
+        assert!(lean > 0.0, "uphill leans the view UP in WrathPlus's sign");
 
         let mut pitch = 0.2_f32;
         let composite = pitch + tilt.pitch();

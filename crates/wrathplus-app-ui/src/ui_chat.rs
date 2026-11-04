@@ -238,7 +238,7 @@ impl Plugin for UiChatPlugin {
 /// lines. The Lua state is itself replaced at the session end, as the reference destroys its own
 /// at logout.
 ///
-/// Deviation: not run on benilla's same-character reconnect, which the reference lacks (it
+/// Deviation: not run on WrathPlus's same-character reconnect, which the reference lacks (it
 /// returns to the login screen), so the window keeps its scrollback there.
 fn end_session_chat(
     script: Option<NonSendMut<wrathplus_ui::script::UiScript>>,

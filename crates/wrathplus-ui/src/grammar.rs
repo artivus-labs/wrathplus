@@ -22,7 +22,7 @@ pub enum PluralRule {
     Slavic,
 }
 
-/// This client's rule: benilla is enUS-only (`GetLocale`), rule 0. Which locale sets rule 1 or 2
+/// This client's rule: WrathPlus is enUS-only (`GetLocale`), rule 0. Which locale sets rule 1 or 2
 /// (French and Russian by their shapes) was not traced.
 pub const CLIENT_RULE: PluralRule = PluralRule::OneOther;
 

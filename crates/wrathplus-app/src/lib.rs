@@ -1,4 +1,4 @@
-//! `benilla`: a from-scratch World of Warcraft 1.12.1 client on Bevy. It opens the patch chain from
+//! `wrathplus`: a from-scratch World of Warcraft 1.12.1 client on Bevy. It opens the patch chain from
 //! the install (`$WOW_DATA`, the project folder on a dev build, else beside the binary), streams
 //! the world around the player through the `wrathplus-assets` `mpq://` pipeline, and runs the network
 //! session on a background thread ([`net`]).
@@ -229,13 +229,13 @@ pub use wrathplus_app_world::world_state;
 use bevy::prelude::*;
 
 // A launcher stamps the build id at compile time and hands it to [`run`] or [`run_with`];
-// re-exported so the `benilla` shim needs no bevy dependency of its own.
+// re-exported so the `wrathplus` shim needs no bevy dependency of its own.
 pub use bevy::app::AppExit;
 pub use wrathplus_world::build_id::BuildId;
 /// The world viewer's entry point, the engine with no game attached, called by the
 /// `wrathplus-worldview` shim.
 pub use wrathplus_world::worldview::run as run_worldview;
-// A crate on top of benilla reads objects and interacts through these, with no protocol dependency.
+// A crate on top of WrathPlus reads objects and interacts through these, with no protocol dependency.
 pub use net::Objects;
 pub use target::Interact;
 /// The session interface load, for the integration tests' kit (`tests/common`), which cannot
@@ -251,13 +251,13 @@ pub fn run(build: BuildId) -> AppExit {
 }
 
 /// [`run`], plus `extend` adding a crate's own plugins: how a feature 1.12.1 lacks is built on top
-/// of benilla (`examples/extended_launcher.rs`), the build marked `extended` wherever it is named.
+/// of WrathPlus (`examples/extended_launcher.rs`), the build marked `extended` wherever it is named.
 /// `extend` gets the client fully built and runs before the probe fleet, which sees what it adds.
 pub fn run_with(build: BuildId, extend: impl FnOnce(&mut App)) -> AppExit {
     launch(build, Some(Box::new(extend)))
 }
 
-/// What a crate on top of benilla adds to the built app ([`run_with`]).
+/// What a crate on top of WrathPlus adds to the built app ([`run_with`]).
 type Extension<'a> = Box<dyn FnOnce(&mut App) + 'a>;
 
 /// The one body behind [`run`] and [`run_with`], not generic, so a launcher compiles none of it.
@@ -291,10 +291,10 @@ fn launch(build: BuildId, extend: Option<Extension<'_>>) -> AppExit {
     };
 
     // A dev build's install, state folder and probe identity resolve from the launcher's folder,
-    // so a crate on top of benilla keeps them in its own and not in cargo's checkout of benilla.
+    // so a crate on top of WrathPlus keeps them in its own and not in cargo's checkout of wrathplus.
     wrathplus_formats::set_project_folder(build.project_dir);
 
-    // From here a panic leaves `benilla-config/Diagnostics/crash-<unix>.txt`; armed before the
+    // From here a panic leaves `wrathplus-config/Diagnostics/crash-<unix>.txt`; armed before the
     // `App` exists, so a panic while plugins build is reported too.
     crash::install(build);
 
@@ -484,7 +484,7 @@ fn launch(build: BuildId, extend: Option<Extension<'_>>) -> AppExit {
     // all out (see `dev.rs`).
     .add_plugins(dev::DevToolsPlugin)
     // The FPS journal ships: `/console fpsJournal 1` appends a per-second row of position, frame
-    // cost and the GPU's per-pass split to `benilla-config/Diagnostics/fps-journal.csv`;
+    // cost and the GPU's per-pass split to `wrathplus-config/Diagnostics/fps-journal.csv`;
     // `WOW_FPS_JOURNAL=<csv>` is the harness lever.
     .add_plugins(perf::FpsJournalPlugin)
     // The game as one group on top of the engine; `game_plugins.rs` has its members, its
@@ -519,7 +519,7 @@ fn launch(build: BuildId, extend: Option<Extension<'_>>) -> AppExit {
         }
     }
 
-    // A crate on top of benilla adds its plugins here ([`run_with`]).
+    // A crate on top of WrathPlus adds its plugins here ([`run_with`]).
     if let Some(extend) = extend {
         extend(&mut app);
     }

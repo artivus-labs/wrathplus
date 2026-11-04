@@ -1062,7 +1062,7 @@ mod tests {
     fn cancels_seen(app: &mut App) -> i64 {
         app.world_mut()
             .non_send_resource::<UiScript>()
-            .eval::<i64>("return BENILLA_TEST_TRADE_CANCELS or 0")
+            .eval::<i64>("return WRATHPLUS_TEST_TRADE_CANCELS or 0")
             .unwrap()
     }
 
@@ -1076,7 +1076,7 @@ mod tests {
                 local f = CreateFrame("Frame")
                 f:RegisterEvent("TRADE_REQUEST_CANCEL")
                 f:SetScript("OnEvent", function()
-                    BENILLA_TEST_TRADE_CANCELS = (BENILLA_TEST_TRADE_CANCELS or 0) + 1
+                    WRATHPLUS_TEST_TRADE_CANCELS = (WRATHPLUS_TEST_TRADE_CANCELS or 0) + 1
                 end)
                 "#,
             )

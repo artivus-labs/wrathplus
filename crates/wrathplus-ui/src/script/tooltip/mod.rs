@@ -24,7 +24,7 @@ use crate::widget::{
 };
 
 /// Registry key of the GameTooltip method table, a named registry root (the MAXCSTACK discipline).
-pub(super) const REG_TOOLTIP_METHODS: &str = "__benilla_tooltip_methods";
+pub(super) const REG_TOOLTIP_METHODS: &str = "__wrathplus_tooltip_methods";
 
 impl super::UiScript {
     /// The name of the frame that owns the GameTooltip named `tooltip`; `None` for no such

@@ -32,7 +32,7 @@ fn load_stable() -> UiScript {
         "player",
         Some(UnitState {
             exists: true,
-            name: Some("Benilla".into()),
+            name: Some("WrathPlus".into()),
             health: 100,
             max_health: 100,
             level: 60,

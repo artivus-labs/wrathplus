@@ -397,7 +397,7 @@ pub(crate) fn build_markers(
 
 /// A bone's stable [`AnimationTargetId`], shared by the clips' curves and the joint entities.
 pub fn bone_target_id(bone: u16) -> AnimationTargetId {
-    AnimationTargetId::from_name(&Name::new(format!("benilla_bone_{bone}")))
+    AnimationTargetId::from_name(&Name::new(format!("wrathplus_bone_{bone}")))
 }
 
 /// The WoW-to-Bevy basis change as a quaternion `r`; a rotation key converts as `r·q·r⁻¹`.

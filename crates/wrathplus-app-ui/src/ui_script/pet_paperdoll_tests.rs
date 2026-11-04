@@ -25,7 +25,7 @@ fn load_pet_page() -> UiScript {
 fn player_unit() -> UnitState {
     UnitState {
         exists: true,
-        name: Some("Benilla".into()),
+        name: Some("WrathPlus".into()),
         health: 100,
         max_health: 100,
         level: 60,

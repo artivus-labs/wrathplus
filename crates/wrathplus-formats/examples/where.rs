@@ -1,4 +1,4 @@
-//! The install benilla's resolver finds, or every place it looked; exits 1 when there is none.
+//! The install WrathPlus's resolver finds, or every place it looked; exits 1 when there is none.
 //! `scripts/gates.sh` asks this rather than repeating the rule.
 //! `cargo run -p wrathplus-formats --example where`
 

@@ -1,5 +1,5 @@
 //! The aura bindings, over the lists the app pushes in display order: the player's in the
-//! reference's insertion-ordered cache (`0xbc6040`), kept by `benilla::ui_aura`, every other unit's
+//! reference's insertion-ordered cache (`0xbc6040`), kept by `wrathplus::ui_aura`, every other unit's
 //! by guid, in ascending aura slot. A token resolves to its guid as the reference's resolver
 //! `0x515970` does ([`super::UnitGuids`]), so `"mouseover"`, `"party1target"` and `"PLAYER"` read
 //! the list of the unit they name, and a token naming the player reads the player's list in cache

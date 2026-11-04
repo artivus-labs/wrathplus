@@ -1,4 +1,4 @@
-//! The tuned Bevy boot: the `DefaultPlugins` set every benilla binary stands on. The engine tuning
+//! The tuned Bevy boot: the `DefaultPlugins` set every WrathPlus binary stands on. The engine tuning
 //! is shared; the `Window` is the caller's.
 
 use bevy::app::{PluginGroupBuilder, TaskPoolOptions, TaskPoolPlugin};
@@ -6,7 +6,7 @@ use bevy::prelude::*;
 
 use crate::thread_qos;
 
-/// `DefaultPlugins` with benilla's engine tuning applied, around the caller's primary window.
+/// `DefaultPlugins` with WrathPlus's engine tuning applied, around the caller's primary window.
 pub fn tuned_default_plugins(primary_window: Window) -> PluginGroupBuilder {
     let headless = crate::headless::active();
     let group = DefaultPlugins

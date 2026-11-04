@@ -1389,7 +1389,7 @@ mod tests {
     #[test]
     fn saved_account_round_trips() {
         let dir = std::env::temp_dir().join(format!(
-            "benilla-login-test-{}-{:?}",
+            "wrathplus-login-test-{}-{:?}",
             std::process::id(),
             std::thread::current().id()
         ));

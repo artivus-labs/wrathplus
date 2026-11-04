@@ -30,7 +30,7 @@ const WRAP_MIN_WIDTH: f32 = 1.0;
 const HEIGHT_LIMIT_MIN: f32 = 1.0;
 
 /// Which grid a text block's top lands on. The reference snaps every `FontString` to the UI grid
-/// ([`snap_block_top`]); benilla's WorldFrame overlays (V-plates, chat bubbles, overhead names)
+/// ([`snap_block_top`]); WrathPlus's WorldFrame overlays (V-plates, chat bubbles, overhead names)
 /// move on the device grid ([`crate::vplates::device_snap`]), where that snap jitters their text.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum TextSeat {
@@ -408,7 +408,7 @@ mod measure_fits_render {
         "Main Menu",
     ];
 
-    /// `BENILLA_ERA_WINDOW_SCALE` of benilla's game menu and options window: fonts land on no whole size.
+    /// `WRATHPLUS_ERA_WINDOW_SCALE` of WrathPlus's game menu and options window: fonts land on no whole size.
     const ERA: f32 = 0.78;
 
     fn spec(h: f32) -> FontSpec<'static> {

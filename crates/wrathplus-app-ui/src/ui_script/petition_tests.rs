@@ -8,9 +8,9 @@ use wrathplus_ui::script::UiScript;
 use super::test_ui::load_ui_strict as load_xml;
 
 /// The petition API in Lua, seeded as a signer's view with two signatures. Tests mutate
-/// `BenillaPetitionFixture`'s fields, never the table, which the closures hold as an upvalue.
+/// `WrathPlusPetitionFixture`'s fields, never the table, which the closures hold as an upvalue.
 const PETITION_FIXTURE: &str = r#"
-BenillaPetitionFixture = {
+WrathPlusPetitionFixture = {
     petitionType = "guild",
     title = "Legacy of Steel",
     bodyText = "",
@@ -27,9 +27,9 @@ BenillaPetitionFixture = {
     calls = {},
 }
 
-local F = BenillaPetitionFixture
+local F = WrathPlusPetitionFixture
 
-function BenillaPetitionCalls()
+function WrathPlusPetitionCalls()
     local out = table.concat(F.calls, "|")
     F.calls = {}
     return out
@@ -101,7 +101,7 @@ fn visible(s: &UiScript, frame: &str) -> bool {
 }
 
 fn calls(s: &UiScript) -> String {
-    s.eval::<String>("return BenillaPetitionCalls()").unwrap()
+    s.eval::<String>("return WrathPlusPetitionCalls()").unwrap()
 }
 
 fn show_petition(s: &mut UiScript) {
@@ -180,7 +180,7 @@ fn a_signers_charter_shows_the_sign_face_and_nine_rows() {
 fn the_owners_charter_swaps_sign_for_request_and_rename() {
     let _data = wrathplus_formats::wow_data_or_skip!();
     let mut s = setup();
-    s.run("BenillaPetitionFixture.isOriginator = 1").unwrap();
+    s.run("WrathPlusPetitionFixture.isOriginator = 1").unwrap();
     show_petition(&mut s);
 
     assert!(visible(&s, "PetitionFrameRequestButton"));
@@ -201,8 +201,8 @@ fn request_signature_disables_at_the_wires_requirement_not_at_nine() {
     let mut s = setup();
     s.run(
         r#"
-        BenillaPetitionFixture.isOriginator = 1
-        BenillaPetitionFixture.signers = { "A", "B", "C" }
+        WrathPlusPetitionFixture.isOriginator = 1
+        WrathPlusPetitionFixture.signers = { "A", "B", "C" }
     "#,
     )
     .unwrap();
@@ -213,7 +213,7 @@ fn request_signature_disables_at_the_wires_requirement_not_at_nine() {
         "three of four signatures — still asking"
     );
 
-    s.run(r#"BenillaPetitionFixture.signers = { "A", "B", "C", "D" }"#)
+    s.run(r#"WrathPlusPetitionFixture.signers = { "A", "B", "C", "D" }"#)
         .unwrap();
     show_petition(&mut s);
     assert!(
@@ -238,7 +238,7 @@ fn the_sign_button_follows_can_sign_petition() {
         .eval::<bool>("return PetitionFrameSignButton:IsEnabled() ~= 0")
         .unwrap());
 
-    s.run("BenillaPetitionFixture.canSign = nil").unwrap();
+    s.run("WrathPlusPetitionFixture.canSign = nil").unwrap();
     show_petition(&mut s);
     assert!(
         !s.eval::<bool>("return PetitionFrameSignButton:IsEnabled() ~= 0")
@@ -263,7 +263,7 @@ fn the_charter_buttons_reach_their_verbs_and_the_close_clears_the_session() {
     s.run("PetitionFrameSignButton:Click()").unwrap();
     assert_eq!(calls(&s), "SignPetition");
 
-    s.run("BenillaPetitionFixture.isOriginator = 1").unwrap();
+    s.run("WrathPlusPetitionFixture.isOriginator = 1").unwrap();
     show_petition(&mut s);
     let _ = calls(&s);
     s.run("PetitionFrameRequestButton:Click()").unwrap();
@@ -279,7 +279,7 @@ fn the_charter_buttons_reach_their_verbs_and_the_close_clears_the_session() {
 fn rename_guild_sends_the_box_text_and_caps_at_twenty_four() {
     let _data = wrathplus_formats::wow_data_or_skip!();
     let mut s = setup();
-    s.run("BenillaPetitionFixture.isOriginator = 1").unwrap();
+    s.run("WrathPlusPetitionFixture.isOriginator = 1").unwrap();
     show_petition(&mut s);
     let _ = calls(&s);
 

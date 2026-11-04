@@ -58,7 +58,7 @@ impl Config {
     }
 
     /// Same non-moving legacy fallback as the client. Manager deliberately ignores inherited
-    /// BENILLA_HOME and pins this checkout's selected home when launching.
+    /// WRATHPLUS_HOME and pins this checkout's selected home when launching.
     pub(crate) fn state_root(&self) -> PathBuf {
         wrathplus_formats::default_state_home(&self.repo)
     }
@@ -180,7 +180,7 @@ pub(crate) fn available(config: &Config) -> bool {
 fn sanitize(command: &mut Command) {
     for (key, _) in env::vars_os() {
         let upper = key.to_string_lossy().to_ascii_uppercase();
-        if upper.starts_with("WOW_") || upper.starts_with("BENILLA_") || upper.contains("PROBE") {
+        if upper.starts_with("WOW_") || upper.starts_with("WRATHPLUS_") || upper.contains("PROBE") {
             command.env_remove(key);
         }
     }
@@ -340,7 +340,7 @@ fn launch_command(config: &Config, state_root: &Path) -> Command {
         .env("WOW_CLIENT_PROFILE", "wrath")
         .env("WOW_LOCALE", &config.locale)
         .env("WOW_HOST", &config.server)
-        .env("BENILLA_HOME", state_root)
+        .env("WRATHPLUS_HOME", state_root)
         .args(["--server", &config.server])
         .stdin(Stdio::null());
     command

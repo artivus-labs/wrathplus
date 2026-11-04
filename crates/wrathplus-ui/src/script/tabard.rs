@@ -12,7 +12,7 @@ use super::Model;
 use crate::widget::{FrameHandle, FrameKind, RegionKind};
 
 /// Registry key of the TabardModel method table, probed before PlayerModel's and Model's.
-pub(super) const REG_TABARDMODEL_METHODS: &str = "__benilla_tabardmodel_methods";
+pub(super) const REG_TABARDMODEL_METHODS: &str = "__wrathplus_tabardmodel_methods";
 
 /// The designer's price in copper, a constant in the reference (`0x6d6de0`).
 pub const TABARD_CREATION_COST: u32 = 100_000;
@@ -23,7 +23,7 @@ pub const TABARD_COUNTS: [i32; 5] = [170, 17, 6, 17, 51];
 
 /// The prefix a Texture carries before the emblem path after `Get{Upper,Lower}EmblemTexture`; the
 /// app draws the reference's generated mask, white carrying the emblem's alpha (`0x503431`).
-pub const EMBLEM_MASK_TOKEN: &str = "benilla:emblem-mask:";
+pub const EMBLEM_MASK_TOKEN: &str = "wrathplus:emblem-mask:";
 
 /// The BLP path inside an [`EMBLEM_MASK_TOKEN`] texture, or `None` for an ordinary path.
 pub fn emblem_mask_path(texture: &str) -> Option<&str> {

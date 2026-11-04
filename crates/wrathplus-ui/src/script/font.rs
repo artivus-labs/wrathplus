@@ -33,11 +33,11 @@ use crate::justify;
 use super::{FontObject, FontShadow, Model, Outline, RegionData};
 
 /// The shared metatable of every font-object handle.
-const REG_FONT_META: &str = "__benilla_font_meta";
+const REG_FONT_META: &str = "__wrathplus_font_meta";
 /// The font-object method table, which is the metatable's `__index`.
-const REG_FONT_METHODS: &str = "__benilla_font_methods";
+const REG_FONT_METHODS: &str = "__wrathplus_font_methods";
 /// name → handle, so `GameFontNormal == GameFontNormal` and a re-declared `<Font>` keeps identity.
-const REG_FONT_WRAPPERS: &str = "__benilla_font_wrappers";
+const REG_FONT_WRAPPERS: &str = "__wrathplus_font_wrappers";
 
 // ── The handle ───────────────────────────────────────────────────────────────────────────────
 

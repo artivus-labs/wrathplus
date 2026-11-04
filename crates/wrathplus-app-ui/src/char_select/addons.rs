@@ -1734,9 +1734,9 @@ mod tests {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let tmp =
-            std::env::temp_dir().join(format!("benilla-charsel-fanout-{}", std::process::id()));
+            std::env::temp_dir().join(format!("wrathplus-charsel-fanout-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
-        let home = tmp.join("benilla-config");
+        let home = tmp.join("wrathplus-config");
         for name in ["Alpha", "Beta"] {
             let dir = home.join("AddOns").join(name);
             std::fs::create_dir_all(&dir).unwrap();
@@ -1744,7 +1744,7 @@ mod tests {
         }
         let _c = crate::local_state::test_env::EnvGuard::unset("WOW_CAPTURE");
         let _h =
-            crate::local_state::test_env::EnvGuard::set("BENILLA_HOME", home.to_str().unwrap());
+            crate::local_state::test_env::EnvGuard::set("WRATHPLUS_HOME", home.to_str().unwrap());
         let path = |who: &str| {
             addons::enable_state_path(Some(&("TestRealm".to_string(), who.to_string()))).unwrap()
         };
@@ -1810,9 +1810,9 @@ mod tests {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let tmp =
-            std::env::temp_dir().join(format!("benilla-charsel-newchar-{}", std::process::id()));
+            std::env::temp_dir().join(format!("wrathplus-charsel-newchar-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
-        let home = tmp.join("benilla-config");
+        let home = tmp.join("wrathplus-config");
         for name in ["Alpha", "Beta"] {
             let dir = home.join("AddOns").join(name);
             std::fs::create_dir_all(&dir).unwrap();
@@ -1820,7 +1820,7 @@ mod tests {
         }
         let _c = crate::local_state::test_env::EnvGuard::unset("WOW_CAPTURE");
         let _h =
-            crate::local_state::test_env::EnvGuard::set("BENILLA_HOME", home.to_str().unwrap());
+            crate::local_state::test_env::EnvGuard::set("WRATHPLUS_HOME", home.to_str().unwrap());
 
         let mut p = AddonsPanel::default();
         p.open_for(
@@ -1862,9 +1862,9 @@ mod tests {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let tmp =
-            std::env::temp_dir().join(format!("benilla-charsel-split-{}", std::process::id()));
+            std::env::temp_dir().join(format!("wrathplus-charsel-split-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
-        let home = tmp.join("benilla-config");
+        let home = tmp.join("wrathplus-config");
         for name in ["Alpha", "Beta"] {
             let dir = home.join("AddOns").join(name);
             std::fs::create_dir_all(&dir).unwrap();
@@ -1881,7 +1881,7 @@ mod tests {
         }
         let _c = crate::local_state::test_env::EnvGuard::unset("WOW_CAPTURE");
         let _h =
-            crate::local_state::test_env::EnvGuard::set("BENILLA_HOME", home.to_str().unwrap());
+            crate::local_state::test_env::EnvGuard::set("WRATHPLUS_HOME", home.to_str().unwrap());
 
         let mut p = AddonsPanel::default();
         p.open_for(

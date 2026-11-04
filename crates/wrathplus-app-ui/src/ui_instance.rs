@@ -40,7 +40,7 @@ pub struct InstanceState {
     /// `0xb4e37c`, "do you hold any bind": `SMSG_UPDATE_INSTANCE_OWNERSHIP`, sent on every map
     /// change (`Player.cpp:2116`), where vmangos says yes only for a raid save.
     owns_saved: bool,
-    /// benilla's half of the same term: we watched the player walk out of a party dungeon. Raised
+    /// WrathPlus's half of the same term: we watched the player walk out of a party dungeon. Raised
     /// by [`LatchWriter::WorldEntry`], cleared by a reset and at logout, and never by an
     /// `owns_saved = false`, which vmangos sends on the very teleport out of the dungeon.
     saw_own_dungeon: bool,
@@ -99,7 +99,7 @@ pub(crate) enum InstanceName {
     Map(u32),
 }
 
-/// Which of the last-dungeon latch's two writers is speaking. The reference does not care; benilla
+/// Which of the last-dungeon latch's two writers is speaking. The reference does not care; WrathPlus
 /// does, as only the world entry is first-hand evidence of a bind.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LatchWriter {
@@ -147,7 +147,7 @@ impl InstanceState {
         self.forget_witness();
     }
 
-    /// Drop benilla's half of the bind term, the one piece of state no server corrects.
+    /// Drop WrathPlus's half of the bind term, the one piece of state no server corrects.
     pub(crate) fn forget_witness(&mut self) {
         self.saw_own_dungeon = false;
     }

@@ -9,7 +9,7 @@
 //!
 //! Deviations:
 //! - PNG, not TGA, because a 32-bit Targa of a modern window is about 8 MB and few tools open it.
-//! - `benilla-config/Screenshots/`, not the install's, because benilla never writes the install.
+//! - `wrathplus-config/Screenshots/`, not the install's, because WrathPlus never writes the install.
 //!
 //! The reference fires `SCREENSHOT_SUCCEEDED` even when the write fails, a bug not copied:
 //! [`report_captures`] answers `SCREENSHOT_FAILED` and logs the reason.
@@ -113,7 +113,7 @@ fn write_capture(captured: On<ScreenshotCaptured>, mut state: ResMut<ScreenshotS
     // No folder under a `$WOW_CAPTURE` run or without an exe directory: report it as a failure.
     let Some(dir) = crate::local_state::screenshots_dir() else {
         let _ = state.tx.send(Outcome::Failed(
-            "no benilla-config folder to write into".into(),
+            "no wrathplus-config folder to write into".into(),
         ));
         return;
     };

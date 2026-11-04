@@ -306,7 +306,7 @@ impl AddFilesByExt for cc::Build {
         {
             self.file(entry.path());
         }
-        // BENILLA ADDITION. Upstream emits no `rerun-if-changed` for the Lua sources, which is
+        // WRATHPLUS ADDITION. Upstream emits no `rerun-if-changed` for the Lua sources, which is
         // harmless when they are an immutable registry copy and a genuine trap once they are a
         // patched fork: editing `lvm.c` then rebuilds NOTHING, the old object file is relinked, and
         // the change appears not to work. That cost real time on the very first patch here — six

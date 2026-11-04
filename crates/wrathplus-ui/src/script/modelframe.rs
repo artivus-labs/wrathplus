@@ -108,11 +108,11 @@ fn facts_of_pane(lua: &Lua, this: &Table) -> mlua::Result<Option<Arc<ModelFileFa
 }
 
 /// Registry key of the `Model` method table (the MAXCSTACK discipline: a Lua-side root).
-pub(super) const REG_MODEL_METHODS: &str = "__benilla_model_methods";
+pub(super) const REG_MODEL_METHODS: &str = "__wrathplus_model_methods";
 
 /// Registry key of the `PlayerModel` table, its own three methods only: `Model`'s 23 are reached
 /// on a miss, as `0x506260` falls through to `0x76f870`.
-pub(super) const REG_PLAYERMODEL_METHODS: &str = "__benilla_playermodel_methods";
+pub(super) const REG_PLAYERMODEL_METHODS: &str = "__wrathplus_playermodel_methods";
 
 /// Run `f` on a frame's Model state under one short write borrow. Errors on a receiver that is not
 /// a live Model: a method taken off the table can be called on anything.

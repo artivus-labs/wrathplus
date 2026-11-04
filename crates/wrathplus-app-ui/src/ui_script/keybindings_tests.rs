@@ -91,7 +91,7 @@ fn every_command_body_compiles() {
     for b in &stock {
         s.run(&format!(
             "local f, err = loadstring({body:?}); \
-             if not f then BenillaBodyError = {name:?} .. \": \" .. err end",
+             if not f then WrathPlusBodyError = {name:?} .. \": \" .. err end",
             body = b.body,
             name = b.name
         ))
@@ -99,7 +99,7 @@ fn every_command_body_compiles() {
     }
     let bad: Vec<String> = s.errors();
     assert!(bad.is_empty(), "script errors: {bad:?}");
-    s.run("if BenillaBodyError then error(BenillaBodyError) end")
+    s.run("if WrathPlusBodyError then error(WrathPlusBodyError) end")
         .unwrap_or_else(|e| panic!("a command body is not valid Lua: {e}"));
 }
 

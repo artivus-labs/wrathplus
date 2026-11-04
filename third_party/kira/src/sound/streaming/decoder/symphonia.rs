@@ -73,7 +73,7 @@ impl super::Decoder for SymphoniaDecoder {
 			match self.format_reader.next_packet()? {
 				Some(packet) if packet.track_id == self.track_id => break packet,
 				Some(_) => continue,
-				// benilla: the end of the packets is an error, as it was on symphonia 0.5, so a
+				// wrathplus: the end of the packets is an error, as it was on symphonia 0.5, so a
 				// stream whose reported length runs past its last packet stops there. An empty
 				// chunk instead leaves `DecodeScheduler::frame_at_index` looping on it forever.
 				None => return Err(std::io::Error::from(std::io::ErrorKind::UnexpectedEof).into()),

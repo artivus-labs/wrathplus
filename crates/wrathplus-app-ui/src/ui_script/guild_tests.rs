@@ -6,12 +6,12 @@
 
 use wrathplus_ui::script::{GuildState, ScriptValue, UiScript, UnitState};
 
-/// One mutable table, `BenillaGuildFixture`, is the whole model: getters read it and verbs append
-/// to `.calls`, drained by `BenillaGuildCalls()`. Tests mutate its fields and never replace it,
+/// One mutable table, `WrathPlusGuildFixture`, is the whole model: getters read it and verbs append
+/// to `.calls`, drained by `WrathPlusGuildCalls()`. Tests mutate its fields and never replace it,
 /// since the functions hold it as an upvalue. The members: the guild master (us), a rank-1
 /// officer, and an offline member in the bottom rank.
 const GUILD_FIXTURE: &str = r#"
-BenillaGuildFixture = {
+WrathPlusGuildFixture = {
     inGuild = 1,
     isLeader = 1,
     guildName = "Legacy of Steel",
@@ -42,15 +42,15 @@ BenillaGuildFixture = {
     },
 }
 
-local F = BenillaGuildFixture
+local F = WrathPlusGuildFixture
 
-function BenillaGuildRecord(call)
+function WrathPlusGuildRecord(call)
     table.insert(F.calls, call)
 end
 
 -- Drain the recorded verbs as one "|"-joined string, so a test asserts on the whole sequence
 -- rather than on "it happened at least once".
-function BenillaGuildCalls()
+function WrathPlusGuildCalls()
     local out = table.concat(F.calls, "|")
     F.calls = {}
     return out
@@ -87,41 +87,41 @@ function GetGuildRosterMOTD() return F.motd end
 function GetGuildRosterSelection() return F.selection end
 function SetGuildRosterSelection(index)
     F.selection = index
-    BenillaGuildRecord("SetGuildRosterSelection:" .. index)
+    WrathPlusGuildRecord("SetGuildRosterSelection:" .. index)
 end
 function GetGuildRosterShowOffline() return F.showOffline end
 function SetGuildRosterShowOffline(value)
     F.showOffline = value
-    BenillaGuildRecord("SetGuildRosterShowOffline:" .. tostring(value))
+    WrathPlusGuildRecord("SetGuildRosterShowOffline:" .. tostring(value))
 end
-function SortGuildRoster(field) BenillaGuildRecord("SortGuildRoster:" .. field) end
-function GuildRoster() BenillaGuildRecord("GuildRoster") end
+function SortGuildRoster(field) WrathPlusGuildRecord("SortGuildRoster:" .. field) end
+function GuildRoster() WrathPlusGuildRecord("GuildRoster") end
 
 function GetGuildInfoText() return F.infoText end
 function SetGuildInfoText(text)
     F.infoText = text
-    BenillaGuildRecord("SetGuildInfoText:" .. text)
+    WrathPlusGuildRecord("SetGuildInfoText:" .. text)
 end
 function GuildSetMOTD(text)
     F.motd = text
-    BenillaGuildRecord("GuildSetMOTD:" .. text)
+    WrathPlusGuildRecord("GuildSetMOTD:" .. text)
 end
 function GuildRosterSetPublicNote(index, text)
-    BenillaGuildRecord("GuildRosterSetPublicNote:" .. index .. ":" .. text)
+    WrathPlusGuildRecord("GuildRosterSetPublicNote:" .. index .. ":" .. text)
 end
 function GuildRosterSetOfficerNote(index, text)
-    BenillaGuildRecord("GuildRosterSetOfficerNote:" .. index .. ":" .. text)
+    WrathPlusGuildRecord("GuildRosterSetOfficerNote:" .. index .. ":" .. text)
 end
 
-function GuildInvite(name) BenillaGuildRecord("GuildInvite:" .. name) end
-function GuildUninvite(name) BenillaGuildRecord("GuildUninvite:" .. name) end
-function GuildPromote(name) BenillaGuildRecord("GuildPromote:" .. name) end
-function GuildDemote(name) BenillaGuildRecord("GuildDemote:" .. name) end
-function GuildSetLeader(name) BenillaGuildRecord("GuildSetLeader:" .. name) end
-function GuildLeave() BenillaGuildRecord("GuildLeave") end
-function GuildDisband() BenillaGuildRecord("GuildDisband") end
-function AcceptGuild() BenillaGuildRecord("AcceptGuild") end
-function DeclineGuild() BenillaGuildRecord("DeclineGuild") end
+function GuildInvite(name) WrathPlusGuildRecord("GuildInvite:" .. name) end
+function GuildUninvite(name) WrathPlusGuildRecord("GuildUninvite:" .. name) end
+function GuildPromote(name) WrathPlusGuildRecord("GuildPromote:" .. name) end
+function GuildDemote(name) WrathPlusGuildRecord("GuildDemote:" .. name) end
+function GuildSetLeader(name) WrathPlusGuildRecord("GuildSetLeader:" .. name) end
+function GuildLeave() WrathPlusGuildRecord("GuildLeave") end
+function GuildDisband() WrathPlusGuildRecord("GuildDisband") end
+function AcceptGuild() WrathPlusGuildRecord("AcceptGuild") end
+function DeclineGuild() WrathPlusGuildRecord("DeclineGuild") end
 
 function CanGuildPromote() return F.rights.promote end
 function CanGuildDemote() return F.rights.demote end
@@ -137,7 +137,7 @@ function GuildControlGetNumRanks() return table.getn(F.ranks) end
 function GuildControlGetRankName(index) return F.ranks[index] end
 function GuildControlSetRank(index)
     F.controlRank = index
-    BenillaGuildRecord("GuildControlSetRank:" .. index)
+    WrathPlusGuildRecord("GuildControlSetRank:" .. index)
 end
 function GuildControlGetRankFlags()
     local f = F.flags[F.controlRank or 1] or {}
@@ -150,14 +150,14 @@ function GuildControlSetRankFlag(index, on)
         F.flags[F.controlRank or 1] = f
     end
     if on then f[index] = 1 else f[index] = nil end
-    BenillaGuildRecord("GuildControlSetRankFlag:" .. index .. ":" .. tostring(on))
+    WrathPlusGuildRecord("GuildControlSetRankFlag:" .. index .. ":" .. tostring(on))
 end
-function GuildControlSaveRank(name) BenillaGuildRecord("GuildControlSaveRank:" .. name) end
+function GuildControlSaveRank(name) WrathPlusGuildRecord("GuildControlSaveRank:" .. name) end
 function GuildControlAddRank(name)
     table.insert(F.ranks, name)
-    BenillaGuildRecord("GuildControlAddRank:" .. name)
+    WrathPlusGuildRecord("GuildControlAddRank:" .. name)
 end
-function GuildControlDelRank(name) BenillaGuildRecord("GuildControlDelRank:" .. name) end
+function GuildControlDelRank(name) WrathPlusGuildRecord("GuildControlDelRank:" .. name) end
 "#;
 
 fn setup() -> UiScript {
@@ -203,7 +203,7 @@ fn enabled(s: &UiScript, button: &str) -> bool {
 }
 
 fn calls(s: &UiScript) -> String {
-    s.eval::<String>("return BenillaGuildCalls()").unwrap()
+    s.eval::<String>("return WrathPlusGuildCalls()").unwrap()
 }
 
 /// A region's text colour to two places: colours are `f32`, so 0.82 reads back 0.8199999928474426.
@@ -340,7 +340,7 @@ fn the_last_online_formatter_takes_the_coarsest_unit() {
     open(&mut s);
     let last = |years, months, days, hours| {
         s.run(&format!(
-            "BenillaGuildFixture.members[3].lastOnline = {{ {years}, {months}, {days}, {hours} }}"
+            "WrathPlusGuildFixture.members[3].lastOnline = {{ {years}, {months}, {days}, {hours} }}"
         ))
         .unwrap();
         // Through a font string: the setter resolves the `|4` plurals (`LASTONLINE_HOURS`).
@@ -483,12 +483,12 @@ fn the_officer_note_pane_resizes_the_card() {
     );
 
     // Can view but not edit: grey text, a mouse-dead pane, no placeholder.
-    s.run("BenillaGuildFixture.rights.editOfficerNote = nil; GuildStatus_Update()")
+    s.run("WrathPlusGuildFixture.rights.editOfficerNote = nil; GuildStatus_Update()")
         .unwrap();
     assert_eq!(colour(&s, "OfficerNoteText"), (0.65, 0.65, 0.65));
 
     // Cannot view: the pane goes, and the card shrinks.
-    s.run("BenillaGuildFixture.rights.viewOfficerNote = nil; GuildStatus_Update()")
+    s.run("WrathPlusGuildFixture.rights.viewOfficerNote = nil; GuildStatus_Update()")
         .unwrap();
     assert!(!visible(&s, "GuildMemberDetailOfficerNoteLabel"));
     assert!(!visible(&s, "GuildMemberOfficerNoteBackground"));
@@ -511,7 +511,7 @@ fn an_editable_empty_note_invites_the_click() {
     );
     assert_eq!(colour(&s, "PersonalNoteText"), (1.0, 1.0, 1.0));
 
-    s.run("BenillaGuildFixture.rights.editPublicNote = nil; GuildStatus_Update()")
+    s.run("WrathPlusGuildFixture.rights.editPublicNote = nil; GuildStatus_Update()")
         .unwrap();
     assert_eq!(
         text(&s, "PersonalNoteText"),
@@ -572,7 +572,7 @@ fn the_motd_is_cached_click_to_edit_and_right_gated() {
     );
     assert!(enabled(&s, "GuildMOTDEditButton"));
 
-    s.run("BenillaGuildFixture.rights.editMOTD = nil; GuildStatus_Update()")
+    s.run("WrathPlusGuildFixture.rights.editMOTD = nil; GuildStatus_Update()")
         .unwrap();
     assert!(
         !enabled(&s, "GuildMOTDEditButton"),
@@ -580,7 +580,7 @@ fn the_motd_is_cached_click_to_edit_and_right_gated() {
     );
     assert_eq!(colour(&s, "GuildFrameNotesText"), (0.65, 0.65, 0.65));
 
-    s.run("BenillaGuildFixture.rights.editMOTD = 1; GuildStatus_Update()")
+    s.run("WrathPlusGuildFixture.rights.editMOTD = 1; GuildStatus_Update()")
         .unwrap();
     let _ = calls(&s);
     s.run("GuildMOTDEditButton:Click()").unwrap();
@@ -611,7 +611,7 @@ fn the_pane_buttons_follow_the_rights() {
     assert!(enabled(&s, "GuildFrameControlButton"));
     assert!(enabled(&s, "GuildFrameAddMemberButton"));
 
-    s.run("BenillaGuildFixture.isLeader = nil; BenillaGuildFixture.rights.invite = nil; GuildStatus_Update()")
+    s.run("WrathPlusGuildFixture.isLeader = nil; WrathPlusGuildFixture.rights.invite = nil; GuildStatus_Update()")
         .unwrap();
     assert!(
         !enabled(&s, "GuildFrameControlButton"),
@@ -620,7 +620,7 @@ fn the_pane_buttons_follow_the_rights() {
     assert!(!enabled(&s, "GuildFrameAddMemberButton"));
 
     // Add Member opens the narrow box: a name, not a sentence.
-    s.run("BenillaGuildFixture.rights.invite = 1; GuildStatus_Update()")
+    s.run("WrathPlusGuildFixture.rights.invite = 1; GuildStatus_Update()")
         .unwrap();
     let _ = calls(&s);
     s.run("GuildFrameAddMemberButton:Click()").unwrap();
@@ -743,7 +743,7 @@ fn the_rank_buttons_follow_the_count_and_the_bottom_rank() {
         enabled(&s, "GuildControlPopupFrameAddRankButton"),
         "six ranks, room for four more"
     );
-    s.run("BenillaGuildFixture.ranks = { \"a\",\"b\",\"c\",\"d\",\"e\",\"f\",\"g\",\"h\",\"i\",\"j\" }")
+    s.run("WrathPlusGuildFixture.ranks = { \"a\",\"b\",\"c\",\"d\",\"e\",\"f\",\"g\",\"h\",\"i\",\"j\" }")
         .unwrap();
     s.run("GuildControlPopupFrameAddRankButton_OnUpdate(GuildControlPopupFrameAddRankButton)")
         .unwrap();
@@ -751,7 +751,7 @@ fn the_rank_buttons_follow_the_count_and_the_bottom_rank() {
         !enabled(&s, "GuildControlPopupFrameAddRankButton"),
         "ten is the ceiling"
     );
-    s.run("BenillaGuildFixture.ranks = { \"Guild Master\",\"Officer\",\"Veteran\",\"Member\",\"Initiate\",\"Peon\" }")
+    s.run("WrathPlusGuildFixture.ranks = { \"Guild Master\",\"Officer\",\"Veteran\",\"Member\",\"Initiate\",\"Peon\" }")
         .unwrap();
 
     // Remove shows only on the last rank, and only past five ranks.
@@ -770,7 +770,7 @@ fn the_rank_buttons_follow_the_count_and_the_bottom_rank() {
     );
 
     // Move him up and repaint: the counter falls to zero and the button arms.
-    s.run("BenillaGuildFixture.members[3].rankIndex = 4; GuildStatus_Update()")
+    s.run("WrathPlusGuildFixture.members[3].rankIndex = 4; GuildStatus_Update()")
         .unwrap();
     s.run(
         "GuildControlPopupFrameRemoveRankButton_OnUpdate(GuildControlPopupFrameRemoveRankButton)",
@@ -877,7 +877,7 @@ fn the_guild_information_board_is_right_gated() {
 
     // Without the right: grey, dead, and no placeholder even when empty. The board shows its cached
     // save until the roster comes back (`FriendsFrame.lua:1230`, `FriendsFrame.xml:4122-4124`).
-    s.run("BenillaGuildFixture.rights.editGuildInfo = nil; BenillaGuildFixture.infoText = \"\"")
+    s.run("local F = WrathPlusGuildFixture F.rights.editGuildInfo = nil F.infoText = \"\"")
         .unwrap();
     s.fire_event("GUILD_ROSTER_UPDATE", Vec::new());
     s.run("ToggleGuildInfoFrame()").unwrap();
@@ -887,7 +887,7 @@ fn the_guild_information_board_is_right_gated() {
     assert_eq!(colour(&s, "GuildInfoEditBox"), (0.65, 0.65, 0.65));
 
     s.run("ToggleGuildInfoFrame()").unwrap();
-    s.run("BenillaGuildFixture.rights.editGuildInfo = 1")
+    s.run("WrathPlusGuildFixture.rights.editGuildInfo = 1")
         .unwrap();
     s.run("ToggleGuildInfoFrame()").unwrap();
     assert_eq!(text(&s, "GuildInfoEditBox"), "Click here to set message");
@@ -957,7 +957,7 @@ fn losing_the_guild_falls_back_off_the_guild_tab() {
     open(&mut s);
     assert!(visible(&s, "GuildFrame"));
 
-    s.run("BenillaGuildFixture.inGuild = nil").unwrap();
+    s.run("WrathPlusGuildFixture.inGuild = nil").unwrap();
     s.fire_event("PLAYER_GUILD_UPDATE", vec![]);
     assert_eq!(
         s.eval::<i64>("return FriendsFrameTab3.isDisabled or 0")
@@ -976,7 +976,7 @@ fn losing_the_guild_falls_back_off_the_guild_tab() {
     assert!(!visible(&s, "GuildFrame"));
     assert!(visible(&s, "FriendsListFrame"));
 
-    s.run("BenillaGuildFixture.inGuild = 1").unwrap();
+    s.run("WrathPlusGuildFixture.inGuild = 1").unwrap();
     s.fire_event("PLAYER_GUILD_UPDATE", vec![]);
     assert_eq!(
         s.eval::<i64>("return FriendsFrameTab3.isDisabled or 0")

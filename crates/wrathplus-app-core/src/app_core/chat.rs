@@ -51,7 +51,7 @@ pub struct PendingCombat {
     pub tries: u16,
 }
 
-/// The chat-event kinds: the `ChatTypeInfo` keys benilla produces.
+/// The chat-event kinds: the `ChatTypeInfo` keys WrathPlus produces.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ChatEventKind {
     Say,

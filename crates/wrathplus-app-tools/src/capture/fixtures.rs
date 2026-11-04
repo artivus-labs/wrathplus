@@ -295,7 +295,7 @@ pub(super) fn seed_ui_fixture(
                 (Field::PlayerBankbagSlot1, 0, G_BANKBAG as u32), // bag button 1's icon
                 (Field::PlayerCoinage, 0, 123_456),
             ]);
-            names.insert_player(PLAYER_GUID, "Benilla".into(), None);
+            names.insert_player(PLAYER_GUID, "WrathPlus".into(), None);
             commands.spawn((
                 crate::app_core::session::ObjectStore(fields),
                 crate::app_core::session::SelfPlayer,
@@ -308,8 +308,8 @@ pub(super) fn seed_ui_fixture(
             if let Some(s) = script.as_mut() {
                 if let Err(e) = s.run(
                     "BankFrame:SetScript(\"OnUpdate\", function()\n\
-                         if not benillaBankPopoutDone and GetContainerNumSlots(5) > 0 then\n\
-                             benillaBankPopoutDone = 1\n\
+                         if not wrathplusBankPopoutDone and GetContainerNumSlots(5) > 0 then\n\
+                             wrathplusBankPopoutDone = 1\n\
                              BankFrameItemButtonBag_OnClick(getglobal(\"BankFrameBag1\"), \"LeftButton\")\n\
                          end\n\
                      end)",
@@ -559,7 +559,7 @@ pub(super) fn seed_ui_fixture(
             ]);
             // A guid and cached name, as the feeds resolve the player through the self query.
             const PLAYER_GUID: u64 = 0x51;
-            names.insert_player(PLAYER_GUID, "Benilla".into(), None);
+            names.insert_player(PLAYER_GUID, "WrathPlus".into(), None);
             commands.spawn((
                 crate::app_core::session::ObjectStore(fields),
                 crate::app_core::session::SelfPlayer,
@@ -855,7 +855,7 @@ pub(super) fn seed_ui_fixture(
             arrows.display_info_id = DISP_STONE;
             items.insert_template(93_012, Some(arrows));
 
-            names.insert_player(PLAYER_GUID, "Benilla".into(), None);
+            names.insert_player(PLAYER_GUID, "WrathPlus".into(), None);
             commands.spawn((
                 crate::app_core::session::ObjectStore(fields),
                 crate::app_core::session::SelfPlayer,
@@ -874,7 +874,7 @@ pub(super) fn seed_ui_fixture(
             // The self player at the camera eye (the 20 yd plate gate measures from here): a
             // level-2 human, so the wolf cons yellow as in the reference screenshot.
             const PLAYER_GUID: u64 = 0x51;
-            names.insert_player(PLAYER_GUID, "Benilla".into(), None);
+            names.insert_player(PLAYER_GUID, "WrathPlus".into(), None);
             commands.spawn((
                 crate::app_core::session::ObjectStore(ObjectFields::from_fields(&[
                     (Field::UnitLevel, 2),
@@ -954,7 +954,7 @@ pub(super) fn seed_ui_fixture(
             use wrathplus_protocol::types::ObjectFields;
             const PLAYER_GUID: u64 = 0x51;
             const G_SWORD: u64 = 0x1002;
-            names.insert_player(PLAYER_GUID, "Benilla".into(), None);
+            names.insert_player(PLAYER_GUID, "WrathPlus".into(), None);
             commands.spawn((
                 crate::app_core::session::ObjectStore(ObjectFields::from_field_slots(&[
                     (Field::UnitLevel, 0, 12),
@@ -1141,7 +1141,7 @@ pub(super) fn seed_ui_fixture(
             }
             // The self player at the eye; the name colour is its reaction to the wolf.
             const SELF_GUID: u64 = 0x51;
-            names.insert_player(SELF_GUID, "Benilla".into(), None);
+            names.insert_player(SELF_GUID, "WrathPlus".into(), None);
             commands.spawn((
                 crate::app_core::session::ObjectStore(ObjectFields::from_fields(&[
                     (Field::UnitLevel, 2),

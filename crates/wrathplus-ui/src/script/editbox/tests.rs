@@ -1449,7 +1449,7 @@ fn an_editbox_is_born_with_the_ctors_five_regions_ahead_of_its_authored_ones() {
         "typed",
         "region 1 is the ctor's embedded text FontString"
     );
-    // 2..5, the selection quads and the caret, carry no art: benilla paints both host-side.
+    // 2..5, the selection quads and the caret, carry no art: WrathPlus paints both host-side.
     assert!(
         s.eval::<bool>(
             "local a,b,c,d,e = Box:GetRegions() \

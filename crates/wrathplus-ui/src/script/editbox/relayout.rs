@@ -14,12 +14,12 @@ use crate::widget::{EditBoxState, FrameHandle, KindState, RegionHandle};
 /// (`0x77b96b`), and raises dirty bits 0-2 (`0x77ba7f or eax,7`): the box's next flush fires
 /// `OnTextChanged` again, with the text unchanged.
 ///
-/// Multi-line, benilla writes that shape, the width once the box has a rect: until then only the
+/// Multi-line, WrathPlus writes that shape, the width once the box has a rect: until then only the
 /// point is written, and the size is kept.
 ///
-/// Single-line, benilla pins `TOPLEFT` and `BOTTOMRIGHT` at the inset corners and keeps no
+/// Single-line, WrathPlus pins `TOPLEFT` and `BOTTOMRIGHT` at the inset corners and keeps no
 /// explicit size. That is a gap: it covers the same rect, but an explicit width here would be a
-/// wrap width, since benilla's single-line region holds the whole text where the reference's holds
+/// wrap width, since WrathPlus's single-line region holds the whole text where the reference's holds
 /// only the window's substring (`0x77d858`). A script sees the difference: `GetPoint` on the
 /// region answers two points where the reference answers one, and `GetWidth`/`GetHeight` answer
 /// the text's measure where the reference answers the explicit size.

@@ -675,7 +675,7 @@ fn relay_chain_seeds_holds_stale_stamps_and_survives_the_clock_wrap() {
     );
 }
 
-/// What the reference's chain does with a server-authored self move, which benilla applies at
+/// What the reference's chain does with a server-authored self move, which WrathPlus applies at
 /// once: the first fires at arrival, a later early one is held to the cadence. The stamps are
 /// server time (vmangos `MovementInfo.h:208`).
 #[test]
@@ -692,7 +692,7 @@ fn the_chain_paces_a_server_authored_self_move_and_would_hold_an_early_one() {
     assert_eq!(
         chain.schedule(61_000, 60_050.0, 0, true),
         60_140.0,
-        "an early arrival is held to the sender's cadence — the pacing benilla's self arm skips"
+        "an early arrival is held to the sender's cadence — the pacing WrathPlus's self arm skips"
     );
 }
 

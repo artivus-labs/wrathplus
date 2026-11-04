@@ -20,7 +20,7 @@ pub struct RangedHold;
 pub struct NockLatch;
 
 /// The reference's PlayAnimation order: handlers run in packet order and the later play wins
-/// bone 0 (`0x5fe2f0`). benilla's swing and cast pipelines are separate streams, so each
+/// bone 0 (`0x5fe2f0`). WrathPlus's swing and cast pipelines are separate streams, so each
 /// animation-bearing message carries a stamp (the wire in packet order, scene-time emitters when
 /// they fire), and the driver resolves a same-frame collision by the highest.
 #[derive(Resource, Default)]
@@ -91,10 +91,10 @@ pub struct DespawnAnimAnnounced;
 /// The reference's pending-destroy mark (`[GO+0xe4]` bit `0x10`), set by the destroy `0x464920` on
 /// a pinned object. Arming a non-resting substate pins (`0x5f3b27 call 0x4683e0`, refcount
 /// `[obj+0xe8]`), slot 14 unpins at the window end (`0x468410`), and the deferred destroy then runs
-/// (`0x46844a call 0x464920`). benilla pins only [`ANIM_DESPAWN`]; an object destroyed
+/// (`0x46844a call 0x464920`). WrathPlus pins only [`ANIM_DESPAWN`]; an object destroyed
 /// mid-transition still goes at once (not built).
 ///
-/// The reference keeps a pinned object addressable by guid while it plays; benilla drops the guid
+/// The reference keeps a pinned object addressable by guid while it plays; WrathPlus drops the guid
 /// at destroy time, so a respawn reusing it cannot refresh a condemned object. Nothing observable
 /// differs: the object still draws, and the server no longer answers for that guid.
 #[derive(Component)]

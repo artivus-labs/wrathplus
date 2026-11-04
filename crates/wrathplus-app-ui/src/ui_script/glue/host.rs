@@ -118,7 +118,7 @@ pub(crate) fn stock_glue(
                     );
                 }
                 // The Server field re-reads the address, kept or refused (not a stock event).
-                script.fire_event("BENILLA_REALMLIST_CHANGED", vec![]);
+                script.fire_event("WRATHPLUS_REALMLIST_CHANGED", vec![]);
             }
             // ── Character select, onto the native roster and pick ──
             GlueRequest::SelectCharacter(index) => {

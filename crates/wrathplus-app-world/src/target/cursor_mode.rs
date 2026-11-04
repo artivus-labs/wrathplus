@@ -12,7 +12,7 @@ use crate::net::Reputations;
 use super::ring::Factions;
 use super::{go_is_nearest, Hovered, HoveredObject};
 
-/// The world cursor modes benilla shows, named by the reference's mode table (`0x853b8c`), whose
+/// The world cursor modes WrathPlus shows, named by the reference's mode table (`0x853b8c`), whose
 /// strings are the `Interface\Cursor\<Name>.blp` stems.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum CursorKind {
@@ -710,7 +710,7 @@ pub(super) fn classify(
             && (lock_unmet || dist_sq > go_interact_range_sq(store.0.gameobject_type_id()));
         Some((kind, unable))
     };
-    // The reference picks once over all objects; benilla picks units and GameObjects apart and
+    // The reference picks once over all objects; WrathPlus picks units and GameObjects apart and
     // classifies whichever is nearer under the cursor.
     let attack_fork = std::cell::Cell::new(false);
     let resolve_unit = || {

@@ -1,6 +1,6 @@
 //! Which build is running: the release and the commit the binary was built from, stamped at
 //! compile time by the launcher shims' build script (`wrathplus-buildstamp`) and passed to `run` as
-//! the [`BuildId`] resource, and whether a crate on top of benilla extended it. It shows in the
+//! the [`BuildId`] resource, and whether a crate on top of WrathPlus extended it. It shows in the
 //! startup log line ([`banner`]), in crash reports and in the debug panel's footer. A dev build's
 //! stamp also names the launcher's project folder, which the entry point hands to
 //! `wrathplus_formats::set_project_folder`.
@@ -24,10 +24,10 @@ pub struct BuildId {
     pub date: &'static str,
     /// The cargo profile directory: `debug`, `release` or `ship`.
     pub profile: &'static str,
-    /// The launcher's project folder in a dev build, where its `WoW` link, `benilla-config/` and
+    /// The launcher's project folder in a dev build, where its `WoW` link, `wrathplus-config/` and
     /// `.probe-identity` live; empty in a player build, which carries no source path.
     pub project_dir: &'static str,
-    /// Whether a crate on top of benilla added plugins through `wrathplus_app::run_with`. The entry
+    /// Whether a crate on top of WrathPlus added plugins through `wrathplus_app::run_with`. The entry
     /// point sets it, so a launcher leaves it to `..Default::default()`.
     pub extended: bool,
 }

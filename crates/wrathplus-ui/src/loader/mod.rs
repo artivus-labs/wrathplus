@@ -440,7 +440,7 @@ impl Loader<'_> {
     /// Resolve `text=` as a global-string key (`FrameScript_GetText 0x703bf0`), so
     /// `GlobalStrings.lua` must run before any XML. A miss comes back empty (`0x882748`) and all
     /// three `text=` readers then show the raw value (`0x778c07`, `0x771006`, `0x7292a6`). The
-    /// warning on a key-shaped miss is benilla's own.
+    /// warning on a key-shaped miss is WrathPlus's own.
     pub(super) fn resolve_text(&mut self, raw: &str, dbg: &str) -> String {
         if let Ok(s) = self.lua().globals().get::<String>(raw) {
             return s;
