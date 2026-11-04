@@ -16,6 +16,9 @@
 --                               attacks you. Following resumes after the fight.
 --   Move.stay()                 hold this spot: fight what attacks you, then walk back.
 --   Move.free()                 no mode; stop.
+--   Move.face_speakers          (default true) turn to whoever talks to you from close by (a party
+--                               line, a whisper, an emote at you, a line naming you) while you are
+--                               not fighting or walking, as a player looks at them.
 --   Move.mode, Move.state       "follow Pallytest" / "stay" / "to Marshal Dughan", and what it is
 --                               doing right now; Move.reached() for an intent's `until`.
 --
@@ -35,6 +38,7 @@ local M = {
   last = nil,
   -- Whom the group's follow intent follows (a name); nil: the leader, or the first other member.
   companion = nil,
+  face_speakers = true,
 }
 
 local who, guid, anchor, aimed, seen, seen_at, started, point
@@ -300,6 +304,28 @@ frame:SetScript("OnUpdate", function(_, dt)
   if since < 0.25 then return end
   since = 0
   if M.mode then tick(GetTime()) end
+end)
+
+-- Someone close talks to us: turn to them, unless something else has us.
+local SPEECH = { "CHAT_MSG_SAY", "CHAT_MSG_YELL", "CHAT_MSG_PARTY", "CHAT_MSG_PARTY_LEADER",
+  "CHAT_MSG_WHISPER", "CHAT_MSG_TEXT_EMOTE", "CHAT_MSG_EMOTE", "CHAT_MSG_MONSTER_SAY" }
+local function for_us(event, text, sender)
+  local lower, mine = string.lower(text or ""), string.lower(UnitName("player") or "")
+  if event == "CHAT_MSG_PARTY" or event == "CHAT_MSG_PARTY_LEADER" or event == "CHAT_MSG_WHISPER" then return true end
+  if (event == "CHAT_MSG_TEXT_EMOTE" or event == "CHAT_MSG_EMOTE") and lower:find(" you", 1, true) then return true end
+  if mine ~= "" and lower:find(mine, 1, true) then return true end
+  return event == "CHAT_MSG_SAY" and UnitInParty and UnitInParty(sender) and true or false
+end
+
+local listener = CreateFrame("Frame")
+for _, event in ipairs(SPEECH) do listener:RegisterEvent(event) end
+listener:SetScript("OnEvent", function(_, event, text, sender)
+  if not M.face_speakers or type(sender) ~= "string" or same(sender, UnitName("player")) then return end
+  if UnitAffectingCombat("player") or (Combat and Combat.active) or AgentWalk().status == "walking" then return end
+  if not for_us(event, text, sender) then return end
+  for _, u in ipairs(AgentNearby(20)) do
+    if same(u.name, sender) then return AgentFace(u.guid) end
+  end
 end)
 
 -- Whom the group follows: the companion named, else the leader, else (leading ourselves, or the

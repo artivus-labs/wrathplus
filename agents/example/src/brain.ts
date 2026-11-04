@@ -27,11 +27,18 @@ export class Inbox implements AsyncIterable<SDKUserMessage> {
   #wake: (() => void) | undefined;
   #closed = false;
 
-  push(text: string): void {
+  /** A message for the planner, with a PNG (base64) of the game when there is one. */
+  push(text: string, png?: string): void {
     if (this.#closed) return;
+    const content = png
+      ? [
+          { type: "image" as const, source: { type: "base64" as const, media_type: "image/png" as const, data: png } },
+          { type: "text" as const, text },
+        ]
+      : text;
     this.#items.push({
       type: "user",
-      message: { role: "user", content: text },
+      message: { role: "user", content },
       parent_tool_use_id: null,
     });
     this.#wake?.();

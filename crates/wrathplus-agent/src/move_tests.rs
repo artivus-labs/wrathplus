@@ -230,3 +230,44 @@ fn dead_nothing_is_offered_and_a_companion_who_logs_off_is_not_followed() {
         .unwrap());
     assert_eq!(offered(&script), "");
 }
+
+#[test]
+fn it_turns_to_whoever_talks_to_it_from_close_by_when_idle() {
+    let mut script = moving();
+    script
+        .run(
+            "faced = {} AgentFace = function(g) faced[#faced + 1] = g end \
+             UnitName = function(u) return ({ player = 'Agenttwo', party1 = 'Pallytest' })[u] end \
+             UnitAffectingCombat = function() return false end UnitInParty = function() return false end",
+        )
+        .unwrap();
+    let say = |script: &mut UiScript, event: &str, text: &str, who: &str| {
+        script.fire_event(
+            event,
+            vec![
+                wrathplus_ui::script::ScriptValue::Str(text.into()),
+                wrathplus_ui::script::ScriptValue::Str(who.into()),
+            ],
+        );
+    };
+    // Party chat from Pallytest, 2 yards away: turn to them.
+    say(&mut script, "CHAT_MSG_PARTY", "over here", "Pallytest");
+    // Someone's /say that is not for us, and our own line: no turn.
+    say(
+        &mut script,
+        "CHAT_MSG_SAY",
+        "anyone selling bread?",
+        "Pallytest",
+    );
+    say(&mut script, "CHAT_MSG_PARTY", "on my way", "Agenttwo");
+    // An emote at us, but we are walking: leave it.
+    script.run("walking = true").unwrap();
+    say(
+        &mut script,
+        "CHAT_MSG_TEXT_EMOTE",
+        "Pallytest waves at you.",
+        "Pallytest",
+    );
+    let faced: String = script.eval("return table.concat(faced, ' | ')").unwrap();
+    assert_eq!(faced, "0xP");
+}

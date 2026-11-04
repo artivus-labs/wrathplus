@@ -66,15 +66,32 @@ export async function runAgent(config: Config, options: RunOptions): Promise<voi
   let handled: string[] = [];
   // Everything that reaches the planner also goes in the session log, with the character's
   // status at that moment, so a wake-up needs no calls to see where things stand.
+  // A half-size frame of the game rides along with a wake-up, at most one every 30 s, so the
+  // planner sees the scene without asking (WRATHPLUS_WAKE_SHOTS=0 turns it off).
+  let shotAt = 0;
+  const glance = async (): Promise<string | undefined> => {
+    if (process.env.WRATHPLUS_WAKE_SHOTS === "0" || Date.now() - shotAt < 30_000) return undefined;
+    try {
+      const response = await fetch(`${config.url}/screenshot?scale=0.5`, {
+        headers: { Authorization: `Bearer ${config.token}` },
+        signal: AbortSignal.timeout(3_000),
+      });
+      if (!response.ok || !(response.headers.get("content-type") ?? "").startsWith("image/png")) return undefined;
+      shotAt = Date.now();
+      return Buffer.from(await response.arrayBuffer()).toString("base64");
+    } catch {
+      return undefined;
+    }
+  };
   const tell = (kind: string, text: string) => {
-    void statusLine(config.url, config.token).then((status) => {
+    void Promise.all([statusLine(config.url, config.token), glance()]).then(([status, png]) => {
       const nearby = heard.length ? `\n\nHeard nearby (no need to answer):\n- ${heard.join("\n- ")}` : "";
       const done = handled.length ? `\n\nDone for the party by the fast loop (already answered):\n- ${handled.join("\n- ")}` : "";
       heard = [];
       handled = [];
       const message = status ? `${text}${done}${nearby}\n\n[Now: ${status}]` : `${text}${done}${nearby}`;
-      notes.record(kind, message);
-      inbox.push(message);
+      notes.record(kind, png ? `${message}\n\n[with a screenshot]` : message);
+      inbox.push(message, png);
     });
   };
   const waker = new Waker((text) => tell("wake-up", text));
