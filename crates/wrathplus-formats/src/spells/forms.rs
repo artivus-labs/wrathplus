@@ -89,3 +89,19 @@ pub fn load_shapeshift_forms(chain: &mut Chain) -> Result<HashMap<u32, Shapeshif
     }
     Ok(map)
 }
+
+/// `CreatureDisplayID[4]`, 3.3.5 columns 23-26 (12340 `0x721cf0` reads them at record `+0x1c`),
+/// against the installed rows.
+#[cfg(test)]
+#[test]
+fn installed_wrath_forms_carry_their_display_ids() {
+    let Some(mut chain) = crate::wow_data().and_then(|d| Chain::open_wrath(&d, "enUS").ok()) else {
+        return;
+    };
+    let forms = load_shapeshift_forms(&mut chain).expect("forms");
+    assert_eq!(forms[&1].creature_display, [892, 0, 0, 0], "Cat Form");
+    assert_eq!(
+        forms[&17].creature_display, [0; 4],
+        "Battle Stance has no model"
+    );
+}
