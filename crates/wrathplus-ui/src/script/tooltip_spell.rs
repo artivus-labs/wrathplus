@@ -527,7 +527,7 @@ pub(super) fn install_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
         lua.create_function(|lua, (this, index): (Table, usize)| {
             let (spell_id, name) = {
                 let model = lua.app_data_mut::<Model>().expect("model app_data");
-                match model.shapeshift_forms.get(index.saturating_sub(1)) {
+                match model.shapeshift.forms.get(index.saturating_sub(1)) {
                     Some(f) => (f.view.spell_id, Some(f.view.name.clone())),
                     None => return Ok(()),
                 }

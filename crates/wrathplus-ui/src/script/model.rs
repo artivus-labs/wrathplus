@@ -560,8 +560,8 @@ pub(crate) struct Model {
     pub(crate) wrath_tutorial: super::wrath_tutorial::State,
     pub(crate) wrath_achievements: Option<super::wrath_achievements::WrathAchievementMetadata>,
 
-    /// The stance bar's forms, in bar order.
-    pub(crate) shapeshift_forms: Vec<super::shapeshift::StoredShapeshiftForm>,
+    /// The stance bar's forms, in bar order, and the player's form id.
+    pub(crate) shapeshift: super::shapeshift::ShapeshiftBar,
 
     /// The pet bar's ten slots and two bar-wide bits, replaced whole by every `SMSG_PET_SPELLS`.
     pub(crate) pet_bar: super::pet::PetBarState,
@@ -1348,7 +1348,7 @@ impl Model {
             tutorial_resets: 0,
             wrath_tutorial: super::wrath_tutorial::State::default(),
             wrath_achievements: None,
-            shapeshift_forms: Vec::new(),
+            shapeshift: Default::default(),
             pet_bar: super::pet::PetBarState::default(),
             pet_autocast_toggles: Vec::new(),
             pet_stop_attacks: 0,

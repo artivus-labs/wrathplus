@@ -28,7 +28,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 (1, Some("HUNTER" | "ROGUE" | "SHAMAN" | "MAGE" | "PRIEST" | "WARLOCK")) => 1.0,
                 (2, Some("HUNTER" | "ROGUE" | "SHAMAN")) => 1.0,
                 (2, Some("DRUID"))
-                    if model.shapeshift_forms.iter().any(|form| {
+                    if model.shapeshift.forms.iter().any(|form| {
                         // Cat Form has one spell rank; never infer form from a localized label
                         // or its position in the stance bar.
                         form.view.active && form.view.spell_id == 768
