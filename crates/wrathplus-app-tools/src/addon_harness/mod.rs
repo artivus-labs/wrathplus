@@ -288,9 +288,9 @@ fn survey_one(
     let warn_mark = script.diagnostics().last().map_or(0, |d| d.seq);
 
     let files = load_addon_files(&script, root, name, &toc);
-    // The live walk stamps each addon as loaded just before its `ADDON_LOADED` (`0x51f5ad`);
-    // without it `IsAddOnLoaded` answers nil and a LoadOnDemand dependent gets
-    // `DEP_NOT_DEMAND_LOADED`. The dependencies stamped themselves in `load_dependencies`.
+    // The live walk stamps each addon as loaded just before its `ADDON_LOADED` (`0x5f8442`);
+    // without it `IsAddOnLoaded` answers nil and a LoadOnDemand dependent's `LoadAddOn` runs it
+    // again. The dependencies stamped themselves in `load_dependencies`.
     script.mark_addon_loaded(name);
     let wants = missing_calls(root, name, &toc, &known, &dep_methods);
     // After the addon's files, so a template its own XML declares is registered.

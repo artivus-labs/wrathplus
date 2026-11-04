@@ -222,3 +222,65 @@ fn disable_all_writes_rows_for_the_visible_addons_only() {
         Some(vec![("Probe".to_string(), false)])
     );
 }
+
+/// In game the gate runs with `dl = 1` (`0x528a6d`): an enabled addon that is not LoadOnDemand
+/// loads, and `IsAddOnLoaded` answers `loaded, finished` (`0x511c0d`). A required dependency that
+/// fails past the gate clears `loaded` again (`0x5f83d8`), and the re-run gate finds no reason, so
+/// the answer is `UNKNOWN_ERROR` (`0x528ab2`).
+#[test]
+fn a_plain_addon_loads_in_game_and_a_failed_dependency_unloads_it() {
+    let mut s = UiScript::new().unwrap();
+    s.set_addon_chain_reader(Box::new(|path| {
+        path.ends_with(".lua")
+            .then(|| b"Ran = strjoin(',', tostringall(IsAddOnLoaded('Plain')))".to_vec())
+    }));
+    let chain = |name: &str, deps: &[&str]| AddOnInfo {
+        name: name.into(),
+        interface: 30300,
+        chain: true,
+        files: vec![format!("{name}.lua")],
+        dependencies: deps.iter().map(|d| d.to_string()).collect(),
+        enabled: true,
+        ..Default::default()
+    };
+    let mut lost = chain("Lost", &[]);
+    lost.chain = false; // no AddOns folder registered: its files cannot be read
+    s.register_addons(
+        vec![chain("Plain", &[]), chain("Needy", &["Lost"]), lost],
+        None,
+        None,
+        None,
+    );
+    s.note_addon_info_reply(&[]);
+    assert_eq!(
+        s.eval::<(Option<i64>, Option<String>)>("return select(5, GetAddOnInfo('Plain'))")
+            .unwrap(),
+        (Some(1), None)
+    );
+    assert_eq!(
+        s.eval::<(Option<i64>, Option<String>)>("return LoadAddOn('Plain')")
+            .unwrap(),
+        (Some(1), None)
+    );
+    assert_eq!(
+        s.eval::<String>("return Ran").unwrap(),
+        "1,nil",
+        "while its own file runs, the addon is loaded and not yet finished"
+    );
+    assert_eq!(
+        s.eval::<(Option<i64>, Option<i64>)>("return IsAddOnLoaded('Plain')")
+            .unwrap(),
+        (Some(1), Some(1))
+    );
+    assert_eq!(s.arity("IsAddOnLoaded('Nope')").unwrap(), 2);
+    assert_eq!(
+        s.eval::<(Option<i64>, Option<String>)>("return LoadAddOn('Needy')")
+            .unwrap(),
+        (None, Some("UNKNOWN_ERROR".into()))
+    );
+    assert_eq!(
+        s.eval::<(Option<i64>, Option<i64>)>("return IsAddOnLoaded('Needy')")
+            .unwrap(),
+        (None, None)
+    );
+}

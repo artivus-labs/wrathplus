@@ -1,14 +1,14 @@
-//! `AddOn_CanLoad` (`0x51e780`) as a pure function: the one load law every surface consults.
+//! `AddOn_CanLoad` (`0x5f7e90`) as a pure function: the one load law every surface consults.
 //! The first check that fires decides, in the reference's order: missing, the visiting guard (a
-//! cycle is loadable), enabled, banned, corrupt, version, dependencies, demand.
+//! cycle is loadable), enabled, banned, corrupt, incompatible, version, dependencies, demand.
 //!
-//! The version gate is an exact `==` against the client's interface, 30300, so 30301 is out of
-//! date and a missing `## Interface` compares as 0. Labelled: the exact compare is 1.12's
-//! (`0x51d7d0`), carried to 12340. With `checkAddonVersion` off the reason is
-//! reset to none, so force-load falls through to the dependency and demand checks.
+//! An `## Interface` below 20000 is `INCOMPATIBLE` whatever `checkAddonVersion` says
+//! (`0x5f7f1a`); otherwise the version gate is an exact `==` against 30300 (`0x5f7f32`), so 30301
+//! is out of date. With `checkAddonVersion` off the reason is reset to none (`0x5f7f56`), so
+//! force-load falls through to the dependency and demand checks.
 //!
-//! The reason renders once (`0x51e930`): the addon's own token, else `DEP_` and the deepest failing
-//! dependency's token, else nil. `BANNED`, `CORRUPT` and `INSECURE` read the server's
+//! The reason renders once (`0x5f4c40`): the addon's own token, else `DEP_` and the deepest
+//! failing dependency's token, else nil. `BANNED`, `CORRUPT` and `INSECURE` read the server's
 //! `SMSG_ADDON_INFO` signature state, which is not modelled; they are never produced.
 
 /// The `## Interface` build 12340 implements.
@@ -23,9 +23,8 @@ pub struct GateRow<'a> {
     /// the leading integer, `0` when absent.
     pub interface: u32,
     pub load_on_demand: bool,
-    /// Loaded this session. A loaded dependency satisfies the recursion outright (`0x51e8ba`),
-    /// which otherwise passes on the caller's `demandOnly` (`0x51e790`, `0x51e8c9`): in game, an
-    /// ordinary dependency enabled but not loaded reports `DEP_NOT_DEMAND_LOADED`.
+    /// Loaded this session. A loaded dependency satisfies the recursion outright (`0x5f7f7f`);
+    /// any other recurses with the demand check off (`0x5f7f9c` pushes 1).
     pub loaded: bool,
     /// `## Dependencies` / `## RequiredDeps` / any `## Dep*` (one list in the reference).
     pub dependencies: Vec<&'a str>,
@@ -61,17 +60,24 @@ impl Verdict {
 
 /// `AddOn_CanLoad` over a registry: can `rows[index]` load right now?
 ///
-/// `demand_only` is the in-game query (`dl=1`), where an unloaded addon that is not LoadOnDemand
-/// reports `NOT_DEMAND_LOADED`; `version_check` is the live `checkAddonVersion`, read per query.
-pub fn can_load(rows: &[GateRow], index: usize, demand_only: bool, version_check: bool) -> Verdict {
-    can_load_for_interface(rows, index, demand_only, version_check, CLIENT_INTERFACE)
+/// `demand_check` is the gate's `dl == 0` (the startup load and the glue's `GetAddOnInfo`,
+/// `0x4dc65a`): a LoadOnDemand addon then reports `DEMAND_LOADED` (`0x5f7fc8`). Every in-game
+/// verb passes `dl = 1` (`0x51138b`, `0x528a6d`) and has no demand check at all; `version_check`
+/// is the live `checkAddonVersion`, read per query.
+pub fn can_load(
+    rows: &[GateRow],
+    index: usize,
+    demand_check: bool,
+    version_check: bool,
+) -> Verdict {
+    can_load_for_interface(rows, index, demand_check, version_check, CLIENT_INTERFACE)
 }
 
 /// [`can_load`] against an explicit client interface.
 pub(crate) fn can_load_for_interface(
     rows: &[GateRow],
     index: usize,
-    demand_only: bool,
+    demand_check: bool,
     version_check: bool,
     client_interface: u32,
 ) -> Verdict {
@@ -79,7 +85,7 @@ pub(crate) fn can_load_for_interface(
     walk(
         rows,
         index,
-        demand_only,
+        demand_check,
         version_check,
         client_interface,
         &mut visiting,
@@ -90,7 +96,7 @@ pub(crate) fn can_load_for_interface(
 fn walk(
     rows: &[GateRow],
     i: usize,
-    demand_only: bool,
+    demand_check: bool,
     version_check: bool,
     client_interface: u32,
     visiting: &mut [bool],
@@ -108,7 +114,14 @@ fn walk(
         };
     }
     // Checks 4 and 5, banned and corrupt: no signature state, never produced.
-    // Check 6: the version gate, exact `==`; with the check off it falls through (`0x51e876`).
+    // Below 20000 is incompatible, with no force-load (`0x5f7f1a`).
+    if row.interface < 20000 {
+        return Verdict::Refused {
+            reason: Some("INCOMPATIBLE"),
+            dep: None,
+        };
+    }
+    // Check 6: the version gate, exact `==`; with the check off it falls through (`0x5f7f4c`).
     if row.interface != client_interface && version_check {
         return Verdict::Refused {
             reason: Some("INTERFACE_VERSION"),
@@ -116,7 +129,7 @@ fn walk(
         };
     }
     // Check 7: the dependencies, recursively; a shared out-param makes the deepest failure's raw
-    // token the one `DEP_` wraps (`0x51e8ce`).
+    // token the one `DEP_` wraps (`0x5f7f94`).
     visiting[i] = true;
     for dep in &row.dependencies {
         let found = rows.iter().position(|r| r.name.eq_ignore_ascii_case(dep));
@@ -126,16 +139,9 @@ fn walk(
                 reason: Some("MISSING"),
                 dep: None,
             },
-            // A loaded dependency satisfies the walk before any recursion (`0x51e8ba`).
+            // A loaded dependency satisfies the walk before any recursion (`0x5f7f89`).
             Some(d) if rows[d].loaded => Verdict::Loadable,
-            Some(d) => walk(
-                rows,
-                d,
-                demand_only,
-                version_check,
-                client_interface,
-                visiting,
-            ),
+            Some(d) => walk(rows, d, false, version_check, client_interface, visiting),
         };
         if let Verdict::Refused { reason, dep } = verdict {
             visiting[i] = false;
@@ -146,10 +152,10 @@ fn walk(
         }
     }
     visiting[i] = false;
-    // Check 8: the demand gate, in game only (`dl=1`).
-    if demand_only && !row.load_on_demand && !row.loaded {
+    // Check 8: the demand gate, `dl == 0` only (`0x5f7fc8`).
+    if demand_check && row.load_on_demand {
         return Verdict::Refused {
-            reason: Some("NOT_DEMAND_LOADED"),
+            reason: Some("DEMAND_LOADED"),
             dep: None,
         };
     }
@@ -187,7 +193,7 @@ mod tests {
     #[test]
     fn the_version_gate_is_exact_and_force_load_erases_it() {
         let mut a = row("A", vec![]);
-        a.interface = 11201;
+        a.interface = 30200;
         let rows = vec![a];
         assert_eq!(
             can_load(&rows, 0, false, true).token().as_deref(),
@@ -195,13 +201,20 @@ mod tests {
         );
         assert_eq!(can_load(&rows, 0, false, false), Verdict::Loadable);
 
-        let mut b = row("B", vec![]);
-        b.interface = 0; // no ## Interface line
-        let rows = vec![b];
-        assert_eq!(
-            can_load(&rows, 0, false, true).token().as_deref(),
-            Some("INTERFACE_VERSION")
-        );
+        // Below 20000, a missing `## Interface` (0) included, force-load does not help
+        // (`0x5f7f1a`).
+        for interface in [11200, 0] {
+            let mut b = row("B", vec![]);
+            b.interface = interface;
+            let rows = vec![b];
+            for version_check in [true, false] {
+                assert_eq!(
+                    can_load(&rows, 0, false, version_check).token().as_deref(),
+                    Some("INCOMPATIBLE"),
+                    "## Interface: {interface}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -232,26 +245,41 @@ mod tests {
         assert_eq!(can_load(&rows, 0, false, true), Verdict::Loadable);
     }
 
+    /// In game (`dl = 1`) an enabled, unloaded addon is loadable, LoadOnDemand or not; only the
+    /// startup query (`dl = 0`) refuses a LoadOnDemand one, and never its dependencies (`0x5f7f9c`).
     #[test]
-    fn the_demand_gate_is_in_game_only_and_survives_force_load() {
-        let mut a = row("A", vec![]);
-        a.interface = 11507;
-        let rows = vec![a];
-        assert_eq!(can_load(&rows, 0, false, false), Verdict::Loadable);
+    fn the_demand_gate_is_the_startup_querys_alone() {
+        let a = row("A", vec![]);
+        let mut b = row("B", vec!["C"]);
+        b.load_on_demand = true;
+        let mut c = row("C", vec![]);
+        c.load_on_demand = true;
+        let rows = vec![a, b, c];
+        for i in 0..3 {
+            assert_eq!(
+                can_load(&rows, i, false, true),
+                Verdict::Loadable,
+                "row {i}"
+            );
+        }
+        assert_eq!(can_load(&rows, 0, true, true), Verdict::Loadable);
         assert_eq!(
-            can_load(&rows, 0, true, false).token().as_deref(),
-            Some("NOT_DEMAND_LOADED"),
-            "force-load falls THROUGH, it does not succeed (`0x51e89d`)"
+            can_load(&rows, 1, true, true).token().as_deref(),
+            Some("DEMAND_LOADED"),
+            "and not DEP_DEMAND_LOADED: the recursion passes dl = 1"
         );
     }
 
+    /// A loaded dependency passes before its own checks run (`0x5f7f89`): disabling it mid-session
+    /// does not refuse its dependent.
     #[test]
-    fn a_loaded_dependency_satisfies_the_demand_query() {
+    fn a_loaded_dependency_satisfies_the_query() {
         let mut a = row("A", vec!["B"]);
         a.load_on_demand = true;
         let mut b = row("B", vec![]);
+        b.enabled = false;
         b.loaded = true;
         let rows = vec![a, b];
-        assert_eq!(can_load(&rows, 0, true, true), Verdict::Loadable);
+        assert_eq!(can_load(&rows, 0, false, true), Verdict::Loadable);
     }
 }

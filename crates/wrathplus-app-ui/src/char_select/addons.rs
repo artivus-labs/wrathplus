@@ -322,8 +322,8 @@ impl AddonsPanel {
             .collect()
     }
 
-    /// Why a row will not load. The glue surface passes `demand_only=false`, so
-    /// `NOT_DEMAND_LOADED` is unreachable; the version check is re-read per query.
+    /// Why a row will not load, the version check re-read per query. Labelled: the glue runs the
+    /// gate with `dl = 0` (`0x4dc65a`), a LoadOnDemand row `DEMAND_LOADED`; here with no demand.
     fn verdict(&self, i: usize) -> Verdict {
         can_load(&self.gate_rows(), i, false, self.version_check)
     }
@@ -374,7 +374,8 @@ fn status_label<'a>(strings: &'a GlueStrings, token: &'a str) -> &'a str {
         "DEP_MISSING" => "Dependency missing",
         "DEP_DISABLED" => "Dependency disabled",
         "DEP_INTERFACE_VERSION" => "Dependency out of date",
-        // `BANNED`, `CORRUPT`, `INSECURE` and `NOT_DEMAND_LOADED` are not produced at the glue.
+        "INCOMPATIBLE" => "Incompatible",
+        // `BANNED`, `CORRUPT`, `INSECURE` and `DEMAND_LOADED` are not produced at the glue.
         other => other,
     };
     strings.get(&format!("ADDON_{token}")).unwrap_or(fallback)
@@ -1553,6 +1554,7 @@ mod tests {
             ("DEP_MISSING", "Dependency missing"),
             ("INTERFACE_VERSION", "Out of date"),
             ("DEP_INTERFACE_VERSION", "Dependency out of date"),
+            ("INCOMPATIBLE", "Incompatible"),
         ] {
             assert_eq!(
                 status_label(&strings, token),
@@ -1571,7 +1573,7 @@ mod tests {
             addon("Lib", &[], 30300),
             addon("Needs", &["Lib"], 30300),
             addon("Orphan", &["Nowhere"], 30300),
-            addon("Old", &[], 11100),
+            addon("Old", &[], 30200),
             addon("Silent", &[], 0),
         ]);
 
@@ -1589,17 +1591,15 @@ mod tests {
         assert_eq!(p.verdict(4).token().as_deref(), Some("INTERFACE_VERSION"));
         assert_eq!(
             p.verdict(5).token().as_deref(),
-            Some("INTERFACE_VERSION"),
-            "a manifest with NO `## Interface` parses as 0 and IS out of date — the record ctor \
-             leaves [rec+0x1c]=0 and the gate compares it like any other value (byte-verified: \
-             a missing line is never read as current)"
+            Some("INCOMPATIBLE"),
+            "a manifest with NO `## Interface` parses as 0, below 20000 (`0x5f7f1a`)"
         );
 
-        // Force-load erases the refusal (reason 7 written, then reset to 0), so a ticked box
-        // leaves an out-of-date row indistinguishable from a current one.
+        // Force-load erases the out-of-date refusal (reason 7 written, then reset to 0), so a
+        // ticked box leaves such a row indistinguishable from a current one; not an incompatible.
         p.version_check = false;
         assert_eq!(p.verdict(4).token(), None);
-        assert_eq!(p.verdict(5).token(), None);
+        assert_eq!(p.verdict(5).token().as_deref(), Some("INCOMPATIBLE"));
         p.version_check = true;
 
         set(&mut p, Some(0), 1, false);

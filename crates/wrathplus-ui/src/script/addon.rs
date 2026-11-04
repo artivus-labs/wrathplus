@@ -1,7 +1,7 @@
 //! The in-game AddOn API, the client's addon globals, over a registry the host fills at discovery. A verb that names
 //! an addon takes a 1-based index or a name. `reason` is a token the stock UI splices into
 //! `getglobal("ADDON_"..reason)` (`UIParent.lua:642`), so its spelling is the contract. Verdicts
-//! come from [`super::addon_gate`], the reference's `AddOn_CanLoad` (`0x51e780`).
+//! come from [`super::addon_gate`], the reference's `AddOn_CanLoad` (`0x5f7e90`).
 
 use std::path::PathBuf;
 
@@ -45,6 +45,9 @@ pub struct AddOnInfo {
     /// The last-saved `enabled`, which `ResetDisabledAddOns` reverts to; set by `register_addons`.
     pub saved_enabled: bool,
     pub loaded: bool,
+    /// Every file ran: `[rec+0x19]`, set just before `ADDON_LOADED` fires (`0x5f8442`), where
+    /// `loaded` (`[rec+0x18]`) is set before the dependencies load (`0x5f810f`).
+    pub finished: bool,
     /// `## Interface`'s leading integer, 0 when absent: what the version gate compares.
     pub interface: u32,
     /// Left out of the Lua index: `[rec+0x29]`, set by `0x51da70` for a `SMSG_ADDON_INFO` status of
@@ -67,10 +70,10 @@ const USAGE_LOADED: &str = "Usage: IsAddOnLoaded(index or \"name\")"; // 0x842e7
 const USAGE_LOAD: &str = "Usage: LoadAddOn(index or \"name\")"; // 0x842e98
 
 /// The `index or "name"` argument, read by the prologue all eight in-game verbs share
-/// (`GetAddOnInfo 0x48e390`, `GetAddOnMetadata 0x48e530`, `GetAddOnDependencies 0x48e5e0`,
-/// `EnableAddOn 0x48e690`, `DisableAddOn 0x48e760`, `IsAddOnLoadOnDemand 0x48e840`,
-/// `IsAddOnLoaded 0x48e8e0`, `LoadAddOn 0x48e980`). A numeric string is an index. An index out of
-/// range, or a non-string, raises through `luaL_error` (`0x6f4940`), which does not return; a
+/// (`GetAddOnInfo 0x511240`, `GetAddOnMetadata 0x511430`, `GetAddOnDependencies 0x5179b0`,
+/// `EnableAddOn 0x511840`, `DisableAddOn 0x511940`, `IsAddOnLoadOnDemand 0x511a60`,
+/// `IsAddOnLoaded 0x511b30`, `LoadAddOn 0x528920`). A numeric string is an index. An index out of
+/// range, or a non-string, raises through `luaL_error` (`0x84f280`), which does not return; a
 /// name passes unchecked, and each verb answers a miss its own way.
 enum AddonKey {
     /// A bounds-checked 0-based position in the registry.
@@ -80,12 +83,12 @@ enum AddonKey {
 
 /// The prologue; `usage` is the verb's own `.data` string.
 fn addon_key(lua: &Lua, model: &Model, key: &Value, usage: &'static str) -> mlua::Result<AddonKey> {
-    // `coerce_number` is `lua_isnumber` (`0x6f34d0`), numeric strings included.
+    // `coerce_number` is `lua_isnumber` (`0x84df20`), numeric strings included.
     if let Some(n) = lua.coerce_number(key.clone())? {
-        // `_ftol` (`0x40a2b0`) truncates; minus one, compared unsigned, so 0 raises like count + 1.
+        // A truncating `fistp` (`0x51126c`), minus one, compared unsigned: 0 raises like count + 1.
         let index0 = (n as i64 as i32).wrapping_sub(1) as u32 as usize;
-        // An index into the sorted, filtered name array, not the registry (`0x51df00` reads
-        // `[[0xbe1b94] + 4*idx]`, bound `[0xbe1b90]`); the message is `0x837d70`'s.
+        // An index into the sorted, filtered name array, not the registry (`0x5f5000` reads
+        // `[[0xc2494c] + 4*idx]`, bound `[0xc24948]`); the message is `0x9f5468`'s.
         return match model.addon_index.get(index0) {
             Some(&row) => Ok(AddonKey::Index(row)),
             None => Err(mlua::Error::RuntimeError(format!(
@@ -94,7 +97,7 @@ fn addon_key(lua: &Lua, model: &Model, key: &Value, usage: &'static str) -> mlua
             ))),
         };
     }
-    // `lua_isstring`, `lua_tostring` (`0x6f3510`, `0x6f3690`); lossy, as a Lua string is bytes.
+    // `lua_isstring`, `lua_tolstring` (`0x84df60`, `0x84e0e0`); lossy, as a Lua string is bytes.
     match key {
         Value::String(s) => Ok(AddonKey::Name(s.to_string_lossy())),
         _ => Err(mlua::Error::RuntimeError(usage.into())),
@@ -175,16 +178,17 @@ fn version_check(model: &Model) -> bool {
         .is_none_or(|s| s.value != "0")
 }
 
-/// [`can_load`] in the in-game flavour (`dl=1`). A loaded addon is loadable before the gate
-/// runs, as in `0x48e390`, so disabling it mid-session does not mark it unloadable.
+/// [`can_load`] in the in-game flavour (`dl = 1`, no demand check). A finished addon is loadable
+/// before the gate runs (`0x51134a` reads `[rec+0x19]`), so disabling it mid-session does not
+/// mark it unloadable.
 fn verdict(model: &Model, i: usize) -> Verdict {
-    if model.addons[i].loaded {
+    if model.addons[i].finished {
         return Verdict::Loadable;
     }
     super::addon_gate::can_load_for_interface(
         &gate_rows(model),
         i,
-        true,
+        false,
         version_check(model),
         super::addon_gate::CLIENT_INTERFACE,
     )
@@ -216,7 +220,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // In-game `0x48e390` returns seven: `name, title, notes, enabled, loadable, reason,
+    // In-game `0x511240` returns seven: `name, title, notes, enabled, loadable, reason,
     // security`, the flags the number 1 or nil (`lua_pushnumber` via `0x6f3810`). The glue's
     // `0x46d460` returns eight, `url` fourth; in-game the URL is `GetAddOnMetadata(name, "URL")`.
     g.set(
@@ -264,10 +268,12 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         lua.create_function(|lua, key: Value| {
             let model = lua.app_data_ref::<Model>().expect("model");
             let key = addon_key(lua, &model, &key, USAGE_LOADED)?;
-            // `0x51e6f0` answers the record's loaded byte `[rec+0x18]`; an unknown name pushes nil
-            // (`0x48e95b`).
-            Ok(flag(
-                row_of(&model, &key).is_some_and(|i| model.addons[i].loaded),
+            // Two values (`0x511c0d`): `[rec+0x18]` then `[rec+0x19]`, loaded then finished; an
+            // unknown name is `nil, nil`.
+            let row = row_of(&model, &key).map(|i| &model.addons[i]);
+            Ok((
+                flag(row.is_some_and(|a| a.loaded)),
+                flag(row.is_some_and(|a| a.finished)),
             ))
         })?,
     )?;
@@ -390,8 +396,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                     lua_str(lua, "MISSING")?,
                 ]));
             };
-            // One record for the call and the calls inside it (`ds:0xb4e3e0` counts them,
-            // `0x48ea85`/`0x48ea9d`), drained when the outermost returns (`0x48eab4`).
+            // One record for the call and the calls inside it (`ds:0xbd0cc8` counts them,
+            // `0x5289f1`/`0x528a05`), drained when the outermost returns (`0x528a10`).
             lua.app_data_mut::<Model>()
                 .expect("model")
                 .load_log
@@ -408,10 +414,15 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             }
             match result {
                 Ok(()) => Ok(MultiValue::from_vec(vec![Value::Integer(1), Value::Nil])),
-                Err(reason) => Ok(MultiValue::from_vec(vec![
-                    Value::Nil,
-                    lua_str(lua, &reason)?,
-                ])),
+                // A failure re-runs the gate for its reason (`0x528a70`), else `UNKNOWN_ERROR`
+                // (`0x528ab2`).
+                Err(reason) => {
+                    let token = verdict(&lua.app_data_ref::<Model>().expect("model"), i).token();
+                    Ok(MultiValue::from_vec(vec![
+                        Value::Nil,
+                        lua_str(lua, token.as_deref().unwrap_or(&reason))?,
+                    ]))
+                }
             }
         })?,
     )?;
@@ -419,7 +430,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     Ok(())
 }
 
-/// `AddOn_Load` (`0x51f240`), dependencies first; `Err` is the reason token. Synchronous inside
+/// `AddOn_Load` (`0x5f80b0`), dependencies first; `Err` is the reason token. Synchronous inside
 /// the Lua call, as stock callers use the addon on the next line (`UIParent.lua:577`).
 fn load_addon(lua: &Lua, i: usize) -> Result<(), String> {
     let (name, folder, files, deps, already, chain, chain_reader) = {
@@ -438,8 +449,8 @@ fn load_addon(lua: &Lua, i: usize) -> Result<(), String> {
     if already {
         return Ok(()); // a redundant load succeeds, as in the reference
     }
-    // `LoadAddOn` (`0x48e980`) refuses through `AddOn_CanLoad` and takes the reason from the same
-    // gate; an out-of-date addon loads only with the version check off (`0x48ea8c`).
+    // `AddOn_Load` refuses through `AddOn_CanLoad` (`0x5f80fa`), and `LoadAddOn` takes the reason
+    // from the same gate; an out-of-date addon loads only with the version check off (`0x5f7f56`).
     {
         let model = lua.app_data_ref::<Model>().expect("model");
         if let refused @ Verdict::Refused { .. } = verdict(&model, i) {
@@ -459,17 +470,18 @@ fn load_addon(lua: &Lua, i: usize) -> Result<(), String> {
         Box::new(move |req: &str| reader(req))
     };
 
-    // Loaded is stamped after the gate (`0x51f2fa`), so a refusal stays retryable, and before the
+    // Loaded is stamped after the gate (`0x5f80fa`), so a refusal stays retryable, and before the
     // dependencies, which is what ends a cycle: `AddOn_Load` has no re-entrancy guard, but its
-    // store `0x51f313` precedes both dependency loops (`0x51f320`, `0x51f343`), so a re-entry
-    // takes the loaded early-out (`0x51f2d6`). Inside a cycle, then, `IsAddOnLoaded("A")` is 1
+    // store `0x5f810f` precedes both dependency loops (`0x5f8122`, `0x5f814f`), so a re-entry
+    // takes the loaded early-out (`0x5f80d5`). Inside a cycle, then, `IsAddOnLoaded("A")` is 1
     // while B runs and `ADDON_LOADED` fires B before A, as in the reference.
     {
         let mut model = lua.app_data_mut::<Model>().expect("model");
         model.addons[i].loaded = true;
     }
 
-    // Past the gate, a dependency that fails to load maps to its `DEP_` reason.
+    // Past the gate, a dependency that fails to load clears `loaded` again (`0x5f83d8`) and leaves
+    // the reason to the caller's re-run of the gate.
     for dep in &deps {
         let d = {
             let model = lua.app_data_ref::<Model>().expect("model");
@@ -479,22 +491,11 @@ fn load_addon(lua: &Lua, i: usize) -> Result<(), String> {
                 .position(|a| a.name.eq_ignore_ascii_case(dep))
         };
         match d {
-            None => return Err("DEP_MISSING".into()),
-            Some(d) => {
-                let loaded = {
-                    let model = lua.app_data_ref::<Model>().expect("model");
-                    model.addons[d].loaded
-                };
-                if !loaded {
-                    load_addon(lua, d).map_err(|r| {
-                        if r.starts_with("DEP_") {
-                            // `DEP_` applies once at any depth (`0x51e8ce`, `0x51e8cf`).
-                            r
-                        } else {
-                            format!("DEP_{r}")
-                        }
-                    })?;
-                }
+            Some(d) if load_addon(lua, d).is_ok() => {}
+            _ => {
+                let mut model = lua.app_data_mut::<Model>().expect("model");
+                model.addons[i].loaded = false;
+                return Err("UNKNOWN_ERROR".into());
             }
         }
     }
@@ -514,7 +515,8 @@ fn load_addon(lua: &Lua, i: usize) -> Result<(), String> {
     // `Bindings.xml` loads between the files and the saved variables.
     load_bindings(lua, &name, &read);
     load_saved_variables(lua, i);
-    // `ADDON_LOADED` closes the addon's load (`0x51f5ad`).
+    lua.app_data_mut::<Model>().expect("model").addons[i].finished = true;
+    // `ADDON_LOADED` closes the addon's load (`0x5f8446`).
     super::event::fire_global(lua, "ADDON_LOADED", &[super::ScriptValue::Str(name)]);
     Ok(())
 }
@@ -807,6 +809,7 @@ impl super::UiScript {
             .find(|a| a.name.eq_ignore_ascii_case(name))
         {
             a.loaded = true;
+            a.finished = true;
         }
     }
 

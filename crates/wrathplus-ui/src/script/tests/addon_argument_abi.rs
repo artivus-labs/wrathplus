@@ -1,7 +1,7 @@
-//! The `index or "name"` prologue of `GetAddOnInfo 0x48e390`, `GetAddOnMetadata 0x48e530`,
-//! `GetAddOnDependencies 0x48e5e0`, `EnableAddOn 0x48e690`, `DisableAddOn 0x48e760`,
-//! `IsAddOnLoadOnDemand 0x48e840`, `IsAddOnLoaded 0x48e8e0` and `LoadAddOn 0x48e980`; both its
-//! raises are `luaL_error` (`0x6f4940`), which does not return.
+//! The `index or "name"` prologue of `GetAddOnInfo 0x511240`, `GetAddOnMetadata 0x511430`,
+//! `GetAddOnDependencies 0x5179b0`, `EnableAddOn 0x511840`, `DisableAddOn 0x511940`,
+//! `IsAddOnLoadOnDemand 0x511a60`, `IsAddOnLoaded 0x511b30` and `LoadAddOn 0x528920`; both its
+//! raises are `luaL_error` (`0x84f280`), which does not return.
 
 use crate::script::{AddOnInfo, UiScript};
 
