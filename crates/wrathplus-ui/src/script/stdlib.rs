@@ -14,6 +14,8 @@ use mlua::{Lua, Value, Variadic};
 
 #[path = "stdlib_guards.rs"]
 mod guards;
+#[path = "stdlib_strings.rs"]
+mod strings;
 #[path = "stdlib_time.rs"]
 mod time;
 
@@ -155,6 +157,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     super::clock::install(lua)?;
     super::zone_text::install(lua)?;
     install_bit(lua)?;
+    strings::install(lua)?;
     lua.load(WRATH_STDLIB)
         .set_name("=[WrathPlus wow stdlib]")
         .set_mode(mlua::ChunkMode::Text)
@@ -188,33 +191,13 @@ function asin(x) return math.deg(math.asin(x)) end
 function acos(x) return math.deg(math.acos(x)) end
 function atan(x) return math.deg(math.atan(x)) end
 function atan2(y, x) return math.deg(math.atan2(y, x)) end
-fastrandom, math.randomseed = math.random, nil -- 12340 has no "randomseed" string at all
+math.randomseed = nil -- 12340 has no "randomseed" string at all
 PI = math.pi
 -- string
 format, gmatch, gsub = string.format, string.gmatch, string.gsub
 strbyte, strchar, strfind, strlen = string.byte, string.char, string.find, string.len
 strlower, strmatch, strrep, strrev = string.lower, string.match, string.rep, string.reverse
 strsub, strupper = string.sub, string.upper
-function strtrim(s, chars)
-    chars = chars or " \t\r\n"
-    local class = "[" .. chars:gsub("[%]%^%-]", "%%%0") .. "]"
-    return (s:gsub("^" .. class .. "+", ""):gsub(class .. "+$", ""))
-end
-function strsplit(sep, s, limit)
-    local out, start, n = {}, 1, 0
-    local class = "[" .. sep:gsub("[%]%^%-]", "%%%0") .. "]"
-    while true do
-        n = n + 1
-        if limit and n >= limit then out[n] = s:sub(start) break end
-        local a, b = s:find(class, start)
-        if not a then out[n] = s:sub(start) break end
-        out[n] = s:sub(start, a - 1)
-        start = b + 1
-    end
-    return unpack(out, 1, n)
-end
-function strjoin(sep, ...) return table.concat({ ... }, sep) end
-function strconcat(...) return table.concat({ ... }) end
 function tostringall(...)
     local n = select("#", ...)
     if n == 0 then return end
@@ -266,7 +249,6 @@ fn install_bit(lua: &Lua) -> mlua::Result<()> {
     bit.set("bor", binary(|a, b| a | b)?)?;
     bit.set("bxor", binary(|a, b| a ^ b)?)?;
     bit.set("bnot", lua.create_function(|_, a: f64| Ok(!arg(a) as i32))?)?;
-    bit.set("tobit", lua.create_function(|_, a: f64| Ok(arg(a) as i32))?)?;
     bit.set(
         "lshift",
         lua.create_function(|_, (a, n): (f64, f64)| Ok(arg(a).wrapping_shl(arg(n) & 31) as i32))?,
