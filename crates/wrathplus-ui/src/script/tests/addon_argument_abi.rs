@@ -111,11 +111,34 @@ fn a_bad_argument_type_raises_each_verbs_own_usage_string() {
         .unwrap(),
         "string|Usage: GetAddOnInfo(index or \"name\")"
     );
-    // Nor does a stand-in for one of the reference's C functions, here `securecall`.
+    // Nor does a stand-in for one of the reference's C functions, here `securecall`, whose
+    // `lua_pcall` (`0x816fca`) hands the raise to the error handler and answers nothing; a hook's
+    // raise goes there too, and the hooked call keeps its results (`0x817170`).
     assert_eq!(
-        raised(&s, "securecall(GetAddOnInfo, {})"),
-        "string|Usage: GetAddOnInfo(index or \"name\")"
+        s.eval::<String>(
+            "local seen = {} seterrorhandler(function(e) seen[#seen + 1] = e end) \
+             local n = select('#', securecall(GetAddOnInfo, {})) \
+             _G['7'] = function(a) seen[#seen + 1] = 'seven' .. a end securecall(7, 1) \
+             hooksecurefunc('GetAddOnMetadata', function() error('hook', 0) end) \
+             local v = GetAddOnMetadata('Alpha', 'Nope') or 'kept' \
+             return n .. '|' .. v .. '|' .. table.concat(seen, '|')"
+        )
+        .unwrap(),
+        "0|kept|Usage: GetAddOnInfo(index or \"name\")|seven1|hook"
     );
+    for (call, want) in [
+        (
+            "hooksecurefunc('print', 'x')",
+            "Usage: hooksecurefunc([table,] \"function\", hookfunc)",
+        ),
+        (
+            "hooksecurefunc('NoSuch', print)",
+            "hooksecurefunc(): NoSuch is not a function",
+        ),
+    ] {
+        let got = raised(&s, call);
+        assert!(got.ends_with(&format!(":1: {want}")), "{call}: {got}");
+    }
     // An `xpcall` handler and `coroutine.resume` see the same string.
     let usage = ":1: Usage: GetAddOnInfo(index or \"name\")";
     let got = s

@@ -169,22 +169,49 @@ fn install_frame_methods(lua: &Lua) -> mlua::Result<()> {
 /// addon code, and secure templates build as ordinary frames. Agents are meant to be able to
 /// automate the interface, so Blizzard's anti-automation layer is deliberately not reproduced.
 /// These are the language-level entry points stock FrameXML expects of that layer.
+///
+/// The error half of `securecall` (`0x816f30`) and `hooksecurefunc` (`0x817170`) is not taint:
+/// each runs its target, or the hook, under `lua_pcall` with the engine's handler (`0x816fca`),
+/// which hands the message to the `seterrorhandler` one, so a failure never reaches the caller;
+/// a failed `securecall` answers nothing (`0x816fd6`). The original a hook wraps runs unprotected.
+/// A target that passes `lua_isstring`, a number included, is `rawget` from `_G` by its text
+/// (`0x816f4f`). Labelled: a target that cannot be called reaches the handler as this chunk's
+/// `attempt to call upvalue 'f' (a nil value)` with a position, where 12340's `lua_pcall` gives
+/// the bare `attempt to call a nil value`.
 fn install_trusted_secure_environment(lua: &Lua) -> mlua::Result<()> {
+    let handler =
+        lua.create_function(|lua, msg: Value| match super::stdlib::error_handler(lua) {
+            Some(h) => h.call::<()>(msg),
+            None => Ok(()),
+        })?;
     lua.load(
         r##"
+        local handler = ...
+        local G, rawget, type, select, unpack, error, tostring =
+            _G, rawget, type, select, unpack, error, tostring
+        local function finish(ok, ...) if ok then return ... end end
+        local function protected(f, ...)
+            local args = { n = select("#", ...), ... }
+            return finish(G.xpcall(function() return f(unpack(args, 1, args.n)) end, handler))
+        end
         function issecure() return 1 end
         function issecurevariable() return 1, nil end
         function forceinsecure() end
         function InCombatLockdown() return nil end
         function securecall(f, ...)
-            if type(f) == "string" then f = _G[f] end
-            if type(f) == "function" then return f(...) end
+            local tf = type(f)
+            if tf == "string" or tf == "number" then f = rawget(G, tostring(f)) end
+            return protected(f, ...)
         end
         function hooksecurefunc(t, name, hook)
-            if type(t) ~= "table" then t, name, hook = _G, t, name end
+            if type(t) ~= "table" then t, name, hook = G, t, name end
+            local tn = type(name)
+            if (tn ~= "string" and tn ~= "number") or type(hook) ~= "function" then
+                error('Usage: hooksecurefunc([table,] "function", hookfunc)', 2)
+            end
             local original = t[name]
             if type(original) ~= "function" then
-                error("hooksecurefunc(): " .. tostring(name) .. " is not a function", 2)
+                error("hooksecurefunc(): " .. name .. " is not a function", 2)
             end
             t[name] = function(...)
                 local results = { n = 0 }
@@ -193,14 +220,14 @@ fn install_trusted_secure_environment(lua: &Lua) -> mlua::Result<()> {
                     for i = 1, results.n do results[i] = (select(i, ...)) end
                 end
                 keep(original(...))
-                hook(...)
+                protected(hook, ...)
                 return unpack(results, 1, results.n)
             end
         end
         "##,
     )
     .set_name("=[AzerothBench trusted secure environment]")
-    .exec()
+    .call(handler)
 }
 
 fn install_truthful_readers(lua: &Lua) -> mlua::Result<()> {
