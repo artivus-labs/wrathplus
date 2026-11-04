@@ -76,3 +76,36 @@ fn a_target_out_of_sight_is_lost() {
     assert_eq!(outcome, "lost");
     assert!(script.eval::<bool>("return Combat.active == nil").unwrap());
 }
+
+#[test]
+fn attacked_with_no_fight_of_its_own_it_fights_back_and_turns_on_a_closer_attacker() {
+    let mut script = combat();
+    // Resting between pulls: a wolf attacks. Nothing engaged it before; now Combat does.
+    script
+        .run("UnitGUID = function() return '0xME' end wolf.in_combat, wolf.target, wolf.reaction = true, '0xME', 'hostile'")
+        .unwrap();
+    script.tick(0.25);
+    assert_eq!(
+        script.eval::<String>("return Combat.active").unwrap(),
+        "0xW"
+    );
+    // Switched off (to run away): stopping the fight is not undone.
+    script.run("Combat.defend = false Combat.stop()").unwrap();
+    script.tick(0.25);
+    assert!(script.eval::<bool>("return Combat.active == nil").unwrap());
+    // Chasing a far target while a second wolf bites in melee: fight the biter.
+    script
+        .run(
+            "Combat.defend = true \
+             far = { guid = '0xF', name = 'Far Wolf', x = 40, y = 0, z = 0, distance = 40 } \
+             wolf.distance = 2 \
+             AgentNearby = function() return { far, wolf } end \
+             Combat.engage('0xF')",
+        )
+        .unwrap();
+    script.tick(0.25);
+    assert_eq!(
+        script.eval::<String>("return Combat.active").unwrap(),
+        "0xW"
+    );
+}

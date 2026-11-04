@@ -7,6 +7,9 @@
 --                        class's range), facing the target without walking in.
 --   Combat.active        the guid being fought, or nil. Combat.state says what it is doing.
 --   Combat.engaged(guid) for an intent's done: true once that fight is over (and the outcome).
+--   Combat.defend        (default true) with no fight of its own, engage whatever is attacking you;
+--                        and while chasing a target out of reach, turn on one already hitting you.
+--                        Set it false to run away (Combat.stop() alone would be re-engaged).
 --
 -- The end of a fight is signalled as AGENT_COMBAT_DONE (guid, "killed" | "lost" | "stopped" |
 -- "died"). Combat.history keeps the last fights ({ name, outcome, seconds, hp_lost }); every
@@ -29,6 +32,7 @@ local C = {
   -- Set reach from the class on each fight (casters and hunters keep their distance); false keeps
   -- a reach of your own.
   auto_reach = true,
+  defend = true,
 }
 
 local name_of, started, hp_at_start, faced
@@ -115,6 +119,19 @@ function C.engaged(guid)
   return true, last and last.outcome == "killed", last and last.outcome
 end
 
+-- The nearest living unit fighting us within `yards` (not `except`), or nil.
+local function attacker(yards, except)
+  local me = UnitGUID("player")
+  local best
+  for _, u in ipairs(AgentNearby(yards)) do
+    if me and u.guid ~= except and not u.dead and u.in_combat and u.target == me and u.reaction ~= "friendly"
+      and (not best or u.distance < best.distance) then
+      best = u
+    end
+  end
+  return best
+end
+
 local function tick(now)
   if UnitIsDeadOrGhost("player") then return done("died") end
   local u = find(C.active)
@@ -125,6 +142,15 @@ local function tick(now)
   end
   seen_at = now
   if u.dead then return done("killed") end
+  if u.distance > C.reach and C.defend and not C.ranged then
+    -- Something else is already hitting us while we chase: fight that one first.
+    local other = attacker(C.reach + 1, C.active)
+    if other then
+      done("stopped")
+      C.engage(other.guid)
+      return
+    end
+  end
   if u.distance > C.reach then
     -- Chase: aim at where it stands, and again whenever it has moved on.
     if not aimed or far(aimed, u) > C.drift or AgentWalk().status ~= "walking" then
@@ -171,7 +197,13 @@ frame:SetScript("OnUpdate", function(_, dt)
   since = since + dt
   if since < 0.2 then return end
   since = 0
-  if C.active then tick(GetTime()) end
+  if C.active then
+    tick(GetTime())
+  elseif C.defend and not UnitIsDeadOrGhost("player") then
+    -- Attacked with no fight of our own (resting, walking, between pulls): fight back.
+    local foe = attacker(30)
+    if foe then C.engage(foe.guid) end
+  end
 end)
 
 return C
