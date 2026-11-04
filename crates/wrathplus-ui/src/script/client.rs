@@ -173,8 +173,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // `GetFramerate()`: frames per second, a smoothed value the app pushes each tick; 0, a number,
-    // before the first push.
+    // `GetFramerate()` (`0x510470`): frames per second, the 30-frame mean the app pushes each
+    // tick; 1000 before the first, as the reference's zeroed ring reads (`0x77f479`).
     g.set(
         "GetFramerate",
         lua.create_function(|lua, ()| {
@@ -281,12 +281,7 @@ mod tests {
     #[test]
     fn get_framerate_is_a_number_before_the_first_push() {
         let mut s = UiScript::new().unwrap();
-        assert_eq!(s.eval::<f64>("return GetFramerate()").unwrap(), 0.0);
-        assert_eq!(
-            s.eval::<String>("return format(\"%.1f\", GetFramerate())")
-                .unwrap(),
-            "0.0"
-        );
+        assert_eq!(s.eval::<f64>("return GetFramerate()").unwrap(), 1000.0);
         s.set_framerate(59.94);
         assert_eq!(
             s.eval::<String>("return format(\"%.1f\", GetFramerate())")
