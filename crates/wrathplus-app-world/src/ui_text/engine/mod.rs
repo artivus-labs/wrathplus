@@ -828,7 +828,7 @@ mod ppem_tests {
         assert_eq!(e.ppem(12.0), 12, "an exact size is itself");
         assert_eq!(e.ppem(12.48), 12, "…and a fractional one rounds, not snaps");
         assert_eq!(e.ppem(12.5), 13);
-        // `BENILLA_ERA_WINDOW_SCALE` (0.78), which the Options window and the Game Menu wear.
+        // `WRATHPLUS_ERA_WINDOW_SCALE` (0.78), which the Options window and the Game Menu wear.
         assert_eq!(e.ppem(16.0 * 0.78), 12);
         e.dpi = 2.0;
         assert_eq!(e.ppem(12.0), 24);
@@ -993,7 +993,7 @@ mod ppem_tests {
             set_weight_class(&mut bytes, 700),
             "patched OS/2 usWeightClass"
         );
-        let root = std::env::temp_dir().join(format!("benilla-bold-font-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("wp-bold-font-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let fonts = root.join("Bolded").join("Fonts");
         std::fs::create_dir_all(&fonts).unwrap();
@@ -1027,7 +1027,7 @@ mod ppem_tests {
             let chain = source.chain.lock_recover();
             chain.read(TEST_FACES[2]).expect("MORPHEUS is in the chain")
         };
-        let root = std::env::temp_dir().join(format!("benilla-addon-font-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("wp-addon-font-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let fonts = root.join("MikScrollingBattleText").join("Fonts");
         std::fs::create_dir_all(&fonts).unwrap();
@@ -1068,8 +1068,7 @@ mod ppem_tests {
             let chain = source.chain.lock_recover();
             chain.read(TEST_FACES[2]).expect("MORPHEUS is in the chain")
         };
-        let root =
-            std::env::temp_dir().join(format!("benilla-addon-outline-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("wp-addon-outline-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let fonts = root.join("MikScrollingBattleText").join("Fonts");
         std::fs::create_dir_all(&fonts).unwrap();

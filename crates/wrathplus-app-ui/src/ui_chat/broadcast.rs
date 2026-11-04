@@ -135,7 +135,7 @@ pub(super) fn feed_broadcasts(
             Broadcast::ChatRestricted => {
                 // Its row is a chat row (tested below), so it is written as a system line here.
                 // Deviation: a missing global prints nothing, where the reference prints an empty
-                // line (`0x703c02`), because benilla's other `DisplayError` routes do the same.
+                // line (`0x703c02`), because WrathPlus's other `DisplayError` routes do the same.
                 if let Some(text) = super::combat::global_string(&script, "ERR_CHAT_RESTRICTED") {
                     log.push_event(ChatEvent::text_only(ChatEventKind::System, text));
                 }

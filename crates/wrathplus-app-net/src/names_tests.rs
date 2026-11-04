@@ -47,11 +47,11 @@ fn the_generation_counts_landings_never_asks() {
         "the miss asked, and asking is not a landing"
     );
 
-    cache.insert_player(player, "Benilla".into(), None);
+    cache.insert_player(player, "WrathPlus".into(), None);
     let landed = cache.generation();
     assert_ne!(g0, landed, "the answer landing is the edge");
 
-    assert_eq!(cache.resolve(player, &cmds), Some("Benilla"));
+    assert_eq!(cache.resolve(player, &cmds), Some("WrathPlus"));
     assert_eq!(cache.generation(), landed, "a cache hit moves nothing");
 
     cache.insert_pet(137, "Voidwalker".into());
@@ -288,7 +288,7 @@ fn a_header_that_differs_in_any_field_discards_the_whole_file() {
 
     let head = good.lines().next().unwrap();
     for (field, bad) in [
-        (0, "not-benilla"),
+        (0, "not-wrathplus"),
         (1, "999"),  // format version
         (2, "5876"), // client build
         (3, "frFR"), // locale

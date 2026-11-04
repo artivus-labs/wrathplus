@@ -658,7 +658,7 @@ pub(super) fn drain_chat_input(
             // `SlashCmdList["PVP"]` is `TogglePVP()`, the popup row's intent queue.
             ParsedChat::Pvp => script.queue_pvp_toggle(),
             ParsedChat::Help => {
-                // benilla's own summary, for a line that skipped the edit box; a typed `/help`
+                // WrathPlus's own summary, for a line that skipped the edit box; a typed `/help`
                 // runs the stock `ChatFrame_DisplayHelpText`.
                 for line in [
                     "Chat: /s /y /p /g /o /raid /rw /bg, /w <name>, /r, /e",

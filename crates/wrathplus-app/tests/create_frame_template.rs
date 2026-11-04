@@ -43,7 +43,7 @@ fn a_real_template_reaches_an_addon_through_create_frame() {
     let _ = s.take_errors();
 
     s.run(
-        r#"ProbeTab = CreateFrame("Button", "BenillaTemplateProbeTab", UIParent, "TabButtonTemplate")"#,
+        r#"ProbeTab = CreateFrame("Button", "WrathPlusTemplateProbeTab", UIParent, "TabButtonTemplate")"#,
     )
     .expect("the corpus idiom must not error");
 
@@ -54,7 +54,7 @@ fn a_real_template_reaches_an_addon_through_create_frame() {
         .unwrap();
     assert_eq!(h, 32.0, "the template's own <Size> height");
     let caps = s
-        .eval::<f32>("return 2 * BenillaTemplateProbeTabLeft:GetWidth()")
+        .eval::<f32>("return 2 * WrathPlusTemplateProbeTabLeft:GetWidth()")
         .unwrap();
     // `caps` plus the empty label's one-unit floor (`FONTSTRING_MIN_SPAN`).
     assert!(
@@ -79,10 +79,10 @@ fn a_real_template_reaches_an_addon_through_create_frame() {
     ] {
         assert!(
             s.eval::<bool>(&format!(
-                r#"return getglobal("BenillaTemplateProbeTab{suffix}") ~= nil"#
+                r#"return getglobal("WrathPlusTemplateProbeTab{suffix}") ~= nil"#
             ))
             .unwrap(),
-            "BenillaTemplateProbeTab{suffix} must exist"
+            "WrathPlusTemplateProbeTab{suffix} must exist"
         );
         assert!(
             s.eval::<bool>(&format!(
@@ -94,10 +94,10 @@ fn a_real_template_reaches_an_addon_through_create_frame() {
     }
 
     // The label is a real FontString the addon can drive.
-    s.run(r#"getglobal("BenillaTemplateProbeTabText"):SetText("Hi")"#)
+    s.run(r#"getglobal("WrathPlusTemplateProbeTabText"):SetText("Hi")"#)
         .unwrap();
     assert_eq!(
-        s.eval::<String>(r#"return getglobal("BenillaTemplateProbeTabText"):GetText()"#)
+        s.eval::<String>(r#"return getglobal("WrathPlusTemplateProbeTabText"):GetText()"#)
             .unwrap(),
         "Hi"
     );
@@ -132,7 +132,7 @@ fn the_corpus_favourite_template_composes_parent_two_levels_deep() {
     s.run(
         // The stock template is a `<ScrollFrame>` with a `<ScrollChild>`, and `framexml::merge`
         // takes the overriding node's tag, so a "Frame" would drop the scroll-only parts.
-        r#"Scroller = CreateFrame("ScrollFrame", "BenillaTemplateProbeScroll", UIParent, "FauxScrollFrameTemplate")"#,
+        r#"Scroller = CreateFrame("ScrollFrame", "WrathPlusTemplateProbeScroll", UIParent, "FauxScrollFrameTemplate")"#,
     )
     .expect("the corpus's most-used template must not error");
 
@@ -149,16 +149,16 @@ fn the_corpus_favourite_template_composes_parent_two_levels_deep() {
     ] {
         assert!(
             s.eval::<bool>(&format!(
-                r#"return getglobal("BenillaTemplateProbeScroll{suffix}") ~= nil"#
+                r#"return getglobal("WrathPlusTemplateProbeScroll{suffix}") ~= nil"#
             ))
             .unwrap(),
-            "BenillaTemplateProbeScroll{suffix} must exist"
+            "WrathPlusTemplateProbeScroll{suffix} must exist"
         );
     }
     assert_eq!(
-        s.eval::<String>("return BenillaTemplateProbeScrollScrollBar:GetParent():GetName()")
+        s.eval::<String>("return WrathPlusTemplateProbeScrollScrollBar:GetParent():GetName()")
             .unwrap(),
-        "BenillaTemplateProbeScroll"
+        "WrathPlusTemplateProbeScroll"
     );
     assert!(
         s.eval::<bool>(r#"return getglobal("FauxScrollFrameTemplateScrollBar") == nil"#)

@@ -50,7 +50,7 @@ pub struct MultisampleFormat {
 
 /// One screen resolution the Video options dropdown offers, in physical pixels. Deviation: the
 /// list is the window sizes this client can present, not the device's display modes, because
-/// benilla makes no exclusive mode-set. `"WxH"` is a contract: `OptionsFrame.lua:281-284` splits
+/// WrathPlus makes no exclusive mode-set. `"WxH"` is a contract: `OptionsFrame.lua:281-284` splits
 /// on the `x` and `CT_Viewport.lua:107` matches `"(%d+)x(%d+)"`, both failing silently.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ScreenResolution {
@@ -556,23 +556,23 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     super::video_pairs::install(lua)
 }
 
-/// What `RestoreVideoDefaults` puts back: the CVars among the reference verb's writes that benilla
+/// What `RestoreVideoDefaults` puts back: the CVars among the reference verb's writes that WrathPlus
 /// registers, each at its registered default. The verb writes no `uiScale`, `useUiScale` or
 /// `anisotropic`.
 ///
 /// Deviation: the reference (`0x48dad0` into `0x639a20`) writes hardware-recommended values from
 /// its matched `VideoHardware.dbc` row and the `CGxFormat` preset it names (`[0xc4e6ac]`): twelve
-/// `gx*` CVars, a synchronous `RestartGx`, then sixteen more. benilla has no such matching, so its
+/// `gx*` CVars, a synchronous `RestartGx`, then sixteen more. WrathPlus has no such matching, so its
 /// registered defaults are its recommended configuration.
 pub const VIDEO_DEFAULT_CVARS: &[&str] = &[
-    // Of the twelve `gx*` the device record writes (`0x639c40`), the six benilla registers.
+    // Of the twelve `gx*` the device record writes (`0x639c40`), the six WrathPlus registers.
     "gxWindow",
     "gxResolution",
     "gxVSync",
     "gxColorBits",
     "gxDepthBits",
     "gxMultisample",
-    // Of the sixteen further graphics CVars (`0x639a60`), the seven benilla registers, in the
+    // Of the sixteen further graphics CVars (`0x639a60`), the seven WrathPlus registers, in the
     // pass's order.
     "farclip",
     "shadowLevel",
@@ -675,7 +675,7 @@ fn install_video_verbs(lua: &Lua) -> mlua::Result<()> {
     // No values is the reference's "nothing to offer" (`0x48c136`), an empty but enabled
     // dropdown. Any argument is accepted; in the reference it picks the resolution, the first
     // when absent (`0x48c0ec`). Deviation: always empty, because a refresh rate is only
-    // selectable through an exclusive mode-set and benilla has none.
+    // selectable through an exclusive mode-set and WrathPlus has none.
     lua.globals().set(
         "GetRefreshRates",
         lua.create_function(|_, _: mlua::MultiValue| Ok(mlua::MultiValue::new()))?,
@@ -860,7 +860,7 @@ pub fn small_cull_text(stop: usize) -> String {
 /// [`WORLD_DETAIL_STOPS`] and `smallCull` from `{0.07, 0.04, 0.01}` (`0x804524`).
 ///
 /// Deviation: the getter reads [`CVAR_WORLD_DETAIL`], where the reference's reads only `smallCull`
-/// (`0x488d77`), because benilla's stop follows the knob that draws: a console `frillDensity`
+/// (`0x488d77`), because WrathPlus's stop follows the knob that draws: a console `frillDensity`
 /// write moves the ground clutter and `WorldDetail` with it, and no renderer reads `smallCull`
 /// (its callback's `[0x868620]` has no reader). A fresh reference client reads stop 1
 /// (`smallCull 0.04`), hence `WorldDetail`'s `"1"`.

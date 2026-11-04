@@ -11,11 +11,11 @@
 //! The frame term is the client's live intrusive-list position: a frame relinks at its bucket's
 //! tail when shown and when a shown frame's strata or level changes, and the later link draws on
 //! top. [`crate::widget::WidgetArena`] keeps a counter bumped at those moments, which orders the
-//! same within a bucket. The is-region bit is benilla's: the client has no frame drawable, and the
+//! same within a bucket. The is-region bit is WrathPlus's: the client has no frame drawable, and the
 //! frame's own slot (backdrop, scissor) must precede its regions.
 //!
 //! Deviation: textures in one layer keep link order where the client sorts them by texture handle
-//! (`0x7731a0`, comparator `0x7731c0`), because benilla allocates its handles differently; no
+//! (`0x7731a0`, comparator `0x7731c0`), because WrathPlus allocates its handles differently; no
 //! content may depend on the order of two overlapping textures in one layer.
 
 use crate::widget::{FrameHandle, RegionHandle, RegionKind, WidgetArena};

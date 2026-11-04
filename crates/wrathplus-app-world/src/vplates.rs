@@ -17,7 +17,7 @@
 //!   large and soft at high resolutions.
 //! - Highlight: the mouseover or the target (`0x606f20` into `0x607080`) lights the plate.
 //!   Deviation: the bar fill brightens by `LIT_BOOST` in place of the reference's ADD
-//!   `Nameplate-Glow` rim, which reads as hard edge lines under benilla's linear blending.
+//!   `Nameplate-Glow` rim, which reads as hard edge lines under WrathPlus's linear blending.
 //!   Hovering a plate makes its unit the mouseover (`0x7cb850`) and turns the name yellow; a
 //!   click on it selects.
 //! - With a target, every other plate dims ([`DIM_ALPHA`]).
@@ -645,7 +645,7 @@ fn drive_vplates(
         }
         // ── The plate's state, handed to the widget layer ──
         //
-        // The reference's plates sit outside the uiScale cascade, but benilla folds uiScale into
+        // The reference's plates sit outside the uiScale cascade, but WrathPlus folds uiScale into
         // one global seam, so dividing by it here keeps plate pixels uiScale-blind.
         // The raid-target index is 1-based here, 0-based for the atlas cell.
         let mark = group.raid_target_index(guid.0);

@@ -133,7 +133,7 @@ fn shipped_unit_frames_drive_end_to_end() {
         "player",
         Some(UnitState {
             exists: true,
-            name: Some("Benilla".into()),
+            name: Some("WrathPlus".into()),
             health: 72,
             max_health: 100,
             level: 12,
@@ -149,7 +149,7 @@ fn shipped_unit_frames_drive_end_to_end() {
     s.fire_event("UNIT_NAME_UPDATE", vec![ScriptValue::Str("player".into())]);
     assert_eq!(
         s.eval::<String>("return PlayerName:GetText()").unwrap(),
-        "Benilla"
+        "WrathPlus"
     );
 
     // A powerless target's bar hides: it has a `TextString` (`TargetFrame.lua:58-59`), and a
@@ -403,7 +403,7 @@ fn left_clicking_the_player_frame_targets_self() {
     assert_eq!(
         menu_values(&s),
         [
-            "Benilla",
+            "WrathPlus",
             "SET_FOCUS",
             "PVP_FLAG",
             "DUNGEON_DIFFICULTY",
@@ -430,7 +430,7 @@ fn left_clicking_the_player_frame_targets_self() {
     assert_eq!(
         menu_values(&s),
         [
-            "Benilla",
+            "WrathPlus",
             "SET_FOCUS",
             "PVP_FLAG",
             "LOOT_METHOD",
@@ -482,7 +482,7 @@ fn seat_self(s: &mut UiScript) {
         Some(UnitState {
             exists: true,
             guid: 0x10,
-            name: Some("Benilla".into()),
+            name: Some("WrathPlus".into()),
             health: 72,
             max_health: 100,
             ..UnitState::default()
@@ -793,7 +793,7 @@ fn pvp_icon_follows_the_three_branch_law() {
 
     let alliance_player = |pvp: bool, ffa: bool| UnitState {
         exists: true,
-        name: Some("Benilla".into()),
+        name: Some("WrathPlus".into()),
         health: 50,
         max_health: 50,
         level: 10,

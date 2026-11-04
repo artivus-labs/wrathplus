@@ -1,6 +1,6 @@
 //! `SlashCmdList` dispatch from the host, for a line that reaches it without passing the stock
 //! `ChatEdit_ParseText` (`ChatFrame.lua`): the same walk, over the table the stock `ChatFrame.lua`
-//! declares, where the stock commands, benilla's layer's and an addon's are entries.
+//! declares, where the stock commands, WrathPlus's layer's and an addon's are entries.
 
 use mlua::{Table, Value};
 

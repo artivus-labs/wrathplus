@@ -16,7 +16,7 @@ pub struct WmoCullProbe {
     /// Set by the panel's dump button: the file the next compute writes the trace to, then
     /// clears. Always a path handed in, never one this crate builds: a cwd-relative one is the
     /// read-only install folder when the binary runs from there. The panel resolves it under
-    /// `benilla-config/Diagnostics/`; `WOW_CULLDUMP=<path>` is the headless spelling.
+    /// `wrathplus-config/Diagnostics/`; `WOW_CULLDUMP=<path>` is the headless spelling.
     pub dump_to: Option<std::path::PathBuf>,
     /// The eye the PVS, the interior claim and the exterior windows were computed from, for
     /// comparison with the pose the frame draws from; a snap is where the two differ.

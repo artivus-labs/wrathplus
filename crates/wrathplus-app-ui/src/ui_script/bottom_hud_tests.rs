@@ -36,19 +36,19 @@ fn no_bottom_band_frame_overlaps_a_raised_bar() {
     assert!(failures.is_empty(), "manifest load errors: {failures:#?}");
 
     s.run(
-        "for _, f in ipairs({BenillaBagFrame, BenillaBagFrame1, BenillaBagFrame2, \
-         BenillaBagFrame3, BenillaBagFrame4}) do if f then f:Show() end end",
+        "for _, f in ipairs({WrathPlusBagFrame, WrathPlusBagFrame1, WrathPlusBagFrame2, \
+         WrathPlusBagFrame3, WrathPlusBagFrame4}) do if f then f:Show() end end",
     )
     .unwrap();
 
     // The frames in the band that must clear the bars. Each is checked only while shown, hence
     // the pair floor below.
     const TENANTS: &[&str] = &[
-        "BenillaBagFrame",
-        "BenillaBagFrame1",
-        "BenillaBagFrame2",
-        "BenillaBagFrame3",
-        "BenillaBagFrame4",
+        "WrathPlusBagFrame",
+        "WrathPlusBagFrame1",
+        "WrathPlusBagFrame2",
+        "WrathPlusBagFrame3",
+        "WrathPlusBagFrame4",
         "CastingBarFrame",
         "ChatFrame1",
     ];
@@ -199,6 +199,6 @@ fn the_item_push_card_shares_the_band_with_a_raised_bar_exactly_as_the_reference
     assert!(
         overlaps(bar, card),
         "the reference's own geometry puts the card inside the bar's band ({bar:?} vs {card:?}) — \
-         if this stops being true, benilla has diverged from it and the divergence needs a record"
+         if this stops being true, WrathPlus has diverged from it and the divergence needs a record"
     );
 }

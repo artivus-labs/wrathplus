@@ -11,7 +11,7 @@ cd "$(dirname "$0")/.."
 
 cat <<'BANNER'
 
-  ── benilla · sound measuring mode ─────────────────────────────────────────
+  ── WrathPlus · sound measuring mode ─────────────────────────────────────────
     Recording two mixes at once: what the game ASKED for (before the limiter)
     and what you actually HEARD (after it). One file cannot tell those apart;
     two can, and that is the whole question.

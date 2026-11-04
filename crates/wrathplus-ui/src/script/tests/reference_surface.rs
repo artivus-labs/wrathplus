@@ -719,7 +719,7 @@ fn editbox_justify_v_echoes_but_multiline_alone_decides_the_pixels() {
     );
 }
 
-/// `Texture:SetDesaturated` (`0x79c1e0`) answers `shaderSupported`, `1` or nil; benilla's renderer
+/// `Texture:SetDesaturated` (`0x79c1e0`) answers `shaderSupported`, `1` or nil; WrathPlus's renderer
 /// greys, so it answers `1`, and stock `ItemButtonTemplate.lua:69` keeps the caller's tint rather
 /// than its 0.5 fallback.
 #[test]
@@ -1483,19 +1483,19 @@ fn the_1_12_nameplate_verbs_are_gone() {
     }
 }
 
-/// The host seams benilla's own interface used are gone, now that it speaks 1.12 alone: the key
+/// The host seams WrathPlus's own interface used are gone, now that it speaks 1.12 alone: the key
 /// capture, the error-log reads, the chat forwarders and the uncalled binding-set probe.
 #[test]
 fn the_layers_host_seams_are_gone() {
     let s = script();
     for name in [
-        "BenillaBindCapture",
-        "BenillaCharacterBindingsExist",
-        "BenillaGetNumScriptErrors",
-        "BenillaGetScriptErrorInfo",
-        "BenillaClearScriptErrors",
+        "WrathPlusBindCapture",
+        "WrathPlusCharacterBindingsExist",
+        "WrathPlusGetNumScriptErrors",
+        "WrathPlusGetScriptErrorInfo",
+        "WrathPlusClearScriptErrors",
         "SubmitChatInput",
-        "BenillaChatTabPressed",
+        "WrathPlusChatTabPressed",
     ] {
         assert!(
             s.eval::<bool>(&format!("return {name} == nil")).unwrap(),

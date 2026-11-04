@@ -2,8 +2,10 @@ use super::*;
 
 #[test]
 fn loose_addon_file_maps_addon_paths_case_insensitively() {
-    let root =
-        std::env::temp_dir().join(format!("benilla-loose-sprite-test-{}", std::process::id()));
+    let root = std::env::temp_dir().join(format!(
+        "wrathplus-loose-sprite-test-{}",
+        std::process::id()
+    ));
     let dir = root.join("Atlas").join("Images").join("Maps");
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("BlackrockDepths.blp"), b"x").unwrap();
@@ -39,7 +41,7 @@ fn read_chain_or_loose_asks_the_chain_then_an_addons_own_file_on_disk() {
     let data = wrathplus_formats::wow_data_or_skip!();
     let chain = Mutex::new(Chain::open(&data).expect("open the chain"));
     let root =
-        std::env::temp_dir().join(format!("benilla-loose-audio-test-{}", std::process::id()));
+        std::env::temp_dir().join(format!("wrathplus-loose-audio-test-{}", std::process::id()));
     let addons = root.join("AddOns");
     std::fs::create_dir_all(addons.join("Jukebox")).unwrap();
     std::fs::write(addons.join("Jukebox").join("Track.mp3"), b"ID3!").unwrap();

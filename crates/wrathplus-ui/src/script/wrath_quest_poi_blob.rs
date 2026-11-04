@@ -29,7 +29,7 @@ use super::super::Model;
 use crate::widget::FrameHandle;
 
 /// The kind's method table, which `kind_method_registries` links ahead of the frame methods.
-pub(crate) const REG_QUEST_POI_METHODS: &str = "__benilla_quest_poi_methods";
+pub(crate) const REG_QUEST_POI_METHODS: &str = "__wrathplus_quest_poi_methods";
 
 /// One `QuestPOIFrame`'s state.
 #[derive(Clone, Debug)]

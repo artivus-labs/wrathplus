@@ -11,7 +11,7 @@ pub const CHAR_CREATE_NAME_IN_USE: u8 = 0x31;
 pub const CHAR_CREATE_SERVER_LIMIT: u8 = 0x34;
 /// `WorldResult::CharDeleteSuccess` (`SMSG_CHAR_DELETE`; vmangos `SharedDefines.h` ResponseCodes).
 pub const CHAR_DELETE_SUCCESS: u8 = 0x39;
-/// Race/Class/Gender values benilla's char-create sends.
+/// Race/Class/Gender values WrathPlus's char-create sends.
 pub const RACE_HUMAN: u8 = 0x1;
 pub const CLASS_WARRIOR: u8 = 0x1;
 pub const GENDER_MALE: u8 = 0x0;

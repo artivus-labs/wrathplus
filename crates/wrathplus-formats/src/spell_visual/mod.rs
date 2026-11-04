@@ -129,7 +129,7 @@ impl TrailProc {
     }
 }
 
-/// The `CharProc` type keys benilla models, out of the dispatcher's nine cases (`0x60d7c0`).
+/// The `CharProc` type keys WrathPlus models, out of the dispatcher's nine cases (`0x60d7c0`).
 pub mod char_proc_type {
     /// Body tint (`0x60d840`): `round(params[0])` is `0x00RRGGBB`, stored with alpha `0xff` in a
     /// node on `unit+0xce0`; each frame the head node's RGB / 255 goes to `model+0x184..0x18c`.

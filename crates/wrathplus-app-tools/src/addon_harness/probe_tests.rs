@@ -10,7 +10,7 @@ struct Fixtures(PathBuf);
 impl Fixtures {
     fn new(tag: &str) -> Self {
         let root = std::env::temp_dir().join(format!(
-            "benilla-probe-{tag}-{}-{:?}",
+            "wrathplus-probe-{tag}-{}-{:?}",
             std::process::id(),
             std::thread::current().id()
         ));

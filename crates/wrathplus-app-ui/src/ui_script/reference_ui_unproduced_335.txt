@@ -1,5 +1,5 @@
 # 3.3.5 window, no producer yet: events a stock 3.3.5 chain file registers that nothing in
-# benilla fires. Remove a line when its producer lands.
+# WrathPlus fires. Remove a line when its producer lands.
 ACTIVE_TALENT_GROUP_CHANGED
 ADDON_ACTION_BLOCKED
 ARENA_SEASON_WORLD_STATE

@@ -47,7 +47,7 @@ const BOW_FAMILY: [u16; 3] = [46, 105, 109]; // AttackBow · LoadBow · HoldBow
 /// `0x5fcfd0`: the body clips of a rifle shooter (guns and crossbows).
 const RIFLE_FAMILY: [u16; 3] = [49, 106, 110]; // AttackRifle · LoadRifle · HoldRifle
 
-/// The unit's equipped ranged weapon prop, benilla's `[CGUnit+0xd24]`: on the prop root when the
+/// The unit's equipped ranged weapon prop, WrathPlus's `[CGUnit+0xd24]`: on the prop root when the
 /// ranged display's model authors 160 or 161, absent for every other held item (nothing else
 /// reaches `0x624cc0`/`0x600209`/`0x600273`).
 #[derive(Component)]

@@ -1406,7 +1406,7 @@ mod bind_confirm_tests {
     }
 
     /// The question is queued behind the place's own `CURSOR_UPDATE`, whose `StaticPopup_Hide`
-    /// (`UIParent.lua:357-359`) would otherwise cancel it unseen: benilla drains a step after the
+    /// (`UIParent.lua:357-359`) would otherwise cancel it unseen: WrathPlus drains a step after the
     /// input pass, where the reference defers inside the call. A later cursor change retires it.
     #[test]
     fn placing_a_boe_on_the_doll_asks_and_survives_its_own_cursor_update() {

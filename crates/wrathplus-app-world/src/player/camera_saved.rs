@@ -7,7 +7,7 @@
 //! ```
 //!
 //! Two keys, LF, six decimals, a trailing newline (writer `0x50c4d0`, reader `0x50c5a0`), no yaw.
-//! Ours is `benilla-config/camera/<realm>-<character>.txt`, written at logout, disconnect and
+//! Ours is `wrathplus-config/camera/<realm>-<character>.txt`, written at logout, disconnect and
 //! quit; the reference's UI teardown (`0x490bd0`) also writes it on `ReloadUI` and a UI-scale
 //! change and reads it straight back, which ours does not. Read once per session, when the roster
 //! names the character; the pitch reaches the camera through the login seize.
@@ -286,10 +286,10 @@ mod login_tests {
         let _l = ENV_LOCK
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let tmp = std::env::temp_dir().join(format!("benilla-cam-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("wrathplus-cam-{}", std::process::id()));
         std::fs::remove_dir_all(&tmp).ok();
         let _c = EnvGuard::unset("WOW_CAPTURE");
-        let _h = EnvGuard::set("BENILLA_HOME", tmp.to_str().unwrap());
+        let _h = EnvGuard::set("WRATHPLUS_HOME", tmp.to_str().unwrap());
         let path = crate::local_state::camera_character_path("Realm", "Tank").unwrap();
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, render(8.0, -0.3)).unwrap();

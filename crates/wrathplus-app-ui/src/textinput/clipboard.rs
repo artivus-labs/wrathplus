@@ -1,4 +1,4 @@
-//! The host OS pasteboard, the one place benilla talks to the platform clipboard. One handle is
+//! The host OS pasteboard, the one place WrathPlus talks to the platform clipboard. One handle is
 //! held for the whole run because on X11 the owning connection is the clipboard: arboard drops the
 //! selection with its last handle. A Wayland window goes through `smithay-clipboard`'s standard
 //! `wl_data_device` on our own `wl_display`, since arboard here speaks only X11.

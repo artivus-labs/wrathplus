@@ -306,7 +306,7 @@ fn play_loot_pickup_sounds(
 
 /// The auto-equip gesture pair, written by [`crate::ui_items`] when a right-click auto-equips a
 /// bag item. The client's `UseContainerItem` (`0x4fa0e0`) runs a synthetic `SetCursorItem` then
-/// `ClearCursor` (`0x494c4a`, `0x49520a`), so pickup then put-down play; benilla's right-click
+/// `ClearCursor` (`0x494c4a`, `0x49520a`), so pickup then put-down play; WrathPlus's right-click
 /// never touches the cursor, so the pair is emitted here.
 #[derive(Message, Clone, Copy)]
 pub struct AutoEquipSound {

@@ -15,14 +15,14 @@
 # Real client files used as test fixtures (document expected paths, do not commit).
 **/tests/fixtures/
 
-# --- benilla's own local state ---
-# The one folder benilla persists into: config.toml, macros/, bindings/, saved-variables.lua,
+# --- WrathPlus's own local state ---
+# The one folder WrathPlus persists into: config.toml, macros/, bindings/, saved-variables.lua,
 # camera/. A dev build resolves it to the main checkout (so linked worktrees share one); a
-# release build puts it beside the binary — which is why it is not called `benilla/`: that name
+# release build puts it beside the binary — which is why it is not called `wrathplus/`: that name
 # collides with the binary of the same name. Machine-local by definition — `crate::local_state`
 # is the only thing in the tree that may write it.
 /wrathplus-config
-# Existing homes remain in use until an explicit, stopped-client rename.
+# The folder's old name: a home still under it is renamed to wrathplus-config on first use.
 /benilla-config
 
 # The account a scripted run from this checkout logs in as (scripts/probe-identity.sh and the
@@ -44,7 +44,7 @@ trace-*.json
 __pycache__/
 
 # The vanilla addon corpus the UI engine's real-addon tests read (third-party content): a symlink
-# beside `WoW`, or `BENILLA_ADDON_CORPUS`.
+# beside `WoW`, or `WRATHPLUS_ADDON_CORPUS`.
 /wow-addons-vanilla
 
 # Agent API keys (agents/.env.example lists them).

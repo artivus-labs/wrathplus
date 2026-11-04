@@ -1097,7 +1097,7 @@ mod loader_tests {
              </Button>\n\
              <Button>\n\
              <Scripts>\
-             <OnLoad>BenillaAnon = this</OnLoad>\
+             <OnLoad>WrathPlusAnon = this</OnLoad>\
              <OnClick>error(\"anon\")</OnClick>\
              </Scripts>\n\
              </Button>\n\
@@ -1127,7 +1127,7 @@ mod loader_tests {
             r#"[string "*:OnClick"]:1: tmpl"#
         );
         assert_eq!(
-            raised(r#"BenillaAnon:GetScript("OnClick")"#),
+            raised(r#"WrathPlusAnon:GetScript("OnClick")"#),
             r#"[string "*:OnClick"]:1: anon"#
         );
     }
@@ -1180,11 +1180,11 @@ mod loader_tests {
     fn an_inline_script_chunk_is_named_for_the_document_not_as_a_file() {
         let s = UiScript::new().unwrap();
         let doc = parse(
-            "<Ui>\n<Script file=\"Sibling.lua\"/>\n<Script>\nBenillaInline = ({}).missing.deeper\n</Script>\n</Ui>",
+            "<Ui>\n<Script file=\"Sibling.lua\"/>\n<Script>\nWrathPlusInline = ({}).missing.deeper\n</Script>\n</Ui>",
         );
         let report = load_in(&s, &doc, "Interface/AddOns/Probe/Probe.xml", &|p: &str| {
             (p == "Interface/AddOns/Probe/Sibling.lua")
-                .then(|| b"BenillaFile = ({}).missing.deeper".to_vec())
+                .then(|| b"WrathPlusFile = ({}).missing.deeper".to_vec())
         });
         assert_eq!(report.errors.len(), 2, "{:?}", report.errors);
         assert!(

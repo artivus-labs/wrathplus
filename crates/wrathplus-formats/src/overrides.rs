@@ -141,7 +141,7 @@ mod tests {
     #[test]
     fn pack_symlinks_are_rejected_at_mount() {
         let root =
-            std::env::temp_dir().join(format!("benilla-pack-symlink-{}", std::process::id()));
+            std::env::temp_dir().join(format!("wrathplus-pack-symlink-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
         std::os::unix::fs::symlink("/etc", root.join("outside")).unwrap();
         assert!(AssetOverrides::from_roots([root.clone()]).is_err());
@@ -152,7 +152,7 @@ mod tests {
     fn enabled_policy_preserves_archive_fallback_and_default_opens() {
         let data = crate::wow_data_or_skip!();
         let root =
-            std::env::temp_dir().join(format!("benilla-pack-fallback-{}", std::process::id()));
+            std::env::temp_dir().join(format!("wrathplus-pack-fallback-{}", std::process::id()));
         std::fs::create_dir_all(root.join("DBFilesClient")).unwrap();
         std::fs::write(root.join("DBFilesClient/Spell.dbc"), b"pack-table").unwrap();
         let original = crate::open_configured_chain(&data).unwrap();
@@ -176,7 +176,8 @@ mod tests {
 
     #[test]
     fn packs_share_read_contains_and_enumeration_with_last_pack_winning() {
-        let root = std::env::temp_dir().join(format!("benilla-pack-policy-{}", std::process::id()));
+        let root =
+            std::env::temp_dir().join(format!("wrathplus-pack-policy-{}", std::process::id()));
         let a = root.join("a");
         let b = root.join("b");
         for dir in [&a, &b] {

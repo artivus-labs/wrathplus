@@ -9,8 +9,8 @@
 # dependencies and features, a path dependency on every lower layer crate (and a dev-dependency
 # with `test-support`, so a lower crate's test helpers reach this crate's tests), its modules
 # `git mv`'d with their `#[path]` siblings, and a lib.rs that declares them `pub mod` and
-# re-exports every lower layer's modules at its root (`pub(crate) use benilla_app_core::net;`),
-# so a moved `crate::net::…` path still resolves. The root declares `pub use benilla_app_x::m;`
+# re-exports every lower layer's modules at its root (`pub(crate) use wrathplus_app_core::net;`),
+# so a moved `crate::net::…` path still resolves. The root declares `pub use wrathplus_app_x::m;`
 # in place of each moved `mod m;` and depends on every layer crate, forwarding `dev` and
 # `test-support`.
 #
@@ -35,7 +35,7 @@
 set -euo pipefail
 root="$(git rev-parse --show-toplevel)"
 cd "$root"
-P=benilla
+P=WrathPlus
 [ -d crates/wrathplus-app ] && P=wrathplus
 app=crates/$P-app
 src=$app/src

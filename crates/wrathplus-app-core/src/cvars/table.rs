@@ -2,12 +2,12 @@
 //! the reference's registered one ([`Reference`]). The runtime that holds the live values is the
 //! parent module.
 
-/// One host-backed CVar: its name, benilla's default, and where that default stands against the
+/// One host-backed CVar: its name, WrathPlus's default, and where that default stands against the
 /// reference's ([`Reference`]).
 pub struct Registered {
     /// The registered name, in the reference's own spelling.
     pub name: &'static str,
-    /// What a fresh `benilla-config` runs at, and what `GetCVar` answers until the player moves it.
+    /// What a fresh `wrathplus-config` runs at, and what `GetCVar` answers until the player moves it.
     pub default: &'static str,
     /// Where `default` stands against the reference's. Read only by the tests: it records the
     /// reference, never a value this client acts on.
@@ -28,7 +28,7 @@ impl Registered {
     }
 }
 
-/// benilla's default against the reference's: the string the reference's `CVar::Register`
+/// WrathPlus's default against the reference's: the string the reference's `CVar::Register`
 /// (`0x63db90`) passes for the name, or, for a setting 1.12 keeps in FrameXML, the value
 /// `UIOptionsFrame.lua` boots it at. Not a `Config.wtf` line (`SaveConfig 0x63d980` writes only
 /// values off their default), and not always what a fresh install runs at: `hwDetect` rewrites
@@ -36,7 +36,7 @@ impl Registered {
 /// Each row's register site or FrameXML line is cited above it.
 #[allow(dead_code)] // read only by the tests
 pub enum Reference {
-    /// The reference registers this default and benilla ships it; the test compares the two.
+    /// The reference registers this default and WrathPlus ships it; the test compares the two.
     Same(&'static str),
     /// The reference registers `registered`, but its own boot code overwrites it before the first
     /// frame; `default` is where that lands, and `why` is the override.
@@ -44,12 +44,12 @@ pub enum Reference {
         registered: &'static str,
         why: &'static str,
     },
-    /// The reference ships `value` and benilla ships another; `why` is the reason.
+    /// The reference ships `value` and WrathPlus ships another; `why` is the reason.
     Deviates {
         value: &'static str,
         why: &'static str,
     },
-    /// No reference setting to match: benilla's own knob, or a later-era name for something 1.12
+    /// No reference setting to match: WrathPlus's own knob, or a later-era name for something 1.12
     /// never made settable. `why` says which, and what the reference does instead.
     Ours(&'static str),
 }
@@ -164,14 +164,14 @@ pub const REGISTERED: &[Registered] = &[
          Ex's own DSP buffer",
     )
     .latched(),
-    // benilla's own, not a 1.12 CVar. Deviation: the reference clips at full scale and has no
+    // WrathPlus's own, not a 1.12 CVar. Deviation: the reference clips at full scale and has no
     // headroom mechanism (its SFX-bus duck `0x457960` is a sidechain armed only by server-pushed
-    // voice lines); benilla limits because every SFX is mastered to full scale and overlapping
+    // voice lines); WrathPlus limits because every SFX is mastered to full scale and overlapping
     // kits clip.
     ours(
         "SoundOutputLimiter",
         "1",
-        "benilla's own — the reference sums at full scale and clips; every WoW SFX is mastered \
+        "WrathPlus's own — the reference sums at full scale and clips; every WoW SFX is mastered \
          to full scale, so overlapping kits need a limiter to keep from distorting",
     ),
     overridden(
@@ -305,7 +305,7 @@ pub const REGISTERED: &[Registered] = &[
     // reference's default is `SPI_GETMOUSESPEED × 0.1`, "1.0" on stock Windows, and its record
     // `[0x882704]` has no reader: the slider sets the OS pointer speed (`0x402ec0`, [0.1, 2.0]).
     // The default matches; Deviation: here the dial multiplies the camera's own rate, because
-    // benilla does not change the OS pointer speed, a system-wide setting.
+    // WrathPlus does not change the OS pointer speed, a system-wide setting.
     same("mousespeed", "1"),
     // The zoom-out limit is `cameraDistanceMax × cameraDistanceMaxFactor`, held to [0, 50]
     // (`0x5112d6`). `cameraDistanceMax` (`0x50beb2`, default `0x84fbd0`) has no panel row; its
@@ -332,7 +332,7 @@ pub const REGISTERED: &[Registered] = &[
     // `0x50fee0`, release `0x5107f0`; ours is `player::camera_dynamics::SmartPivot`.
     same("cameraPivot", "1"),
     // Read by the routing (`0x50fff5`/`0x510004`) in radians of camera rotation, so they carry to
-    // benilla's raw-device units unchanged.
+    // WrathPlus's raw-device units unchanged.
     same("cameraPivotDXMax", "0.05"),
     same("cameraPivotDYMin", "0"),
     // The pitch bias's ease-back once the pivot lets go, deg/s (`[0xbe0fc8]`; `0x512a50` divides
@@ -393,7 +393,7 @@ pub const REGISTERED: &[Registered] = &[
     // registered "1", off, stands.
     same("anisotropic", "1"),
     // The four video CVars the stock window's verbs read and write (`wrathplus_ui` `video_pairs`);
-    // benilla has no mechanism behind any of them. `shadowLevel` (`0x6885bc`, "1", flags 1,
+    // WrathPlus has no mechanism behind any of them. `shadowLevel` (`0x6885bc`, "1", flags 1,
     // callback `0x688c10`, record `[0xc7f350]`) is behind `Get/SetTerrainMip` as `1 − level`: the
     // callback refuses above 1 and prints "Shadow mip level changed upon restart.", and the
     // terrain's shadow-map mip (`0x66f877`) reads it at load. `hwDetect` leaves it at 1.
@@ -408,7 +408,7 @@ pub const REGISTERED: &[Registered] = &[
     same("texLodBias", "0.0"),
     // `baseMip` (`0x6887aa`, "0", flags 1, callback `0x689090`, record `[0xc7f2f0]`), behind
     // `Get/SetBaseMip` as `1 − level`: the callback refuses outside [0, 1] ("BaseMip must be 0 or
-    // 1") and sets the device's first uploaded mip level (`0x589bf0`, read at `0x59f6ce`). benilla
+    // 1") and sets the device's first uploaded mip level (`0x589bf0`, read at `0x59f6ce`). WrathPlus
     // uploads every level; the write is kept and has no effect. `hwDetect` leaves it at 0.
     same("baseMip", "0"),
     // Weather Intensity (`OptionsFrame.lua:33`), registered "2" (`0x67b806`, flags 0, callback
@@ -422,7 +422,7 @@ pub const REGISTERED: &[Registered] = &[
         "every precipitation rate in `wrathplus-world`'s own precipitation module was \
          derived and graded against the reference install's own apitrace captures, and that \
          install runs \
-         `SET weatherDensity \"3\"` (K = 1.0) — so 3 is the value a benilla-vs-reference \
+         `SET weatherDensity \"3\"` (K = 1.0) — so 3 is the value a wrathplus-vs-reference \
          side-by-side is correct at, and the registered 2 would thin every rate to 0.66 against \
          the only client we compare with. The slider is how a player takes it back down",
     ),
@@ -445,7 +445,7 @@ pub const REGISTERED: &[Registered] = &[
     // record `[0xc7f2cc]`), Enable All Shaders and Terrain Highlights. Both callbacks act only on a
     // device whose caps field `[0x58a230()+0x98]` is above -1, setting bits 28 and 27 of the render
     // flags `[0xc7b2a4]`, which gate the shader negotiation `0x6941f0` for terrain, water and
-    // models; `pixelShaders` also gates the FFX pass (`0x6cd8b6`). No effect here: benilla always
+    // models; `pixelShaders` also gates the FFX pass (`0x6cd8b6`). No effect here: WrathPlus always
     // draws the shader leg (`liquid.wgsl` records it), and the stock Okay carries this box into
     // `ffx`, which is wired.
     overridden(
@@ -466,16 +466,16 @@ pub const REGISTERED: &[Registered] = &[
     // `0x82e644`, "0"), flags 0, no callback: their registering function reads six of its eight
     // `M2*` records at `0x40297f`-`0x4029dd` into the M2 renderer's feature word `[0xceefb0]`
     // (`0x706dd0`), once at startup, hence the stock tooltip's logout requirement. No effect here:
-    // benilla's M2 draw has one skinning and lighting path, chosen by no switch.
+    // WrathPlus's M2 draw has one skinning and lighting path, chosen by no switch.
     same("M2UseShaders", "1"),
     same("M2UsePixelShaders", "0"),
     // `lod` (`0x68848c`: name `0x8697d0`, "1", flags 1, callback `0x688920`, record `[0xc7f314]`),
     // World LOD: bit 2 of `[0xc7b2a4]`, which gates the doodad LOD distance test at `0x6afb11`. No
-    // effect here: benilla has no doodad LOD swap, as `lodDist` above has no row.
+    // effect here: WrathPlus has no doodad LOD swap, as `lodDist` above has no row.
     same("lod", "0"), // build 12340's, `0x78e446`
     // `movieSubtitle` (`0x402c18`: name `0x82e9d8`, "0", flags 0, record `[0x882640]`), Cinematic
     // Subtitles: the pre-rendered movies' subtitles, read by the glue's `GetMovieSubtitles`
-    // (`0x46dbc0`). No effect here: benilla plays no pre-rendered movie.
+    // (`0x46dbc0`). No effect here: WrathPlus plays no pre-rendered movie.
     same("movieSubtitle", "0"),
     // `useWeatherShaders` (`0x67b81d`: name `0x868598`, "1", flags 0, no callback, record
     // `[0xc7b588]`), Weather Shaders: read in each precipitation effect's constructor (`0x67480f`,
@@ -484,14 +484,14 @@ pub const REGISTERED: &[Registered] = &[
     // CPU-built triangle per flake where the shader leg (`0x678610`) is a point sprite, a second
     // draw path `wrathplus_world::weather` does not have, so the shader leg always runs.
     same("useWeatherShaders", "1"),
-    // benilla's own: `/console fpsJournal 1` appends a per-second row of position, frame cost and
-    // per-pass GPU time to `benilla-config/Diagnostics/fps-journal.csv`. The knob is `perf`'s
+    // WrathPlus's own: `/console fpsJournal 1` appends a per-second row of position, frame cost and
+    // per-pass GPU time to `wrathplus-config/Diagnostics/fps-journal.csv`. The knob is `perf`'s
     // `FpsJournalSetting`; the row stays in the core table because `perf` registers only in a `dev`
     // build, and a player build must still keep the setting.
     ours(
         "fpsJournal",
         "0",
-        "benilla's own — 1.12 has no player-side perf log; its nearest thing is the \
+        "WrathPlus's own — 1.12 has no player-side perf log; its nearest thing is the \
          Ctrl+R framerate label, a number with no file behind it",
     ),
 ];

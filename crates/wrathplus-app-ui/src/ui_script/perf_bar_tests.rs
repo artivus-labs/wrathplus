@@ -166,7 +166,7 @@ fn poll_beat(s: &mut UiScript) {
     s.tick(11.0);
 }
 
-/// The app pushes the averaged RTT; both bandwidth returns stay 0, as benilla counts no throughput.
+/// The app pushes the averaged RTT; both bandwidth returns stay 0, as WrathPlus counts no throughput.
 #[test]
 fn get_net_stats_reports_the_pushed_latency() {
     wrathplus_formats::wow_data_or_skip!();

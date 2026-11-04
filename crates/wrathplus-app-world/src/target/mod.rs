@@ -223,7 +223,7 @@ pub(crate) fn latch_press_pick(
 }
 
 /// Whether the hovered GameObject, not the character pick, is what a click acts on. The reference
-/// makes one pick over all CGObjects; benilla makes two and keeps the GameObject only when strictly
+/// makes one pick over all CGObjects; WrathPlus makes two and keeps the GameObject only when strictly
 /// nearer. A corpse or a refused pick holds the ground as a unit does.
 pub fn go_is_nearest(character: &Hovered, go: &HoveredObject) -> bool {
     match (character.any().is_some() || character.refused, go.target) {

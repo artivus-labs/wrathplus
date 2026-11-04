@@ -50,7 +50,7 @@ pub fn by_key(key: &str) -> Option<&'static MessageRecord> {
     CATALOG.iter().find(|r| r.key == key)
 }
 
-/// Where a message goes, by key. A key with no row is a benilla typo, never a reference state
+/// Where a message goes, by key. A key with no row is a WrathPlus typo, never a reference state
 /// (the reference addresses messages by index), and falls back to the red line.
 pub fn kind_of(key: &str) -> MsgKind {
     by_key(key).map_or(MsgKind::Error, |r| r.kind)

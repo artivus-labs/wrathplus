@@ -3,7 +3,7 @@
 //! reference's play step (`0x51d710`) finishes at once for an id `Movie.dbc` lacks, else fires
 //! `PLAY_MOVIE(name, volume)`. The stock `MovieFrame` plays it, and `GameMovieFinished()`
 //! (`0x518870`) ends the pending movie with an empty `CMSG_COMPLETE_MOVIE`, only while one is
-//! pending. benilla has no playback path:
+//! pending. WrathPlus has no playback path:
 //! `MovieFrame:StartMovie` answers nil (`wrathplus_ui::script` `movie`), so the stock frame finishes
 //! straight away, as the reference does for a file it cannot open. Wow.exe pass:
 //! `/tmp/azb-wireb-ghidra/movie-decomp.log`.

@@ -39,12 +39,14 @@ export function mainCheckout(from = import.meta.dir): string {
   return dirname(run.stdout.toString().trim());
 }
 
-/** `wrathplus_formats::default_state_home`: a legacy `benilla-config` wins, else `wrathplus-config`. */
+/** `wrathplus_formats::default_state_home`: `wrathplus-config`, or a home still under its old
+ * name, `benilla-config`, until the Manager or a client has moved it. */
 export function stateHome(env = process.env): string {
   if (env.WRATHPLUS_STATE_HOME) return env.WRATHPLUS_STATE_HOME;
   const root = mainCheckout();
+  const home = join(root, "wrathplus-config");
   const legacy = join(root, "benilla-config");
-  return existsSync(legacy) ? legacy : join(root, "wrathplus-config");
+  return !existsSync(home) && existsSync(legacy) ? legacy : home;
 }
 
 export const agentDir = (home: string, account: string) => join(home, "agents", account);
@@ -144,7 +146,7 @@ export function startClient(home: string, agent: ManagedAgent, character?: strin
         WOW_DATA: config.data,
         WOW_CLIENT_PROFILE: "wrath",
         WOW_LOCALE: config.locale,
-        BENILLA_HOME: join(dir, "home"),
+        WRATHPLUS_HOME: join(dir, "home"),
         WOW_HEADLESS: "1",
         WOW_AGENT_TOKEN: tokenOf(home, agent),
         WRATHPLUS_AGENT_PASSWORD: secret(dir, "password"),

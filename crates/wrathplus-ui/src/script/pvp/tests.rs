@@ -34,7 +34,7 @@ fn inspect_state() -> InspectHonorData {
 fn player() -> UnitState {
     UnitState {
         exists: true,
-        name: Some("Benilla".into()),
+        name: Some("WrathPlus".into()),
         sex: 3, // female
         is_player: true,
         // Both, and they differ: `faction_group` is the live faction template, `pvp_team` the
@@ -347,7 +347,7 @@ fn a_sideless_player_still_has_a_team_digit_because_his_race_has_one() {
     );
     assert_eq!(
         s.eval::<String>(r#"return UnitPVPName("player")"#).unwrap(),
-        "Grand Marshal Benilla",
+        "Grand Marshal WrathPlus",
         "and the name decoration reads the same digit"
     );
     // The control: a unit whose race has no side is -1, and -1 misses.
@@ -610,12 +610,12 @@ fn unit_pvp_name_decorates_a_ranked_player_and_falls_back_three_ways() {
     // Leg A: the seated player is a female Alliance rank 9, so the `_FEMALE` twin wins.
     assert_eq!(
         s.eval::<String>(r#"return UnitPVPName("player")"#).unwrap(),
-        "Sergeant Major (f) Benilla"
+        "Sergeant Major (f) WrathPlus"
     );
     s.set_unit("player", Some(UnitState { sex: 2, ..player() }));
     assert_eq!(
         s.eval::<String>(r#"return UnitPVPName("player")"#).unwrap(),
-        "Sergeant Major Benilla"
+        "Sergeant Major WrathPlus"
     );
 
     s.set_unit(
@@ -628,7 +628,7 @@ fn unit_pvp_name_decorates_a_ranked_player_and_falls_back_three_ways() {
     );
     assert_eq!(
         s.eval::<String>(r#"return UnitPVPName("player")"#).unwrap(),
-        "Leader Benilla",
+        "Leader WrathPlus",
         "rank 19 names here and is refused by GetPVPRankInfo"
     );
 
@@ -643,7 +643,7 @@ fn unit_pvp_name_decorates_a_ranked_player_and_falls_back_three_ways() {
     );
     assert_eq!(
         s.eval::<String>(r#"return UnitPVPName("player")"#).unwrap(),
-        "Sergeant Major Benilla\nGuardian of Stormwind"
+        "Sergeant Major WrathPlus\nGuardian of Stormwind"
     );
 
     // Leg C: an unranked player is just a name, and so is a plain creature.
@@ -656,7 +656,7 @@ fn unit_pvp_name_decorates_a_ranked_player_and_falls_back_three_ways() {
     );
     assert_eq!(
         s.eval::<String>(r#"return UnitPVPName("player")"#).unwrap(),
-        "Benilla"
+        "WrathPlus"
     );
     s.set_unit(
         "target",
@@ -730,7 +730,7 @@ fn unit_pvp_name_without_the_globalstrings_answers_the_plain_name() {
     let s = seated(); // nothing seated on _G
     assert_eq!(
         s.eval::<String>(r#"return UnitPVPName("player")"#).unwrap(),
-        "Benilla"
+        "WrathPlus"
     );
     // The template alone is not enough: the title has to resolve too.
     s.lua()
@@ -739,7 +739,7 @@ fn unit_pvp_name_without_the_globalstrings_answers_the_plain_name() {
         .expect("global");
     assert_eq!(
         s.eval::<String>(r#"return UnitPVPName("player")"#).unwrap(),
-        "Benilla"
+        "WrathPlus"
     );
 }
 
@@ -767,7 +767,7 @@ fn the_two_string_template_is_substituted_not_hardcoded() {
         .expect("global");
     assert_eq!(
         s.eval::<String>(r#"return UnitPVPName("player")"#).unwrap(),
-        "<Sergeant Major (f)> Benilla"
+        "<Sergeant Major (f)> WrathPlus"
     );
 }
 

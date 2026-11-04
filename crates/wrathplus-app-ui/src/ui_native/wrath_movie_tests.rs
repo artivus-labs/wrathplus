@@ -86,7 +86,7 @@ fn an_unknown_movie_finishes_without_playing() {
 /// `MovieFrame.lua`. Their `Movie.dbc` rows carry no file name: build 12340 reaches the files
 /// through `MovieVariation.dbc` and `FileData.dbc` (`WOW_WRATHGATE_*.AVI`, `WOW_FOTLK_*.AVI`, at
 /// 800 and 1024), which ship loose under `Data/<locale>/Interface/Cinematics` in Blizzard's own
-/// `digm` video codec. Labelled: benilla has no decoder, so `StartMovie` answers nil and the stock
+/// `digm` video codec. Labelled: WrathPlus has no decoder, so `StartMovie` answers nil and the stock
 /// frame takes its fallback, hiding and calling `GameMovieFinished`; each movie ends with one
 /// `CMSG_COMPLETE_MOVIE`, as the reference does for a movie it cannot open.
 #[test]

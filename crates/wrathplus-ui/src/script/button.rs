@@ -16,8 +16,8 @@ use crate::widget::{
     RegionKind,
 };
 
-pub(super) const REG_BUTTON_METHODS: &str = "__benilla_button_methods";
-pub(super) const REG_CHECKBUTTON_METHODS: &str = "__benilla_checkbutton_methods";
+pub(super) const REG_BUTTON_METHODS: &str = "__wrathplus_button_methods";
+pub(super) const REG_CHECKBUTTON_METHODS: &str = "__wrathplus_checkbutton_methods";
 
 /// A Button's texture and label slots, each an arena region created on first set.
 #[derive(Clone, Copy, PartialEq, Eq)]

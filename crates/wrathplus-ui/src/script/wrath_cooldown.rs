@@ -7,7 +7,7 @@ use super::super::object::frame_handle_of;
 use super::super::Model;
 
 /// The kind's method table, which `kind_method_registries` links ahead of the frame methods.
-pub(crate) const REG_COOLDOWN_METHODS: &str = "__benilla_cooldown_methods";
+pub(crate) const REG_COOLDOWN_METHODS: &str = "__wrathplus_cooldown_methods";
 
 pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     let m = lua.create_table()?;

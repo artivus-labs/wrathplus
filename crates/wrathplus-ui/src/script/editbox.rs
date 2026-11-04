@@ -31,7 +31,7 @@ use crate::order::{self, DrawLayer, ZTarget};
 use crate::widget::{EditBoxState, FrameHandle, FrameKind, KindState, RegionHandle, RegionKind};
 
 /// Registry key of the EditBox method table (the MAXCSTACK discipline: Lua-side root, named key).
-pub(super) const REG_EDITBOX_METHODS: &str = "__benilla_editbox_methods";
+pub(super) const REG_EDITBOX_METHODS: &str = "__wrathplus_editbox_methods";
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 // Public entry points
@@ -113,7 +113,7 @@ pub(super) fn action(lua: &Lua, a: EditAction) -> bool {
             }
             EditUnit::Edge => move_to_edge(lua, h, !back, extend),
             // UP/DOWN fork on `multiLine` (`0x77b64e`, `0x77b675`): a row in a multi-line box,
-            // else history recall (`0x77d030`, `0x77cfd0`; benilla's is shell-style, see
+            // else history recall (`0x77d030`, `0x77cfd0`; WrathPlus's is shell-style, see
             // `EditBoxState::history_step`). On an alt-arrow box, as the stock chat box is, that is
             // Alt+Up/Down.
             EditUnit::Row => {

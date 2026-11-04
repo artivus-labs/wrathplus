@@ -6,7 +6,7 @@
 //! `CastSpellByName(`, through the resolver the `CastSpellByName` binding (`0x4b4ab0`) uses
 //! (`0x4b3950` → `0x4b3a10`), so a bare name binds the highest known rank.
 //!
-//! `[rec+0x568]` is the book the spell resolved from, 0 the player's and 1 the pet's. benilla
+//! `[rec+0x568]` is the book the spell resolved from, 0 the player's and 1 the pet's. WrathPlus
 //! resolves against the player's book only, so a macro that casts a pet spell binds nothing.
 
 use wrathplus_ui::script::{resolve_spell_by_name, SpellBookState};

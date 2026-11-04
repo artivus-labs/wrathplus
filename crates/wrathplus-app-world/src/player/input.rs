@@ -137,7 +137,7 @@ pub(super) fn move_axes(
     // - The transition into both buttons held (`0x514a73`, the same helper).
     // - Losing the mover, a level: the emitter gate `0x514560` down (health `<= 0`,
     //   `MOVEMENTFLAGS & 0x1200`, stand state 7) makes writer `0x514748` clear the bit at the next
-    //   emit; ours is `state::may_translate`. The server-ride term is benilla's own.
+    //   emit; ours is `state::may_translate`. The server-ride term is WrathPlus's own.
     // A jump, a chat EditBox taking focus and a zone change leave it set; mounting is untraced and
     // leaves it set here. A focused chat box releases nothing, so W held through ENTER still runs.
     let both_buttons_engaged = (both_buttons && rig.world_mouse.rose()) || binds.steering_began();

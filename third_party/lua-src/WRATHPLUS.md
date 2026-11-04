@@ -1,4 +1,4 @@
-# benilla's `lua-src` fork: what differs from upstream, and how to check
+# WrathPlus's `lua-src` fork: what differs from upstream, and how to check
 
 Upstream: [`mlua-rs/lua-src-rs`](https://github.com/mlua-rs/lua-src-rs), MIT, version `550.0.0`,
 the version mlua 0.11 resolves to. Wired in through `[patch.crates-io]` in the workspace root.
@@ -15,7 +15,7 @@ spelling: `bad argument #%d to '%s' (%s)`, `calling '%s' on bad self (%s)`,
 Two differences remain:
 
 * `src/lib.rs` has Lua 5.2/5.3/5.4/5.5 stripped from the `Version` enum (with their source trees
-  deleted): benilla builds 5.1 and only 5.1, and a fork that still offered the other four would
+  deleted): WrathPlus builds 5.1 and only 5.1, and a fork that still offered the other four would
   answer a request for one with a missing directory at build time instead of a compile error.
 * `lua-5.1.5/lstrlib.c` limits each native `string.find`, `string.match`, `gmatch` iterator call
   or `string.gsub` call to 100,000,000 deterministic matcher steps and 200 recursive matcher
@@ -28,7 +28,7 @@ Two differences remain:
 
 The 1.12-era Lua 5.0 compatibility hunks (the table generic-for, 5.0's constructor
 compat-semicolon and table-size hint, nesting long strings, backquote `LUA_QL`, and the deleted
-`...`/`#`/`%` parser arms) and their `benilla.wrath51` runtime switch are gone with Vanilla.
+`...`/`#`/`%` parser arms) and their `wrathplus.wrath51` runtime switch are gone with Vanilla.
 
 To verify the Lua sources against upstream at any time:
 

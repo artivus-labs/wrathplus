@@ -19,7 +19,7 @@ fn the_cast_bar_follows_the_targets_cast() {
     };
     assert!(!castbar_shown(&s), "no cast, no bar");
 
-    state.cast = Some(benilla_ui_plate_cast(1.5, 0.5, false));
+    state.cast = Some(wrathplus_ui_plate_cast(1.5, 0.5, false));
     drive(&mut s, std::slice::from_ref(&state));
     assert!(castbar_shown(&s));
     assert!(s
@@ -38,7 +38,7 @@ fn the_cast_bar_follows_the_targets_cast() {
         )
         .unwrap());
 
-    state.cast = Some(benilla_ui_plate_cast(1.5, 0.75, true));
+    state.cast = Some(wrathplus_ui_plate_cast(1.5, 0.75, true));
     drive(&mut s, std::slice::from_ref(&state));
     assert!(s
         .eval::<bool>(
@@ -54,7 +54,7 @@ fn the_cast_bar_follows_the_targets_cast() {
     assert!(!castbar_shown(&s), "the cast's end hides the bar");
 }
 
-fn benilla_ui_plate_cast(
+fn wrathplus_ui_plate_cast(
     max: f32,
     value: f32,
     not_interruptible: bool,

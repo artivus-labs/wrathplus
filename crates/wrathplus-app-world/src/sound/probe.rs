@@ -14,7 +14,7 @@
 //! | voice-steal / refusal clicks | `refused` climbing, a discontinuity at the mark |
 //! | the limiter's own pumping | `post.wav` clean but `gain` diving repeatedly |
 //!
-//! A run writes three files to `benilla-config/sound-probe/`, off the game thread: `pre.wav` (the
+//! A run writes three files to `wrathplus-config/sound-probe/`, off the game thread: `pre.wav` (the
 //! mix ahead of the limiter), `post.wav` (after it) and `timeline.jsonl` (a row every [`TICK`] with
 //! level, health and voice counts, plus an event per kit start, marker and refusal).
 //!
@@ -53,7 +53,7 @@ pub(super) fn output_dir() -> Option<PathBuf> {
             Some(h) => h.join("sound-probe"),
             None => {
                 warn!(
-                    "sound probe: no benilla-config folder to write into (hermetic run) — set \
+                    "sound probe: no wrathplus-config folder to write into (hermetic run) — set \
                      WOW_SOUND_PROBE=<dir> to name one. Not recording."
                 );
                 return None;

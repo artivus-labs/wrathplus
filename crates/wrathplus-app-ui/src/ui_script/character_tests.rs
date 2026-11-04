@@ -13,7 +13,7 @@ use super::test_ui::load_ui as load_xml;
 fn player_unit() -> UnitState {
     UnitState {
         exists: true,
-        name: Some("Benilla".into()),
+        name: Some("WrathPlus".into()),
         health: 100,
         max_health: 100,
         level: 12,
@@ -177,7 +177,7 @@ fn shipped_character_frame_drives_end_to_end() {
     assert_eq!(
         s.eval::<String>("return CharacterNameText:GetText()")
             .unwrap(),
-        "Benilla"
+        "WrathPlus"
     );
     assert_eq!(
         s.eval::<String>("return CharacterLevelText:GetText()")

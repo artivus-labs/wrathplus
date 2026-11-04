@@ -12,7 +12,7 @@ use crate::script::Model;
 use crate::widget::{InsertMode, KindState, MessageFrameState};
 
 /// Registry key of the MessageFrame method table (the MAXCSTACK discipline).
-pub(crate) const REG_MESSAGEFRAME_METHODS: &str = "__benilla_plain_messageframe_methods";
+pub(crate) const REG_MESSAGEFRAME_METHODS: &str = "__wrathplus_plain_messageframe_methods";
 
 /// Run `f` over a MessageFrame's state under one short borrow; any other frame, reachable only
 /// through a misapplied method table, is an error.

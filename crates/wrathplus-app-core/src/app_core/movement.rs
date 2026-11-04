@@ -79,7 +79,7 @@ pub mod move_flags {
     pub const INTEGRATED: u32 = 0xff | FALLING;
 
     /// The committed-lower-body test routing a one-shot to the masked overlay (`0x5fe6dc`); the
-    /// client's separate mouse-turn test (`d58 & 0x1800`) reads a field benilla does not model.
+    /// client's separate mouse-turn test (`d58 & 0x1800`) reads a field WrathPlus does not model.
     pub const ROUTE_COMMITTED_MOVE: u32 =
         FORWARD | BACKWARD | STRAFE_LEFT | STRAFE_RIGHT | TURN_LEFT | TURN_RIGHT | SWIMMING;
 

@@ -112,7 +112,7 @@ fn parse_glue_strings(src: &str) -> HashMap<String, String> {
 
 /// The assignments inside `GlueLocalization.lua`'s `Localize()`, which `GlueLocalization.xml` runs
 /// as it loads. The file's other function, `LocalizeFrames()`, moves the `WorldOfWarcraftRating`
-/// logo (called on `FRAMES_LOADED`), a frame benilla's glue does not have, so it is not read.
+/// logo (called on `FRAMES_LOADED`), a frame WrathPlus's glue does not have, so it is not read.
 ///
 /// The body ends at the first unindented `end`, as the stock file is formatted; a file of another
 /// shape yields no overrides.

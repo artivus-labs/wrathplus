@@ -245,6 +245,9 @@ fn legacy_registrations_links_and_saved_variables_keep_one_home() {
     let f = Fixture::new();
     let legacy = f.config.repo.join("benilla-config");
     std::fs::create_dir(&legacy).unwrap();
+    // Both names from the start: the old home is not moved, and wins.
+    let new = f.config.repo.join("wrathplus-config");
+    std::fs::create_dir(&new).unwrap();
     let source = addon(&f.config.repo, "legacy-source", "Demo", "");
     let settings = Settings {
         folders: vec![source.clone()],
@@ -254,8 +257,6 @@ fn legacy_registrations_links_and_saved_variables_keep_one_home() {
     let saved = legacy.join("saved/Demo.lua");
     std::fs::create_dir_all(saved.parent().unwrap()).unwrap();
     std::fs::write(&saved, "legacy data").unwrap();
-    let new = f.config.repo.join("wrathplus-config");
-    std::fs::create_dir(&new).unwrap();
     assert_eq!(load(&f.config).unwrap().selected, settings.selected);
     assert!(discover(&f.config, &settings)
         .iter()

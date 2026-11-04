@@ -1,5 +1,5 @@
 name: Bug report
-description: Something benilla gets wrong, or does differently from 1.12.1.
+description: Something WrathPlus gets wrong, or does differently from 1.12.1.
 body:
   - type: textarea
     id: what
@@ -21,5 +21,5 @@ body:
     id: build
     attributes:
       label: Build and setup
-      description: The `benilla build` line from the start of the terminal output, your OS, and the server you play on.
+      description: The `WrathPlus build` line from the start of the terminal output, your OS, and the server you play on.
       placeholder: "wrathplus build 0.2.0 · 64cca13 · 2026-09-24 · release, macOS 15, vmangos"

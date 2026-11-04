@@ -1,7 +1,7 @@
 //! `Logs\FrameXML.log` (`0x842ecc`): the UI loads' records ([`wrathplus_ui::status`]), written a
 //! line at a time as the reference's log layer writes one (`0x65ac20`): the stamp
 //! `"%u/%u %02u:%02u:%02u.%03u  "` (`0x866aa0`), the text, then `"\r\n"` (`0x82edfc`). Deviation:
-//! the file is `benilla-config/Logs/FrameXML.log`, since the install is read-only.
+//! the file is `wrathplus-config/Logs/FrameXML.log`, since the install is read-only.
 
 use std::io::Write as _;
 
@@ -82,7 +82,8 @@ mod tests {
     /// leaves the last file standing.
     #[test]
     fn a_load_rewrites_a_load_addon_appends_and_a_clean_load_touches_nothing() {
-        let dir = std::env::temp_dir().join(format!("benilla-framexml-log-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("wrathplus-framexml-log-{}", std::process::id()));
         std::fs::remove_dir_all(&dir).ok();
         write_under(&dir, vec![LogWrite::Rewrite(vec!["first load".into()])]);
         write_under(&dir, vec![LogWrite::Rewrite(vec!["second load".into()])]);

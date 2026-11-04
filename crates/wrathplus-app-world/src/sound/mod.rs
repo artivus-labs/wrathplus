@@ -63,7 +63,7 @@ pub use zone::ExplorationSounds;
 #[derive(Resource)]
 pub struct SoundConfig {
     /// `Sound_EnableAllSound` (12340 `0x4d1710`, "1"; 1.12's `MasterSoundEffects`), which pauses
-    /// the engine (`0x457500` → `0x7a6570`); benilla zeroes every category in
+    /// the engine (`0x457500` → `0x7a6570`); WrathPlus zeroes every category in
     /// [`Self::category_amp`] and channels run on silently, which sounds the same.
     pub enabled: bool,
     /// The dev chord + `M` mute: zeroes the main track only, so selection and channels run on and
@@ -78,7 +78,7 @@ pub struct SoundConfig {
     /// `Sound_EnableSFX` (build 12340, default "1", `0x4d1681`), the panel's Sound Effects box.
     pub sfx_enabled: bool,
     /// `Sound_EnableMusic`/`Sound_EnableAmbience` ("1", `0x4d16ed`/`0x4d16a7`). 1.12's music
-    /// callback stops and re-picks the stream (`0x457490` → `0x45b050`/`0x45aeb0`); benilla keeps
+    /// callback stops and re-picks the stream (`0x457490` → `0x45b050`/`0x45aeb0`); WrathPlus keeps
     /// it alive at zero and resumes mid-track.
     pub music_enabled: bool,
     pub ambience_enabled: bool,
@@ -92,7 +92,7 @@ pub struct SoundConfig {
     /// music included. It is a mute, not a pause: playback cursors keep moving.
     ///
     /// Deviation: the reference also refuses to open a new non-music stream while inactive
-    /// (`0x7a52bf`); benilla starts everything and gates the output, because a refusal at kit
+    /// (`0x7a52bf`); WrathPlus starts everything and gates the output, because a refusal at kit
     /// start would make an unattended capture record silence.
     pub background_sound: bool,
     /// `Sound_EnableReverb` (12340 `0x4d125b`, "0"; 1.12's `SoundReverb`): gates both the zone
@@ -129,7 +129,7 @@ pub struct SoundConfig {
     /// `Sound_EnableEmoteSounds` (12340 `0x4d17e5`, "1"): gates only the received text-emote voice
     /// line ([`emote::emote_sounds`]); a zero fetches no kit at all. The reference's check sits in
     /// `0x623c80` or on the shared `0x623c10` leg, which `$CSD` also enters; which one is
-    /// untraced, and benilla gates the received path alone.
+    /// untraced, and WrathPlus gates the received path alone.
     pub emote_sounds: bool,
     /// `Sound_ZoneMusicNoDelay` (12340 `0x4d1808`, "0"), the panel's "Loop Music": drops the
     /// `ZoneMusic.dbc` silence interval between plays of one zone's track
@@ -449,7 +449,7 @@ fn update_audio_listener(
             return;
         }
     }
-    // Deviation: with no character the reference leaves the listener where it was; benilla seats
+    // Deviation: with no character the reference leaves the listener where it was; WrathPlus seats
     // it on the camera, where the view is.
     if let Ok(t) = cam.single() {
         listener.pos = t.translation;

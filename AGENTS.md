@@ -1,16 +1,15 @@
-# AzerothBench fork of benilla
+# WrathPlus
 
-Fork-specific scope: read `https://github.com/artivus-labs/wrathplus/wiki/AZEROTHBENCH` first. This fork targets Wrath
-3.3.5a/build 12340; upstream's vanilla-only feature scope below describes the
-baseline, not the fork's destination. Preserve upstream engineering and asset
-provenance rules. The owner authorized current-realm testing and service restarts
-on 2026-10-02. Use dedicated test credentials, preserve player state and back up
-before migrations; no destructive resets without specific authorization. External
-harnesses own policies/training; the client provides ordinary human play and
-low-level, declared observation/control interfaces.
+A World of Warcraft 3.3.5a (build 12340) client in Rust and Bevy. WrathPlus started as a fork of
+[benilla](https://github.com/samwhosung/benilla), a from-scratch 1.12.1 client; where the docs
+below still describe a vanilla-only scope, that is the starting point, not the destination. The
+reference client is the spec: WrathPlus is a faithful, modern implementation of it, not a place
+to get creative. Keep the engineering and asset provenance rules it inherited.
 
-A from-scratch World of Warcraft 1.12.1 client in Rust and Bevy. The reference client is the
-spec: benilla is a faithful, modern implementation of it, not a place to get creative.
+The owner authorized current-realm testing and service restarts on 2026-10-02. Use dedicated test
+credentials, preserve player state and back up before migrations; no destructive resets without
+specific authorization. External harnesses own policies/training; the client provides ordinary
+human play and low-level, declared observation/control interfaces.
 
 Read, in this order:
 

@@ -333,7 +333,7 @@ fn a_macro_slot_shows_the_macros_own_icon_and_follows_an_edit() {
     let events = |app: &mut App| {
         app.world_mut()
             .non_send_resource::<UiScript>()
-            .eval::<i64>("return BENILLA_TEST_SLOT_EVENTS or 0")
+            .eval::<i64>("return WRATHPLUS_TEST_SLOT_EVENTS or 0")
             .unwrap()
     };
     app.world_mut()
@@ -343,7 +343,7 @@ fn a_macro_slot_shows_the_macros_own_icon_and_follows_an_edit() {
             local f = CreateFrame("Frame")
             f:RegisterEvent("ACTIONBAR_SLOT_CHANGED")
             f:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9)
-                if arg1 == 1 then BENILLA_TEST_SLOT_EVENTS = (BENILLA_TEST_SLOT_EVENTS or 0) + 1 end
+                if arg1 == 1 then WRATHPLUS_TEST_SLOT_EVENTS = (WRATHPLUS_TEST_SLOT_EVENTS or 0) + 1 end
             end)
             EditMacro(1, "Shadowstep", nil)
             "#,
@@ -507,11 +507,11 @@ fn a_tame_failure_composes_the_reason_string_into_err_tame_failed() {
                 ERR_TAME_FAILED = "%s.";
                 PETTAME_TOOHIGHLEVEL = "Creature is too high level for you to tame";
                 PETTAME_UNKNOWNERROR = "Unknown taming error";
-                BENILLA_TEST_LINES = {};
+                WRATHPLUS_TEST_LINES = {};
                 local f = CreateFrame("Frame")
                 f:RegisterEvent("UI_ERROR_MESSAGE")
                 f:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9)
-                    table.insert(BENILLA_TEST_LINES, arg1)
+                    table.insert(WRATHPLUS_TEST_LINES, arg1)
                 end)
                 "#,
             )
@@ -520,7 +520,7 @@ fn a_tame_failure_composes_the_reason_string_into_err_tame_failed() {
     let line = |app: &mut App, i: usize| {
         app.world_mut()
             .non_send_resource::<UiScript>()
-            .eval::<Option<String>>(&format!("return BENILLA_TEST_LINES[{i}]"))
+            .eval::<Option<String>>(&format!("return WRATHPLUS_TEST_LINES[{i}]"))
             .unwrap()
     };
 

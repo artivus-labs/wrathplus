@@ -1,8 +1,8 @@
-//! Binding persistence in `benilla-config/bindings/account.txt` and `<Realm>-<Char>.txt`: one
+//! Binding persistence in `wrathplus-config/bindings/account.txt` and `<Realm>-<Char>.txt`: one
 //! line per command whose keys differ from its defaults.
 //!
 //! ```text
-//! # benilla key bindings
+//! # WrathPlus key bindings
 //! bind JUMP F
 //! bind MOVEFORWARD W
 //! bind TOGGLESHEATH
@@ -41,7 +41,7 @@ pub(crate) fn to_diff(snapshot: &[(String, Vec<String>)], defaults: &[KeyBinding
             .find(|(c, _)| c.eq_ignore_ascii_case(name))
             .map_or(&[][..], |(_, k)| k.as_slice())
     };
-    let mut out = String::from("# benilla key bindings — diff vs defaults\n");
+    let mut out = String::from("# WrathPlus key bindings — diff vs defaults\n");
     let unlisted = defaults
         .iter()
         .filter(|(c, _)| !snapshot.iter().any(|(n, _)| n.eq_ignore_ascii_case(c)))

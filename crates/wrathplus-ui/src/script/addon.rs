@@ -686,7 +686,7 @@ fn run_chunk(lua: &Lua, bytes: &[u8], name: &str) -> mlua::Result<()> {
     }
 }
 
-const REG_ADDON_PRIVATE_TABLES: &str = "__benilla_addon_private_tables";
+const REG_ADDON_PRIVATE_TABLES: &str = "__wrathplus_addon_private_tables";
 
 /// Execute an addon file with build 12340's chunk arguments, `(addon_name, private_table)`.
 pub(crate) fn run_addon_chunk(

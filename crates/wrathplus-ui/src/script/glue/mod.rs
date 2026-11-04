@@ -34,7 +34,7 @@ pub enum GlueRequest {
     /// `RealmListDialogCancelled()`: the list's Cancel, which on the login screen drops the realm
     /// connection.
     RealmListCancelled,
-    /// `BenillaSetRealmlist(text)`, AzerothBench's own login button (not stock 3.3.5): the typed
+    /// `WrathPlusSetRealmlist(text)`, AzerothBench's own login button (not stock 3.3.5): the typed
     /// realmlist, for App to check and keep.
     SetRealmlist(String),
     /// `SelectCharacter(index)`, 1-based: the row the stage shows.
@@ -235,7 +235,7 @@ impl super::UiScript {
         }
     }
 
-    /// `BenillaGetRealmlist`'s answer.
+    /// `WrathPlusGetRealmlist`'s answer.
     pub fn set_glue_realmlist(&mut self, address: &str, pinned: bool) {
         if let Some(mut m) = self.glue_mut() {
             m.realmlist = address.to_string();

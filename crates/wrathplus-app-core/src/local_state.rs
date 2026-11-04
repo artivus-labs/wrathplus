@@ -1,15 +1,16 @@
-//! Where benilla keeps local state: one folder, `wrathplus-config/`, never inside the install, and
+//! Where WrathPlus keeps local state: one folder, `wrathplus-config/`, never inside the install, and
 //! this module is the only place that computes a path into it; each path fn's doc says what it
 //! holds. The 1.12 client is portable the same way, its `WTF/` and `Cache/` in its own folder.
 //!
 //! Resolution, in order, the same shape as [`wrathplus_formats::wow_data`]:
-//! 1. `$BENILLA_HOME`.
+//! 1. `$WRATHPLUS_HOME`.
 //! 2. `<project folder>/wrathplus-config/`, dev builds only ([`wrathplus_formats::project_folder`], the
 //!    launcher's): a shipped binary must not carry the build machine's source tree.
 //! 3. `<exe dir>/wrathplus-config/`.
 //!
-//! At either resident root, an existing `benilla-config` wins (even if both names exist).
-//! No state is moved or merged; see [`wrathplus_formats::default_state_home`].
+//! At either resident root a home still under the old name, `benilla-config`, is renamed to
+//! `wrathplus-config` on first use; with both names present the old one is used, unmoved. See
+//! [`wrathplus_formats::default_state_home`].
 //!
 //! With `$WOW_CAPTURE` set every path resolves to `None`: a capture neither reads nor writes
 //! player state.
@@ -17,7 +18,7 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-/// The folder's name: not `benilla`, which beside the binary is the executable itself, and not
+/// The folder's name: not `wrathplus`, which beside the binary is the executable itself, and not
 /// `WTF`, which a real install already uses.
 #[cfg(test)]
 const STATE_DIR: &str = "wrathplus-config";
@@ -29,11 +30,11 @@ pub fn home() -> Option<PathBuf> {
     if std::env::var_os("WOW_CAPTURE").is_some() {
         return None; // hermetic: captures neither read nor write player state
     }
-    if let Some(over) = std::env::var_os("BENILLA_HOME") {
+    if let Some(over) = std::env::var_os("WRATHPLUS_HOME") {
         return Some(PathBuf::from(over));
     }
     if cfg!(test) {
-        return None; // a unit test reaches no real state folder unless it pins `$BENILLA_HOME`
+        return None; // a unit test reaches no real state folder unless it pins `$WRATHPLUS_HOME`
     }
     resident_home()
 }
@@ -200,7 +201,7 @@ pub fn shots_path() -> Option<PathBuf> {
 /// `wrathplus-config/Screenshots/`: where the print-screen key writes, each image once, not through
 /// [`write_atomic`].
 ///
-/// Deviation: the reference writes `Screenshots\\` inside the install, which benilla never writes
+/// Deviation: the reference writes `Screenshots\\` inside the install, which WrathPlus never writes
 /// to; the folder keeps the reference's name.
 pub fn screenshots_dir() -> Option<PathBuf> {
     home().map(|h| h.join("Screenshots"))
@@ -258,7 +259,7 @@ const ADDONS_DIR: &str = "AddOns";
 
 /// The addon folder, `<wrathplus-config>/AddOns/`, or `None` (always under `$WOW_CAPTURE`); addon
 /// textures and fonts resolve onto it too (`ui_script::addons`, the font engine). Deviation: the
-/// reference reads the install's `Interface\AddOns\`; benilla reads an install and does not live
+/// reference reads the install's `Interface\AddOns\`; WrathPlus reads an install and does not live
 /// in one, so its addons live in its own state folder, and only there.
 pub fn addons_root() -> Option<PathBuf> {
     addons_root_from(home())

@@ -182,7 +182,7 @@ fn the_host_reads_the_owner_and_lua_cannot() {
     assert_eq!(s.tooltip_owner_name("TTO"), None, "the hide un-owns");
     assert_eq!(s.tooltip_owner_name("NoSuchTooltip"), None);
     assert_eq!(s.tooltip_owner_name("OwnA"), None, "a Button is no tooltip");
-    for method in ["BenillaGetTooltipOwner", "BenillaSetItemById"] {
+    for method in ["WrathPlusGetTooltipOwner", "WrathPlusSetItemById"] {
         assert!(
             s.eval::<bool>(&format!("return TTO.{method} == nil"))
                 .unwrap(),

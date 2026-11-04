@@ -14,7 +14,7 @@ const BUILD_DATE: &str = "Sep 19 2006";
 pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     let g = lua.globals();
 
-    // `GetLocale()` (glue `0x46ce40`, in-game `0x48d8b0`) returns one string, `enUS`, as benilla
+    // `GetLocale()` (glue `0x46ce40`, in-game `0x48d8b0`) returns one string, `enUS`, as WrathPlus
     // is enUS-only. `IsMacClient()` (`0x48c980`) returns one nil, the PC build's answer, which
     // takes FrameXML's PC key-label arm.
     g.set(
@@ -57,12 +57,12 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     // does, never raising, and stores nothing; all return zero values.
     // - `SetEuropeanNumbers(flag)` (`0x48dec0`): `GetBoolOrDefault(1, true)` into `[0xcf4d24]`,
     //   which turns on `FontString:SetText`'s digit-group pass (`0x771daa` into `0x771c50`).
-    //   benilla's `SetText` has no such pass.
+    //   WrathPlus's `SetText` has no such pass.
     // - `SetLayoutMode(mode)` (`0x488540`): a number truncates into the UI root's `+0xcf8`, anything
     //   else stores 1; read by the root's mouse handler (`0x766301`) for a frame-dragging mode
-    //   benilla does not build.
+    //   WrathPlus does not build.
     // - `SetConsoleKey(key)` (`0x488640`): a one-character or named key becomes the console's
-    //   toggle key (`0x63cb00`), a non-string the default `0x30e`. benilla has no console screen.
+    //   toggle key (`0x63cb00`), a non-string the default `0x30e`. WrathPlus has no console screen.
     for name in ["SetEuropeanNumbers", "SetLayoutMode", "SetConsoleKey"] {
         g.set(
             name,

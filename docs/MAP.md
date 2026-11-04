@@ -7,6 +7,7 @@
 ## Crates
 
 - **wrathplus-adt** (no Bevy) — ADT terrain-tile reader for WoW 3.3.5a (build 12340)
+- **wrathplus-agent** (Bevy) — The client's control port for external agents: Lua, screenshots, events and status over local HTTP
 - **wrathplus-app-core** (Bevy) — The app's core layer: cvars, local state, data configuration and the shared types the other app crates build on
 - **wrathplus-app-net** (Bevy) — The app's net layer: the realm session and the packet handlers that turn server messages into game state
 - **wrathplus-app-tools** (Bevy) — The app's dev instruments: debug panel, perf journal, probes and censuses (mostly behind the dev feature)
@@ -22,6 +23,7 @@
 - **wrathplus-m2** (no Bevy) — M2 (MD20) model reader for WoW 3.3.5a (build 12340)
 - **wrathplus-manager** (no Bevy) — The WrathPlus launcher: client setup, addons and the managed local Playerbots server
 - **wrathplus-mpq** (no Bevy) — Read-only MPQ archive reader for WoW 3.3.5 (build 12340)
+- **wrathplus-nav** (no Bevy) — Pathfinding over AzerothCore's mmaps navmesh tiles, with the server's own Detour
 - **wrathplus-protocol** (no Bevy) — WoW 3.3.5a (build 12340) auth (SRP6) and world wire protocol
 - **wrathplus-srp** (no Bevy) — WoW 3.3.5a (build 12340) SRP6 client and world-header crypto
 - **wrathplus-ui** (no Bevy) — Engine-free WoW UI engine core: TOC and FrameXML parsing, templates, anchors, z-order
@@ -241,6 +243,7 @@
 - UiNativeWhoPlugin
 - UiLayoutPlugin
 - ScreenshotPlugin
+- AgentPlugin
 
 ### Behind the `dev` feature (`crates/wrathplus-app-tools/src/dev.rs` — compiled out by `--no-default-features`)
 
@@ -308,6 +311,7 @@
 ## Modules (top-level, per crate)
 
 - **wrathplus-adt** (lib.rs): combined_alpha 
+- **wrathplus-agent** (lib.rs): env events lua nav server world 
 - **wrathplus-app-core** (lib.rs): app_core area chr_classes crash cvars data_config glue_strings launch_plan local_state pending_item_ops query_cache quest_reputation run_mode shutdown text_filter text_reshape wrath_vehicle_seats 
 - **wrathplus-app-net** (lib.rs): area_trigger creature_type go_templates items name_persist names net realmlist 
 - **wrathplus-app-tools** (lib.rs): addon_harness capture debug_panel dev hover_log perf preflight probe_shield showcase_capture 
@@ -323,8 +327,8 @@
 - **wrathplus-ui** (lib.rs): bindings_xml civil framexml grammar heirloom justify layout loader markup messages order script source status strings toc widget 
 - **wrathplus-visual** (lib.rs): relight 
 - **wrathplus-wmo** (lib.rs): tests 
-- **wrathplus-world** (lib.rs): art_scope assets bgwin billboard boot build_id clean_exit clouds clutter collision decal dev_state doodad_anim entity_shade exterior_cull ffx_glow final_pass frame_pace ground_fx instance_tint interact interior layout_keys light_anim lighting liquid log_ring mac_quit map_proj mat_anim_table material_specialization mesh_tag model_fade model_forms model_render modern_lighting modern_shadows modkeys occluded particles ribbons ride_frame rig_anim rig_palette rig_rider schedule shaders shadow_gpu_smoke sky sky_order skybox static_gx static_merge straddle sun surface terrain_stream thread_qos view vis_chain water_fx wdl weather wmo_portal wmo_unified_gpu_tests world_census world_map world_plugins world_point world_unit worldview zfill 
-- **wrathplus-manager** (main.rs): addons branding build_feedback cli client_actions module_config module_ui modules pages preflight prerequisites server setup style tests update 
+- **wrathplus-world** (lib.rs): art_scope assets bgwin billboard boot build_id clean_exit clouds clutter collision decal dev_state doodad_anim entity_shade exterior_cull ffx_glow final_pass frame_pace ground_fx headless instance_tint interact interior layout_keys light_anim lighting liquid log_ring mac_quit map_proj mat_anim_table material_specialization mesh_tag model_fade model_forms model_render modern_lighting modern_shadows modkeys occluded particles ribbons ride_frame rig_anim rig_palette rig_rider schedule shaders shadow_gpu_smoke sky sky_order skybox static_gx static_merge straddle sun surface terrain_stream thread_qos view vis_chain water_fx wdl weather wmo_portal wmo_unified_gpu_tests world_census world_map world_plugins world_point world_unit worldview zfill 
+- **wrathplus-manager** (main.rs): addons agents branding build_feedback cli client_actions module_config module_ui modules pages preflight prerequisites server setup style tests update 
 
 ## CLI binaries
 
@@ -361,6 +365,9 @@
 > semantics. (The in-window surfaces — the Ctrl+Shift dev-chord overlays — are plugins
 > above; this indexes the switches that don't announce themselves.)
 
+- `WOW_AGENT_PORT` — wrathplus-app-core/src/launch_plan.rs
+- `WOW_AGENT_SCRIPTS` — wrathplus-agent/src/env.rs
+- `WOW_AGENT_TOKEN` — wrathplus-agent/src/lib.rs, wrathplus-manager/src/agents.rs
 - `WOW_ALLOW_ACCOUNT` — wrathplus-app-core/src/run_mode.rs, wrathplus-app-ui/src/login/mod.rs
 - `WOW_AMBIGUITY_DUMP` — wrathplus-app/src/game_plugins.rs
 - `WOW_ANIM_COST` — wrathplus-app-world/src/creature_anim/driver.rs
@@ -410,7 +417,7 @@
 - `WOW_CLAMP_COST` — wrathplus-app-world/src/motion/spline.rs
 - `WOW_CLAMP_SEAT` — wrathplus-app-world/src/motion/spline.rs
 - `WOW_CLAMP_TRACE` — wrathplus-app-world/src/motion/spline.rs
-- `WOW_CLIENT_PROFILE` — wrathplus-formats/src/game_tables.rs, wrathplus-formats/src/profile.rs, wrathplus-formats/src/quest_rewards.rs, wrathplus-formats/src/wrath_layouts.rs, wrathplus-formats/tests/wrath_achievements.rs, wrathplus-formats/tests/wrath_animation_data.rs, wrathplus-formats/tests/wrath_asset_route.rs, wrathplus-formats/tests/wrath_beams.rs, wrathplus-formats/tests/wrath_currencies.rs, wrathplus-formats/tests/wrath_effect_scale.rs, wrathplus-formats/tests/wrath_effects.rs, wrathplus-formats/tests/wrath_enchantments.rs, wrathplus-formats/tests/wrath_glyphs_vehicles.rs, wrathplus-formats/tests/wrath_ground_effects.rs, wrathplus-formats/tests/wrath_heirlooms.rs, wrathplus-formats/tests/wrath_item_limit_category.rs, wrathplus-formats/tests/wrath_lfg.rs, wrathplus-formats/tests/wrath_liquid_catalogs.rs, wrathplus-formats/tests/wrath_material.rs, wrathplus-formats/tests/wrath_mh2o.rs, wrathplus-formats/tests/wrath_multitexture.rs, wrathplus-formats/tests/wrath_ranges.rs, wrathplus-formats/tests/wrath_remaining_dbc.rs, wrathplus-formats/tests/wrath_ribbons.rs, wrathplus-formats/tests/wrath_sound_entries.rs, wrathplus-formats/tests/wrath_spell_family.rs, wrathplus-formats/tests/wrath_spell_visuals.rs, wrathplus-formats/tests/wrath_stage_gap_census.rs, wrathplus-formats/tests/wrath_voice_barber.rs, wrathplus-manager/src/setup.rs, wrathplus-manager/src/setup_tests.rs
+- `WOW_CLIENT_PROFILE` — wrathplus-formats/src/game_tables.rs, wrathplus-formats/src/profile.rs, wrathplus-formats/src/quest_rewards.rs, wrathplus-formats/src/wrath_layouts.rs, wrathplus-formats/tests/wrath_achievements.rs, wrathplus-formats/tests/wrath_animation_data.rs, wrathplus-formats/tests/wrath_asset_route.rs, wrathplus-formats/tests/wrath_beams.rs, wrathplus-formats/tests/wrath_currencies.rs, wrathplus-formats/tests/wrath_effect_scale.rs, wrathplus-formats/tests/wrath_effects.rs, wrathplus-formats/tests/wrath_enchantments.rs, wrathplus-formats/tests/wrath_glyphs_vehicles.rs, wrathplus-formats/tests/wrath_ground_effects.rs, wrathplus-formats/tests/wrath_heirlooms.rs, wrathplus-formats/tests/wrath_item_limit_category.rs, wrathplus-formats/tests/wrath_lfg.rs, wrathplus-formats/tests/wrath_liquid_catalogs.rs, wrathplus-formats/tests/wrath_material.rs, wrathplus-formats/tests/wrath_mh2o.rs, wrathplus-formats/tests/wrath_multitexture.rs, wrathplus-formats/tests/wrath_ranges.rs, wrathplus-formats/tests/wrath_remaining_dbc.rs, wrathplus-formats/tests/wrath_ribbons.rs, wrathplus-formats/tests/wrath_sound_entries.rs, wrathplus-formats/tests/wrath_spell_family.rs, wrathplus-formats/tests/wrath_spell_visuals.rs, wrathplus-formats/tests/wrath_stage_gap_census.rs, wrathplus-formats/tests/wrath_voice_barber.rs, wrathplus-manager/src/agents.rs, wrathplus-manager/src/setup.rs, wrathplus-manager/src/setup_tests.rs
 - `WOW_CLOCK` — wrathplus-world/src/dev_state.rs
 - `WOW_CLOUD_DUMP` — wrathplus-world/src/clouds/mod.rs
 - `WOW_CLUSTERS` — wrathplus-app-world/src/player/setup.rs
@@ -425,7 +432,7 @@
 - `WOW_CULLDUMP` — wrathplus-world/src/wmo_portal/mod.rs
 - `WOW_CULL_TRACE` — wrathplus-world/src/exterior_cull.rs
 - `WOW_CURSOR_TRACE` — wrathplus-app-world/src/cursor.rs
-- `WOW_DATA` — wrathplus-app-core/src/local_state_tests.rs, wrathplus-app-ui/src/ui_script/wrath_framexml_tests.rs, wrathplus-app-ui/src/ui_trainer/wrath_tests.rs, wrathplus-app-world/src/minimap/blips/quest_status_tests.rs, wrathplus-assets/examples/wrath_model.rs, wrathplus-formats/src/game_tables.rs, wrathplus-formats/src/install.rs, wrathplus-formats/src/quest_rewards.rs, wrathplus-formats/src/wrath_layouts.rs, wrathplus-formats/tests/project_folder.rs, wrathplus-formats/tests/wow_data_env.rs, wrathplus-formats/tests/wow_data_none.rs, wrathplus-formats/tests/wrath_achievements.rs, wrathplus-formats/tests/wrath_animation_data.rs, wrathplus-formats/tests/wrath_asset_route.rs, wrathplus-formats/tests/wrath_beams.rs, wrathplus-formats/tests/wrath_currencies.rs, wrathplus-formats/tests/wrath_effect_scale.rs, wrathplus-formats/tests/wrath_effects.rs, wrathplus-formats/tests/wrath_enchantments.rs, wrathplus-formats/tests/wrath_glyphs_vehicles.rs, wrathplus-formats/tests/wrath_ground_effects.rs, wrathplus-formats/tests/wrath_heirlooms.rs, wrathplus-formats/tests/wrath_item_limit_category.rs, wrathplus-formats/tests/wrath_lfg.rs, wrathplus-formats/tests/wrath_liquid_catalogs.rs, wrathplus-formats/tests/wrath_material.rs, wrathplus-formats/tests/wrath_mh2o.rs, wrathplus-formats/tests/wrath_multitexture.rs, wrathplus-formats/tests/wrath_ranges.rs, wrathplus-formats/tests/wrath_remaining_dbc.rs, wrathplus-formats/tests/wrath_ribbons.rs, wrathplus-formats/tests/wrath_sound_entries.rs, wrathplus-formats/tests/wrath_spell_family.rs, wrathplus-formats/tests/wrath_spell_visuals.rs, wrathplus-formats/tests/wrath_stage_gap_census.rs, wrathplus-formats/tests/wrath_voice_barber.rs, wrathplus-manager/src/setup.rs, wrathplus-manager/src/setup_tests.rs
+- `WOW_DATA` — wrathplus-app-core/src/local_state_tests.rs, wrathplus-app-ui/src/ui_script/wrath_framexml_tests.rs, wrathplus-app-ui/src/ui_trainer/wrath_tests.rs, wrathplus-app-world/src/minimap/blips/quest_status_tests.rs, wrathplus-assets/examples/wrath_model.rs, wrathplus-formats/src/game_tables.rs, wrathplus-formats/src/install.rs, wrathplus-formats/src/quest_rewards.rs, wrathplus-formats/src/wrath_layouts.rs, wrathplus-formats/tests/project_folder.rs, wrathplus-formats/tests/wow_data_env.rs, wrathplus-formats/tests/wow_data_none.rs, wrathplus-formats/tests/wrath_achievements.rs, wrathplus-formats/tests/wrath_animation_data.rs, wrathplus-formats/tests/wrath_asset_route.rs, wrathplus-formats/tests/wrath_beams.rs, wrathplus-formats/tests/wrath_currencies.rs, wrathplus-formats/tests/wrath_effect_scale.rs, wrathplus-formats/tests/wrath_effects.rs, wrathplus-formats/tests/wrath_enchantments.rs, wrathplus-formats/tests/wrath_glyphs_vehicles.rs, wrathplus-formats/tests/wrath_ground_effects.rs, wrathplus-formats/tests/wrath_heirlooms.rs, wrathplus-formats/tests/wrath_item_limit_category.rs, wrathplus-formats/tests/wrath_lfg.rs, wrathplus-formats/tests/wrath_liquid_catalogs.rs, wrathplus-formats/tests/wrath_material.rs, wrathplus-formats/tests/wrath_mh2o.rs, wrathplus-formats/tests/wrath_multitexture.rs, wrathplus-formats/tests/wrath_ranges.rs, wrathplus-formats/tests/wrath_remaining_dbc.rs, wrathplus-formats/tests/wrath_ribbons.rs, wrathplus-formats/tests/wrath_sound_entries.rs, wrathplus-formats/tests/wrath_spell_family.rs, wrathplus-formats/tests/wrath_spell_visuals.rs, wrathplus-formats/tests/wrath_stage_gap_census.rs, wrathplus-formats/tests/wrath_voice_barber.rs, wrathplus-manager/src/agents.rs, wrathplus-manager/src/setup.rs, wrathplus-manager/src/setup_tests.rs
 - `WOW_DEPTH` — wrathplus-app-tools/src/capture/depth_probe.rs, wrathplus-app-tools/src/dev.rs, wrathplus-world/src/bgwin.rs
 - `WOW_DEPTH_AFTER` — wrathplus-app-tools/src/capture/depth_probe.rs
 - `WOW_DEPTH_AT` — wrathplus-app-tools/src/capture/depth_probe.rs
@@ -487,6 +494,8 @@
 - `WOW_GX_CENSUS` — wrathplus-world/src/static_gx/cull.rs
 - `WOW_GX_FADE_TRACE` — wrathplus-world/src/static_gx/cull.rs
 - `WOW_GX_PERF` — wrathplus-world/src/static_gx/mod.rs
+- `WOW_HEADLESS` — wrathplus-app-world/src/sound/mod.rs, wrathplus-manager/src/agents.rs, wrathplus-world/src/headless.rs
+- `WOW_HEADLESS_FPS` — wrathplus-world/src/headless.rs
 - `WOW_HIT_COST` — wrathplus-app-ui/src/ui_script/input.rs
 - `WOW_HOST` — wrathplus-app-core/src/launch_plan.rs, wrathplus-app-net/src/realmlist.rs, wrathplus-app/src/game_plugins/client_tests/shipped_cvars.rs, wrathplus-manager/src/setup.rs, wrathplus-manager/src/setup_tests.rs
 - `WOW_HOVER_LOG` — wrathplus-app-tools/src/hover_log.rs
@@ -515,7 +524,7 @@
 - `WOW_LIVE_SHOT_AT` — wrathplus-app-tools/src/capture/live_shot.rs
 - `WOW_LIVE_SHOT_COUNT` — wrathplus-app-tools/src/capture/live_shot.rs
 - `WOW_LIVE_SHOT_EVERY` — wrathplus-app-tools/src/capture/live_shot.rs
-- `WOW_LOCALE` — wrathplus-formats/src/profile.rs, wrathplus-manager/src/setup.rs, wrathplus-manager/src/setup_tests.rs
+- `WOW_LOCALE` — wrathplus-formats/src/profile.rs, wrathplus-manager/src/agents.rs, wrathplus-manager/src/setup.rs, wrathplus-manager/src/setup_tests.rs
 - `WOW_LOGIN_SHOT` — wrathplus-world/src/bgwin.rs
 - `WOW_LOGIN_SHOT_OUT` — wrathplus-app-ui/src/login/screen.rs
 - `WOW_LOGIN_SMOKE` — wrathplus-app-ui/src/char_select/mod.rs, wrathplus-app-ui/src/login/mod.rs, wrathplus-app-ui/src/login/smoke.rs, wrathplus-world/src/bgwin.rs
@@ -549,6 +558,7 @@
 - `WOW_NAME_EL` — wrathplus-app-tools/src/capture/mod.rs
 - `WOW_NAME_H` — wrathplus-app-tools/src/capture/mod.rs
 - `WOW_NATIVE_GLUE` — wrathplus-app-ui/src/ui_script/glue/click_tests.rs, wrathplus-app-ui/src/ui_script/glue/mod.rs
+- `WOW_NAV_MMAPS` — wrathplus-agent/src/nav.rs, wrathplus-manager/src/agents.rs
 - `WOW_NODE_PROBE` — wrathplus-app-tools/src/capture/probes/world_census.rs, wrathplus-app-tools/src/dev.rs, wrathplus-world/src/bgwin.rs
 - `WOW_NONSTOCK_PATCHES` — wrathplus-formats/src/chain.rs
 - `WOW_NOPORTALCULL` — wrathplus-world/src/dev_state.rs
@@ -740,7 +750,7 @@
 - `WOW_WFX_HEAD` — wrathplus-app-tools/src/capture/mod.rs
 - `WOW_WFX_MODE` — wrathplus-app-tools/src/capture/mod.rs
 - `WOW_WFX_SPEED` — wrathplus-app-tools/src/capture/mod.rs
-- `WOW_WIN` — wrathplus-app-world/src/video.rs, wrathplus-world/src/worldview.rs
+- `WOW_WIN` — wrathplus-app-world/src/video.rs, wrathplus-world/src/headless.rs, wrathplus-world/src/worldview.rs
 - `WOW_WMO_BIAS` — wrathplus-world/src/model_render.rs, wrathplus-world/src/static_gx/mod.rs
 - `WOW_WORLDVIEW_` — wrathplus-world/src/bgwin.rs
 - `WOW_WORLDVIEW_AT` — wrathplus-world/src/worldview.rs
@@ -765,7 +775,6 @@
 - `gates.sh` — The land gate chain: every gate in order, stopping at the first failure.
 - `genmap.sh` — Generate docs/MAP.md, the map of what is built, from what is on disk.
 - `probe-identity.sh` — Who a scripted run logs in as; sourced by smoke.sh, cine.sh and summon-live.sh, never run alone.
-- `rename-wrathplus.sh` — The one-shot `benilla-*` → `wrathplus-*` rename (docs/WRATHPLUS-RENAME-PLAN.md, policy in docs/WRATHPLUS-RENAME.md). Re-runnable and idempotent: it mo…
 - `showcase-pair.sh` — Manager-only: invokes an already-built dev-enabled client, never cargo/builds or servers.
 - `smoke.sh` — The clean-run gate: boot the real client, log out, re-enter, walk the realm list, check the log.
 - `soundprobe.sh` — Start the client in sound measuring mode: record the mix before and after the output limiter.

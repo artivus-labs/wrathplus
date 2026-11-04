@@ -56,7 +56,7 @@ pub fn at_requested_dpi(res: WindowResolution) -> WindowResolution {
     }
 }
 
-/// The display modes benilla ships; neither is the reference's mode-setting fullscreen.
+/// The display modes WrathPlus ships; neither is the reference's mode-setting fullscreen.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub(crate) enum DisplayMode {
     /// Borderless, filling the monitor: `gxWindow "0"`, the reference's default.
@@ -344,7 +344,7 @@ pub const CVARS: &[crate::cvars::Registered] = {
             "gxApi",
             "",
             "direct3d",
-            "descriptive, not a selector — benilla renders through wgpu, which has no D3D9 \
+            "descriptive, not a selector — WrathPlus renders through wgpu, which has no D3D9 \
              backend and no chooser; the value is the live adapter's own and is never persisted",
         )
         .latched(),
@@ -395,7 +395,7 @@ pub const CVARS: &[crate::cvars::Registered] = {
         // `0x689510`, record `[0xc7f2a4]`), the Spell Detail slider (`OptionsFrame.lua:32`). The
         // callback's two effects here: the particle emission scalar ([`on_cvar`]) and
         // the dynamic-object shard rate, read at each emitter's spawn (`crate::entities`). Its third,
-        // skipping one M2-scene ground decal below level 2 (`0x672b3a`), has no counterpart: benilla
+        // skipping one M2-scene ground decal below level 2 (`0x672b3a`), has no counterpart: WrathPlus
         // does not draw that projection.
         // Build 12340 registers "9" (`0x78e8f8`) on its 0..9 slider; the particle scalar here
         // follows 1.12's 0..2 scale ([`on_cvar`]), so 3.3.5's scale is not ported.
@@ -419,13 +419,13 @@ pub const CVARS: &[crate::cvars::Registered] = {
         // triple-buffer choice.
         same("gxTripleBuffer", "0").latched(),
         // `gxCursor` (`0x63a906`: name `0x864eb8`, "1", callback `0x63b220` → `+0x05` `[0xc4eb9d]`),
-        // Hardware Cursor. No effect here: benilla always draws the OS cursor (`crate::cursor`) and has
+        // Hardware Cursor. No effect here: WrathPlus always draws the OS cursor (`crate::cursor`) and has
         // no software cursor to fall back to.
         same("gxCursor", "1").latched(),
         // `gxFixLag` (`0x63a9c1`: name `0x864e40`, callback `0x63b310` → `+0x06` `[0xc4eb9e]`), Fix
         // Input Lag: its default is `"%d"` of `VideoHardware.dbc` field 20 (`[[0xc4e6e4]+0x50]`) of the
         // row `DetectHardware` matched, 1 on all three fallback rows (168, 169, 170) a modern GPU can
-        // reach. No effect here: benilla has no such switch in its frame pacing.
+        // reach. No effect here: WrathPlus has no such switch in its frame pacing.
         same("gxFixLag", "1").latched(),
         // `gxRefresh` (`0x63a7e7`: name `0x864fa8`, "75", callback `0x63aed0` → `+0x28`), the refresh
         // dropdown (`OptionsFrame.lua:242-245`, `:300`); the callback accepts only the eleven rates at
@@ -543,7 +543,7 @@ fn offerable(r: ScreenResolution) -> bool {
 
 /// The reference's four hardcoded modes, in its append order (`0x48bda2`, `0x48bddf`, `0x48be43`,
 /// `0x48bea7`), used when no enumerated mode survives [`offerable`]. The reference also takes this
-/// path when `widescreen` (`0x63a747`, default `"1"`) is 0; benilla does not register that CVar.
+/// path when `widescreen` (`0x63a747`, default `"1"`) is 0; WrathPlus does not register that CVar.
 const SCREEN_FALLBACK: [ScreenResolution; 4] = [
     ScreenResolution {
         width: 800,

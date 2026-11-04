@@ -1,4 +1,4 @@
-//! The build stamp: the `build.rs` body the `benilla` and `wrathplus-worldview` launcher shims
+//! The build stamp: the `build.rs` body the `wrathplus` and `wrathplus-worldview` launcher shims
 //! share. It stays a build-dependency of the shims, never of `wrathplus-app`: cargo rebuilds the
 //! package that owns a `rerun-if-changed` path whenever that path's mtime moves, and these paths
 //! move on every commit, rebase and checkout.
@@ -10,14 +10,14 @@ use std::process::Command;
 /// vars, which its `main.rs` reads back with `env!` into a `BuildId`, beside its own
 /// `CARGO_PKG_VERSION`:
 ///
-/// - `BENILLA_GIT_SHA`: the full sha.
-/// - `BENILLA_GIT_SHORT`: git's own abbreviation of it.
-/// - `BENILLA_GIT_DATE`: the commit date (`%cs`, `YYYY-MM-DD`), not the build date.
-/// - `BENILLA_GIT_DESCRIBE`: `git describe --tags --long` against the nearest release tag
+/// - `WRATHPLUS_GIT_SHA`: the full sha.
+/// - `WRATHPLUS_GIT_SHORT`: git's own abbreviation of it.
+/// - `WRATHPLUS_GIT_DATE`: the commit date (`%cs`, `YYYY-MM-DD`), not the build date.
+/// - `WRATHPLUS_GIT_DESCRIBE`: `git describe --tags --long` against the nearest release tag
 ///   (`v0.2.0-12-gb17be27`), which says how far past its release the commit is.
-/// - `BENILLA_PROFILE`: the profile directory's name, which tells `ship` from `release` where
+/// - `WRATHPLUS_PROFILE`: the profile directory's name, which tells `ship` from `release` where
 ///   cargo's `PROFILE` does not.
-/// - `BENILLA_PROJECT_DIR`: the folder a dev build keeps its `WoW` link, `benilla-config/` and
+/// - `WRATHPLUS_PROJECT_DIR`: the folder a dev build keeps its `WoW` link, `wrathplus-config/` and
 ///   `.probe-identity` in, the calling package's workspace root ([`workspace_root`]); empty unless
 ///   the package's own `dev` feature is on, so a player binary carries no source path.
 ///
@@ -61,11 +61,11 @@ pub fn emit() {
     println!("cargo::rerun-if-changed=build.rs");
 
     for (var, args) in [
-        ("BENILLA_GIT_SHA", &["rev-parse", "HEAD"][..]),
-        ("BENILLA_GIT_SHORT", &["rev-parse", "--short", "HEAD"]),
-        ("BENILLA_GIT_DATE", &["log", "-1", "--format=%cs"]),
+        ("WRATHPLUS_GIT_SHA", &["rev-parse", "HEAD"][..]),
+        ("WRATHPLUS_GIT_SHORT", &["rev-parse", "--short", "HEAD"]),
+        ("WRATHPLUS_GIT_DATE", &["log", "-1", "--format=%cs"]),
         (
-            "BENILLA_GIT_DESCRIBE",
+            "WRATHPLUS_GIT_DESCRIBE",
             &["describe", "--tags", "--long", "--match", "v[0-9]*"],
         ),
     ] {
@@ -86,19 +86,19 @@ pub fn emit() {
         .and_then(|i| parts[i].as_os_str().to_str())
         .map(str::to_owned)
         .unwrap_or_else(|| std::env::var("PROFILE").unwrap_or_default());
-    println!("cargo::rustc-env=BENILLA_PROFILE={profile}");
+    println!("cargo::rustc-env=WRATHPLUS_PROFILE={profile}");
 
     let project = if std::env::var_os("CARGO_FEATURE_DEV").is_some() {
         workspace_root(Path::new(&dir)).display().to_string()
     } else {
         String::new()
     };
-    println!("cargo::rustc-env=BENILLA_PROJECT_DIR={project}");
+    println!("cargo::rustc-env=WRATHPLUS_PROJECT_DIR={project}");
 }
 
 /// The workspace root of the package at `manifest_dir`: the nearest folder up from it holding
 /// `Cargo.lock`, which cargo writes at the root before any build script runs, else the package's
-/// own folder. For a launcher inside benilla's checkout that is the checkout.
+/// own folder. For a launcher inside WrathPlus's checkout that is the checkout.
 fn workspace_root(manifest_dir: &Path) -> &Path {
     manifest_dir
         .ancestors()
@@ -112,7 +112,7 @@ mod tests {
 
     #[test]
     fn the_workspace_root_is_the_nearest_folder_holding_the_lockfile() {
-        let tmp = std::env::temp_dir().join(format!("benilla-stamp-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("wrathplus-stamp-{}", std::process::id()));
         let member = tmp.join("ws/crates/launcher");
         std::fs::create_dir_all(&member).unwrap();
         // A lockfile further up belongs to some other tree and must not win over the nearer one.
@@ -124,7 +124,8 @@ mod tests {
         assert_eq!(workspace_root(&member), member);
         std::fs::remove_dir_all(&tmp).ok();
 
-        let bare = std::env::temp_dir().join(format!("benilla-stamp-bare-{}", std::process::id()));
+        let bare =
+            std::env::temp_dir().join(format!("wrathplus-stamp-bare-{}", std::process::id()));
         std::fs::create_dir_all(&bare).unwrap();
         let root = workspace_root(&bare);
         assert!(
@@ -135,13 +136,13 @@ mod tests {
         std::fs::remove_dir_all(&bare).ok();
     }
 
-    /// benilla's own launchers stamp the checkout, the folder a dev build always used.
+    /// WrathPlus's own launchers stamp the checkout, the folder a dev build always used.
     #[test]
     fn a_launcher_in_this_checkout_stamps_the_checkout() {
         let shim = Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .unwrap()
-            .join("benilla");
+            .join("wrathplus");
         let checkout = Path::new(env!("CARGO_MANIFEST_DIR"))
             .ancestors()
             .nth(2)

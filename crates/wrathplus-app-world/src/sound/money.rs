@@ -5,7 +5,7 @@
 //!
 //! The first value after login or reconnect seeds without playing; whether the reference's watcher
 //! fires on the login set is untraced. Deviation: the reference also plays an optimistic coin at
-//! the loot-money click, so looted money sounds twice; benilla plays the watcher's coin alone,
+//! the loot-money click, so looted money sounds twice; WrathPlus plays the watcher's coin alone,
 //! because one coin on the confirmed change reads cleanly and the round trip the early coin hides
 //! is imperceptible on a local server.
 

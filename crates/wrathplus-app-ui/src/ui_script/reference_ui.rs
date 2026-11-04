@@ -277,13 +277,13 @@ mod tests {
             .eval::<bool>("return type(PaperDollItemSlotButton_OnLoad) == \"function\"")
             .unwrap());
 
-        // The character sheet runs the stock bodies alone, with no `BenillaPaperDollSlot_OnLoad`.
+        // The character sheet runs the stock bodies alone, with no `WrathPlusPaperDollSlot_OnLoad`.
         assert!(
             s.eval::<bool>(
                 "return type(PaperDollFrame_SetLevel) == \"function\" \
                  and type(CHARACTERFRAME_SUBFRAMES) == \"table\" \
                  and table.getn(CHARACTERFRAME_SUBFRAMES) == 5 \
-                 and BenillaPaperDollSlot_OnLoad == nil"
+                 and WrathPlusPaperDollSlot_OnLoad == nil"
             )
             .unwrap(),
             "the character sheet's bodies must be the reference's own now"
@@ -1166,7 +1166,7 @@ mod tests {
             // ── The stock `UIParent.lua`'s listeners first, then the other files' ──
             (
                 "ADDON_ACTION_FORBIDDEN",
-                "UIParent.lua — the protected-action refusal; benilla has no protected-call \
+                "UIParent.lua — the protected-action refusal; WrathPlus has no protected-call \
                  taint model, so nothing can raise it",
             ),
             (
@@ -1184,11 +1184,11 @@ mod tests {
             (
                 "GOSSIP_ENTER_CODE",
                 "UIParent.lua — the code-entry gossip option (a door with a combination); \
-                 benilla's gossip feed carries no code-entry option kind yet",
+                 WrathPlus's gossip feed carries no code-entry option kind yet",
             ),
             (
                 "PLAYER_SKINNED",
-                "UIParent.lua — the corpse-skinned notice; benilla's loot feed does not derive it",
+                "UIParent.lua — the corpse-skinned notice; WrathPlus's loot feed does not derive it",
             ),
             (
                 "TRADE_REQUEST",
@@ -1196,18 +1196,18 @@ mod tests {
                  UNPRODUCEABLE rather than unbuilt: the 5875 client registers the event and \
                  signals it from NOWHERE (a whole-image census: no signal site passes its id, \
                  `0x11d`), so StaticPopupDialogs[\"TRADE\"] is \
-                 dead code THERE too, and benilla leaves it unproduced: \
+                 dead code THERE too, and WrathPlus leaves it unproduced: \
                  producing this would be a divergence, not a fix",
             ),
             (
                 "TRADE_REPLACE_ENCHANT",
-                "UIParent.lua — the enchant-replacement confirm inside a trade; benilla's trade \
+                "UIParent.lua — the enchant-replacement confirm inside a trade; WrathPlus's trade \
                  feed does not derive it",
             ),
             (
                 "CLOSE_WORLD_MAP",
                 "WorldMapFrame.lua — the engine-side close the reference fires when the map is \
-                 shut from outside its own frame; benilla closes the map through the frame's own \
+                 shut from outside its own frame; WrathPlus closes the map through the frame's own \
                  hide path only",
             ),
             ("DISPLAY_SIZE_CHANGED", "the four paperdoll files"),
@@ -1220,7 +1220,7 @@ mod tests {
                 "PaperDollFrame.lua — the second `TRADE_REQUEST`: event 377 is \
                  registered in 5875 and signalled from NOWHERE (zero fire sites in the whole \
                  image), so this listener is dead code THERE \
-                 too. benilla once fired it, and later drove the plates itself on a \
+                 too. WrathPlus once fired it, and later drove the plates itself on a \
                  shift-held hover; both were supersets. Nothing in this engine seats a \
                  shopping plate now — the reference's own callers do (`MerchantFrame.xml:63-80`, \
                  the auction rows), which is the whole of the compare in 1.12.1. Producing this \
@@ -1231,7 +1231,7 @@ mod tests {
             (
                 "UNIT_QUEST_LOG_CHANGED",
                 "QuestLogFrame.lua — a party member's quest-log fields changing (the reference \
-                 fires it off the unit's PLAYER_QUEST_LOG_* descriptor updates); benilla's unit \
+                 fires it off the unit's PLAYER_QUEST_LOG_* descriptor updates); WrathPlus's unit \
                  feed does not derive it yet",
             ),
             (
@@ -1328,7 +1328,7 @@ mod tests {
         );
     }
 
-    /// Every event benilla fires exists in the 1.12 client: an event it can dispatch is a
+    /// Every event WrathPlus fires exists in the 1.12 client: an event it can dispatch is a
     /// NUL-terminated string in `WoW.exe`, and a name missing there no stock listener can ever
     /// receive. Test files are skipped; they fire synthetic names (`E3`) on purpose.
     #[test]
@@ -1389,8 +1389,8 @@ mod tests {
 
         let ghosts: Vec<String> = fired
             .iter()
-            // A `BENILLA_` prefix marks an event as ours, never mistaken for a client name.
-            .filter(|(ev, _)| !ev.starts_with("BENILLA_"))
+            // A `WRATHPLUS_` prefix marks an event as ours, never mistaken for a client name.
+            .filter(|(ev, _)| !ev.starts_with("WRATHPLUS_"))
             .filter(|(ev, _)| {
                 let needle: Vec<u8> = ev.bytes().chain(std::iter::once(0)).collect();
                 !bytes.windows(needle.len()).any(|w| w == needle)
@@ -1399,7 +1399,7 @@ mod tests {
             .collect();
         assert!(
             ghosts.is_empty(),
-            "benilla fires {} event(s) the 12340 client does not have — a 1.12 name, or one \
+            "WrathPlus fires {} event(s) the 12340 client does not have — a 1.12 name, or one \
              invented here. Nothing in the stock UI can ever listen for these:\n  {}",
             ghosts.len(),
             ghosts.join("\n  ")

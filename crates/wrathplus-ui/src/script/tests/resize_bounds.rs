@@ -231,7 +231,7 @@ fn a_center_grip_moves_the_frame_and_ignores_the_bounds() {
 fn the_xml_element_writes_both_pairs() {
     let mut s = UiScript::new().unwrap();
     s.set_screen_size(1024.0, 768.0);
-    let doc = benilla_ui_doc(
+    let doc = wrathplus_ui_doc(
         r#"
         <Frame name="Chatty" resizable="true">
           <Size><AbsDimension x="400" y="200"/></Size>
@@ -256,7 +256,7 @@ fn the_xml_element_writes_both_pairs() {
     // An authored `<Size>` outside the bounds survives load unclamped.
     assert_eq!(s.eval::<f32>("return Chatty:GetWidth()").unwrap(), 400.0);
 
-    let partial = benilla_ui_doc(
+    let partial = wrathplus_ui_doc(
         r#"
         <Frame name="Half" resizable="true">
           <ResizeBounds><minResize><AbsDimension x="10" y="20"/></minResize></ResizeBounds>
@@ -276,7 +276,7 @@ fn the_xml_element_writes_both_pairs() {
 }
 
 /// Wrap a fragment in the `<Ui>` root the parser wants.
-fn benilla_ui_doc(body: &str) -> String {
+fn wrathplus_ui_doc(body: &str) -> String {
     format!("<Ui>{body}</Ui>")
 }
 

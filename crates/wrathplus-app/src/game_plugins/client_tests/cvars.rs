@@ -690,13 +690,13 @@ fn a_change_saves_after_one_quiet_second_with_no_exit() {
     let _l = ENV_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let tmp = std::env::temp_dir().join(format!("benilla-cvar-quiet-{}", std::process::id()));
+    let tmp = std::env::temp_dir().join(format!("wrathplus-cvar-quiet-{}", std::process::id()));
     std::fs::remove_dir_all(&tmp).ok();
     let _c = EnvGuard::unset("WOW_CAPTURE");
     let _u = EnvGuard::unset("WOW_UI_SCALE");
     let _f = EnvGuard::unset("WOW_FARCLIP");
     let _d = EnvGuard::unset("WOW_CLUTTER_DENSITY");
-    let _h = EnvGuard::set("BENILLA_HOME", tmp.to_str().unwrap());
+    let _h = EnvGuard::set("WRATHPLUS_HOME", tmp.to_str().unwrap());
 
     let mut app = cvar_app();
     app.update();
@@ -730,13 +730,13 @@ fn a_lua_setcvar_lands_in_config_toml_end_to_end() {
     let _l = ENV_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let tmp = std::env::temp_dir().join(format!("benilla-cvar-e2e-{}", std::process::id()));
+    let tmp = std::env::temp_dir().join(format!("wrathplus-cvar-e2e-{}", std::process::id()));
     std::fs::remove_dir_all(&tmp).ok();
     let _c = EnvGuard::unset("WOW_CAPTURE");
     let _u = EnvGuard::unset("WOW_UI_SCALE");
     let _f = EnvGuard::unset("WOW_FARCLIP");
     let _d = EnvGuard::unset("WOW_CLUTTER_DENSITY");
-    let _h = EnvGuard::set("BENILLA_HOME", tmp.to_str().unwrap());
+    let _h = EnvGuard::set("WRATHPLUS_HOME", tmp.to_str().unwrap());
     crate::local_state::write_atomic(&tmp.join("config.toml"), "[cvars]\nMusicVolume = \"0.1\"\n")
         .unwrap();
 
@@ -959,7 +959,7 @@ pub(super) fn res<T: Resource>(app: &App) -> &T {
     app.world().resource::<T>()
 }
 
-/// The last character entered survives a quit: two launches over one `benilla-config/` with the
+/// The last character entered survives a quit: two launches over one `wrathplus-config/` with the
 /// real [`CvarPlugin`] and [`crate::char_select`] systems, so the screen's host write must
 /// reach the file through the registry's dirty/compose path.
 #[test]
@@ -970,7 +970,7 @@ fn entering_the_world_survives_the_quit_and_comes_back_selected() {
     let _l = ENV_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let tmp = std::env::temp_dir().join(format!("benilla-lastchar-{}", std::process::id()));
+    let tmp = std::env::temp_dir().join(format!("wrathplus-lastchar-{}", std::process::id()));
     std::fs::remove_dir_all(&tmp).ok();
     let _c = EnvGuard::unset("WOW_CAPTURE");
     let _u = EnvGuard::unset("WOW_UI_SCALE");
@@ -978,7 +978,7 @@ fn entering_the_world_survives_the_quit_and_comes_back_selected() {
     let _d = EnvGuard::unset("WOW_CLUTTER_DENSITY");
     let _w = EnvGuard::unset("WOW_CHAR");
     let _s = EnvGuard::unset("WOW_CHARSELECT_PICK");
-    let _h = EnvGuard::set("BENILLA_HOME", tmp.to_str().unwrap());
+    let _h = EnvGuard::set("WRATHPLUS_HOME", tmp.to_str().unwrap());
     let roster = || {
         (1..=4)
             .map(|g| crate::char_select::test_character(g, &format!("Char{g}")))
@@ -1042,13 +1042,13 @@ fn a_minimap_setzoom_reaches_the_knob_and_the_file() {
     let _l = ENV_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let tmp = std::env::temp_dir().join(format!("benilla-mmzoom-{}", std::process::id()));
+    let tmp = std::env::temp_dir().join(format!("wrathplus-mmzoom-{}", std::process::id()));
     std::fs::remove_dir_all(&tmp).ok();
     let _c = EnvGuard::unset("WOW_CAPTURE");
     let _u = EnvGuard::unset("WOW_UI_SCALE");
     let _f = EnvGuard::unset("WOW_FARCLIP");
     let _d = EnvGuard::unset("WOW_CLUTTER_DENSITY");
-    let _h = EnvGuard::set("BENILLA_HOME", tmp.to_str().unwrap());
+    let _h = EnvGuard::set("WRATHPLUS_HOME", tmp.to_str().unwrap());
     // The previous session left the outdoor map zoomed right in.
     crate::local_state::write_atomic(&tmp.join("config.toml"), "[cvars]\nminimapZoom = \"5\"\n")
         .unwrap();
@@ -1304,14 +1304,14 @@ fn the_loaded_file_reaches_a_knob_before_anything_ordered_after_cvar_load() {
     let _l = ENV_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let tmp = std::env::temp_dir().join(format!("benilla-cvar-load-{}", std::process::id()));
+    let tmp = std::env::temp_dir().join(format!("wrathplus-cvar-load-{}", std::process::id()));
     std::fs::remove_dir_all(&tmp).ok();
     let _c = EnvGuard::unset("WOW_CAPTURE");
     let _u = EnvGuard::unset("WOW_UI_SCALE");
     let _f = EnvGuard::unset("WOW_FARCLIP");
     let _d = EnvGuard::unset("WOW_CLUTTER_DENSITY");
     let _m = EnvGuard::unset("WOW_MSAA");
-    let _h = EnvGuard::set("BENILLA_HOME", tmp.to_str().unwrap());
+    let _h = EnvGuard::set("WRATHPLUS_HOME", tmp.to_str().unwrap());
     crate::local_state::write_atomic(
         &tmp.join("config.toml"),
         "[cvars]\nMusicVolume = \"0.1\"\ngxMultisample = \"4\"\n",
@@ -1474,13 +1474,13 @@ fn the_v_keys_move_the_plate_cvars_and_the_plates_follow() {
     let _l = ENV_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let tmp = std::env::temp_dir().join(format!("benilla-cvar-vkeys-{}", std::process::id()));
+    let tmp = std::env::temp_dir().join(format!("wrathplus-cvar-vkeys-{}", std::process::id()));
     std::fs::remove_dir_all(&tmp).ok();
     let _c = EnvGuard::unset("WOW_CAPTURE");
     let _u = EnvGuard::unset("WOW_UI_SCALE");
     let _f = EnvGuard::unset("WOW_FARCLIP");
     let _d = EnvGuard::unset("WOW_CLUTTER_DENSITY");
-    let _h = EnvGuard::set("BENILLA_HOME", tmp.to_str().unwrap());
+    let _h = EnvGuard::set("WRATHPLUS_HOME", tmp.to_str().unwrap());
 
     let mut app = cvar_app();
     app.update();

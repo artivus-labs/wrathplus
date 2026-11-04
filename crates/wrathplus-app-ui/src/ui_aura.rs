@@ -499,7 +499,7 @@ fn feed_auras(
     memo.tracking_last = tracking_key;
     memo.present = true;
 
-    if changed && std::env::var_os("BENILLA_AURA_DUMP").is_some() {
+    if changed && std::env::var_os("WRATHPLUS_AURA_DUMP").is_some() {
         info!("aura dump: {} aura(s) on the player bar", cache.auras.len());
         for c in &cache.auras {
             let name = catalog
@@ -570,7 +570,7 @@ fn feed_auras(
         },
     );
 
-    if unit_changed.contains(&"target") && std::env::var_os("BENILLA_AURA_DUMP").is_some() {
+    if unit_changed.contains(&"target") && std::env::var_os("WRATHPLUS_AURA_DUMP").is_some() {
         let l = if target_guid == self_guid.0 {
             Some(list.as_slice())
         } else {

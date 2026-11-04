@@ -61,7 +61,7 @@ fn water_splashes(
         // Any crossing splashes; a first-seen unit arms silently. A crossing while the unit's last
         // splash still sounds is dropped, so a jump's quick double crossing splashes once, as in
         // the reference. The reference routes the splash through the unit's emitter
-        // (`[CGUnit+0xb18]`); a busy emitter suppressing it is benilla's model of that.
+        // (`[CGUnit+0xb18]`); a busy emitter suppressing it is WrathPlus's model of that.
         if was.is_some_and(|w| w != submerged) && !source_kit_playing(&out, entity, SPLASH_KIT) {
             if let Err(e) = play_kit_ext(
                 &mut kits,

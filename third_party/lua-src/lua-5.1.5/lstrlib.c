@@ -167,7 +167,7 @@ static int str_dump (lua_State *L) {
 #define CAP_UNFINISHED	(-1)
 #define CAP_POSITION	(-2)
 
-/* BENILLA: deterministic limits for one public matcher invocation (see BENILLA.md). */
+/* WRATHPLUS: deterministic limits for one public matcher invocation (see WRATHPLUS.md). */
 #define WRATH_MATCH_STEPS	100000000
 #define WRATH_MATCH_DEPTH	200
 

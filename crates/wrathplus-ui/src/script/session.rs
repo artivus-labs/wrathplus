@@ -36,7 +36,7 @@ impl super::UiScript {
         std::mem::take(&mut self.model_mut().session_requests)
     }
 
-    /// Queue an intent from the app: `/logout`, `/camp`, `/quit` and `/reload`, which benilla
+    /// Queue an intent from the app: `/logout`, `/camp`, `/quit` and `/reload`, which WrathPlus
     /// parses in Rust rather than through `SlashCmdList`, take their Lua verbs' route this way.
     pub fn queue_session_request(&mut self, request: SessionRequest) {
         self.model_mut().session_requests.push(request);

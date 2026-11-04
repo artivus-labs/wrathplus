@@ -260,27 +260,28 @@ using its checkout-local home selected below; it does not migrate the old script
 
 Fresh installations use `wrathplus-config/`, with addons in `wrathplus-config/AddOns/`.
 The runtime selects the primary checkout for development builds (shared across linked
-worktrees), or the executable directory for player builds. At that root an existing
-`benilla-config` entry takes precedence, **even when both names exist**. The entire selected
-home is used for reads and writes: CVars, account/realmlist login state, macros, bindings,
-addon enable state, SavedVariables, AddOns, screenshots/logs, `manager.json` and
-`manager-addons.json`. There is no per-file fallback or automatic copy, merge, move or deletion.
-An invalid/unreadable legacy entry fails normally rather than silently selecting a fresh home.
+worktrees), or the executable directory for player builds. The entire home is used for reads
+and writes: CVars, account/realmlist login state, macros, bindings, addon enable state,
+SavedVariables, AddOns, screenshots/logs, `manager.json` and `manager-addons.json`.
+
+A home still under the folder's old name, `benilla-config/`, is renamed to `wrathplus-config/`
+the first time the Manager or a client resolves it, and the absolute paths Manager stored in its
+JSON files (module and addon sources, build receipts) are rewritten to the new name. Stop the
+realm, clients and agents first: they hold paths into the old folder. The old home is used as it
+is, unmoved, when both names exist (resolve them offline with backups; do not merge blindly),
+when the old name is a symlink, or when the rename fails. An invalid/unreadable old entry fails
+normally rather than silently selecting a fresh home.
 
 Manager uses the same naming rule under its selected checkout, including when restoring old
-`manager.json` at startup, and explicitly passes that selected home as `BENILLA_HOME` to the
-game. Inherited `BENILLA_HOME` is intentionally not imported by Manager. Direct client launches
-still honor an explicit `BENILLA_HOME` exactly (including an empty value); no `WRATHPLUS_HOME`
-alias is introduced. `WOW_CAPTURE` continues to disable all client player-state access.
+`manager.json` at startup, and explicitly passes that selected home as `WRATHPLUS_HOME` to the
+game. Inherited `WRATHPLUS_HOME` is intentionally not imported by Manager. Direct client launches
+still honor an explicit `WRATHPLUS_HOME` exactly (including an empty value). The variable was
+`BENILLA_HOME` before; the old name is not read. `WOW_CAPTURE` continues to disable all client
+player-state access.
 Private `.azerothbench-test.env` login prefill remains at the checkout root and is unchanged.
 
-To adopt the new name for existing state, first stop **all clients and Managers** using the
-home, back it up, then manually rename the **whole** `benilla-config` directory to
-`wrathplus-config`, only if the destination does not exist. If both exist, retain both and
-resolve them offline with backups; do not overwrite or merge blindly. Update any explicit
-`BENILLA_HOME` paths or custom addon source paths pointing inside the renamed directory.
-External managed addon symlink targets and JSON schemas are unchanged. No migration is
-performed while a client may be running; this change itself touches no real state directory.
+Update any explicit `WRATHPLUS_HOME` paths, launch scripts or custom addon source paths that
+point inside the old folder.
 
 ## Addons and custom source folders
 

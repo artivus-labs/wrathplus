@@ -3,7 +3,7 @@
 	"Server" field, the row under Password in the stock boxes' style, holding the address the
 	login dials (host or host:port; the port defaults to 3724, and the
 	tooltip says so). Stock 3.3.5 has no such control; its realmlist is realmlist.wtf.
-	Leaving the field after an edit keeps it in $BENILLA_HOME/realmlist.wtf, searched before the
+	Leaving the field after an edit keeps it in $WRATHPLUS_HOME/realmlist.wtf, searched before the
 	install's; an address the client cannot use is refused with a dialog and the field reverts.
 	A launch with the server flag (or WOW_HOST) pins the address for the session: the field then
 	shows it, greyed and read-only.
@@ -11,11 +11,11 @@
 <Ui xmlns="http://www.blizzard.com/wow/ui/">
 	<Script>
 		-- The field's tooltip: a colon and a port are allowed, for servers off the default port.
-		BENILLA_SERVER_FIELD_HINT = "Logon server: host or host:port\n(the port defaults to 3724)";
+		WRATHPLUS_SERVER_FIELD_HINT = "Logon server: host or host:port\n(the port defaults to 3724)";
 
 		-- The saved address, and whether the launch pins it, into the field.
-		function BenillaServerField_Refresh(self)
-			local address, pinned = BenillaGetRealmlist();
+		function WrathPlusServerField_Refresh(self)
+			local address, pinned = WrathPlusGetRealmlist();
 			self:SetText(address or "");
 			self.committed = address;
 			-- Read-only while pinned: the field takes no focus, greyed (an EditBox has no Disable).
@@ -29,11 +29,11 @@
 				AccountLoginServerEditLabel:SetText("Server");
 			end
 		end
-		-- Leaving the field commits an edit; the host answers with BENILLA_REALMLIST_CHANGED.
-		function BenillaServerField_Commit(self)
+		-- Leaving the field commits an edit; the host answers with WRATHPLUS_REALMLIST_CHANGED.
+		function WrathPlusServerField_Commit(self)
 			local text = self:GetText();
 			if ( not self.pinned and text ~= self.committed ) then
-				BenillaSetRealmlist(text);
+				WrathPlusSetRealmlist(text);
 			end
 		end
 	</Script>
@@ -82,20 +82,20 @@
 				local backdropColor = DEFAULT_TOOLTIP_COLOR;
 				self:SetBackdropBorderColor(backdropColor[1], backdropColor[2], backdropColor[3]);
 				self:SetBackdropColor(backdropColor[4], backdropColor[5], backdropColor[6]);
-				self:RegisterEvent("BENILLA_REALMLIST_CHANGED");
+				self:RegisterEvent("WRATHPLUS_REALMLIST_CHANGED");
 			</OnLoad>
 			<OnEnter>
 				GlueTooltip_SetOwner(self);
-				GlueTooltip_SetText(BENILLA_SERVER_FIELD_HINT, nil, 1.0, 1.0, 1.0);
+				GlueTooltip_SetText(WRATHPLUS_SERVER_FIELD_HINT, nil, 1.0, 1.0, 1.0);
 			</OnEnter>
 			<OnLeave>
 				GlueTooltip:Hide();
 			</OnLeave>
 			<OnShow>
-				BenillaServerField_Refresh(self);
+				WrathPlusServerField_Refresh(self);
 			</OnShow>
 			<OnEvent>
-				BenillaServerField_Refresh(self);
+				WrathPlusServerField_Refresh(self);
 			</OnEvent>
 			<OnEnterPressed>
 				self:ClearFocus();
@@ -104,7 +104,7 @@
 				AccountLogin_FocusAccountName();
 			</OnTabPressed>
 			<OnEscapePressed>
-				BenillaServerField_Refresh(self);
+				WrathPlusServerField_Refresh(self);
 				self:ClearFocus();
 			</OnEscapePressed>
 			<OnEditFocusGained>
@@ -116,7 +116,7 @@
 			</OnEditFocusGained>
 			<OnEditFocusLost>
 				self:HighlightText(0, 0);
-				BenillaServerField_Commit(self);
+				WrathPlusServerField_Commit(self);
 			</OnEditFocusLost>
 		</Scripts>
 		<FontString inherits="GlueEditBoxFont"/>

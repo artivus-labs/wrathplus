@@ -1,4 +1,4 @@
-//! The macro wiring: persistence under `benilla-config/macros/`, the runner's route through the
+//! The macro wiring: persistence under `wrathplus-config/macros/`, the runner's route through the
 //! stock chat frame, and the seed and dirty contract the plugin's systems rely on.
 
 use wrathplus_ui::script::{MacroState, MacroView, UiScript};
@@ -23,16 +23,16 @@ fn character_view(name: &str, body: &str) -> MacroView {
     }
 }
 
-/// A save writes the reference's format under `benilla-config/macros/`, and a load reads it back.
+/// A save writes the reference's format under `wrathplus-config/macros/`, and a load reads it back.
 #[test]
-fn a_saved_macro_table_round_trips_through_benilla_macros() {
+fn a_saved_macro_table_round_trips_through_wrathplus_macros() {
     let _l = ENV_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let tmp = std::env::temp_dir().join(format!("benilla-macros-{}", std::process::id()));
+    let tmp = std::env::temp_dir().join(format!("wrathplus-macros-{}", std::process::id()));
     std::fs::remove_dir_all(&tmp).ok();
     let _c = EnvGuard::unset("WOW_CAPTURE");
-    let _h = EnvGuard::set("BENILLA_HOME", tmp.to_str().unwrap());
+    let _h = EnvGuard::set("WRATHPLUS_HOME", tmp.to_str().unwrap());
 
     let account = crate::local_state::macros_account_path().unwrap();
     let character = crate::local_state::macros_character_path("Test Realm", "Probeone").unwrap();
@@ -67,7 +67,7 @@ fn a_capture_run_persists_nothing() {
     let _l = ENV_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let _h = EnvGuard::set("BENILLA_HOME", "/tmp/benilla-should-not-exist");
+    let _h = EnvGuard::set("WRATHPLUS_HOME", "/tmp/wrathplus-should-not-exist");
     let _c = EnvGuard::set("WOW_CAPTURE", "ui-macro");
     assert_eq!(crate::local_state::macros_account_path(), None);
     assert_eq!(crate::local_state::macros_character_path("R", "C"), None);

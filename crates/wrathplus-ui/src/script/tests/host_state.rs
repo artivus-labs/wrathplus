@@ -1,7 +1,7 @@
 //! The host's state lives off `_G`: the client's global table has no name for the clock, the zone
 //! caches, the game clock or the error-handler slot, and the
 //! getters over them read the client's own state, which Lua cannot reach. So a global an addon
-//! assigns under one of benilla's old host names is a global no getter reads.
+//! assigns under one of WrathPlus's old host names is a global no getter reads.
 
 use super::common::script;
 use crate::script::{ActionState, AuraState, UiScript};
@@ -10,58 +10,58 @@ use crate::script::{ActionState, AuraState, UiScript};
 /// is read before and after the write; the two must agree, and the name must be absent from `_G`.
 const HOST_NAMES: &[(&str, &str, &str)] = &[
     (
-        "__benilla_now",
-        "__benilla_now = 0",
+        "__wrathplus_now",
+        "__wrathplus_now = 0",
         "return GetTime() .. ' ' .. GetPlayerBuffTimeLeft(0)",
     ),
     (
-        "__benilla_zone_name",
-        "__benilla_zone_name = 'x'",
+        "__wrathplus_zone_name",
+        "__wrathplus_zone_name = 'x'",
         "return GetZoneText()",
     ),
     (
-        "__benilla_real_zone_name",
-        "__benilla_real_zone_name = 'x'",
+        "__wrathplus_real_zone_name",
+        "__wrathplus_real_zone_name = 'x'",
         "return GetRealZoneText()",
     ),
     (
-        "__benilla_subzone_name",
-        "__benilla_subzone_name = 'x'",
+        "__wrathplus_subzone_name",
+        "__wrathplus_subzone_name = 'x'",
         "return GetSubZoneText()",
     ),
     (
-        "__benilla_zone_text",
-        "__benilla_zone_text = 'x'",
+        "__wrathplus_zone_text",
+        "__wrathplus_zone_text = 'x'",
         "return GetMinimapZoneText()",
     ),
     (
-        "__benilla_pvp_type",
-        "__benilla_pvp_type = 'hostile'",
+        "__wrathplus_pvp_type",
+        "__wrathplus_pvp_type = 'hostile'",
         "return tostring((GetZonePVPInfo()))",
     ),
     (
-        "__benilla_pvp_faction",
-        "__benilla_pvp_faction = 'Horde'",
+        "__wrathplus_pvp_faction",
+        "__wrathplus_pvp_faction = 'Horde'",
         "local _, f = GetZonePVPInfo() return tostring(f)",
     ),
     (
-        "__benilla_pvp_arena",
-        "__benilla_pvp_arena = true",
+        "__wrathplus_pvp_arena",
+        "__wrathplus_pvp_arena = true",
         "local _, _, a = GetZonePVPInfo() return tostring(a)",
     ),
     (
-        "__benilla_game_hour",
-        "__benilla_game_hour = 13",
+        "__wrathplus_game_hour",
+        "__wrathplus_game_hour = 13",
         "local h, m = GetGameTime() return h .. ':' .. m",
     ),
     (
-        "__benilla_game_minute",
-        "__benilla_game_minute = 59",
+        "__wrathplus_game_minute",
+        "__wrathplus_game_minute = 59",
         "local h, m = GetGameTime() return h .. ':' .. m",
     ),
     (
-        "__benilla_script_error",
-        "__benilla_script_error = function() ErrorSinkHit = 1 end",
+        "__wrathplus_script_error",
+        "__wrathplus_script_error = function() ErrorSinkHit = 1 end",
         "local h = geterrorhandler() if h then pcall(h, 'probe') end \
          return tostring(ErrorSinkHit)",
     ),
@@ -109,7 +109,7 @@ fn a_host_name_is_absent_from_g_and_writing_it_changes_nothing() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
-/// The clock an addon cannot rewind: after `__benilla_now = 0`, the next tick advances `GetTime`
+/// The clock an addon cannot rewind: after `__wrathplus_now = 0`, the next tick advances `GetTime`
 /// from where it was, and every countdown on it (a buff's time left, an action's cooldown) reads
 /// on as before.
 #[test]
@@ -131,7 +131,7 @@ fn rewinding_the_old_clock_name_leaves_the_session_clock_running() {
     };
     let (t0, left0, cd0) = read(&s);
     assert_eq!((t0, left0, cd0), (500.5, 1199.5, 520.0));
-    s.run("__benilla_now = 0").unwrap();
+    s.run("__wrathplus_now = 0").unwrap();
     s.tick(0.25);
     let (t1, left1, cd1) = read(&s);
     assert_eq!(t1, 500.75, "the tick advances from the session clock");

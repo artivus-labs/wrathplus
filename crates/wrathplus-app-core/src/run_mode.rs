@@ -154,7 +154,7 @@ pub fn free_fly_hint() -> String {
 /// This crate's source directory on a dev build, `None` in a player build. The `cfg` must be real,
 /// not a runtime check: `env!("CARGO_MANIFEST_DIR")` names the build machine, and the literal must
 /// be absent from a player binary. Read by [`crate::ui_script`] for the live `assets/ui`, which are
-/// benilla's own files whoever the launcher is; the launcher's folder is
+/// WrathPlus's own files whoever the launcher is; the launcher's folder is
 /// [`wrathplus_formats::project_folder`]. Held by [`tests::the_dev_plane_has_exactly_one_door`].
 pub fn dev_source_dir() -> Option<&'static std::path::Path> {
     #[cfg(feature = "dev")]

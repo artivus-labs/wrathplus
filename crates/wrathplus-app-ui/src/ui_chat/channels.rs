@@ -353,7 +353,7 @@ fn apply_walk(steps: &[WalkStep], channels: &mut ChannelState, commands: &NetCom
     names_moved
 }
 
-/// Whether the zone under the player is final: an active avatar done settling, benilla's stand-in
+/// Whether the zone under the player is final: an active avatar done settling, WrathPlus's stand-in
 /// for the loading screen the reference walks after.
 fn zone_is_settled(player: Option<&crate::app_core::player::Player>) -> bool {
     player.is_some_and(|p| p.active && !p.settling)

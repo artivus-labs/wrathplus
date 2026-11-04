@@ -4,11 +4,11 @@
 //!
 //! The reference writes `WTF/Account/<ACC>/<REALM>/<CHAR>/layout-cache.txt` with `Frame:`,
 //! `FrameLevel:`, `X:`, `Y:`, `W:` and `H:` lines; ours is
-//! `benilla-config/layout/<realm>-<character>.txt`, keeping `Frame:`, `W:` and `H:`.
+//! `wrathplus-config/layout/<realm>-<character>.txt`, keeping `Frame:`, `W:` and `H:`.
 //! Deviation: one `Point: <point> <relativeTo> <relativePoint> <x> <y>` line per anchor, `-` for
-//! the screen root, instead of `X:`/`Y:`, because a benilla drag moves the authored anchors
+//! the screen root, instead of `X:`/`Y:`, because a WrathPlus drag moves the authored anchors
 //! rather than re-anchoring to one TOPLEFT, and a pair would lose them. There is no
-//! `FrameLevel:`: the reference saves an undocked window's raise, and benilla's raise does not
+//! `FrameLevel:`: the reference saves an undocked window's raise, and WrathPlus's raise does not
 //! persist.
 //!
 //! The reference writes the file only in its UI shutdown tail (`0x490bd0`), at `0x490c79`,
@@ -33,9 +33,9 @@ const SCREEN_TOKEN: &str = "-";
 
 /// The file's header, a `#` block the parser skips.
 const HEADER: &str = "\
-# benilla window layout — every frame the player has moved or resized (the client's userPlaced
+# WrathPlus window layout — every frame the player has moved or resized (the client's userPlaced
 # bit). A relative of the reference's layout-cache.txt: same scope, same Frame:/W:/H: keys, but
-# anchors instead of its X:/Y: pair, because a benilla drag moves a frame's anchors rather than
+# anchors instead of its X:/Y: pair, because a WrathPlus drag moves a frame's anchors rather than
 # collapsing it to a screen position. `-` as a Point: target means the screen root.
 ";
 

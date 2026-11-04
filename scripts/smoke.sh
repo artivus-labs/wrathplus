@@ -41,9 +41,9 @@ done
 # Check the server before the build: a refused connection would read as a client bug in the log.
 probe_server_or_skip smoke || exit 0
 
-log="$(mktemp "${TMPDIR:-/tmp}/benilla-smoke.XXXXXX")"
-stamp="$(mktemp "${TMPDIR:-/tmp}/benilla-smoke-stamp.XXXXXX")"
-before="$(mktemp "${TMPDIR:-/tmp}/benilla-smoke-before.XXXXXX")"
+log="$(mktemp "${TMPDIR:-/tmp}/wrathplus-smoke.XXXXXX")"
+stamp="$(mktemp "${TMPDIR:-/tmp}/wrathplus-smoke-stamp.XXXXXX")"
+before="$(mktemp "${TMPDIR:-/tmp}/wrathplus-smoke-before.XXXXXX")"
 # One EXIT trap, so an early `fail` strands no temp file; WOW_SMOKE_KEEP spares the log.
 trap 'rm -f "$stamp" "$before"; [ -n "${WOW_SMOKE_KEEP:-}" ] || rm -f "$log"' EXIT
 
@@ -57,7 +57,7 @@ elif [ -d "$root/WoW" ]; then
     install_root="$root/WoW"
 fi
 # A running reference client (wow.exe) writes its own WTF files into a shared install, and this
-# watch cannot tell those from benilla's; note it so the verdict can say so.
+# watch cannot tell those from WrathPlus's; note it so the verdict can say so.
 reference_client_before=""
 if pgrep -f '[w]ow\.exe' >/dev/null 2>&1; then
     reference_client_before=1
@@ -157,7 +157,7 @@ saving (the quit root must be observed in \`Last\`, after PostUpdate's exit_on_a
 
 # The read-only verdict names each changed file, the whole lead to whatever wrote it.
 if [ -n "$install_root" ]; then
-    after="$(mktemp "${TMPDIR:-/tmp}/benilla-smoke-after.XXXXXX")"
+    after="$(mktemp "${TMPDIR:-/tmp}/wrathplus-smoke-after.XXXXXX")"
     find -L "$install_root" -type f 2>/dev/null | sort >"$after"
     appeared="$(comm -13 "$before" "$after")"
     vanished="$(comm -23 "$before" "$after")"
@@ -167,12 +167,12 @@ if [ -n "$install_root" ]; then
         if [ -n "$reference_client_before" ] || pgrep -f '[w]ow\.exe' >/dev/null 2>&1; then
             echo "SMOKE INCONCLUSIVE: the install changed, but the REFERENCE CLIENT was running."
             echo "  wow.exe writes its own WTF while it runs, and this watch is a whole-tree mtime"
-            echo "  diff — it cannot tell those writes from benilla's. This is NOT evidence that"
-            echo "  benilla wrote to the install, and it is not evidence that it did not."
+            echo "  diff — it cannot tell those writes from WrathPlus's. This is NOT evidence that"
+            echo "  WrathPlus wrote to the install, and it is not evidence that it did not."
             echo "  Close the reference client and re-run to get a real reading."
         else
-            echo "SMOKE FAILED: the run WROTE TO THE INSTALL — benilla never does."
-            echo "  Every file benilla persists goes through \`crate::local_state\` into"
+            echo "SMOKE FAILED: the run WROTE TO THE INSTALL — WrathPlus never does."
+            echo "  Every file WrathPlus persists goes through \`crate::local_state\` into"
             echo "  \`wrathplus-config/\` (or the existing legacy home) beside the binary."
         fi
         [ -n "$appeared" ] && { echo "  added:"; printf '%s\n' "$appeared" | sed 's/^/    /'; }
@@ -190,7 +190,7 @@ fi
 # park; this drives Change Realm, Okay, Change Realm, Cancel, Okay against the real server and
 # fails anything but a completed walk.
 echo "smoke: running the realm-list boundary walk (~12 s, opens a window)…"
-rlog="$(mktemp "${TMPDIR:-/tmp}/benilla-smoke-realm.XXXXXX")"
+rlog="$(mktemp "${TMPDIR:-/tmp}/wrathplus-smoke-realm.XXXXXX")"
 # No WOW_CHAR: the walk drives character select, and `realm_select::smoke` refuses a seated body.
 WOW_UNATTENDED=1 WOW_NOSOUND=1 WOW_USER="$user" WOW_PASS="$pass" WOW_REALM_SMOKE=1 \
     timeout 120 cargo run -q -p wrathplus >"$rlog" 2>&1

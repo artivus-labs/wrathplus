@@ -236,7 +236,7 @@ impl super::UiScript {
     }
 
     /// Queue an intent from a slash command (`/ginvite`, `/gquit`, `/gpromote`, ...). The
-    /// reference's slash commands are Lua calling the same bindings; benilla parses them in Rust.
+    /// reference's slash commands are Lua calling the same bindings; WrathPlus parses them in Rust.
     pub fn queue_guild_request(&mut self, request: GuildRequest) {
         self.model_mut().guild_requests.push(request);
     }

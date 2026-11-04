@@ -11497,7 +11497,7 @@
     "crates/wrathplus-formats/src/bin/wrathplus-extract/scan/skeleton.rs": {
       "sha256": "c9135a8c947e8d585940a8ded18ef287146f908e56e91cc5e6a948f70da2fdda",
       "functions": {
-        "RawBoneTrack::benilla_today": [
+        "RawBoneTrack::wrathplus_today": [
           42.0
         ],
         "RawBoneTrack::delta": [

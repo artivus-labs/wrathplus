@@ -142,7 +142,7 @@ pub(in crate::script) fn install(lua: &Lua) -> mlua::Result<()> {
                 r#"Usage: UnitName("unit")"#,
             )?);
             // Two values (`0x5170ae`, `0x517289`): the name, and the realm, nil for a same-realm
-            // player or a non-player (`0x609210`), so always nil in single-realm benilla. A second
+            // player or a non-player (`0x609210`), so always nil in single-realm wrathplus. A second
             // argument (stock `UnitPopup.lua:106` passes `true`) is not read. The name is nil only
             // for an empty `"player"` buffer (`0x51708c`, `0x6f3895`) or GUID 0 (`0x5170c0`);
             // otherwise a string, `UNKNOWNOBJECT` until the name cache answers (`0x517220`,
@@ -468,7 +468,7 @@ pub(in crate::script) fn install(lua: &Lua) -> mlua::Result<()> {
 
     // UnitPlayerOrPetInParty/InRaid(unit): the unit or its owner (`UnitState::owner`) is in the
     // group. The reference's predicate behind `0x5162f0`/`0x5163b0` is untraced; the owner reading
-    // is benilla's.
+    // is WrathPlus's.
     for (name, raid) in [
         ("UnitPlayerOrPetInParty", false),
         ("UnitPlayerOrPetInRaid", true),

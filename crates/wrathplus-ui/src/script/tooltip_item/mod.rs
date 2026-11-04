@@ -359,7 +359,7 @@ pub(super) fn install_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
             // unique id to `+0x420`, unread; a missing field is 0. So a link shows its roll's
             // lines, never the placeholder (`0x52cc33`). The name is the link's own, built with
             // the suffix joined (`0x5d8b00`). The enchant id is parsed, not rendered: naming it
-            // needs its `SpellItemEnchantment` row, and no link benilla composes carries one.
+            // needs its `SpellItemEnchantment` row, and no link WrathPlus composes carries one.
             let inst = render::ItemInstance {
                 name: link_name(&link).map(str::to_string),
                 enchants: roll_enchants(lua, roll),

@@ -1,7 +1,7 @@
-//! The launcher `examples/extended_launcher.rs` documents for a crate on top of benilla stays in
+//! The launcher `examples/extended_launcher.rs` documents for a crate on top of WrathPlus stays in
 //! step with the workspace: cargo reads `[patch]` and `[profile]` from the root manifest only, so
-//! the header repeats the root's, a missing patch builds a client that is silently not benilla's,
-//! and a bevy other than the workspace's is a second bevy. The rest mirrors the `benilla` launcher.
+//! the header repeats the root's, a missing patch builds a client that is silently not WrathPlus's,
+//! and a bevy other than the workspace's is a second bevy. The rest mirrors the `wrathplus` launcher.
 
 use std::path::Path;
 

@@ -616,7 +616,7 @@ pub fn resolve_rect_edges(
 
 // ── Graph driver ─────────────────────────────────────────────────────────────────────────────
 
-/// Resolves anchored frames in dependency order, a driver of benilla's own: the client resolves
+/// Resolves anchored frames in dependency order, a driver of WrathPlus's own: the client resolves
 /// lazily through a dependency-ordered deferred queue (`0x7680e0`, ordered by `0x7681b0`). Handles
 /// index its arrays directly, so they must be dense. A round: [`begin`](Self::begin),
 /// [`set_external`](Self::set_external) and [`set_frame`](Self::set_frame), [`solve`](Self::solve).

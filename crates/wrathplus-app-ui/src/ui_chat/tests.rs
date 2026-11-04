@@ -443,7 +443,7 @@ pub(super) fn chat_vm() -> wrathplus_ui::script::UiScript {
 /// `|`, which raises on a `nil` in any slot.
 pub(super) const SPY: &str = r#"
     SpyN, SpyEvent, SpyLine = 0, "", ""
-    Spy = CreateFrame("Frame", "BenillaChatSpy")
+    Spy = CreateFrame("Frame", "WrathPlusChatSpy")
     Spy:SetScript("OnEvent", function()
         SpyN = SpyN + 1
         SpyEvent = event
@@ -464,7 +464,7 @@ fn an_addon_registering_our_own_chat_frame_does_not_double_print() {
     let mut s = chat_vm();
     let mut windows = super::frames::ChatWindows::default();
     s.run(SPY).unwrap();
-    s.run(r#"BenillaChatSpy:RegisterEvent("CHAT_MSG_SAY")"#)
+    s.run(r#"WrathPlusChatSpy:RegisterEvent("CHAT_MSG_SAY")"#)
         .unwrap();
 
     assert_eq!(lines_in_window(&s), 0, "the window starts empty");
@@ -498,11 +498,11 @@ fn an_addons_handler_sees_the_line_already_in_the_window() {
     s.run(
         r#"
         SeenAtFireTime = -1
-        Spy = CreateFrame("Frame", "BenillaChatSpy")
+        Spy = CreateFrame("Frame", "WrathPlusChatSpy")
         Spy:SetScript("OnEvent", function()
             SeenAtFireTime = ChatFrame1:GetNumMessages()
         end)
-        BenillaChatSpy:RegisterEvent("CHAT_MSG_SAY")
+        WrathPlusChatSpy:RegisterEvent("CHAT_MSG_SAY")
     "#,
     )
     .unwrap();
@@ -522,7 +522,7 @@ fn a_say_line_fires_chat_msg_say_in_the_references_arg_positions() {
     let mut s = chat_vm();
     let mut windows = super::frames::ChatWindows::default();
     s.run(SPY).unwrap();
-    s.run(r#"BenillaChatSpy:RegisterEvent("CHAT_MSG_SAY")"#)
+    s.run(r#"WrathPlusChatSpy:RegisterEvent("CHAT_MSG_SAY")"#)
         .unwrap();
 
     let mut e = ev(K::Say, "throm-ka", "Grunk");
@@ -549,7 +549,7 @@ fn a_channel_notice_fires_its_token_and_the_reference_reads_arg7_and_arg10_bare(
     s.run(
         r#"
         SpyZone, SpySuffix = nil, nil
-        BenillaChatSpy:SetScript("OnEvent", function()
+        WrathPlusChatSpy:SetScript("OnEvent", function()
             SpyN = SpyN + 1
             SpyEvent = event
             SpyLine = arg1.."|"..arg2.."|"..arg3.."|"..arg4.."|"..arg5.."|"..arg6..
@@ -558,7 +558,7 @@ fn a_channel_notice_fires_its_token_and_the_reference_reads_arg7_and_arg10_bare(
             if arg7 > 0 then SpyZone = arg7 end
             if arg10 > 0 then SpySuffix = arg10 end
         end)
-        BenillaChatSpy:RegisterEvent("CHAT_MSG_CHANNEL_NOTICE")
+        WrathPlusChatSpy:RegisterEvent("CHAT_MSG_CHANNEL_NOTICE")
     "#,
     )
     .unwrap();
@@ -627,7 +627,7 @@ fn a_channel_we_are_not_in_fires_the_bare_name_and_zeroes() {
     let mut s = chat_vm();
     let mut windows = super::frames::ChatWindows::default();
     s.run(SPY).unwrap();
-    s.run(r#"BenillaChatSpy:RegisterEvent("CHAT_MSG_CHANNEL")"#)
+    s.run(r#"WrathPlusChatSpy:RegisterEvent("CHAT_MSG_CHANNEL")"#)
         .unwrap();
 
     let channels = super::edit::ChannelState::default();
@@ -1772,7 +1772,7 @@ fn every_combat_log_kind_reaches_an_addon() {
         let mut s = chat_vm();
         let mut windows = super::frames::ChatWindows::default();
         s.run(SPY).unwrap();
-        s.run(&format!(r#"BenillaChatSpy:RegisterEvent("{name}")"#))
+        s.run(&format!(r#"WrathPlusChatSpy:RegisterEvent("{name}")"#))
             .unwrap();
 
         let line = format!("a line for {name}");
@@ -2176,9 +2176,9 @@ fn the_chat_cache_restore_is_finished_before_player_login() {
     let _l = crate::local_state::test_env::ENV_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let tmp = std::env::temp_dir().join(format!("benilla-chat-order-{}", std::process::id()));
+    let tmp = std::env::temp_dir().join(format!("wp-chat-order-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&tmp);
-    let home = tmp.join("benilla-config");
+    let home = tmp.join("wrathplus-config");
     let probe = home.join("AddOns").join("ChatOrderProbe");
     std::fs::create_dir_all(&probe).expect("hermetic home + probe addon dir");
     std::fs::write(
@@ -2216,8 +2216,8 @@ fn the_chat_cache_restore_is_finished_before_player_login() {
     )
     .expect("probe lua");
     let _capture = crate::local_state::test_env::EnvGuard::unset("WOW_CAPTURE");
-    let _home =
-        crate::local_state::test_env::EnvGuard::set("BENILLA_HOME", home.to_str().expect("utf-8"));
+    let path = home.to_str().expect("utf-8");
+    let _home = crate::local_state::test_env::EnvGuard::set("WRATHPLUS_HOME", path);
 
     let mut world = bevy::prelude::World::new();
     world.init_resource::<crate::ui_script::AddOnIdentity>();

@@ -207,14 +207,14 @@ impl Track {
 
 		// apply spatialization, then the volume fade.
 		//
-		// benilla: the spatial gains and the volume are evaluated at the CHUNK's two ends and
+		// wrathplus: the spatial gains and the volume are evaluated at the CHUNK's two ends and
 		// interpolated linearly across it, not recomputed per frame. Upstream spatialized every
 		// frame — two vector normalizes, a length, an attenuation curve and a dB→amplitude
 		// `powf` per frame per spatial track, and two more `powf`s for the volume tween — which
 		// made a dozen voices cost ~1 ms of every 60 Hz frame on the audio thread. A chunk is
 		// the output device's buffer (~10 ms); the pan and attenuation of a moving source change
 		// negligibly across it, and the mixer this backend stands in for (FMOD 3) updates them
-		// per mixer update, not per sample. See `third_party/kira/BENILLA.md`.
+		// per mixer update, not per sample. See `third_party/kira/WRATHPLUS.md`.
 		if let Some(spatial_data) = &mut self.spatial_data {
 			spatial_data.position.update(dt * out.len() as f64, &info);
 			spatial_data
@@ -318,7 +318,7 @@ struct SpatialData {
 }
 
 impl SpatialData {
-	/// benilla: the gains [`Self::spatialize`] applies, as a value — so a chunk can evaluate
+	/// wrathplus: the gains [`Self::spatialize`] applies, as a value — so a chunk can evaluate
 	/// them twice and lerp instead of recomputing them per frame.
 	fn spatial_gains(
 		&self,
@@ -427,7 +427,7 @@ impl SpatialData {
 	}
 }
 
-/// benilla: what [`SpatialData::spatialize`] does to a frame, factored out of the per-frame
+/// wrathplus: what [`SpatialData::spatialize`] does to a frame, factored out of the per-frame
 /// loop — attenuation, then (for a spatialized track) mono-fold and per-ear gain.
 #[derive(Clone, Copy)]
 struct SpatialGains {

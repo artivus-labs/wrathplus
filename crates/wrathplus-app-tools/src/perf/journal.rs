@@ -1,7 +1,7 @@
 //! The FPS journal (`/console fpsJournal 1` in any build, or `WOW_FPS_JOURNAL=<csv path>`): once
 //! a second, one row of where the player is, what the frame cost on the wall, the CPU and the
 //! GPU, and what is resident ([`JOURNAL_HEADER`]). It ships in the player build so a player on any
-//! hardware can record a run; the file is `benilla-config/Diagnostics/fps-journal.csv`, opened
+//! hardware can record a run; the file is `wrathplus-config/Diagnostics/fps-journal.csv`, opened
 //! with a `#` line naming the adapter, the backend and whether the device can time passes.
 //!
 //! The GPU columns read bevy's per-pass render diagnostics, which exist only where the device

@@ -755,7 +755,7 @@ fn a_stale_layout_row_cannot_seat_a_stock_frame() {
     assert!(failures.is_empty(), "manifest load errors: {failures:#?}");
     s.resolve();
 
-    // The row as `benilla-config/layout/<realm>-<character>.txt` carries it: Cartographer's saved
+    // The row as `wrathplus-config/layout/<realm>-<character>.txt` carries it: Cartographer's saved
     // `LookNFeel` offsets and the size it forces.
     let row = || wrathplus_ui::script::FrameLayout {
         name: "WorldMapFrame".into(),

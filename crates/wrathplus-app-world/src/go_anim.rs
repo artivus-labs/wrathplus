@@ -208,7 +208,7 @@ fn rest_anim(state: u32) -> Option<u16> {
 
 /// The motion for a `prev → cur` change. The reference (`0x5f3cb0`) dispatches on the new state and
 /// plays a motion from one old state only; each condition is also met by `ANIMPROGRESS < 100`,
-/// which benilla does not read.
+/// which WrathPlus does not read.
 fn motion_anim(prev: u32, cur: u32) -> Option<u16> {
     match (prev, cur) {
         (1, 0) => Some(0x94), // closed → open      : Open

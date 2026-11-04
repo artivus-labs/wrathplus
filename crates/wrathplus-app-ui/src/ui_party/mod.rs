@@ -545,11 +545,11 @@ mod tests {
     fn leader_lines() {
         let mut g = GroupState::default();
         assert_eq!(
-            g.apply_leader_changed("Alice", Some("Benilla")),
+            g.apply_leader_changed("Alice", Some("WrathPlus")),
             vec![UiError::s("ERR_NEW_LEADER_S", "Alice")]
         );
         assert_eq!(
-            g.apply_leader_changed("Benilla", Some("Benilla")),
+            g.apply_leader_changed("WrathPlus", Some("WrathPlus")),
             vec![UiError::key("ERR_NEW_LEADER_YOU")]
         );
     }

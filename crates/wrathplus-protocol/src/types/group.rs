@@ -190,7 +190,7 @@ impl PartyMemberStatsInfo {
     /// pet whose name the cache does not hold yet keeps the name the record had.
     ///
     /// Deviation: zone and position are kept, not set to the viewer's zone and the object's
-    /// position, because nothing in benilla reads them.
+    /// position, because nothing in WrathPlus reads them.
     ///
     /// [`ObjectFields::unit_pet_guid`]: crate::types::update_object::ObjectFields::unit_pet_guid
     pub fn snapshot_descriptor(

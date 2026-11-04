@@ -319,7 +319,7 @@ fn draw_weapon_trails(
             trail.swing = None;
             continue;
         };
-        // The visibility gate is benilla's, not the reference's: a hidden prop has no blade on
+        // The visibility gate is WrathPlus's, not the reference's: a hidden prop has no blade on
         // screen. The swing keeps ageing so it does not resume mid-arc when shown.
         if !vis.get() || strip.len() < 2 {
             continue;

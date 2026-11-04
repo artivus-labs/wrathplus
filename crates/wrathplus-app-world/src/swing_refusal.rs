@@ -54,7 +54,7 @@ pub(crate) enum SwingRefusalEdge {
     CombatCancelled,
     /// One of our swings landed on a victim we can see (`0x6259b6`). The write site applies both
     /// gates: the attacker is the local player (`0x5fa6d0`) and the victim resolves as a unit
-    /// (`0x468460(8)`); benilla checks presence only, which is equivalent since the victim is
+    /// (`0x468460(8)`); WrathPlus checks presence only, which is equivalent since the victim is
     /// always a unit or player.
     Landed,
 }

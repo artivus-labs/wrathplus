@@ -1,4 +1,4 @@
-//! The output stream: benilla's own kira backend, the same code on every platform. It owns
+//! The output stream: WrathPlus's own kira backend, the same code on every platform. It owns
 //! everything between kira's render and the speaker: the device, the IO callback, the render
 //! thread and the meters. The one platform seam is `device` (`coreaudio.rs` on macOS, `cpal.rs`
 //! elsewhere), which finds the default output, opens a stream and hands the callback one buffer
@@ -263,7 +263,7 @@ enum Stage {
     Dead,
 }
 
-/// benilla's kira backend: the render thread, the ring, the device stream and its meters.
+/// WrathPlus's kira backend: the render thread, the ring, the device stream and its meters.
 pub(super) struct OutputBackend {
     settings: OutputSettings,
     shared: Arc<Shared>,

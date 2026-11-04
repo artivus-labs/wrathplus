@@ -1300,7 +1300,7 @@ fn the_bonus_action_bar_exists_hidden_and_takes_layout_calls() {
     assert!(
         !s.eval::<bool>("return BonusActionBarFrame:IsShown()")
             .unwrap(),
-        "it must ship HIDDEN — benilla re-pages the main bar instead of showing this one"
+        "it must ship HIDDEN — WrathPlus re-pages the main bar instead of showing this one"
     );
 
     for i in [1, 12] {
@@ -1449,7 +1449,7 @@ fn both_reference_action_button_templates_are_inheritable() {
     assert!(
         s.eval::<bool>("return ActionButton1NormalTexture ~= nil and ActionButton1:GetScript(\"OnClick\") ~= nil")
             .unwrap(),
-        "BenillaActionButtonTemplate's 48 inherits= sites must be untouched by the split"
+        "WrathPlusActionButtonTemplate's 48 inherits= sites must be untouched by the split"
     );
 }
 

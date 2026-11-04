@@ -89,7 +89,7 @@ fn trade_status(
         }
         // The three that close the window; `CANCELED` signals `TRADE_REQUEST_CANCEL` (`0x4bf832`)
         // before the close. The reference also sends `CMSG_CANCEL_TRADE` from inside `0x4bf4e0`;
-        // benilla sends none on a server-driven close (the frame's `CloseTrade` drains after the
+        // WrathPlus sends none on a server-driven close (the frame's `CloseTrade` drains after the
         // session is clear), and vmangos ignores it once the trade is gone (`Player.cpp:11739`).
         TradeStatus::Canceled => {
             trade.signal_request_cancel();

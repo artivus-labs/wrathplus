@@ -5,7 +5,7 @@
 //! sequence (`0x52906c` → `0x5e0240`) writes the permanent watches back; a timed watch is never
 //! saved.
 //!
-//! Ours is `benilla-config/quests/<realm>-<character>.txt`, the ids in watch order on one line,
+//! Ours is `wrathplus-config/quests/<realm>-<character>.txt`, the ids in watch order on one line,
 //! written at logout, disconnect and quit; the reference keeps the CVar in the character's
 //! config cache. The watch table is the client's, so a `ReloadUI` keeps it: the old VM's
 //! permanent watches are seated into the new one on its first log push.
@@ -27,7 +27,7 @@ pub(crate) struct TrackedQuestsFile {
     watched: Vec<u32>,
 }
 
-/// `benilla-config/quests/<realm>-<character>.txt`, named as the layout cache's file is.
+/// `wrathplus-config/quests/<realm>-<character>.txt`, named as the layout cache's file is.
 fn path_for(realm: &str, character: &str) -> Option<PathBuf> {
     let layout = crate::local_state::layout_character_path(realm, character)?;
     Some(

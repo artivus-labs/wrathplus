@@ -62,7 +62,7 @@ fn world_refusal_text(strings: &GlueStrings, code: u8) -> &str {
         m::AUTH_ALREADY_LOGGING_IN => ("AUTH_ALREADY_LOGGING_IN", "Already Logging In"),
         m::AUTH_LOGIN_SERVER_NOT_FOUND => ("AUTH_LOGIN_SERVER_NOT_FOUND", "Invalid Login Server"),
         // All but `AUTH_ALREADY_ONLINE` below are the rows of the client's `OKAY_WITH_URL` table
-        // (`0x803740`). Deviation: no URL button, because `LaunchURL` is a shell-out benilla does
+        // (`0x803740`). Deviation: no URL button, because `LaunchURL` is a shell-out WrathPlus does
         // not make and its whitelist (`0x85cc34`) names only Blizzard domains that no longer
         // serve these pages.
         m::AUTH_BANNED => (

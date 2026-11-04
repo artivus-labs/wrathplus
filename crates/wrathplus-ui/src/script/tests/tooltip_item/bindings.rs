@@ -101,7 +101,7 @@ fn merchant_compare_renders_the_compare_shape_and_no_hover_seats_a_plate() {
         CreateFrame("GameTooltip", "ShoppingTooltip2"):Hide()
         -- A ref-shaped SHOW_COMPARE_TOOLTIP listener, kept as the NEGATIVE control: 5875 never
         -- signals event 377 (zero fire sites in the whole image), so nothing
-        -- benilla does may reach this handler.
+        -- WrathPlus does may reach this handler.
         compare_calls = {}
         local watcher = CreateFrame("Frame", "CompareWatcher")
         watcher:RegisterEvent("SHOW_COMPARE_TOOLTIP")

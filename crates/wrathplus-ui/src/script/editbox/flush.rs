@@ -26,8 +26,8 @@ pub(in crate::script) fn update(lua: &Lua, h: FrameHandle, dt: f32) {
 /// Deviation: the flush's promotion of bit 2 to bit 0 when the caret has left the display window
 /// (`0x77d3f5`–`0x77d436`), with its IME legs (`0x77d417`–`0x77d431`), and the IME writer's
 /// `or 6` (`0x77acde`, in `0x77ac60`) are not modelled: the promotion only relayouts, which
-/// re-windows a single-line box whose window benilla keeps host-side, and fires nothing, since
-/// bit 0 is sampled before it; benilla has no IME composition.
+/// re-windows a single-line box whose window WrathPlus keeps host-side, and fires nothing, since
+/// bit 0 is sampled before it; WrathPlus has no IME composition.
 ///
 /// The reference measures the caret inside the leg (`0x77da80` → `0x772ae0`), so `OnCursorChanged`
 /// always precedes the text change's `OnTextChanged`, and stock `ScrollingEdit_OnTextChanged`
@@ -150,7 +150,7 @@ fn cursor_changed(lua: &Lua, h: FrameHandle) -> bool {
 /// (`0x77a7b4`).
 ///
 /// Deviation: not gated on the cursor lying inside the scroll window (`0x77a7bd`–`0x77a7d7`),
-/// which benilla's host keeps around the caret.
+/// which WrathPlus's host keeps around the caret.
 fn blink(lua: &Lua, h: FrameHandle, dt: f32) {
     if !focused(lua, h) {
         return;

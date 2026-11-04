@@ -7,7 +7,7 @@
 //! lit or unlit, attachments included; `0xff404040` is only the fallback before a map's light
 //! loads.
 //!
-//! benilla carries the flag in bit 31 of the per-instance `MeshTag` (`wrathplus_world::mesh_tag`),
+//! WrathPlus carries the flag in bit 31 of the per-instance `MeshTag` (`wrathplus_world::mesh_tag`),
 //! and `wow_model.wgsl` adds the scene ambient when it is set.
 
 use bevy::mesh::MeshTag;

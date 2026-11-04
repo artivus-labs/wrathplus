@@ -1,5 +1,5 @@
 //! A panic leaves a crash report. [`install`] chains a hook after Rust's default one, which still
-//! prints to stderr, and writes `benilla-config/Diagnostics/crash-<unix-seconds>.txt` through
+//! prints to stderr, and writes `wrathplus-config/Diagnostics/crash-<unix-seconds>.txt` through
 //! [`crate::local_state`]: the build id, time and uptime, thread, location and payload, a
 //! backtrace captured regardless of `RUST_BACKTRACE`, and the last
 //! [`wrathplus_world::log_ring::CAPACITY`] log lines. The path is the last stderr line.
@@ -170,7 +170,7 @@ mod tests {
         ] {
             assert!(text.contains(needle), "missing {needle:?} in:\n{text}");
         }
-        // A client a crate on top of benilla extended says so in the build line.
+        // A client a crate on top of WrathPlus extended says so in the build line.
         report.build.extended = true;
         let extended = render(&report);
         assert!(
@@ -178,7 +178,7 @@ mod tests {
             "{extended}"
         );
 
-        let dir = std::env::temp_dir().join(format!("benilla-crash-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("wrathplus-crash-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let path = write(&dir, &text).expect("report written");
         assert!(path.starts_with(&dir), "{}", path.display());

@@ -189,7 +189,7 @@ mod tests {
     #[test]
     fn a_library_a_neighbour_ships_is_there_in_the_shared_vm() {
         let tmp =
-            std::env::temp_dir().join(format!("benilla-harness-together-{}", std::process::id()));
+            std::env::temp_dir().join(format!("wrathplus-harness-together-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         let write = |name: &str, toc: &str, file: &str, body: &str| {
             let dir = tmp.join(name);
@@ -243,7 +243,7 @@ mod tests {
     #[test]
     fn a_raise_in_the_shared_vm_lands_on_the_folder_that_raised() {
         let tmp = std::env::temp_dir().join(format!(
-            "benilla-harness-together-attrib-{}",
+            "wrathplus-harness-together-attrib-{}",
             std::process::id()
         ));
         let _ = std::fs::remove_dir_all(&tmp);

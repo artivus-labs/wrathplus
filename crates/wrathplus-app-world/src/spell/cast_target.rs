@@ -112,7 +112,7 @@ pub enum CastWireTarget {
 /// fallback (`0x6e53d7`).
 #[derive(Clone, Copy, Debug, Default)]
 pub struct CastCandidates {
-    /// The current selection (the client's `0xb4e2d8`); benilla never passes an explicit guid.
+    /// The current selection (the client's `0xb4e2d8`); WrathPlus never passes an explicit guid.
     pub selection: Option<u64>,
     pub caster: Option<u64>,
     /// The equipped main hand's item guid (`[player+0x1d3c][15]`), only when it resolves to a

@@ -163,11 +163,11 @@ fn vm_icon_type(script: &UiScript, pos: usize) -> String {
         .unwrap_or_default()
 }
 
-/// `BENILLA_GOSSIP_ICONS.binder` in the live VM, `""` when absent. The stock
+/// `WRATHPLUS_GOSSIP_ICONS.binder` in the live VM, `""` when absent. The stock
 /// `GossipFrame.lua:123` builds the icon path from the type string and defines no such table.
 fn vm_binder_texture(script: &UiScript) -> String {
     script
-        .eval::<String>("return (BENILLA_GOSSIP_ICONS and BENILLA_GOSSIP_ICONS.binder) or \"\"")
+        .eval::<String>("return (WRATHPLUS_GOSSIP_ICONS and WRATHPLUS_GOSSIP_ICONS.binder) or \"\"")
         .unwrap_or_default()
 }
 
@@ -482,7 +482,7 @@ fn assert_icon_and_select(
     if texture.is_empty() {
         error!(
             "PROBE_BINDER: FAIL (3 icon) — the app maps the row to {ICON_TYPE_BINDER:?} but \
-             BENILLA_GOSSIP_ICONS.binder resolves to nothing in the live VM, so the row would \
+             WRATHPLUS_GOSSIP_ICONS.binder resolves to nothing in the live VM, so the row would \
              still draw the fallback bubble"
         );
         probe.fails += 1;
@@ -491,7 +491,7 @@ fn assert_icon_and_select(
     }
     info!(
         "PROBE_BINDER: PASS (3 icon) — row {} {:?}: wire icon={ICON_INNKEEPER} index={} → type \
-         {ty:?}, BENILLA_GOSSIP_ICONS.binder = {texture:?}",
+         {ty:?}, WRATHPLUS_GOSSIP_ICONS.binder = {texture:?}",
         pos + 1,
         opt.message,
         opt.index

@@ -149,7 +149,7 @@ fn cvar_default(world: &mut World, args: &str) -> Vec<String> {
 
 /// `cvarlist [match]` (`0x63d6f0`), one line per row: value, default when moved, staged value,
 /// and whether the session or an addon owns it. The reference's line format is untraced; this
-/// one is benilla's.
+/// one is WrathPlus's.
 fn cvarlist(world: &mut World, args: &str) -> Vec<String> {
     let wanted = args.split_whitespace().next().map(str::to_ascii_lowercase);
     let cvars = world.resource::<Cvars>();

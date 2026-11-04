@@ -824,7 +824,7 @@ pub enum SessionEvent {
     },
     /// A talent spell-modifier cell (`SMSG_SET_FLAT_SPELL_MODIFIER`/`_PCT_`), absolute: row
     /// `mask_bit`, a `SpellFamilyFlags` bit, column `op`, neither bounded on the wire. Deviation:
-    /// `benilla::spell_mods` refuses an out-of-range pair, because the reference would overrun it.
+    /// `wrathplus::spell_mods` refuses an out-of-range pair, because the reference would overrun it.
     SpellModifier {
         flat: bool,
         mask_bit: u8,

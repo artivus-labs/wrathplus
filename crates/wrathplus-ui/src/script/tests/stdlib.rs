@@ -100,19 +100,19 @@ fn sandbox_removes_dangerous_globals() {
 fn acedbs_capture_names_the_calling_addon_not_the_librarys_owner() {
     let s = script();
     s.run_chunk_named(
-        b"function BenillaProbeRegisterDB()
+        b"function WrathPlusProbeRegisterDB()
             return string.gsub(debugstack(), \".-\\n.-\\\\AddOns\\\\(.-)\\\\.*\", \"%1\")
           end",
         &crate::script::addon_chunk_name("AtlasLoot", "Libs\\AceDB-2.0\\AceDB-2.0.lua"),
     )
     .unwrap();
     s.run_chunk_named(
-        b"BenillaProbeCaller = BenillaProbeRegisterDB()",
+        b"WrathPlusProbeCaller = WrathPlusProbeRegisterDB()",
         &crate::script::addon_chunk_name("Bartender2", "Bartender2.lua"),
     )
     .unwrap();
     assert_eq!(
-        s.eval::<String>("return BenillaProbeCaller").unwrap(),
+        s.eval::<String>("return WrathPlusProbeCaller").unwrap(),
         "Bartender2",
         "the capture must name the CALLER's addon, not the library owner's"
     );
@@ -123,7 +123,7 @@ fn acedbs_capture_names_the_calling_addon_not_the_librarys_owner() {
 fn the_first_debugstack_line_is_a_frame() {
     let s = script();
     s.run_chunk_named(
-        b"function BenillaProbeFirstLine()
+        b"function WrathPlusProbeFirstLine()
             local first = string.gsub(debugstack(), \"\\n.*\", \"\")
             return string.gsub(first, \".*\\\\(.*).lua:%d+: .*\", \"%1\")
           end",
@@ -131,7 +131,8 @@ fn the_first_debugstack_line_is_a_frame() {
     )
     .unwrap();
     assert_eq!(
-        s.eval::<String>("return BenillaProbeFirstLine()").unwrap(),
+        s.eval::<String>("return WrathPlusProbeFirstLine()")
+            .unwrap(),
         "AceLibrary",
         "line 1 is the calling function's own frame"
     );
@@ -144,10 +145,10 @@ fn a_named_frame_uses_the_backtick_quoting() {
     let s = script();
     let found: String = s
         .eval(
-            "function BenillaProbeNamed()                 local _, _, f = string.find(debugstack(), \"([`<].-['>])\")                 return f or '<no match>'              end              local r = BenillaProbeNamed() return r",
+            "function WrathPlusProbeNamed()                 local _, _, f = string.find(debugstack(), \"([`<].-['>])\")                 return f or '<no match>'              end              local r = WrathPlusProbeNamed() return r",
         )
         .unwrap();
-    assert_eq!(found, "`BenillaProbeNamed'");
+    assert_eq!(found, "`WrathPlusProbeNamed'");
 }
 
 /// The reference ends each frame with `"\n"` and writes no header (`0x703971`). It formats while
@@ -164,8 +165,8 @@ fn debugstack_frames_end_in_newline_and_count1_does_not_clamp() {
     );
     let two: String = s
         .eval(
-            "function BenillaProbeDepth2() local r = debugstack(1, 1, 0) return r end \
-             local r = BenillaProbeDepth2() return r",
+            "function WrathPlusProbeDepth2() local r = debugstack(1, 1, 0) return r end \
+             local r = WrathPlusProbeDepth2() return r",
         )
         .unwrap();
     let lines: Vec<&str> = two.trim_end().split('\n').collect();
@@ -173,10 +174,10 @@ fn debugstack_frames_end_in_newline_and_count1_does_not_clamp() {
     assert!(!two.contains("..."), "no elision at depth 2: {two:?}");
     let deep: String = s
         .eval(
-            "function BenillaProbeC() local r = debugstack(1, 1, 0) return r end \
-             function BenillaProbeB() local r = BenillaProbeC() return r end \
-             function BenillaProbeA() local r = BenillaProbeB() return r end \
-             local r = BenillaProbeA() return r",
+            "function WrathPlusProbeC() local r = debugstack(1, 1, 0) return r end \
+             function WrathPlusProbeB() local r = WrathPlusProbeC() return r end \
+             function WrathPlusProbeA() local r = WrathPlusProbeB() return r end \
+             local r = WrathPlusProbeA() return r",
         )
         .unwrap();
     let lines: Vec<&str> = deep.trim_end().split('\n').collect();
@@ -195,13 +196,13 @@ fn an_addon_chunk_is_named_the_way_the_client_names_it() {
     // FuBar's own pattern, against a traceback from a chunk loaded under that name.
     let s = script();
     s.run_chunk_named(
-        b"function BenillaProbeFolder() return debugstack(1, 1, 0) end",
+        b"function WrathPlusProbeFolder() return debugstack(1, 1, 0) end",
         &name,
     )
     .unwrap();
     let folder: String = s
         .eval(
-            "local _, _, f = string.find(BenillaProbeFolder(), \"\\\\AddOns\\\\(.*)\\\\\") \
+            "local _, _, f = string.find(WrathPlusProbeFolder(), \"\\\\AddOns\\\\(.*)\\\\\") \
              return f or '<no match>'",
         )
         .unwrap();
@@ -347,15 +348,15 @@ fn a_runscript_chunk_is_named_by_its_own_source() {
 fn runscript_swallows_a_bad_argument_instead_of_raising() {
     let mut s = script();
     s.run(
-        "BenillaRan = 0
+        "WrathPlusRan = 0
          RunScript(nil)
          RunScript({})
          RunScript(false)
          RunScript('')
-         BenillaRan = 1",
+         WrathPlusRan = 1",
     )
     .expect("a bad RunScript argument is a no-op, not a raise");
-    assert_eq!(s.eval::<i64>("return BenillaRan").unwrap(), 1);
+    assert_eq!(s.eval::<i64>("return WrathPlusRan").unwrap(), 1);
     assert!(
         s.take_errors().is_empty(),
         "a silent no-op records nothing either"
@@ -377,14 +378,14 @@ fn runscript_swallows_a_bad_argument_instead_of_raising() {
 fn a_runscript_error_reaches_the_handler_and_not_the_caller() {
     let mut s = script();
     s.run(
-        "BenillaAfter = 0
+        "WrathPlusAfter = 0
          RunScript('error(\"inner\")')
          RunScript('this is not lua')
-         BenillaAfter = 1",
+         WrathPlusAfter = 1",
     )
     .expect("neither a runtime nor a compile error may propagate to the caller");
     assert_eq!(
-        s.eval::<i64>("return BenillaAfter").unwrap(),
+        s.eval::<i64>("return WrathPlusAfter").unwrap(),
         1,
         "the caller's next statement still runs"
     );

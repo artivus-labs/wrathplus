@@ -107,7 +107,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     )?;
     // The range verbs answer only the two CVars build 12340 bounds, nil for the rest. Labelled:
     // `extShadowQuality`'s maxima are the hardware's supported shadow levels (`0x873f50`,
-    // `0x8740d0`); benilla draws none, so they read 0.
+    // `0x8740d0`); WrathPlus draws none, so they read 0.
     install_range(
         lua,
         "GetCVarMin",

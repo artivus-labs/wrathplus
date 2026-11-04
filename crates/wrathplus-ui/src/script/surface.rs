@@ -1,4 +1,4 @@
-//! benilla's widget method surface asked of a running VM, shared by the `dump_widget_methods`
+//! WrathPlus's widget method surface asked of a running VM, shared by the `dump_widget_methods`
 //! example and the widget-surface gate (`script::tests::widget_surface`). Each row is a live
 //! instance asked `type(obj.Name) == "function"`, as an addon asks it; only the candidate names
 //! come from elsewhere, the keys of the VM's method tables ([`METHOD_TABLES`]), since a Rust
@@ -9,36 +9,36 @@ use mlua::{Table, Value};
 
 use super::UiScript;
 
-/// The VM's named-registry method tables: every widget method benilla registers is a key in one,
+/// The VM's named-registry method tables: every widget method WrathPlus registers is a key in one,
 /// and the per-instance probe decides which a class answers.
 const METHOD_TABLES: &[&str] = &[
-    "__benilla_frame_methods",
-    "__benilla_region_methods",
-    "__benilla_texture_methods",
-    "__benilla_fontstring_methods",
-    "__benilla_title_methods",
-    "__benilla_font_methods",
-    "__benilla_button_methods",
-    "__benilla_checkbutton_methods",
-    "__benilla_lootbutton_methods",
-    "__benilla_editbox_methods",
-    "__benilla_statusbar_methods",
-    "__benilla_slider_methods",
-    "__benilla_scrollframe_methods",
-    "__benilla_simplehtml_methods",
-    "__benilla_colorselect_methods",
-    "__benilla_model_methods",
-    "__benilla_playermodel_methods",
-    "__benilla_dressupmodel_methods",
-    "__benilla_tabardmodel_methods",
-    "__benilla_plain_messageframe_methods",
-    "__benilla_scrollingmessageframe_methods",
-    "__benilla_minimap_methods",
-    "__benilla_movieframe_methods",
-    "__benilla_tooltip_methods",
+    "__wrathplus_frame_methods",
+    "__wrathplus_region_methods",
+    "__wrathplus_texture_methods",
+    "__wrathplus_fontstring_methods",
+    "__wrathplus_title_methods",
+    "__wrathplus_font_methods",
+    "__wrathplus_button_methods",
+    "__wrathplus_checkbutton_methods",
+    "__wrathplus_lootbutton_methods",
+    "__wrathplus_editbox_methods",
+    "__wrathplus_statusbar_methods",
+    "__wrathplus_slider_methods",
+    "__wrathplus_scrollframe_methods",
+    "__wrathplus_simplehtml_methods",
+    "__wrathplus_colorselect_methods",
+    "__wrathplus_model_methods",
+    "__wrathplus_playermodel_methods",
+    "__wrathplus_dressupmodel_methods",
+    "__wrathplus_tabardmodel_methods",
+    "__wrathplus_plain_messageframe_methods",
+    "__wrathplus_scrollingmessageframe_methods",
+    "__wrathplus_minimap_methods",
+    "__wrathplus_movieframe_methods",
+    "__wrathplus_tooltip_methods",
 ];
 
-/// Every class benilla can hand an addon, with a Lua expression making one, published as
+/// Every class WrathPlus can hand an addon, with a Lua expression making one, published as
 /// `DW_<Class>`. `Frame` must come first: the region and font rows are made by it.
 /// `TaxiRouteFrame` is left out, being a plain `Frame` to Lua.
 const CLASSES: &[(&str, &str)] = &[

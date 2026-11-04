@@ -28,7 +28,7 @@ pub(crate) fn scripts_dir() -> PathBuf {
     if let Some(dir) = std::env::var_os("WOW_AGENT_SCRIPTS") {
         return dir.into();
     }
-    std::env::var_os("BENILLA_HOME")
+    std::env::var_os("WRATHPLUS_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."))
         .join("Agent")

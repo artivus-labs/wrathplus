@@ -29,7 +29,7 @@ wrathplus-assets = { path = "../wrathplus-assets", default-features = false }
 wrathplus-formats = { path = "../wrathplus-formats", default-features = false }
 wrathplus-protocol = { path = "../wrathplus-protocol" }
 wrathplus-world = { path = "../wrathplus-world", default-features = false }
-# The CVar diff persisted in `benilla-config/config.toml`.
+# The CVar diff persisted in `wrathplus-config/config.toml`.
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 # Collision for our kinematic character controller; 0.6 targets Bevy 0.18, 0.7 moves to 0.19.

@@ -628,7 +628,7 @@ mod tests {
         static COUNTER: AtomicU32 = AtomicU32::new(0);
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
         std::env::temp_dir().join(format!(
-            "benilla_mpq_test_{}_{}_{}.mpq",
+            "wrathplus_mpq_test_{}_{}_{}.mpq",
             std::process::id(),
             n,
             tag

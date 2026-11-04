@@ -701,7 +701,7 @@ fn feed_gx_aspect(
 /// every other frame while nothing else keeps it awake; the pose and item effects run at full
 /// rate ([`wrathplus_world::particles::ViewThrottled`]). The glue screens are exempt.
 ///
-/// Deviation: `boothHalfRate` is benilla's own CVar, because the reference draws its doll in the
+/// Deviation: `boothHalfRate` is WrathPlus's own CVar, because the reference draws its doll in the
 /// main pass and has no second view; a full-rate pass costs up to 7.6 ms a frame at 4K.
 #[derive(Resource, Clone, Copy, PartialEq, Eq, Debug)]
 pub struct PaneRate {
@@ -738,12 +738,12 @@ pub fn on_cvar(ev: On<crate::cvars::CvarChanged>, mut rate: ResMut<PaneRate>) {
 pub const CVARS: &[crate::cvars::Registered] = {
     use crate::cvars::ours;
     &[
-        // benilla's own: a body pane's doll renders at half the frame rate while the pane is open; the
+        // WrathPlus's own: a body pane's doll renders at half the frame rate while the pane is open; the
         // reference draws it in the main pass. The knob is [`PaneRate`].
         ours(
             "boothHalfRate",
             "1",
-            "benilla's own — the reference draws its doll inside the main pass and has no \
+            "WrathPlus's own — the reference draws its doll inside the main pass and has no \
              second view to rate-limit",
         ),
     ]
@@ -1100,7 +1100,7 @@ fn test_mode(cached: &mut Option<bool>) -> bool {
     *cached.get_or_insert_with(|| std::env::var("WOW_PORTRAIT_TEST").is_ok_and(|s| !s.is_empty()))
 }
 
-/// benilla's `UNIT_MODEL_CHANGED` for the producers that are not a change of dress; a body pane
+/// WrathPlus's `UNIT_MODEL_CHANGED` for the producers that are not a change of dress; a body pane
 /// re-takes its snapshot when it moves ([`SnapKey`]).
 ///
 /// - The manual sheath ceremony: `ToggleSheath` passes `bInstant = 0`, and the clip's
@@ -2268,7 +2268,7 @@ fn player_temporary_portrait(race: Option<u8>, sex: Option<u8>) -> String {
 /// (`0x51a0ce`), so neither.
 ///
 /// Deviation: the reference probes a bake cache keyed by the record's display id (`0x525cb0`,
-/// `0xc0cea4`) before the stand-in, so a pet out of view keeps its face. benilla holds no such
+/// `0xc0cea4`) before the stand-in, so a pet out of view keeps its face. WrathPlus holds no such
 /// cache, and [`PortraitBakes`] is keyed by guid for the party slots alone: the stand-in shows.
 fn party_pet_subject<'a>(
     roster: &crate::app_core::group::GroupState,
@@ -2300,7 +2300,7 @@ fn party_pet_subject<'a>(
     }
 }
 
-/// The creature stand-in, benilla's own file: the reference's only creature stand-in is `-Pet`,
+/// The creature stand-in, WrathPlus's own file: the reference's only creature stand-in is `-Pet`,
 /// for a roster pet with no object (`0x525cb0`), and a live creature not yet loaded shows blank.
 fn creature_temporary_portrait() -> String {
     format!("{TEMPORARY_PORTRAIT}-Monster.blp")

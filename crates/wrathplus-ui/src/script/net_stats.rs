@@ -1,6 +1,6 @@
 //! `GetNetStats()` (`0x48b8b0`): `bandwidthIn, bandwidthOut, latency` for the main bar's latency
 //! meter. The latency is the average over the connection's 16-slot RTT ring (`HandlePong`
-//! `0x537d60`, `0x537f20`), which the app keeps and pushes here. Both bandwidths read 0: benilla
+//! `0x537d60`, `0x537f20`), which the app keeps and pushes here. Both bandwidths read 0: WrathPlus
 //! measures no throughput, and the one stock caller, `MainMenuBarPerformanceBarFrame`, drops them.
 
 use mlua::Lua;

@@ -24,23 +24,26 @@ fn a_started_fade_ramps_off_uiparents_tick_and_completes() {
     for _ in 0..3 {
         s.tick(1.0);
     }
-    s.run(r#"CreateFrame("Frame", "BenillaFadeProbe")"#)
+    s.run(r#"CreateFrame("Frame", "WrathPlusFadeProbe")"#)
         .unwrap();
-    s.run("UIFrameFadeIn(BenillaFadeProbe, 1.0)").unwrap();
+    s.run("UIFrameFadeIn(WrathPlusFadeProbe, 1.0)").unwrap();
     assert!(
-        s.eval::<bool>("return UIFrameIsFading(BenillaFadeProbe) == 1")
+        s.eval::<bool>("return UIFrameIsFading(WrathPlusFadeProbe) == 1")
             .unwrap(),
         "on the fade list"
     );
     assert_eq!(
-        s.eval::<f64>("return BenillaFadeProbe:GetAlpha()").unwrap(),
+        s.eval::<f64>("return WrathPlusFadeProbe:GetAlpha()")
+            .unwrap(),
         0.0,
         "the fade armed at its IN startAlpha"
     );
 
     s.tick(0.5);
     s.resolve();
-    let mid = s.eval::<f64>("return BenillaFadeProbe:GetAlpha()").unwrap();
+    let mid = s
+        .eval::<f64>("return WrathPlusFadeProbe:GetAlpha()")
+        .unwrap();
     assert!(
         (mid - 0.5).abs() < 1e-3,
         "half the timeToFade in, half the ramp: {mid} {:?}",
@@ -50,12 +53,13 @@ fn a_started_fade_ramps_off_uiparents_tick_and_completes() {
     s.tick(0.6); // past timeToFade
     s.resolve();
     assert_eq!(
-        s.eval::<f64>("return BenillaFadeProbe:GetAlpha()").unwrap(),
+        s.eval::<f64>("return WrathPlusFadeProbe:GetAlpha()")
+            .unwrap(),
         1.0,
         "the fade completes at its endAlpha"
     );
     assert!(
-        !s.eval::<bool>("return UIFrameIsFading(BenillaFadeProbe) == 1")
+        !s.eval::<bool>("return UIFrameIsFading(WrathPlusFadeProbe) == 1")
             .unwrap(),
         "…and leaves the list"
     );
@@ -78,19 +82,19 @@ fn a_flash_alternates_then_stops() {
     s.resolve();
 
     s.run(
-        r#"Probe = CreateFrame("Frame", "BenillaFlashProbe", UIParent)
+        r#"Probe = CreateFrame("Frame", "WrathPlusFlashProbe", UIParent)
            Probe:SetWidth(10) Probe:SetHeight(10) Probe:SetPoint("TOPLEFT", 0, 0)
            UIFrameFlash(Probe, 0.05, 0.05, 0.3, nil, 0, 0)"#,
     )
     .unwrap();
     assert!(
-        s.eval::<bool>("return UIFrameIsFlashing(BenillaFlashProbe) == 1")
+        s.eval::<bool>("return UIFrameIsFlashing(WrathPlusFlashProbe) == 1")
             .unwrap(),
         "the frame is on the flash list"
     );
 
     // Re-arming a flashing frame returns early (`UIParent.lua:1235`).
-    s.run("UIFrameFlash(BenillaFlashProbe, 1, 1, 1, nil, 0, 0)")
+    s.run("UIFrameFlash(WrathPlusFlashProbe, 1, 1, 1, nil, 0, 0)")
         .unwrap();
     assert_eq!(
         s.eval::<i64>("return table.getn(FLASHFRAMES)").unwrap(),
@@ -110,7 +114,7 @@ fn a_flash_alternates_then_stops() {
         "the flash finished and the frame left the list"
     );
     assert!(
-        !s.eval::<bool>("return BenillaFlashProbe:IsShown()")
+        !s.eval::<bool>("return WrathPlusFlashProbe:IsShown()")
             .unwrap(),
         "showWhenDone was nil, so it ends hidden"
     );

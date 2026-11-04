@@ -41,12 +41,12 @@ fn the_home_law_override_then_the_residents_and_hermetic_captures() {
     let _l = ENV_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let tmp = std::env::temp_dir().join(format!("benilla-ls-{}", std::process::id()));
+    let tmp = std::env::temp_dir().join(format!("wrathplus-ls-{}", std::process::id()));
     std::fs::create_dir_all(&tmp).unwrap();
 
     // 1 · the explicit override.
     let _c = EnvGuard::unset("WOW_CAPTURE");
-    let _h = EnvGuard::set("BENILLA_HOME", tmp.join(STATE_DIR).to_str().unwrap());
+    let _h = EnvGuard::set("WRATHPLUS_HOME", tmp.join(STATE_DIR).to_str().unwrap());
     assert_eq!(home(), Some(tmp.join(STATE_DIR)));
     assert_eq!(
         config_path(),
@@ -126,18 +126,18 @@ fn explicit_legacy_custom_and_empty_overrides_are_not_rewritten() {
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let _c = EnvGuard::unset("WOW_CAPTURE");
     for value in [
-        "/custom/benilla-config",
+        "/custom/wrathplus-config",
         "/custom/wrathplus-config",
         "/custom/state",
         "",
     ] {
-        let _h = EnvGuard::set("BENILLA_HOME", value);
+        let _h = EnvGuard::set("WRATHPLUS_HOME", value);
         assert_eq!(home(), Some(PathBuf::from(value)));
         assert_eq!(addons_root(), Some(PathBuf::from(value).join("AddOns")));
     }
 }
 
-/// A unit test that does not pin `$BENILLA_HOME` resolves no state folder, so no test can write
+/// A unit test that does not pin `$WRATHPLUS_HOME` resolves no state folder, so no test can write
 /// the real one.
 #[test]
 fn a_test_without_an_override_has_no_state_folder() {
@@ -145,7 +145,7 @@ fn a_test_without_an_override_has_no_state_folder() {
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let _c = EnvGuard::unset("WOW_CAPTURE");
-    let _h = EnvGuard::unset("BENILLA_HOME");
+    let _h = EnvGuard::unset("WRATHPLUS_HOME");
     assert_eq!(home(), None);
     assert_eq!(config_path(), None);
 }
@@ -157,8 +157,8 @@ fn the_state_folder_no_longer_depends_on_finding_the_install() {
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let _c = EnvGuard::unset("WOW_CAPTURE");
-    let _h = EnvGuard::unset("BENILLA_HOME");
-    let _d = EnvGuard::set("WOW_DATA", "/nonexistent/benilla-test/Data");
+    let _h = EnvGuard::unset("WRATHPLUS_HOME");
+    let _d = EnvGuard::set("WOW_DATA", "/nonexistent/wrathplus-test/Data");
     let h = resident_home().expect("a broken install path must not cost the player their config");
     assert!(
         !h.starts_with("/nonexistent"),
@@ -180,7 +180,7 @@ fn the_state_folder_lands_where_the_build_says() {
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let _c = EnvGuard::unset("WOW_CAPTURE");
-    let _h = EnvGuard::unset("BENILLA_HOME");
+    let _h = EnvGuard::unset("WRATHPLUS_HOME");
     let h = resident_home().expect("the resident folder always resolves");
     assert!(
         h.ends_with(STATE_DIR) || h.ends_with("benilla-config"),
@@ -216,12 +216,12 @@ fn the_state_folder_lands_where_the_build_says() {
 }
 
 /// A project folder that is a linked worktree keeps its state in the primary checkout, so every
-/// worktree shares one; any other folder, a crate on top of benilla's included, keeps its own.
+/// worktree shares one; any other folder, a crate on top of WrathPlus's included, keeps its own.
 #[test]
 fn the_state_root_is_the_folder_or_its_primary_checkout() {
-    let tmp = std::env::temp_dir().join(format!("benilla-root-{}", std::process::id()));
+    let tmp = std::env::temp_dir().join(format!("wrathplus-root-{}", std::process::id()));
     std::fs::remove_dir_all(&tmp).ok();
-    let primary = tmp.join("benilla");
+    let primary = tmp.join("wrathplus");
     std::fs::create_dir_all(primary.join(".git/worktrees/pool-3")).unwrap();
     let slot = tmp.join("pool-3");
     std::fs::create_dir_all(&slot).unwrap();
@@ -243,7 +243,7 @@ fn the_state_root_is_the_folder_or_its_primary_checkout() {
 /// runs this same test in a child process of the test binary, which records and resolves.
 #[test]
 fn a_recorded_launcher_folder_holds_the_state_and_the_identity() {
-    const CHILD: &str = "BENILLA_TEST_LAUNCHER_FOLDER";
+    const CHILD: &str = "WRATHPLUS_TEST_LAUNCHER_FOLDER";
     if let Some(dir) = std::env::var_os(CHILD) {
         let dir = PathBuf::from(dir);
         wrathplus_formats::set_project_folder(dir.to_str().unwrap());
@@ -266,7 +266,7 @@ fn a_recorded_launcher_folder_holds_the_state_and_the_identity() {
         }
         return;
     }
-    let tmp = std::env::temp_dir().join(format!("benilla-launcher-{}", std::process::id()));
+    let tmp = std::env::temp_dir().join(format!("wrathplus-launcher-{}", std::process::id()));
     std::fs::remove_dir_all(&tmp).ok();
     std::fs::create_dir_all(&tmp).unwrap();
     std::fs::write(
@@ -278,7 +278,7 @@ fn a_recorded_launcher_folder_holds_the_state_and_the_identity() {
     let out = std::process::Command::new(std::env::current_exe().unwrap())
         .args(["--exact", name, "--nocapture"])
         .env(CHILD, &tmp)
-        .env_remove("BENILLA_HOME")
+        .env_remove("WRATHPLUS_HOME")
         .env_remove("WOW_CAPTURE")
         .output()
         .unwrap();
@@ -299,7 +299,7 @@ fn write_atomic_creates_dirs_and_replaces_whole_files() {
     let _l = ENV_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let tmp = std::env::temp_dir().join(format!("benilla-wa-{}", std::process::id()));
+    let tmp = std::env::temp_dir().join(format!("wrathplus-wa-{}", std::process::id()));
     std::fs::remove_dir_all(&tmp).ok();
     let path = tmp.join("nested/config.toml");
     write_atomic(&path, "a = \"1\"\n").unwrap();

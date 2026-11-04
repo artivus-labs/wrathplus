@@ -784,24 +784,24 @@ fn the_remaining_line_is_gated_on_until_cancelled_not_on_the_duration() {
         SPELL_TIME_REMAINING_MIN_P1 = "<%d mm>"
         SPELL_TIME_REMAINING_SEC    = "<%d s>"
         SPELL_TIME_REMAINING_SEC_P1 = "<%d ss>"
-        BENILLA_ANCHOR = CreateFrame("Button", "BF2")
-        BENILLA_ANCHOR:SetPoint("CENTER", 0, 0); BENILLA_ANCHOR:SetWidth(10); BENILLA_ANCHOR:SetHeight(10)
-        BENILLA_TIP = CreateFrame("GameTooltip", "TT2")
+        WRATHPLUS_ANCHOR = CreateFrame("Button", "BF2")
+        WRATHPLUS_ANCHOR:SetPoint("CENTER", 0, 0); WRATHPLUS_ANCHOR:SetWidth(10); WRATHPLUS_ANCHOR:SetHeight(10)
+        WRATHPLUS_TIP = CreateFrame("GameTooltip", "TT2")
     "#,
     )
     .unwrap();
     let hover = r#"
-        BENILLA_TIP:SetOwner(BENILLA_ANCHOR, "ANCHOR_RIGHT")
-        BENILLA_TIP:SetPlayerBuff(0)
-        BENILLA_LINES = BENILLA_TIP:NumLines()
-        BENILLA_LAST = BENILLA_LINES == 3 and TT2TextLeft3:GetText() or ""
+        WRATHPLUS_TIP:SetOwner(WRATHPLUS_ANCHOR, "ANCHOR_RIGHT")
+        WRATHPLUS_TIP:SetPlayerBuff(0)
+        WRATHPLUS_LINES = WRATHPLUS_TIP:NumLines()
+        WRATHPLUS_LAST = WRATHPLUS_LINES == 3 and TT2TextLeft3:GetText() or ""
     "#;
     let mut show = |aura: AuraState| {
         s.set_player_auras(vec![aura]);
         s.run(hover).unwrap();
         (
-            s.eval::<i64>("return BENILLA_LINES").unwrap(),
-            s.eval::<String>("return BENILLA_LAST").unwrap(),
+            s.eval::<i64>("return WRATHPLUS_LINES").unwrap(),
+            s.eval::<String>("return WRATHPLUS_LAST").unwrap(),
         )
     };
     let base = AuraState {

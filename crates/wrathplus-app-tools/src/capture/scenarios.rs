@@ -175,7 +175,7 @@ pub(super) const GLUE_SCENARIOS: &[GlueScenario] = &[
 ];
 
 /// The golden baseline: two spots at noon and at night, Elwynn water and a Felwood hollow on
-/// Kalimdor, their coordinates recorded with `/shot` (`benilla-config/shots.txt`). Held small on
+/// Kalimdor, their coordinates recorded with `/shot` (`wrathplus-config/shots.txt`). Held small on
 /// purpose: a viewpoint being worked on belongs in [`ON_DEMAND`], capturable by name.
 pub(super) const SCENARIOS: &[Scenario] = &[
     Scenario {

@@ -9,7 +9,7 @@ use crate::model_key;
 
 /// Dump a WMO root's MODD props with their MODS sets and owning groups, read from the group files'
 /// MODR lists. The reference creates a prop only from a visible group's refs (`0x695aa0`), so it
-/// never draws a prop no group names (`ORPHAN`); benilla spawns one with no room gate.
+/// never draws a prop no group names (`ORPHAN`); WrathPlus spawns one with no room gate.
 pub fn wmodoodads(chain: &mut Chain, raw_path: &str, filter: Option<&str>) -> Result<()> {
     let root_path = raw_path.replace('/', "\\").to_ascii_lowercase();
     let bytes = chain

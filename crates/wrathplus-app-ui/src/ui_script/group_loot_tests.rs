@@ -535,6 +535,6 @@ fn the_roll_template_carries_the_reference_name_and_the_parts_addons_reach_for()
         .expect("the timer must answer StatusBar verbs");
 
     assert!(s
-        .eval::<bool>(r#"return getglobal("BenillaGroupLootFrameTemplate") == nil"#)
+        .eval::<bool>(r#"return getglobal("WrathPlusGroupLootFrameTemplate") == nil"#)
         .unwrap());
 }

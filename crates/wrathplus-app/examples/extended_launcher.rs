@@ -1,6 +1,6 @@
 //! `extended_launcher`: the client with a plugin of its own on top, started through
-//! [`wrathplus_app::run_with`] as a crate built on benilla starts it. A feature 1.12.1 does not have
-//! lives in a crate like this one, never in benilla.
+//! [`wrathplus_app::run_with`] as a crate built on WrathPlus starts it. A feature 1.12.1 does not have
+//! lives in a crate like this one, never in wrathplus.
 //!
 //! ```text
 //! cargo run -p wrathplus-app --example extended_launcher
@@ -8,9 +8,9 @@
 //!
 //! The banner reads `wrathplus build … · extended`, and the plugin logs one line at `Startup`.
 //!
-//! A crate of its own copies the `benilla` launcher (`crates/wrathplus`): a build script that stamps
+//! A crate of its own copies the `wrathplus` launcher (`crates/wrathplus`): a build script that stamps
 //! its commit, a `main` like this one that reads the stamp back as `crates/wrathplus/src/main.rs`
-//! does, and a manifest that takes benilla as the workspace does:
+//! does, and a manifest that takes WrathPlus as the workspace does:
 //!
 //! ```toml
 //! [features]
@@ -20,18 +20,18 @@
 //!
 //! [dependencies]
 //! # `default-features = false`, or `--no-default-features` still builds wrathplus-app with `dev`.
-//! wrathplus-app = { git = "https://github.com/samwhosung/benilla", default-features = false }
-//! # benilla's version, adding no features: bevy's defaults bring its audio stack back.
+//! wrathplus-app = { git = "https://github.com/artivus-labs/wrathplus", default-features = false }
+//! # WrathPlus's version, adding no features: bevy's defaults bring its audio stack back.
 //! bevy = { version = "0.18.1", default-features = false }
 //!
 //! [build-dependencies]
-//! wrathplus-buildstamp = { git = "https://github.com/samwhosung/benilla" }
+//! wrathplus-buildstamp = { git = "https://github.com/artivus-labs/wrathplus" }
 //!
-//! # Cargo reads `[patch]` and `[profile]` from the root manifest only, so benilla's are repeated:
-//! # without the patches the addon Lua and the mixer are not benilla's.
+//! # Cargo reads `[patch]` and `[profile]` from the root manifest only, so WrathPlus's are repeated:
+//! # without the patches the addon Lua and the mixer are not WrathPlus's.
 //! [patch.crates-io]
-//! lua-src = { git = "https://github.com/samwhosung/benilla" }
-//! kira = { git = "https://github.com/samwhosung/benilla" }
+//! lua-src = { git = "https://github.com/artivus-labs/wrathplus" }
+//! kira = { git = "https://github.com/artivus-labs/wrathplus" }
 //!
 //! [profile.dev]
 //! opt-level = 1
@@ -47,10 +47,10 @@
 //! }
 //! ```
 //!
-//! Its `Cargo.lock` starts as a copy of benilla's: cargo reads only the root's lockfile too, and
-//! without it resolves every crate to its newest compatible version, not the one benilla is built
-//! with. A dev build keeps its `WoW` link, `benilla-config/` and `.probe-identity` in its own
-//! folder, beside that `Cargo.lock`, as benilla's does.
+//! Its `Cargo.lock` starts as a copy of WrathPlus's: cargo reads only the root's lockfile too, and
+//! without it resolves every crate to its newest compatible version, not the one WrathPlus is built
+//! with. A dev build keeps its `WoW` link, `wrathplus-config/` and `.probe-identity` in its own
+//! folder, beside that `Cargo.lock`, as WrathPlus's does.
 
 use bevy::prelude::*;
 use wrathplus_app::{AppExit, BuildId};

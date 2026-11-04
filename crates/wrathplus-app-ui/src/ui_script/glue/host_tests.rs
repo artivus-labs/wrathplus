@@ -175,7 +175,7 @@ fn the_realmlist_button_sets_the_session_address() {
     let (mut app, _rx) = app();
     app.world_mut()
         .non_send_resource_mut::<UiScript>()
-        .run("BenillaSetRealmlist('logon.example.org:3725')")
+        .run("WrathPlusSetRealmlist('logon.example.org:3725')")
         .unwrap();
     app.update();
     assert_eq!(
@@ -187,13 +187,13 @@ fn the_realmlist_button_sets_the_session_address() {
     assert_eq!(
         app.world_mut()
             .non_send_resource_mut::<UiScript>()
-            .eval::<String>("return (BenillaGetRealmlist())")
+            .eval::<String>("return (WrathPlusGetRealmlist())")
             .unwrap(),
         "logon.example.org:3725"
     );
     app.world_mut()
         .non_send_resource_mut::<UiScript>()
-        .run("BenillaSetRealmlist('two words')")
+        .run("WrathPlusSetRealmlist('two words')")
         .unwrap();
     app.update();
     assert!(log(&mut app).starts_with("OPEN_STATUS_DIALOG:OKAY:"));

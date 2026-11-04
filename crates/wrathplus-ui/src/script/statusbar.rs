@@ -13,7 +13,7 @@ use crate::order::DrawLayer;
 use crate::widget::{KindState, RegionKind, StatusBarState};
 
 /// Registry key of the StatusBar method table.
-pub(super) const REG_STATUSBAR_METHODS: &str = "__benilla_statusbar_methods";
+pub(super) const REG_STATUSBAR_METHODS: &str = "__wrathplus_statusbar_methods";
 
 /// Run `f` over a frame's StatusBar state; errors on any other receiver, since the method table
 /// is a plain Lua value a caller can misapply.

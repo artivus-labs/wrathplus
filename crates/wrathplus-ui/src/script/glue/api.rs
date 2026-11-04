@@ -319,7 +319,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
 
     // ── AzerothBench's own, not stock 3.3.5: the login screen's Server field
     // (`assets/ui/glue/ServerField.xml`) reads and sets the address through these. ──
-    set(lua, "BenillaGetRealmlist", |lua, _| {
+    set(lua, "WrathPlusGetRealmlist", |lua, _| {
         let (address, pinned) = {
             let m = glue(lua);
             (m.realmlist.clone(), m.realmlist_pinned)
@@ -329,7 +329,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             crate::script::binding_abi::flag(pinned),
         ]))
     })?;
-    set(lua, "BenillaSetRealmlist", |lua, args| {
+    set(lua, "WrathPlusSetRealmlist", |lua, args| {
         let text = text(lua, args.front())?;
         push(lua, GlueRequest::SetRealmlist(text));
         none()
@@ -349,7 +349,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 .collect::<mlua::Result<_>>()?,
         ))
     })?;
-    // The SSE check `AccountLogin`'s `OnShow` asks: a machine running benilla is supported.
+    // The SSE check `AccountLogin`'s `OnShow` asks: a machine running WrathPlus is supported.
     constant(lua, "IsSystemSupported", Some(1))?;
     // The select and create screens' model frames: the booth stands their stage, so the names
     // need nothing kept.

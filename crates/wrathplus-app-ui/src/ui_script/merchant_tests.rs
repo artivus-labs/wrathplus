@@ -380,7 +380,7 @@ fn vendor_open_opens_the_backpack_and_layers_the_sound() {
 }
 
 /// A bag the player already had open stays open when the vendor closes: the was-open memory, per
-/// bag in `BENILLA_BAG_WAS_OPEN` as in the stock `backpackWasOpen` (`ContainerFrame.lua:198-201`).
+/// bag in `WRATHPLUS_BAG_WAS_OPEN` as in the stock `backpackWasOpen` (`ContainerFrame.lua:198-201`).
 #[test]
 fn vendor_leaves_an_already_open_backpack_alone() {
     let _data = wrathplus_formats::wow_data_or_skip!();

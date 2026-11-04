@@ -193,7 +193,7 @@ pub(super) fn tick_scale_ease(
     }
 }
 
-/// A rebuild of a body that was drawn, benilla's own palette heal: its composite is forced, so the
+/// A rebuild of a body that was drawn, WrathPlus's own palette heal: its composite is forced, so the
 /// body never drops out for frames as an arriving one waits, and rebuilds at once as it always has.
 #[derive(Component)]
 pub(super) struct ShownRebuild;

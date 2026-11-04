@@ -31,19 +31,19 @@ pub(super) fn install_wrath_budget_guards(
         }
         Ok(values)
     })?;
-    lua.globals().set("__benilla_budget_check", check)?;
+    lua.globals().set("__wrathplus_budget_check", check)?;
     lua.load(WRATH_BUDGET_GUARDS)
-        .set_name("=[benilla wrath budget guards]")
+        .set_name("=[WrathPlus wrath budget guards]")
         .set_mode(mlua::ChunkMode::Text)
         .exec()
 }
 
 const WRATH_BUDGET_GUARDS: &str = r#"
 do
-    local check = __benilla_budget_check
+    local check = __wrathplus_budget_check
     local native_pcall, native_xpcall = pcall, xpcall
     local native_resume = coroutine.resume
-    __benilla_budget_check = nil
+    __wrathplus_budget_check = nil
 
     function pcall(...) return check(native_pcall(...)) end
     function xpcall(...) return check(native_xpcall(...)) end
@@ -189,7 +189,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     super::zone_text::install(lua)?;
     install_bit(lua)?;
     lua.load(WRATH_STDLIB)
-        .set_name("=[benilla wow stdlib]")
+        .set_name("=[WrathPlus wow stdlib]")
         .set_mode(mlua::ChunkMode::Text)
         .exec()?;
     let positional = POSITIONAL_FORMAT.replace(
@@ -197,7 +197,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         "local function reformat(fmt, ...) local arg = {n = select('#', ...), ...}",
     );
     lua.load(&positional)
-        .set_name("=[benilla Wrath positional format]")
+        .set_name("=[WrathPlus Wrath positional format]")
         .exec()?;
     Ok(())
 }

@@ -355,7 +355,7 @@ pub(super) fn attach_entity_visuals(
         // included, until it can draw dressed, as the reference's ShouldRender answers the
         // composite driver's 0 (`0x607e7c` → `0x481749`). Retried each frame, with the look of
         // that frame. A display swap waits the same way, a fresh component in the reference
-        // (`0x607da0` → `0x5fb200`); a body benilla rebuilds while it was drawn does not.
+        // (`0x607da0` → `0x5fb200`); a body WrathPlus rebuilds while it was drawn does not.
         let body_tex = match look.as_ref() {
             Some(l) => {
                 let key = skin_key(l, equip, worn.emblem, worn.tabard_preview);

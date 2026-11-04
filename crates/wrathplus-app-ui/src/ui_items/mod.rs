@@ -228,7 +228,7 @@ pub(crate) fn item_use_route(
     }
 }
 
-/// Send what [`item_use_route`] decides; the only place a `CMSG_USE_ITEM` leaves benilla. The
+/// Send what [`item_use_route`] decides; the only place a `CMSG_USE_ITEM` leaves wrathplus. The
 /// reference's cast tail calls `0x6e5a90`, whose body is `call 0x6e4b60`, `TryCast`: the function
 /// the spellbook, `/cast` and the action bar run, with the item as an argument no gate skips for
 /// (it reaches the requirement validator `0x6094f0`), and `SendCast` (`0x6e54f0`) picks the opcode
