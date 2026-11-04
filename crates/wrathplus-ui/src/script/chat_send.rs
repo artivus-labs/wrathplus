@@ -1,4 +1,4 @@
-//! `SendChatMessage(text [, chatType [, language [, target]]])` (`0x49f1e0`): the engine verb an
+//! `SendChatMessage(text [, chatType [, language [, target]]])` (`0x50d170`): the engine verb an
 //! addon speaks through, with no FrameXML between it and the wire. `chatType` defaults to
 //! `"SAY"`; the fourth argument is the whisper target or the channel's number.
 //!
@@ -6,15 +6,16 @@
 //! grammar: an addon's `SendChatMessage("/dance")` says the characters. The reference splits the
 //! same way, `ChatEdit_SendText` parsing and `SendChatMessage` not.
 //!
-//! `language` starts as the speaker's race base language (`0x5ec890`, at `0x49f2aa`). A string or
-//! number third argument is matched by name, case-insensitively, against every `Languages.dbc`
-//! row (`0x49f8a0`), known to the character or not, and a miss raises `Unknown language`
-//! (`0x844afc`, at `0x49f2e1`): a number is its text, so `7` raises. Refusing a tongue the
-//! character never learned is the server's (vmangos `ChatHandler.cpp:175`).
+//! Its raises, in order, all `luaL_error`: the Usage; `SendChatMessage(): Unknown chat type`;
+//! then, past the empty-line gate, `Chat message must be UTF-8 text`, `Unknown language`, a whisper
+//! with no target and a channel send with no number. A string or number third argument is matched
+//! by name, case-insensitively, against every `Languages.dbc` row (`0x4fe2d0`), known to the
+//! character or not; refusing a tongue the character never learned is the server's. Labelled: the
+//! chat gate (`0x5191c0`), the dead-player and group gates and the escape-code check (`0x50d7b1`)
+//! are not modelled.
 //!
-//! Deviation: no truncation at 255 characters (`0x49f604`), because vmangos refuses a longer line
-//! itself (`Chat.cpp:2177`): it is dropped where the reference sends its first 255. The server
-//! throttles in both.
+//! Deviation: no truncation at 255 characters, because the server refuses a longer line itself:
+//! it is dropped where the reference sends its first 255. The server throttles in both.
 
 use mlua::{Lua, MultiValue, Value};
 
@@ -140,43 +141,89 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
 
     lua.globals().set(
         "SendChatMessage",
-        lua.create_function(
-            |lua, (text, chat_type, language, target): (String, Option<String>, Value, Value)| {
-                let chat_type = chat_type
-                    .unwrap_or_else(|| "SAY".into())
-                    .to_ascii_uppercase();
-                // The language is read only past the empty-line gate. The line is queued
-                // anyway: the type check that precedes the gate is the app's, and the drain
-                // applies the gate after it.
-                let reads_language = !ends_at_empty_line(&text, &chat_type);
-                let language = match super::binding_abi::optional_string(lua, &language) {
-                    Some(name) if reads_language => {
-                        let model = lua.app_data_ref::<Model>().expect("model app_data");
-                        let id = language_id(&model.language_table, &name);
-                        Some(
-                            id.ok_or_else(|| mlua::Error::RuntimeError("Unknown language".into()))?,
-                        )
+        lua.create_function(|lua, args: MultiValue| {
+            let arg = |i: usize| args.get(i).cloned().unwrap_or(Value::Nil);
+            let raise = |m: &str| mlua::Error::runtime(format!("SendChatMessage(): {m}"));
+            // `lua_isstring(1)` (`0x50d1ba`), else the Usage (`0x9fcce0`).
+            let Some(text) = lua.coerce_string(arg(0))? else {
+                return Err(mlua::Error::runtime(
+                    "Usage: SendChatMessage(text [,type] [,language] [,targetPlayer])",
+                ));
+            };
+            // A string type is looked up (`0x4fbb20`) before anything else, else SAY.
+            let chat_type = match super::binding_abi::optional_string(lua, &arg(1)) {
+                Some(t) => {
+                    let t = t.to_ascii_uppercase();
+                    if !SEND_TYPES.contains(&t.as_str()) {
+                        return Err(raise("Unknown chat type"));
                     }
-                    _ => None,
-                };
-                // `lua_isstring` then `lua_tostring` (`0x49f2f6`, `0x49f306`): a number is its
-                // text, so `2.7` reaches the channel's `SStrToInt` as "2.7", which reads 2.
-                let target = super::binding_abi::optional_string(lua, &target);
-                lua.app_data_mut::<Model>()
-                    .expect("model app_data")
-                    .chat_sends
-                    .push(ChatSend {
-                        text,
-                        chat_type,
-                        target,
-                        language,
-                    });
-                Ok(())
-            },
-        )?,
+                    t
+                }
+                None => "SAY".into(),
+            };
+            // The language, UTF-8 and target checks come only past the empty-line gate. The line
+            // is queued anyway: the drain applies the gate after the type check, as here.
+            let checked =
+                !ends_at_empty_line(&String::from_utf8_lossy(&text.as_bytes()), &chat_type);
+            // `0x7e0ec0`; labelled: Rust's UTF-8 rule stands in for its validator.
+            let text = match String::from_utf8(text.as_bytes().to_vec()) {
+                Ok(t) => t,
+                Err(_) if checked => return Err(raise("Chat message must be UTF-8 text")),
+                Err(e) => String::from_utf8_lossy(e.as_bytes()).into_owned(),
+            };
+            let language = match super::binding_abi::optional_string(lua, &arg(2)) {
+                Some(name) if checked => {
+                    let model = lua.app_data_ref::<Model>().expect("model app_data");
+                    let id = language_id(&model.language_table, &name);
+                    Some(id.ok_or_else(|| raise("Unknown language"))?)
+                }
+                _ => None,
+            };
+            // `lua_isstring` then `lua_tostring` (`0x50d2d2`, `0x50d2e3`): a number is its text,
+            // so `2.7` reaches the channel's `SStrToInt` as "2.7", which reads 2.
+            let target = super::binding_abi::optional_string(lua, &arg(3));
+            let no_target = target.as_deref().is_none_or(str::is_empty);
+            if checked && no_target && chat_type == "WHISPER" {
+                return Err(raise("Whisper message missing target player!"));
+            }
+            if checked && no_target && chat_type == "CHANNEL" {
+                return Err(raise("Channel send missing channel number"));
+            }
+            lua.app_data_mut::<Model>()
+                .expect("model app_data")
+                .chat_sends
+                .push(ChatSend {
+                    text,
+                    chat_type,
+                    target,
+                    language,
+                });
+            Ok(())
+        })?,
     )?;
     Ok(())
 }
+
+/// The chat types `SendChatMessage` resolves (`0x4fbb20`, seventeen rows, compared ignoring case).
+const SEND_TYPES: [&str; 17] = [
+    "SAY",
+    "PARTY",
+    "RAID",
+    "GUILD",
+    "OFFICER",
+    "YELL",
+    "WHISPER",
+    "EMOTE",
+    "CHANNEL",
+    "AFK",
+    "DND",
+    "RAID_WARNING",
+    "BATTLEGROUND",
+    "BN",
+    "BN_WHISPER",
+    "BN_WHISPER_INFORM",
+    "BN_CONVERSATION",
+];
 
 impl super::UiScript {
     /// Drain the lines `SendChatMessage` queued since the last call.
@@ -226,8 +273,10 @@ mod tests {
             .unwrap();
         s.run(r#"SendChatMessage("lf1m", "CHANNEL", nil, 2.7)"#)
             .unwrap();
-        s.run(r#"SendChatMessage("lf1m", "CHANNEL", nil, {})"#)
-            .unwrap();
+        // A table is no string, so no channel number (`0x50d587`).
+        assert!(s
+            .run(r#"SendChatMessage("lf1m", "CHANNEL", nil, {})"#)
+            .is_err());
         let sent = s.take_chat_sends();
         assert_eq!(sent[0].target.as_deref(), Some("Bob"));
         assert_eq!(sent[1].target.as_deref(), Some("1"));
@@ -237,7 +286,6 @@ mod tests {
             Some("2.7"),
             "not rounded: the app's `SStrToInt` reads 2"
         );
-        assert_eq!(sent[4].target, None, "a table is no string");
         assert_eq!(sent[1].chat_type, "CHANNEL");
     }
 
@@ -302,6 +350,49 @@ mod tests {
         assert!(s.run(r#"SendChatMessage("", "AFK", "Klingon")"#).is_err());
         // An empty line of any other type ends before the language is read.
         s.run(r#"SendChatMessage("", "SAY", "Klingon")"#).unwrap();
+        // The other raises, in `0x50d170`'s order, through a C `pcall`: no position.
+        for (args, want) in [
+            (
+                "",
+                "Usage: SendChatMessage(text [,type] [,language] [,targetPlayer])",
+            ),
+            (
+                r#"{}, "SAY""#,
+                "Usage: SendChatMessage(text [,type] [,language] [,targetPlayer])",
+            ),
+            (
+                r#""x", "BOGUS", "Klingon""#,
+                "SendChatMessage(): Unknown chat type",
+            ),
+            (
+                r#""x", "SAY", "Klingon""#,
+                "SendChatMessage(): Unknown language",
+            ),
+            (
+                r#""\255", "SAY""#,
+                "SendChatMessage(): Chat message must be UTF-8 text",
+            ),
+            (
+                r#""x", "whisper""#,
+                "SendChatMessage(): Whisper message missing target player!",
+            ),
+            (
+                r#""x", "CHANNEL", nil, """#,
+                "SendChatMessage(): Channel send missing channel number",
+            ),
+        ] {
+            let sep = [", ", ""][usize::from(args.is_empty())];
+            let got = s
+                .eval::<String>(&format!(
+                    "return select(2, pcall(SendChatMessage{sep}{args}))"
+                ))
+                .unwrap();
+            assert_eq!(got, want, "SendChatMessage({args})");
+        }
+        assert!(
+            s.take_chat_sends().len() == 1,
+            "only the empty SAY line queued"
+        );
     }
 
     /// The count matters: an addon passes the result straight to `SendChatMessage` as `language`.
