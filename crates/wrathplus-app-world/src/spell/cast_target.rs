@@ -540,6 +540,9 @@ pub fn resolve_cast_target(
     }
 }
 
+#[path = "cast_target_facts.rs"]
+mod facts;
+
 #[cfg(test)]
 #[path = "cast_target_tests.rs"]
 mod tests;

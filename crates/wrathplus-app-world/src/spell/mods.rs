@@ -59,13 +59,13 @@ fn index(mask_bit: u8, op: u8) -> usize {
     usize::from(mask_bit) * OPS + usize::from(op)
 }
 
-/// What a talent does to one number, `(value + flat) * pct / 100`; spent only through
-/// [`Self::apply`]. [`Default`] is the identity `(0, 100)`.
+/// What a talent does to one number, `(value + flat) * pct / 100`, through [`Self::apply`] or
+/// read raw (the range test, `0x7fd970`). [`Default`] is the identity `(0, 100)`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct SpellMod {
-    flat: i32,
+pub struct SpellMod {
+    pub flat: i32,
     /// `max(0, 100 + sum)`, the `+100` added once in the reader (`6e6bb4`): 100 is unchanged.
-    pct: i32,
+    pub pct: i32,
 }
 
 impl Default for SpellMod {
@@ -174,7 +174,7 @@ impl SpellModifiers {
     /// `GetSpellModifiers 0x6e6b30` for one spell and op. `None` covers all four of its false
     /// exits: the three gates and both sums zero (`6e6ba8`/`6e6bad`). The op range check is ours;
     /// the reference's call sites all pass a literal.
-    fn modifiers(&self, d: &SpellDisplay, op: u8) -> Option<SpellMod> {
+    pub fn modifiers(&self, d: &SpellDisplay, op: u8) -> Option<SpellMod> {
         if !self.gates_pass(d) || usize::from(op) >= OPS {
             return None;
         }

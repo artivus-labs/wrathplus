@@ -50,7 +50,7 @@ pub(crate) struct State {
     mirror: [Option<WrathMirrorTimer>; 3],
     /// `None` without a player.
     pvp: Option<PvpTimer>,
-    instance: Option<WrathInstanceInfo>,
+    pub(crate) instance: Option<WrathInstanceInfo>,
     /// Each bag's `BagFamily`, `GetContainerNumFreeSlots`'s second value.
     bag_families: std::collections::HashMap<i64, u32>,
     /// The current area's `AreaTable` flag `0x8000000`.

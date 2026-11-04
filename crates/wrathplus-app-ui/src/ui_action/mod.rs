@@ -22,6 +22,7 @@ mod feed;
 mod feed_tests;
 mod net;
 mod ranks;
+pub(crate) mod spell_use;
 mod state;
 pub(crate) mod toggle;
 mod weapon_icon;
@@ -230,6 +231,10 @@ impl Plugin for UiActionPlugin {
                         .in_set(UnitFeed)
                         .in_set(CooldownEvents)
                         .after(feed::feed_actions),
+                    // The use queries' inputs, beside the bar's state from the same walks.
+                    spell_use::feed_spell_use
+                        .in_set(UnitFeed)
+                        .after(state::feed_action_state),
                     drain::drain_action_sets.after(UiInput),
                     // The target chain queues the openers earlier in the frame.
                     drain::drain_go_openers.after(UiInput),

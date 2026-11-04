@@ -109,6 +109,7 @@ fn catalog_row(
         max_range: range.map_or(0.0, |r| f64::from(r.max)),
         passive: def.passive,
         trade_skill_link: None,
+        ..crate::ui_action::spell_use::catalog_facts(def, spells)
     }
 }
 

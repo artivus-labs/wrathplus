@@ -67,7 +67,8 @@ pub use price_discount::vendor_price_discount;
 #[cfg(any(test, feature = "test-support"))]
 pub use price_discount::{human_warrior_player, stormwind_fixture, HUMAN_WARRIOR};
 pub use relations::{
-    can_assist, can_attack, can_interact, corpse_friendly, is_possessed_by, UNIT_FLAG_POSSESSED,
+    can_assist, can_assist_in, can_attack, can_interact, corpse_friendly, is_possessed_by,
+    UNIT_FLAG_POSSESSED,
 };
 // `CanAttack`/`CanAssist`'s live inputs: the creature template cache and the guid lookup.
 pub use wrath_relations::{

@@ -4,7 +4,7 @@
 use super::Model;
 use mlua::{Lua, Value};
 
-fn item_id(model: &Model, query: &Value) -> Option<u32> {
+pub(super) fn item_id(model: &Model, query: &Value) -> Option<u32> {
     match query {
         Value::Integer(n) => u32::try_from(*n).ok(),
         Value::Number(n) if n.is_finite() && *n > 0.0 && *n <= u32::MAX as f64 => Some(*n as u32),

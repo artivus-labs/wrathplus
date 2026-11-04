@@ -755,6 +755,9 @@ pub enum SessionEvent {
         ammo_display_id: Option<u32>,
         /// Build 12340's cast count byte (the castID `UNIT_SPELLCAST_*` passes); `None` on 1.12.
         cast_count: Option<u8>,
+        /// The item the cast is from (the packet's first guid when it is not the caster), as
+        /// [`Self::SpellGo`]'s; `None` on 1.12.
+        item_caster: Option<u64>,
     },
     /// The cast launched (`SMSG_SPELL_GO`); the server times impact off `Spell.dbc` Speed itself.
     SpellGo {

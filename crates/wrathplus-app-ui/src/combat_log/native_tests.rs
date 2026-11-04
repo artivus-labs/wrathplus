@@ -186,6 +186,7 @@ fn casts_log_start_success_and_our_failures() {
         target: Some(2),
         ammo_display_id: None,
         cast_count: Some(1),
+        item_caster: None,
     });
     assert_eq!(
         (start[0].event, start[0].source, start[0].dest),

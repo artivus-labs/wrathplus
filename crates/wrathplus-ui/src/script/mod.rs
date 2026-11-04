@@ -241,8 +241,11 @@ pub use wrath_tutorial::WrathTutorialRequest;
 mod wrath_achievement_progress;
 mod wrath_item_services;
 mod wrath_item_spell;
+mod wrath_item_use;
 mod wrath_items;
 mod wrath_sockets;
+mod wrath_spell_range;
+mod wrath_spell_use;
 pub use wrath_achievement_progress::{WrathAchievementProgress, WrathAchievementRequest};
 pub use wrath_equipment::{
     EquipmentSetRequest, EquipmentSetView, EQUIPMENT_SET_IGNORED_SLOT, EQUIPMENT_SET_SLOTS,
@@ -450,6 +453,9 @@ pub use worldmap::{
 };
 pub use worldstate::WorldStateUiView;
 pub use worn_display::WornDisplay;
+pub use wrath_item_use::{ItemUseFacts, ItemUseSpellFacts, ItemUseView};
+pub use wrath_spell_range::{RangeRow, RangeUnitFacts, SpellRangeFacts};
+pub use wrath_spell_use::SpellUseView;
 pub use wrath_surface::wrath_group::{Group as WrathGroup, Member as WrathGroupMember};
 pub use zone_text::ZoneTexts;
 
@@ -793,6 +799,8 @@ impl UiScript {
             wrath_sockets::install(&lua)?;
             wrath_bag_portrait::install(&lua)?;
             wrath_item_spell::install(&lua)?;
+            wrath_spell_use::install(&lua)?;
+            wrath_item_use::install(&lua)?;
             wrath_currency::install(&lua)?;
             wrath_equipment::install(&lua)?;
             wrath_modifiers::install(&lua)?;

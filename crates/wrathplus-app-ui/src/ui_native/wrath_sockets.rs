@@ -38,7 +38,7 @@ const BACKPACK_FIRST: u8 = 23;
 const BAG_SLOT_FIRST: u8 = 19;
 
 #[derive(Resource)]
-pub(crate) struct Gems(GemCatalog);
+pub(crate) struct Gems(pub(crate) GemCatalog);
 
 /// `EndRefund(2)` / `EndBoundTradeable("gem")` answers the StaticPopup host forwarded.
 #[derive(Resource, Default)]
