@@ -15,9 +15,13 @@ pub enum Event {
     Health(super::status::Health),
     Build(super::build_state::BuildState),
     Docker(super::docker::Docker),
+    /// A setup task made this folder the Source folder.
+    Source(PathBuf),
+    /// A setup task made this folder the Server data folder.
+    Data(PathBuf),
 }
 type Result<T> = std::result::Result<T, String>;
-fn execute(mut command: Command, log: &File) -> Result<()> {
+pub(super) fn execute(mut command: Command, log: &File) -> Result<()> {
     let status = command.stdin(Stdio::null())
         .stdout(log.try_clone().map_err(|e| e.to_string())?)
         .stderr(log.try_clone().map_err(|e| e.to_string())?)
@@ -30,7 +34,7 @@ fn execute(mut command: Command, log: &File) -> Result<()> {
         ))
     }
 }
-fn capture(command: Command, log: &mut File) -> Result<String> {
+pub(super) fn capture(command: Command, log: &mut File) -> Result<String> {
     let start = log.metadata().map_err(|e| e.to_string())?.len();
     execute(command, log)?;
     let mut reader = log.try_clone().map_err(|e| e.to_string())?;
@@ -69,6 +73,25 @@ pub fn tail(path: &Path) -> Result<String> {
     };
     Ok(String::from_utf8_lossy(&bytes[start..]).into_owned())
 }
+/// A new private log file under the managed state folder, as every server operation keeps one.
+pub(super) fn open_log(config: &setup::Config) -> Result<(File, PathBuf)> {
+    let dir = Settings::state(config).join("manager-logs");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| e.to_string())?
+        .as_nanos();
+    let path = dir.join(format!("{stamp}-{}.log", std::process::id()));
+    let mut options = OpenOptions::new();
+    options.create_new(true).read(true).write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let log = options.open(&path).map_err(|e| e.to_string())?;
+    Ok((log, path))
+}
 pub fn run(
     mut config: setup::Config,
     mut settings: Settings,
@@ -106,21 +129,7 @@ pub fn run(
     let config_dir = crate::module_config::directory(&config);
     crate::module_config::validate(&config, &settings.source, &config_dir.join("probe.conf"))?;
     std::fs::create_dir_all(&config_dir).map_err(|e| e.to_string())?;
-    let dir = Settings::state(&config).join("manager-logs");
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let stamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|e| e.to_string())?
-        .as_nanos();
-    let path = dir.join(format!("{stamp}-{}.log", std::process::id()));
-    let mut options = OpenOptions::new();
-    options.create_new(true).read(true).write(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    let mut log = options.open(&path).map_err(|e| e.to_string())?;
+    let (mut log, path) = open_log(&config)?;
     let _ = sender.send(Event::Log(path));
     let stage = |label: &str| {
         let _ = sender.send(Event::Stage(label.into()));

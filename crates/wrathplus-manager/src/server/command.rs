@@ -127,15 +127,11 @@ pub fn summary(rows: &[serde_json::Value]) -> String {
         .join(" · ")
 }
 
+/// The managed server image the build makes; it also carries AzerothCore's map tools.
+pub const IMAGE: &str = "wrathplus/playerbots:arm64-spike";
 /// Global image lookup only; never touches containers or an arbitrary realm.
 pub fn local_image() -> Command {
     let mut command = Command::new("docker");
-    command.args([
-        "image",
-        "ls",
-        "--quiet",
-        "--no-trunc",
-        "wrathplus/playerbots:arm64-spike",
-    ]);
+    command.args(["image", "ls", "--quiet", "--no-trunc", IMAGE]);
     command
 }

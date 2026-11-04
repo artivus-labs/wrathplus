@@ -318,6 +318,16 @@ fn main() -> iced::Result {
         );
         return Ok(());
     }
+    if let Some((task, scope)) = options.server_task {
+        match server::run_setup_cli(options.config, task, scope) {
+            Ok(message) => println!("{message}"),
+            Err(error) => {
+                eprintln!("Server setup failed: {error}");
+                std::process::exit(1);
+            }
+        }
+        return Ok(());
+    }
     if options.doctor {
         let report = preflight::inspect(&options.config);
         println!("{}", report.summary());
