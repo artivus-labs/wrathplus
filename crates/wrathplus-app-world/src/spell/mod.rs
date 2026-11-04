@@ -18,6 +18,7 @@ pub mod cast_fail_keys;
 mod cast_send;
 pub mod cast_target;
 pub mod cooldowns;
+pub mod form_cancel;
 pub mod group_relation;
 pub mod inflight;
 mod mods;
@@ -62,6 +63,8 @@ pub struct ScriptCast<'w, 's> {
     pub ladder: CastLadder<'w, 's>,
     /// The `secureAbilityToggle` guard's cast requests ([`secure_toggle`]).
     pub recent: ResMut<'w, secure_toggle::RecentCastRequests>,
+    /// The predicted form cancel ([`form_cancel`], `player+0x9f4`).
+    pub form_cancel: ResMut<'w, form_cancel::FormCancelPrediction>,
 }
 
 /// The local self-cancel's set: a reader of the in-flight state orders `.after(LocalCancel)` so a
@@ -84,6 +87,7 @@ impl Plugin for SpellPlugin {
             .init_resource::<crate::net::wrath_combo_points::NativeComboPoints>()
             .init_resource::<AutoSelfCast>()
             .init_resource::<secure_toggle::RecentCastRequests>()
+            .init_resource::<form_cancel::FormCancelPrediction>()
             .init_resource::<SpellTargeting>()
             .init_resource::<targeting::glyph::GlyphPlacements>()
             .add_systems(
@@ -106,6 +110,10 @@ impl Plugin for SpellPlugin {
                         .in_set(UnitFeed)
                         .in_set(LocalCancel),
                     mods::track_class_family
+                        .after(WorldStage::Net)
+                        .before(UnitFeed),
+                    // `0x6da130`, before the stance feed reads the form byte through it.
+                    form_cancel::observe_form_byte
                         .after(WorldStage::Net)
                         .before(UnitFeed),
                     (

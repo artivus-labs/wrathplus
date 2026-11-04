@@ -142,3 +142,74 @@ fn a_stance_aura_coming_or_going_fires_the_form_edge() {
     assert_eq!(push(&mut s, &mut memory, vec![]), FormsEdge::Form);
     assert_eq!(fired(&s), 1, "the remove site");
 }
+
+/// A predicted form cancel (`0x721cf0`): the form byte reads 0, so the lit form goes dark and
+/// `GetShapeshiftForm` answers 0; its start and its clear fire `UPDATE_SHAPESHIFT_FORM` once each,
+/// whether or not the bar's own diff already did.
+#[test]
+fn a_predicted_form_cancel_reads_no_form_and_fires_once() {
+    let mut s = UiScript::new().unwrap();
+    s.run(
+        "LOG = {} local f = CreateFrame('Frame') f:RegisterEvent('UPDATE_SHAPESHIFT_FORM') \
+         f:SetScript('OnEvent', function(_, e) table.insert(LOG, e) end)",
+    )
+    .unwrap();
+    let fired = |s: &UiScript| s.eval::<i64>("local n = #LOG LOG = {} return n").unwrap();
+    let bear = SpellDisplay {
+        shapeshift_form: Some(5),
+        ..Default::default()
+    };
+    let view = |form_byte: u8| ShapeshiftFormView {
+        spell_id: 5487,
+        active: form_active(5487, &bear, form_byte, &[]),
+        castable: true,
+        ..Default::default()
+    };
+    let mut memory = StanceMemory::default();
+    // In bear form.
+    s.set_shapeshift_form_byte(5);
+    push_stance(&mut s, &mut memory, vec![view(5)], None);
+    fire_owed_form_event(&mut s, &memory, false);
+    fired(&s);
+    assert_eq!(s.eval::<i64>("return GetShapeshiftForm()").unwrap(), 1);
+
+    // Predicted: the feed sees form 0; the bar's diff fires, the owed event does not repeat it.
+    s.set_shapeshift_form_byte(0);
+    assert_eq!(
+        push_stance(&mut s, &mut memory, vec![view(0)], None),
+        FormsEdge::Form
+    );
+    fire_owed_form_event(&mut s, &memory, true);
+    assert_eq!(fired(&s), 1);
+    assert_eq!(s.eval::<i64>("return GetShapeshiftForm()").unwrap(), 0);
+    assert!(
+        s.eval::<bool>("return select(3, GetShapeshiftFormInfo(1)) == nil")
+            .unwrap(),
+        "no MOD_SHAPESHIFT slot is active meanwhile"
+    );
+
+    // The server's form byte 0 clears it: the bar is unmoved, so the owed event fires alone.
+    assert_eq!(
+        push_stance(&mut s, &mut memory, vec![view(0)], None),
+        FormsEdge::Unchanged
+    );
+    fire_owed_form_event(&mut s, &memory, true);
+    assert_eq!(fired(&s), 1);
+    fire_owed_form_event(&mut s, &memory, false);
+    assert_eq!(fired(&s), 0);
+}
+
+/// Ghost Wolf has no stance bar (`AttributesEx2 & 0x2`): the owed event is the only one.
+#[test]
+fn a_predicted_cancel_with_no_bar_still_fires() {
+    let mut s = UiScript::new().unwrap();
+    s.run(
+        "N = 0 local f = CreateFrame('Frame') f:RegisterEvent('UPDATE_SHAPESHIFT_FORM') \
+         f:SetScript('OnEvent', function() N = N + 1 end)",
+    )
+    .unwrap();
+    let mut memory = StanceMemory::default();
+    push_stance(&mut s, &mut memory, vec![], None);
+    fire_owed_form_event(&mut s, &memory, true);
+    assert_eq!(s.eval::<i64>("return N").unwrap(), 1);
+}

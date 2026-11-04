@@ -16,8 +16,10 @@ use wrathplus_protocol::wrath_spell_control::Command;
 
 use crate::app_core::session::ObjectStore;
 use crate::net::wrath_auras::StampedAura;
-use crate::net::{ClientCommand, NetCommands, Objects};
+use crate::net::{ClientCommand, Objects};
+use crate::spell::form_cancel::{has_mod_shapeshift, FormCancel, FormCancelPrediction};
 use crate::spell::secure_toggle::RecentCastRequests;
+use crate::spell::{CastLadder, ScriptCast};
 use std::time::Instant;
 
 /// The packet aura flag `isActive` tests (`0x802e45`): `AFLAG_POSITIVE`.
@@ -53,30 +55,91 @@ pub(crate) fn summoned_critter(d: &SpellDisplay, me: &ObjectStore) -> Option<u64
 /// The press-again cancel (`0x80da80`): a lit spell is not cast; `0x802f80` dismisses its critter
 /// (`CMSG_DISMISS_CRITTER`) or cancels its aura (`CMSG_CANCEL_AURA`), and sends nothing while we
 /// are charmed (`UNIT_FIELD_CHARMEDBY`, `0x802fd0`) or the `secureAbilityToggle` guard holds the
-/// press ([`RecentCastRequests::blocks`]). True when the press was taken; false records it as a
-/// cast request, which the caller goes on to send.
+/// press ([`RecentCastRequests::blocks`]). A `MOD_SHAPESHIFT` spell is not lit while its form's
+/// cancel is predicted (`0x802cb0`), and its cancel runs the prediction ([`predict_form_cancel`]).
+/// True when the press was taken; false records it as a cast request, which the caller goes on to
+/// send.
 pub(crate) fn send_press_again(
-    commands: &NetCommands,
+    ladder: &CastLadder,
     recent: &mut RecentCastRequests,
+    form_cancel: &mut FormCancelPrediction,
     spell_id: u32,
     d: &SpellDisplay,
-    objects: &Objects,
     me: &ObjectStore,
 ) -> bool {
     let now = Instant::now();
+    let lit = active_action_toggle(spell_id, d, unit_auras(&ladder.objects, me))
+        && !(form_cancel.predicted() && has_mod_shapeshift(d));
     let command = if let Some(critter) = summoned_critter(d, me) {
         ClientCommand::NativeSpellControl(Command::DismissCritter { critter })
-    } else if active_action_toggle(spell_id, d, unit_auras(objects, me)) {
+    } else if lit {
         ClientCommand::CancelAura { spell_id }
     } else {
         recent.record(spell_id, now);
         return false;
     };
-    if !press_again_held(recent, spell_id, me, now) {
-        debug!("press-again: spell {spell_id} re-pressed, {command:?}");
-        let _ = commands.0.send(command);
+    if press_again_held(recent, spell_id, me, now) {
+        return true;
     }
+    let is_cancel = matches!(command, ClientCommand::CancelAura { .. });
+    if is_cancel && predict_form_cancel(ladder, form_cancel, d, me) == FormCancel::Refused {
+        return true;
+    }
+    debug!("press-again: spell {spell_id} re-pressed, {command:?}");
+    let _ = ladder.commands.0.send(command);
     true
+}
+
+/// `0x802f80`'s form arm ahead of a self-cancel of `d` ([`crate::spell::form_cancel`]).
+pub(crate) fn predict_form_cancel(
+    ladder: &CastLadder,
+    form_cancel: &mut FormCancelPrediction,
+    d: &SpellDisplay,
+    me: &ObjectStore,
+) -> FormCancel {
+    ladder.spells.as_deref().map_or(FormCancel::Plain, |s| {
+        form_cancel.on_cancel(d, me, &s.forms)
+    })
+}
+
+/// `CastSpell`'s two cancel forks, in order: the press-again cancel (12340 `isActive`
+/// `0x802cb0`), then the form match over the form byte as `0x71af70` reads it, which `UseAction`
+/// lacks, with its silent no-op. True when the press was taken.
+pub(crate) fn cast_spell_cancels(cast: &mut ScriptCast, spell_id: u32) -> bool {
+    let ScriptCast {
+        targeting,
+        ladder,
+        recent,
+        form_cancel,
+    } = cast;
+    let (Some(sp), Some(store)) = (ladder.spells.as_ref(), targeting.self_store.iter().next())
+    else {
+        return false;
+    };
+    let Some(d) = sp.catalog.get(spell_id) else {
+        return false;
+    };
+    if send_press_again(ladder, recent, form_cancel, spell_id, d, store) {
+        return true;
+    }
+    let form = form_cancel.form_byte(store.0.unit_shapeshift_form());
+    match form_recast_disposition(d, form, sp.forms.get(&u32::from(form))) {
+        Some(true) => {
+            debug!("ui_spellbook: cast {spell_id} — the active form cancels");
+            if predict_form_cancel(ladder, form_cancel, d, store) != FormCancel::Refused {
+                let _ = ladder
+                    .commands
+                    .0
+                    .send(ClientCommand::CancelAura { spell_id });
+            }
+            true
+        }
+        Some(false) => {
+            debug!("ui_spellbook: cast {spell_id} — non-cancelable form, silent no-op");
+            true
+        }
+        None => false,
+    }
 }
 
 /// The lit press is taken but nothing is sent: the `secureAbilityToggle` window holds it

@@ -190,6 +190,10 @@ fn installed_wrath_family_and_form_known_rows() {
         cat.attack_icon.as_deref(),
         Some(r"Interface\Icons\Ability_Druid_CatFormAttack")
     );
+    // `CreatureDisplayID[4]`, columns 23-26 (12340 `0x721cf0` reads them at record `+0x1c`).
+    assert_eq!(cat.creature_display, [892, 0, 0, 0]);
+    let battle = forms.get(&17).expect("Battle Stance");
+    assert_eq!(battle.creature_display, [0; 4], "a stance has no model");
 }
 
 #[test]

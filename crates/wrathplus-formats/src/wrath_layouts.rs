@@ -33,7 +33,7 @@ pub(crate) fn columns(
         "SpellDispelType" => (12, 21, spell_dispel_type),
         "SkillLine" => (32, 56, skill_line),
         "TalentTab" => (16, 24, talent_tab),
-        "SpellShapeshiftForm" => (14, 35, spell_shapeshift_form),
+        "SpellShapeshiftForm" => (18, 35, spell_shapeshift_form),
         "Faction" => (41, 57, faction),
         "ChrRaces" => (29, 69, chr_races),
         "ChrClasses" => (35, 60, chr_classes),
@@ -200,10 +200,10 @@ fn talent_tab(m: &mut Map) {
         .run(15, 21, 1);
 }
 
-/// `SpellShapeshiftForm.dbc` 14 → 35: id, bonus action bar, name, flags, creature type,
-/// attack icon.
+/// `SpellShapeshiftForm.dbc` 18 → 35: id, bonus action bar, name, flags, creature type,
+/// attack icon; slots 14-17 are the loader's 3.3.5-only `CreatureDisplayID[4]` (23-26).
 fn spell_shapeshift_form(m: &mut Map) {
-    m.same(0, 2).loc(2, 2).run(11, 19, 3);
+    m.same(0, 2).loc(2, 2).run(11, 19, 3).run(14, 23, 4);
 }
 
 /// `Faction.dbc` 41 → 57: the reputation columns are unchanged; the name and description blocks
@@ -311,7 +311,7 @@ mod tests {
         ("SpellDispelType", 12, 21),
         ("SkillLine", 32, 56),
         ("TalentTab", 16, 24),
-        ("SpellShapeshiftForm", 14, 35),
+        ("SpellShapeshiftForm", 18, 35),
         ("Faction", 41, 57),
         ("ChrRaces", 29, 69),
         ("ChrClasses", 35, 60),

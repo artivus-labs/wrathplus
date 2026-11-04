@@ -28,6 +28,10 @@ pub struct ShapeshiftForm {
     /// `AttackIconID` (column 13) through `SpellIcon.dbc`: the Attack action shows the current
     /// form's icon before the main-hand weapon's (`0x4e6870`); `None` falls through to the weapon.
     pub attack_icon: Option<String>,
+    /// `CreatureDisplayID[4]` (3.3.5 columns 23-26, record `+0x1c`): the form's models. A predicted
+    /// form cancel shows the native display only while the unit wears one of them (12340
+    /// `0x721cf0`). Zero on a 1.12-shaped file, which has no such columns.
+    pub creature_display: [u32; 4],
 }
 
 impl ShapeshiftForm {
@@ -52,8 +56,10 @@ pub fn load_shapeshift_forms(chain: &mut Chain) -> Result<HashMap<u32, Shapeshif
     let bytes = chain
         .read_file(SHAPESHIFT_FORM)
         .context("reading SpellShapeshiftForm.dbc")?;
+    // The 3.3.5 file (35 columns) also yields the four display ids, as loader slots 14-17.
+    let wrath = bytes.get(8..12) == Some(&35u32.to_le_bytes()[..]);
     let mut schema = Schema::new("SpellShapeshiftForm");
-    for i in 0..14 {
+    for i in 0..if wrath { 18 } else { 14 } {
         match i {
             // Column 2: the enUS slot of the name locstring (2..10, eight locales and a flag word).
             2 => schema.add_field(SchemaField::new("Name", FieldType::String)),
@@ -76,6 +82,7 @@ pub fn load_shapeshift_forms(chain: &mut Chain) -> Result<HashMap<u32, Shapeshif
                     attack_icon: u32_at(r, 13)
                         .filter(|&i| i != 0)
                         .and_then(|i| icons.get(&i).cloned()),
+                    creature_display: std::array::from_fn(|k| u32_at(r, 14 + k).unwrap_or(0)),
                 },
             );
         }
