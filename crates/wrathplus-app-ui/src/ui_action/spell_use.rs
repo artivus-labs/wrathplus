@@ -23,16 +23,16 @@ use crate::items::Items;
 use crate::net::NetCommands;
 use crate::spell::usable;
 
+type RangeMods = HashMap<u32, (i32, i32)>;
+/// The range test's pushed inputs: unit facts, op 5 modifiers by spell, ranged item scale.
+type RangeInputs = (HashMap<u64, RangeUnitFacts>, RangeMods, Option<f32>);
+
 /// What the feed last pushed, for the diffs.
 #[derive(Default)]
 pub(super) struct UseMemory {
     spells: Option<(HashMap<u32, SpellUseView>, HashMap<u32, SpellUseView>)>,
     items: Option<HashMap<u32, ItemUseView>>,
-    range: Option<(
-        HashMap<u64, RangeUnitFacts>,
-        HashMap<u32, (i32, i32)>,
-        Option<f32>,
-    )>,
+    range: Option<RangeInputs>,
     auto_repeat: Option<[Option<u32>; 2]>,
     cast_items: Option<Vec<u32>>,
     statics: bool,
