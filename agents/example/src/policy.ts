@@ -67,7 +67,8 @@ const WAKE: Record<string, { reason: string; interrupt: boolean }> = {
   PLAYER_REGEN_DISABLED: { reason: "combat started", interrupt: true },
   PLAYER_REGEN_ENABLED: { reason: "combat ended", interrupt: false },
   PLAYER_DEAD: { reason: "died", interrupt: true },
-  PLAYER_ALIVE: { reason: "alive again", interrupt: true },
+  // Fired on releasing to a ghost as well as on a spirit healer's resurrection.
+  PLAYER_ALIVE: { reason: "released or resurrected", interrupt: true },
   PLAYER_UNGHOST: { reason: "alive again", interrupt: true },
   LOOT_OPENED: { reason: "loot window", interrupt: false },
   GOSSIP_SHOW: { reason: "gossip window", interrupt: false },

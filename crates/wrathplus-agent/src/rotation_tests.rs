@@ -108,3 +108,44 @@ fn a_list_of_its_own_and_a_failing_spell_backing_off() {
     let default: String = script.eval("return Rotation.describe()").unwrap();
     assert_eq!(default, "Execute > Battle Shout > Rend > Heroic Strike");
 }
+
+fn refuse(script: &mut UiScript, spell: &str) {
+    script.fire_event(
+        "UNIT_SPELLCAST_FAILED",
+        vec![
+            ScriptValue::Str("player".into()),
+            ScriptValue::Str(spell.into()),
+        ],
+    );
+}
+
+/// Ticks (1.1 s apart) until the spell is cast again.
+fn ticks_until(script: &UiScript, spell: &str) -> usize {
+    (1..100).find(|_| tick(script) == spell).unwrap()
+}
+
+#[test]
+fn victory_rush_waits_for_a_kill_and_a_refused_spell_waits_longer_each_time() {
+    let mut script = rotation();
+    script
+        .run("BOOK[#BOOK + 1] = 'Victory Rush' COST['Victory Rush'] = 0 Rotation.list = { { spell = 'Victory Rush' } }")
+        .unwrap();
+    // Usable only after a kill: no Victorious, no cast, and no refusal to back off from.
+    assert_eq!(tick(&script), "");
+    script.run("buffs = { 'Victorious' }").unwrap();
+    assert_eq!(tick(&script), "Victory Rush");
+    // Refused anyway: 4 s, then 8 s; a cast that goes through starts over.
+    refuse(&mut script, "Victory Rush");
+    assert_eq!(ticks_until(&script, "Victory Rush"), 4);
+    refuse(&mut script, "Victory Rush");
+    assert_eq!(ticks_until(&script, "Victory Rush"), 8);
+    script.fire_event(
+        "UNIT_SPELLCAST_SUCCEEDED",
+        vec![
+            ScriptValue::Str("player".into()),
+            ScriptValue::Str("Victory Rush".into()),
+        ],
+    );
+    refuse(&mut script, "Victory Rush");
+    assert_eq!(ticks_until(&script, "Victory Rush"), 4);
+}

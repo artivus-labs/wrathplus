@@ -7,7 +7,12 @@
 --   Quests.hand_in()   hand in every finished quest to the givers within `reach` (the yellow
 --                      "?"): complete it and take the reward that is an upgrade (Upkeep), else
 --                      the one that sells for most.
+--                      Both return at once and run in the background; the visit ends as
+--                      AGENT_QUESTS_DONE (kind, picked up, handed in), so wait on that, not the log.
 --   Quests.state       what it is doing; Quests.busy() for an intent's `until`.
+--   Quests.list()      the quest log: { { id, title, level, complete, objectives = { { text,
+--                      done }, ... } }, ... }, headers skipped (GetQuestLogTitle's 3.3.5 order is
+--                      title, level, tag, suggestedGroup, isHeader, ..., questID).
 --   Quests.where(id)   where a logged quest's objectives are and where it is handed in, from the
 --                      quest's map areas: { objectives = { { index, x, y }, ... }, hand_in = { x, y } }
 --                      (nil until the client has them). Move.to(x, y) gets there.
@@ -66,6 +71,9 @@ end
 local function stop(why)
   if job then
     did(why)
+    if Agent and Agent.signal then
+      Agent.signal("QUESTS_DONE", job == "available" and "pick_up" or "hand_in", #visit.accepted, #visit.handed)
+    end
     announce()
   end
   job, npc, Q.state, asked = nil, nil, nil, nil
@@ -79,6 +87,22 @@ end
 
 function Q.pick_up() return start("available") end
 function Q.hand_in() return start("reward") end
+
+function Q.list()
+  local out = {}
+  for i = 1, GetNumQuestLogEntries() or 0 do
+    local title, level, _, _, header, _, complete, _, id = GetQuestLogTitle(i)
+    if title and not header then
+      local objectives = {}
+      for j = 1, GetNumQuestLeaderBoards(i) or 0 do
+        local text, _, done = GetQuestLogLeaderBoard(j, i)
+        objectives[#objectives + 1] = { text = text, done = done and true or false }
+      end
+      out[#out + 1] = { id = id, title = title, level = level, complete = complete == 1, objectives = objectives }
+    end
+  end
+  return out
+end
 
 function Q.busy()
   return job ~= nil

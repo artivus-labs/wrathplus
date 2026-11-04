@@ -7,6 +7,7 @@
 --     run = function() Hunt:start() end,                         -- starts the activity
 --     done = function() return Hunt.finished, Hunt.ok end,       -- optional: when it has ended
 --     timeout = 120,                                             -- optional: give up after (s)
+--     while_dead = true,                                         -- optional: offered dead too
 --   })
 -- Choosing an intent starts an *activity*. Without `done` it ends, unannounced, as soon as `run`
 -- returns (a failed `run` is still announced). With
@@ -56,12 +57,14 @@ function A.remove(name)
   if A.current and A.current.name == name then A.current = nil end
 end
 
--- The intents whose `available` passes now, as { name, when } pairs, for the fast tier.
+-- The intents whose `available` passes now, as { name, when } pairs, for the fast tier. Dead or a
+-- ghost, nothing is offered (wp.revive carries that) but an intent marked `while_dead`.
 function A.available()
   local out = {}
+  local dead = UnitIsDeadOrGhost and UnitIsDeadOrGhost("player")
   for name, spec in pairs(A.intents) do
-    local ok, yes = true, true
-    if spec.available then ok, yes = pcall(spec.available) end
+    local ok, yes = not dead or spec.while_dead == true, true
+    if ok and spec.available then ok, yes = pcall(spec.available) end
     local when = spec.when
     if type(when) == "function" then
       local fine, text = pcall(when)

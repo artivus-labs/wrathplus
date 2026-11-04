@@ -23,6 +23,7 @@ UnitExists = function(u) return u == "party1" or u == "player" end
 UnitGUID = function(u) if u == "party1" then return "0xP" elseif u == "player" then return "0xME" end end
 UnitName = function(u) if u == "party1" then return "Pallytest" end end
 UnitIsDeadOrGhost = function() return false end
+UnitIsConnected = function() return true end
 GetNumPartyMembers = function() return 1 end
 GetPartyLeaderIndex = function() return 1 end
 Combat = { active = nil, engage = function(g) calls[#calls + 1] = "engage " .. g Combat.active = g return true end,
@@ -121,7 +122,7 @@ fn grouped_the_fast_tier_is_offered_follow_and_stay() {
     // Leading the party itself, it follows the first other member; a companion named wins.
     script
         .run(
-            "GetPartyLeaderIndex = function() return 0 end GetNumPartyMembers = function() return 2 end \
+            "GetPartyLeaderIndex = function() return 0 end GetNumPartyMembers = function() return 2 end UnitExists = function() return true end \
              UnitName = function(u) return ({ party1 = 'Pallytest', party2 = 'Agentone' })[u] end",
         )
         .unwrap();
@@ -200,4 +201,32 @@ fn a_window_left_open_is_closed_so_following_carries_on() {
         script.tick(0.3);
     }
     assert_eq!(calls(&script), "close trainer | move 18,0");
+}
+
+#[test]
+fn dead_nothing_is_offered_and_a_companion_who_logs_off_is_not_followed() {
+    let mut script = moving();
+    let offered = |script: &UiScript| -> String {
+        script
+            .eval("local out = {} for _, i in ipairs(Agent.available()) do out[#out + 1] = i.name end return table.concat(out, ' ')")
+            .unwrap()
+    };
+    assert_eq!(offered(&script), "follow_companion");
+    script
+        .run("UnitIsDeadOrGhost = function() return true end")
+        .unwrap();
+    assert_eq!(offered(&script), "");
+    script
+        .run("UnitIsDeadOrGhost = function() return false end connected = true UnitIsConnected = function() return connected end")
+        .unwrap();
+    // Following; then Pallytest logs off (gone from sight, and offline): following ends.
+    script.run("Move.follow('Pallytest') pally.x = 20").unwrap();
+    script.tick(0.3);
+    assert_eq!(state(&script), "following Pallytest (20 yd)");
+    script.run("connected = false pally = nil").unwrap();
+    script.tick(0.3);
+    assert!(script
+        .eval::<bool>("return Move.mode == nil and Move.last.outcome == 'offline'")
+        .unwrap());
+    assert_eq!(offered(&script), "");
 }

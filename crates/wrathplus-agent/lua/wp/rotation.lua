@@ -17,10 +17,20 @@
 -- Make it your own: replace or edit Rotation.list in a module of yours (autoexec, so it comes
 -- back after a restart). Rotation.stats counts casts and failures per spell for the fights since
 -- the last Rotation.reset_stats(); Combat's fight reviews read them.
+--
+-- A spell the game keeps refusing is left alone longer each time (4 s, doubling to a minute), and
+-- Rotation.usable[spell](c) says when a spell can be cast at all, for any list: Victory Rush only
+-- after a kill (the Victorious buff). The client has no IsUsableSpell yet (#87); add to it.
 
 local R = { list = nil, gcd = 1.0, stats = {} }
 
 local failed = {} -- spell -> time it may be tried again
+local strikes = {} -- spell -> refusals in a row, for the backoff
+
+R.usable = {
+  ["Victory Rush"] = function(c) return c.buff("Victorious") end,
+  ["Execute"] = function(c) return c.target_hp < 20 end,
+}
 local last_cast = 0
 local book, defaults -- the spellbook's names (to their slots), and the class default made from it
 
@@ -90,6 +100,11 @@ local function ready(spell, c, on_self)
   local start, duration = GetSpellCooldown(slot(spell), "spell")
   if start and start > 0 and start + (duration or 0) > GetTime() then return false end
   if (failed[spell] or 0) > GetTime() then return false end
+  local usable = R.usable[spell]
+  if usable then
+    local ok, yes = pcall(usable, c)
+    if not (ok and yes) then return false end
+  end
   -- Queued already (Heroic Strike waits for the next swing): casting again wastes the tick.
   if IsCurrentSpell and IsCurrentSpell(slot(spell), "spell") then return false end
   local my_type = UnitPowerType and UnitPowerType("player") or power_type
@@ -138,6 +153,7 @@ end
 local frame = CreateFrame("Frame")
 frame:RegisterEvent("UNIT_SPELLCAST_FAILED")
 frame:RegisterEvent("UI_ERROR_MESSAGE")
+frame:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
 for _, event in ipairs({ "SPELLS_CHANGED", "LEARNED_SPELL_IN_TAB", "PLAYER_LEVEL_UP" }) do
   frame:RegisterEvent(event)
 end
@@ -146,9 +162,14 @@ frame:SetScript("OnEvent", function(_, event, unit, spell)
     book, defaults = nil, nil
     return
   end
+  if event == "UNIT_SPELLCAST_SUCCEEDED" then
+    if unit == "player" and spell then strikes[spell] = nil end
+    return
+  end
   local name = event == "UNIT_SPELLCAST_FAILED" and unit == "player" and spell or (event == "UI_ERROR_MESSAGE" and R.last)
   if name and GetTime() - last_cast < 1.5 then
-    failed[name] = GetTime() + 4
+    strikes[name] = (strikes[name] or 0) + 1
+    failed[name] = GetTime() + math.min(4 * 2 ^ (strikes[name] - 1), 60)
     count(name, "failed")
   end
 end)

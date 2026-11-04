@@ -4,7 +4,8 @@
 --
 --   Move.to(unit [, within])    walk up to a unit, even a moving one (routing again as it moves),
 --                               and stop within `within` yards (default: close enough to talk or
---                               trade). Ends as AGENT_MOVE_DONE (target, "arrived" | "lost" | "failed").
+--                               trade). Ends as AGENT_MOVE_DONE (target, "arrived" | "lost" | "failed");
+--                               following ends that way too, "offline", when they log off.
 --   Move.to(x, y [, z])         the same for a place (or a table { x =, y = [, z =] }): the navmesh
 --                               route, ending as AGENT_MOVE_DONE too. A name not in sight fails at
 --                               once (false, why): the client only knows what it can see.
@@ -44,6 +45,19 @@ end
 
 local function same(a, b)
   return a and b and string.lower(a) == string.lower(b)
+end
+
+local function online(unit)
+  return UnitExists(unit) and (not UnitIsConnected or UnitIsConnected(unit))
+end
+
+-- A party member by name who has logged off (not one merely out of sight).
+local function logged_off(name)
+  for i = 1, 4 do
+    local unit = "party" .. i
+    if same(UnitName(unit), name) then return not online(unit) end
+  end
+  return false
 end
 
 -- The unit's guid now: a token or a guid answers directly, a name by what is in sight or in the party.
@@ -244,6 +258,8 @@ local function tick(now)
   end
   -- Follow.
   if fight(u) then return end
+  -- They logged off: following is over (the fast tier chooses again).
+  if not u and logged_off(who) then return finish("offline") end
   -- Something else is walking us (AgentInteract to an innkeeper) or we are talking to someone:
   -- let it finish, as a player stops following to deal with an NPC.
   if not aimed and AgentWalk().status == "walking" then
@@ -286,17 +302,22 @@ frame:SetScript("OnUpdate", function(_, dt)
   if M.mode then tick(GetTime()) end
 end)
 
--- Whom the group follows: the companion named, else the leader, else (leading ourselves) the
--- first other member.
+-- Whom the group follows: the companion named, else the leader, else (leading ourselves, or the
+-- leader logged off) the first other member who is online; nil when nobody is.
 function M.companion_now()
-  if (GetNumPartyMembers() or 0) == 0 then return nil end
+  local n = GetNumPartyMembers() or 0
+  if n == 0 then return nil end
   if M.companion then
     for i = 1, 4 do
-      if same(UnitName("party" .. i), M.companion) then return UnitName("party" .. i) end
+      local unit = "party" .. i
+      if same(UnitName(unit), M.companion) and online(unit) then return UnitName(unit) end
     end
   end
   local i = GetPartyLeaderIndex and GetPartyLeaderIndex() or 0
-  return UnitName("party" .. (i > 0 and i or 1))
+  if i > 0 and online("party" .. i) then return UnitName("party" .. i) end
+  for j = 1, n do
+    if online("party" .. j) then return UnitName("party" .. j) end
+  end
 end
 
 -- Grouped, the fast tier may put the agent in follow mode or have it hold a spot by itself.

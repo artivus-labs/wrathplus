@@ -134,3 +134,46 @@ fn a_visit_hands_in_then_takes_what_is_on_offer() {
         "interact 0xR | turn in 1 | complete | reward 1 | interact 0xR | select 1 | accept | PARTY: Handed in: Quest 1. Picked up: Quest 2."
     );
 }
+
+#[test]
+fn the_quest_log_reads_in_3_3_5_order_and_a_visit_ends_with_a_signal() {
+    let mut script = quests();
+    script
+        .run(
+            "LOG = { { 'Elwynn Forest', 0, nil, 0, 1, nil, nil, nil, 0 }, \
+                     { 'The Jasperlode Mine', 10, nil, 0, nil, nil, nil, nil, 76 }, \
+                     { 'Wolves Across the Border', 6, nil, 0, nil, nil, 1, nil, 33 } } \
+             GetNumQuestLogEntries = function() return #LOG, 2 end \
+             GetQuestLogTitle = function(i) return unpack(LOG[i]) end \
+             GetNumQuestLeaderBoards = function(i) return i == 3 and 1 or 0 end \
+             GetQuestLogLeaderBoard = function(j, i) return 'Tough Wolf Meat: 8/8', 'item', 1 end",
+        )
+        .unwrap();
+    let listed: String = script
+        .eval(
+            "local out = {} for _, q in ipairs(Quests.list()) do \
+               out[#out + 1] = q.id .. ' ' .. q.title .. (q.complete and ' (complete)' or '') .. ' ' .. #q.objectives \
+             end return table.concat(out, ' | ')",
+        )
+        .unwrap();
+    assert_eq!(
+        listed,
+        "76 The Jasperlode Mine 0 | 33 Wolves Across the Border (complete) 1"
+    );
+    // A pick-up visit: AGENT_QUESTS_DONE with what it took.
+    script.run("signals = {} offers = 1").unwrap();
+    visit(&mut script);
+    let signals: String = script.eval("return table.concat(signals, ' | ')").unwrap();
+    assert!(signals.contains("QUESTS_DONE pick_up 1 0"), "{signals}");
+}
+
+/// Pick up the one quest on offer, through gossip, and let the visit end.
+fn visit(script: &mut UiScript) {
+    script.run("Quests.pick_up()").unwrap();
+    script.tick(0.6);
+    script.fire_event("GOSSIP_SHOW", vec![]);
+    script.fire_event("QUEST_DETAIL", vec![]);
+    for _ in 0..10 {
+        script.tick(0.6);
+    }
+}
