@@ -1,6 +1,6 @@
-//! The stance bar's four bindings, which `BonusActionBarFrame.lua`'s `ShapeshiftBar_*` calls, over
-//! a form list the app resolves and pushes; flags answer 1/nil and the cooldown is the reference's
-//! `(start, duration, enable)`.
+//! The stance bar's bindings: the four `BonusActionBarFrame.lua`'s `ShapeshiftBar_*` calls, over a
+//! form list the app resolves and pushes (flags answer 1/nil and the cooldown is the reference's
+//! `(start, duration, enable)`), and `GetShapeshiftForm`, which macros and addons ask.
 
 use mlua::{Lua, MultiValue, Value};
 
@@ -23,6 +23,15 @@ pub struct ShapeshiftFormView {
     pub cooldown: Option<(i64, u32, bool)>,
 }
 
+/// The bar as the VM holds it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct ShapeshiftBar {
+    /// The forms, in bar order.
+    pub(crate) forms: Vec<StoredShapeshiftForm>,
+    /// The player's form id (`UNIT_FIELD_BYTES_1` byte 3), 0 out of any form.
+    pub(crate) form_byte: u8,
+}
+
 /// A pushed form with its cooldown in `GetTime` seconds.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct StoredShapeshiftForm {
@@ -35,7 +44,7 @@ impl super::UiScript {
     /// Replace the form list, in bar order; the app fires `UPDATE_SHAPESHIFT_FORMS` itself.
     pub fn set_shapeshift_forms(&mut self, forms: Vec<ShapeshiftFormView>) {
         let mut model = self.model_mut();
-        model.shapeshift_forms = forms
+        model.shapeshift.forms = forms
             .into_iter()
             .map(|view| {
                 let cooldown = view.cooldown.map(|(start_ms, duration_ms, enabled)| {
@@ -50,10 +59,15 @@ impl super::UiScript {
             .collect();
     }
 
+    /// The player's form id, which `GetShapeshiftForm` reads beside the bar.
+    pub fn set_shapeshift_form_byte(&mut self, form: u8) {
+        self.model_mut().shapeshift.form_byte = form;
+    }
+
     /// The bar's form count, `GetNumShapeshiftForms`'s answer; the cooldown flush fires
     /// `UPDATE_SHAPESHIFT_COOLDOWN` only while it is nonzero (12340 `0x53bac5`).
     pub fn num_shapeshift_forms(&self) -> usize {
-        self.model_mut().shapeshift_forms.len()
+        self.model_mut().shapeshift.forms.len()
     }
 
     /// Take the `CastShapeshiftForm` calls out of the call stream, as form spells; the app casts
@@ -70,7 +84,7 @@ impl super::UiScript {
 fn form_at(model: &Model, i: u32) -> Option<&StoredShapeshiftForm> {
     usize::try_from(i.checked_sub(1)?)
         .ok()
-        .and_then(|n| model.shapeshift_forms.get(n))
+        .and_then(|n| model.shapeshift.forms.get(n))
 }
 
 pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
@@ -80,7 +94,29 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         "GetNumShapeshiftForms",
         lua.create_function(|lua, ()| {
             let model = lua.app_data_ref::<Model>().expect("model app_data");
-            Ok(model.shapeshift_forms.len() as i64)
+            Ok(model.shapeshift.forms.len() as i64)
+        })?,
+    )?;
+
+    // `0x53de10` (through `0x53d4b0`): the highest bar slot whose form is active, the same test as
+    // GetShapeshiftFormInfo's third return, scanned top down; 0 for none, never nil. With the flag
+    // (macro conditionals) a player in no form (byte 0: a paladin aura, a presence) answers 0, and
+    // a form byte with no lit slot answers one past the bar.
+    g.set(
+        "GetShapeshiftForm",
+        lua.create_function(|lua, flag: Value| {
+            let model = lua.app_data_ref::<Model>().expect("model app_data");
+            let form = model.shapeshift.form_byte;
+            if super::action::truthy_nonzero(&flag) && form == 0 {
+                return Ok(0);
+            }
+            let forms = &model.shapeshift.forms;
+            let lit = forms.iter().rposition(|f| f.view.active).map(|i| i + 1);
+            Ok(match lit {
+                Some(i) => i,
+                None if form != 0 => forms.len() + 1,
+                None => 0,
+            })
         })?,
     )?;
 
@@ -161,6 +197,27 @@ mod tests {
                 cooldown: Some((9400, 1500, true)),
             },
         ]
+    }
+
+    #[test]
+    fn the_current_form_is_its_bar_index_and_the_flag_wants_a_real_form() {
+        let mut s = UiScript::new().unwrap();
+        assert_eq!(s.eval::<i64>("return GetShapeshiftForm()").unwrap(), 0);
+        // Battle Stance (slot 1) lit, its form byte set.
+        s.set_shapeshift_forms(forms());
+        s.set_shapeshift_form_byte(17);
+        assert_eq!(s.eval::<i64>("return GetShapeshiftForm()").unwrap(), 1);
+        assert_eq!(s.eval::<i64>("return GetShapeshiftForm(true)").unwrap(), 1);
+        // A lit slot with no form byte (an aura, a presence): an index, but 0 for the flag.
+        s.set_shapeshift_form_byte(0);
+        assert_eq!(s.eval::<i64>("return GetShapeshiftForm()").unwrap(), 1);
+        assert_eq!(s.eval::<i64>("return GetShapeshiftForm(1)").unwrap(), 0);
+        // A form byte and no lit slot: one past the bar.
+        let mut unlit = forms();
+        unlit[0].active = false;
+        s.set_shapeshift_forms(unlit);
+        s.set_shapeshift_form_byte(17);
+        assert_eq!(s.eval::<i64>("return GetShapeshiftForm()").unwrap(), 3);
     }
 
     #[test]

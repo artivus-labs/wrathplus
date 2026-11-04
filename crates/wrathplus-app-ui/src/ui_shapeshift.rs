@@ -230,6 +230,7 @@ fn feed_shapeshift_bar(
     let me = self_q.iter().next();
     let store = me.map(|(s, _)| s);
     let form_byte = store.map(|s| s.0.unit_shapeshift_form()).unwrap_or(0);
+    script.set_shapeshift_form_byte(form_byte);
     let auras: &[StampedAura] = me
         .and_then(|(_, g)| packets.as_deref()?.by_guid.get(&g.0))
         .map_or(&[], Vec::as_slice);
