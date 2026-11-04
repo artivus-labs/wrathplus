@@ -1,10 +1,9 @@
 //! The live inputs of the Lua spell and item use queries (`IsUsableSpell 0x541680`,
 //! `IsSpellInRange 0x541c60`, `IsUsableItem 0x51c450`, `GetItemCooldown 0x510fc0` and kin), each
-//! diff-pushed per frame: the book spells' usable pairs (the pet as the caster for the pet's
-//! book), the items' pairs, cooldowns, use-spell enchants and charges, the units and range
-//! modifiers the range test reads, the auto-repeat words and the item a cast came from. The
-//! Spell.dbc facts ride the catalog ([`catalog_facts`]) and the templates' with them
-//! ([`push_templates`]).
+//! diff-pushed per frame: the book spells' usable pairs (the pet casts the pet's book), the
+//! items' pairs, cooldowns, use-spell enchants and charges, the units and range modifiers the
+//! range test reads, the auto-repeat words and the item a cast came from. Spell.dbc facts ride
+//! the catalog ([`catalog_facts`]) and the templates' with them ([`push_templates`]).
 
 use std::collections::HashMap;
 

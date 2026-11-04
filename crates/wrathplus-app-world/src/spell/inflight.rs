@@ -472,11 +472,7 @@ mod tests {
         let mut p = PendingCast::default();
         p.arm_item(439, 0x4000_0000_0000_0042, t0);
         assert_eq!(p.item_use(t0), Some((439, 0x4000_0000_0000_0042)));
-        assert_eq!(
-            p.item_use(t0 + ITEM_SEND_PROVISIONAL),
-            None,
-            "past the deadline"
-        );
+        assert_eq!(p.item_use(t0 + ITEM_SEND_PROVISIONAL), None, "lapsed");
         p.clear_if(133);
         assert!(p.item_use(t0).is_some(), "another spell's reply leaves it");
         p.clear_if(439);
