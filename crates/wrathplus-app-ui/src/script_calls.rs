@@ -122,6 +122,7 @@ pub fn apply_script_calls(
                 }
             }
             ScriptCall::Dismount => crate::ui_chat_verbs::dismount(&mut appliers.p3()),
+            ScriptCall::TargetGuid(guid) => appliers.p0().target_guid(guid),
             ScriptCall::ActivateTalentGroup { group } => {
                 if let Some(progress) = progress.as_deref() {
                     crate::ui_chat_verbs::activate_talent_group(

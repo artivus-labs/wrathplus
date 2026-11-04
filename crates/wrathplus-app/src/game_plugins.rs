@@ -141,6 +141,7 @@ impl PluginGroup for GamePlugins {
             .add(crate::combat_log::FactionStandingPlugin)
             .add(crate::death::DeathPlugin)
             .add(crate::ui_death::UiDeathPlugin)
+            .add(wrathplus_app_ui::ui_char_state::UiCharStatePlugin)
             .add(crate::glue::GluePlugin)
             .add(crate::char_select::CharSelectPlugin { start: self.start })
             .add(crate::login::LoginPlugin)

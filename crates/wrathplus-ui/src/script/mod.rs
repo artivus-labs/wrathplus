@@ -222,7 +222,9 @@ pub use wrath_achievements::{
     WrathAchievement, WrathAchievementCategory, WrathAchievementCriterion, WrathAchievementMetadata,
 };
 mod wrath_calendar;
+mod wrath_char_state;
 mod wrath_engine_constants;
+mod wrath_game_queries;
 mod wrath_gm_survey;
 mod wrath_inspect_talents;
 mod wrath_macro_options;
@@ -232,6 +234,7 @@ mod wrath_quests_completed;
 mod wrath_ready_check;
 mod wrath_saved_instances;
 mod wrath_state_queries;
+pub use wrath_char_state::{power_regen as wrath_power_regen, WrathCharState, WrathUnitExtra};
 mod wrath_tutorial;
 pub use wrath_inspect_talents::{WrathInspectGroup, WrathInspectTalents};
 mod wrath_server_time;
@@ -852,6 +855,8 @@ impl UiScript {
             wrath_engine_constants::install(&lua)?;
             unit::wrath_queries::install(&lua)?;
             wrath_quest_queries::install(&lua)?;
+            wrath_char_state::install(&lua)?;
+            wrath_game_queries::install(&lua)?;
         }
 
         let s = UiScript {

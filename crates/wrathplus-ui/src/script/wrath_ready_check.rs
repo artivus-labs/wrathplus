@@ -5,10 +5,16 @@ use super::{Model, PartyRequest, ScriptValue, UiScript};
 use mlua::Lua;
 use std::collections::HashMap;
 
+/// The ready check's length, `READY_CHECK`'s `timeLeft`.
+const READY_CHECK_SECS: f64 = 30.0;
+
 #[derive(Default)]
 pub(crate) struct State {
     active: bool,
     statuses: HashMap<u64, &'static str>,
+    /// `GetReadyCheckTimeLeft`'s end (`0xbeb61c`) on the `GetTime` clock: the start plus 30000 ms
+    /// (`0x574d50`, `MSG_RAID_READY_CHECK`), cleared by the last answer and at the finish.
+    pub(crate) ends_at: Option<f64>,
 }
 fn token(model: &Model, guid: u64) -> Option<String> {
     if guid != 0 && guid == model.party.own_guid {
@@ -48,6 +54,7 @@ impl UiScript {
             model.wrath_ready_check = State {
                 active: true,
                 statuses,
+                ends_at: Some(model.now + READY_CHECK_SECS),
             };
             token(&model, initiator)
         };
@@ -57,7 +64,7 @@ impl UiScript {
             "READY_CHECK",
             vec![
                 initiator_token.map_or(ScriptValue::Nil, ScriptValue::Str),
-                ScriptValue::Number(30.0),
+                ScriptValue::Number(READY_CHECK_SECS),
             ],
         );
     }
@@ -71,6 +78,12 @@ impl UiScript {
                 .wrath_ready_check
                 .statuses
                 .insert(guid, if state == 0 { "notready" } else { "ready" });
+            // The last answer ends the timer (`0x574880`/`0x5744f0` stamp `now - 1`, and the timer
+            // pass `0x573390` zeroes it), so the time left reads 0.
+            let check = &mut model.wrath_ready_check;
+            if !check.statuses.values().any(|s| *s == "waiting") {
+                check.ends_at = None;
+            }
             token(&model, guid)
         };
         if let Some(unit) = unit {
@@ -81,7 +94,11 @@ impl UiScript {
         }
     }
     pub fn wrath_ready_check_finish(&mut self) {
-        self.model_mut().wrath_ready_check.active = false;
+        {
+            let mut model = self.model_mut();
+            model.wrath_ready_check.active = false;
+            model.wrath_ready_check.ends_at = None;
+        }
         // Keep final statuses for stock unit-frame fade callbacks. The next start
         // replaces them; no Vanilla AFK summary or leader-only timer runs here.
         self.fire_event("READY_CHECK_FINISHED", vec![]);

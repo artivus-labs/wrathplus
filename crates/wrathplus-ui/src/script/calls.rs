@@ -83,6 +83,9 @@ pub enum ScriptCall {
     /// Build 12340 `InteractUnit(unit)` (`0x527f00` → `0x5277b0`): the object's own interact, as a
     /// right-click on it runs it.
     InteractUnit { guid: u64 },
+    /// Build 12340 `TargetTotem(slot)` (`0x5262e0`): the slot's totem guid straight into
+    /// `SetSelection` (`0x524bf0`).
+    TargetGuid(u64),
 }
 
 /// The mode the four `TargetNearest*` shims hand the TAB cycler `0x493f60`, the only byte that
@@ -101,6 +104,9 @@ pub enum NearestMode {
     EnemyPlayer,
     /// Build 12340 `TargetNearestFriendPlayer` (`0x525b90`, mode 4 of `0x524fc0`).
     FriendPlayer,
+    /// Build 12340 `TargetNearest` (`0x525a90`, mode 0 of `0x524fc0`): any unit, as the candidate
+    /// filter `0x518e40` tests nothing for mode 0.
+    Any,
 }
 
 impl UiScript {

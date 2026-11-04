@@ -31,6 +31,7 @@ pub mod ui_binder;
 pub mod ui_calendar;
 pub mod ui_cast;
 pub mod ui_char;
+pub mod ui_char_state;
 pub mod ui_chat;
 pub mod ui_chat_verbs;
 pub mod ui_companions;

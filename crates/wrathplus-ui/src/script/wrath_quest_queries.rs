@@ -20,7 +20,7 @@ const QUEST_FLAGS_PVP: u32 = 0x2000;
 #[derive(Default)]
 pub(crate) struct State {
     /// The open quest panel's flags (`0xc0d6b4`).
-    panel_flags: u32,
+    pub(crate) panel_flags: u32,
     /// Each logged quest's `(source item, objective drops)`.
     item_drops: HashMap<u32, (u32, Vec<(u32, u32)>)>,
     /// Each logged quest's staged reputation rewards `(faction, hundredths)`.
