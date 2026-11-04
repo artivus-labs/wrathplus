@@ -378,6 +378,17 @@ mod tests {
         }
         let ends: String = script.eval("return ends[#ends]").unwrap();
         assert_eq!(ends, "follow_steps=false:step stuck leg timed out");
+        // Not offered again until the planner sets new steps: re-running it would just fail again.
+        let offered = |script: &UiScript| -> bool {
+            script
+                .eval("for _, i in ipairs(Agent.available()) do if i.name == 'follow_steps' then return true end end return false")
+                .unwrap()
+        };
+        assert!(!offered(&script));
+        script
+            .run("Agent.set_steps({ { name = 'another way', run = function() end } })")
+            .unwrap();
+        assert!(offered(&script));
     }
 
     #[test]

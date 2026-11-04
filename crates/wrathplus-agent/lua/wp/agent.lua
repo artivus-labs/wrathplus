@@ -220,11 +220,17 @@ local function step_check()
   end
   if not finished then
     if step.timeout and GetTime() - (A.steps.since or GetTime()) >= step.timeout then
+      A.steps.failed = A.steps.at
       return true, false, "step " .. step.name .. " timed out"
     end
     return false
   end
-  if succeeded == false then return true, false, "step " .. step.name .. " failed" end
+  -- A failed step is the planner's to fix: follow_steps is not offered again until it sets new
+  -- steps, or the fast tier re-runs the same failing step over and over.
+  if succeeded == false then
+    A.steps.failed = A.steps.at
+    return true, false, "step " .. step.name .. " failed"
+  end
   A.steps.at = A.steps.at + 1
   if not step_now() then
     A.steps.list, A.steps.at = {}, 0
@@ -238,6 +244,7 @@ end
 
 function A.set_steps(list)
   A.steps.list, A.steps.at = list or {}, (list and #list > 0) and 1 or 0
+  A.steps.failed = nil
   if A.steps.at == 0 then
     A.intents.follow_steps = nil
     return
@@ -248,6 +255,7 @@ function A.set_steps(list)
       return step and string.format("Carry on with the planner's steps: step %d of %d, %s.",
         A.steps.at, #A.steps.list, step.name) or "No steps left."
     end,
+    available = function() return not A.steps.failed end,
     run = start_step,
     done = step_check,
     plan = true,
