@@ -12,44 +12,12 @@
 
 use mlua::{Lua, Value, Variadic};
 
+#[path = "stdlib_guards.rs"]
+mod guards;
 #[path = "stdlib_time.rs"]
 mod time;
 
-/// Put native protected operations behind a sticky host check. Lua 5.1 can catch a hook error, and
-/// `coroutine.resume` reports one as a false result. Once the shared budget trips, these wrappers
-/// raise a fresh Rust callback error after the protected operation returns, so nesting protected
-/// calls only moves the same failure outward and cannot resume useful Lua execution.
-pub(super) fn install_wrath_budget_guards(
-    lua: &Lua,
-    budget: std::sync::Arc<super::InstructionBudget>,
-) -> mlua::Result<()> {
-    let check = lua.create_function(move |_, values: mlua::MultiValue| {
-        use std::sync::atomic::Ordering::Relaxed;
-
-        if budget.exhausted.load(Relaxed) {
-            return Err(super::instruction_budget_error(budget.used.load(Relaxed)));
-        }
-        Ok(values)
-    })?;
-    lua.globals().set("__wrathplus_budget_check", check)?;
-    lua.load(WRATH_BUDGET_GUARDS)
-        .set_name("=[WrathPlus wrath budget guards]")
-        .set_mode(mlua::ChunkMode::Text)
-        .exec()
-}
-
-const WRATH_BUDGET_GUARDS: &str = r#"
-do
-    local check = __wrathplus_budget_check
-    local native_pcall, native_xpcall = pcall, xpcall
-    local native_resume = coroutine.resume
-    __wrathplus_budget_check = nil
-
-    function pcall(...) return check(native_pcall(...)) end
-    function xpcall(...) return check(native_xpcall(...)) end
-    coroutine.resume = function(...) return check(native_resume(...)) end
-end
-"#;
+pub(super) use guards::install_wrath_budget_guards;
 
 /// An mlua error's bare Lua message, as `loadstring` returns it: without the `syntax error: ` or
 /// `runtime error: ` word mlua's `Display` adds and the reference never does.

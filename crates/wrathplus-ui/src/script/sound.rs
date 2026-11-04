@@ -168,6 +168,13 @@ mod tests {
             let e = s.run(call).expect_err(call).to_string();
             assert!(e.contains(usage), "{call}: {e}");
         }
+        // `lua_pushfstring` and `lua_error` (`0x985930`), no `luaL_where`: no position even when
+        // a Lua function is the caller.
+        assert_eq!(
+            s.eval::<String>("return select(2, pcall(function() PlaySound() end))")
+                .unwrap(),
+            r#"Usage: PlaySound("sound")"#
+        );
         assert!(s.take_sounds().is_empty(), "a raise queues nothing");
     }
 
