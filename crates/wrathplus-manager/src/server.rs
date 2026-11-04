@@ -9,7 +9,12 @@ mod chatter;
 mod command;
 mod data_prep;
 mod docker;
+mod environment;
+#[cfg(test)]
+mod environment_tests;
+mod environment_ui;
 mod guide;
+mod module_settings;
 mod settings;
 mod setup_job;
 mod source;
@@ -54,6 +59,8 @@ pub enum Input {
     /// Start a first-install task (source, data or navigation meshes).
     Setup(SetupTask),
     SetupFinished(SetupTask, Result<String, String>),
+    /// Edit the server settings (typed module settings and environment variables).
+    Environment(environment_ui::EnvInput),
 }
 pub struct Server {
     settings: Settings,
@@ -84,6 +91,7 @@ pub struct Server {
     job: Option<setup_job::Job>,
     /// How the last first-install task ended.
     job_result: Option<setup_job::Finished>,
+    env_form: environment_ui::EnvForm,
 }
 impl Default for Server {
     fn default() -> Self {
@@ -114,6 +122,7 @@ impl Default for Server {
             transfer: characters_ui::Transfer::default(),
             job: None,
             job_result: None,
+            env_form: environment_ui::EnvForm::default(),
         }
     }
 }
@@ -300,6 +309,12 @@ impl Manager {
                     Err(error) => state.error = Some(error),
                 }
                 state.next_refresh = Some(Instant::now() + std::time::Duration::from_secs(3));
+            }
+            Input::Environment(environment_ui::EnvInput::ToggleAdvanced) => {
+                state.environment_update(environment_ui::EnvInput::ToggleAdvanced)
+            }
+            Input::Environment(input) if !state.locked() && !self.module_state.busy => {
+                state.environment_update(input)
             }
             Input::Transfer(input) => return self.transfer_update(input),
             Input::Setup(task) => return self.setup_start(task, Navmesh::All),

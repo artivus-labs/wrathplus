@@ -1,4 +1,5 @@
 //! Managed fresh-instance settings; deliberately separate from client manager.json.
+use super::environment::Environment;
 use crate::setup;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -10,6 +11,9 @@ pub struct Settings {
     pub source: PathBuf,
     pub data: PathBuf,
     pub reuse_image: bool,
+    /// Server environment variables (AzerothCore config overrides); see `environment`.
+    #[serde(default, skip_serializing_if = "Environment::is_empty")]
+    pub environment: Environment,
 }
 impl Default for Settings {
     fn default() -> Self {
@@ -17,6 +21,7 @@ impl Default for Settings {
             source: PathBuf::new(),
             data: PathBuf::new(),
             reuse_image: true,
+            environment: Environment::default(),
         }
     }
 }
@@ -26,6 +31,10 @@ impl Settings {
     }
     pub fn state(config: &setup::Config) -> PathBuf {
         config.state_root().join("managed-server").join(PROJECT)
+    }
+    /// The private env file Compose hands to the servers, rewritten on every start.
+    pub fn env_file(config: &setup::Config) -> PathBuf {
+        Self::state(config).join("server.env")
     }
     pub fn load(config: &setup::Config) -> Result<Self, String> {
         let path = Self::path(config);
@@ -75,8 +84,10 @@ impl Settings {
         )
     }
     pub fn validate(&self, config: &setup::Config, needs_data: bool) -> Result<(), String> {
+        self.environment.validate()?;
         for output in [
             Self::path(config),
+            Self::env_file(config),
             Self::state(config),
             Self::state(config).join("manager-logs"),
         ] {

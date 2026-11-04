@@ -138,6 +138,7 @@ fn settings_reject_output_overlap_without_needing_selected_client_assets() {
         source: root.join("source"),
         data: root.join("server-assets"),
         reuse_image: true,
+        ..Settings::default()
     };
     assert!(settings.validate(&config, false).is_ok());
     assert!(Settings::check_output(&config, &Settings::path(&config)).is_ok());

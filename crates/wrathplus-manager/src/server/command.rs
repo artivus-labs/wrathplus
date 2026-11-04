@@ -33,6 +33,8 @@ pub fn compose(config: &setup::Config, settings: &Settings, args: &[&str]) -> Co
             },
         )
         .env("SERVER_STATE", Settings::state(config))
+        // The servers' environment (written on start); a path only, never values in argv.
+        .env("SERVER_ENV_FILE", Settings::env_file(config))
         // Never adopt an inherited Compose file, project, profile or env-file override.
         .env_remove("COMPOSE_FILE")
         .env_remove("COMPOSE_PROJECT_NAME")

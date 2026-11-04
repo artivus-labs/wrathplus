@@ -100,6 +100,15 @@ impl Manager {
                 "Get the server source first; a server type selects modules from it.".into();
             return iced::Task::none();
         }
+        // The type's server settings (bot population and turnover, or no bots) apply at the next
+        // start; a saved value the type does not set is kept.
+        if let Err(error) = self
+            .server_state
+            .apply_server_type(&self.config, preset.modules())
+        {
+            self.module_state.notice = format!("Server settings: {error}");
+            return iced::Task::none();
+        }
         self.module_state.busy = true;
         self.module_state.notice = format!("Selecting {}…", preset.title());
         let (sender, receiver) = iced::futures::channel::oneshot::channel();

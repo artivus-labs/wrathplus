@@ -12,6 +12,10 @@
    - **Get server source** downloads AzerothCore with Playerbots (about 1 GB, a minute or two).
    - Choose a **server type** (*Playerbots* is recommended) and **Build**; the first build takes
      about an hour.
+   - **Server settings** shows the selected modules' settings: for Playerbots, 1,000 to 2,000
+     random bots that start again at level 1 within two days of reaching 80. *Advanced: environment
+     variables* edits any AzerothCore setting (see
+     [`packaging/server/README.md`](../../packaging/server/README.md#server-settings-environment)).
    - **Prepare server data** reads maps from your client (a few minutes, about 1 GB).
    - **Start**, then **Use this server for the client**.
    - Optionally **Make navigation meshes** so bots and agents find their way (several hours;

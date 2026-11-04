@@ -139,6 +139,7 @@ impl Manager {
         page.push(card(status))
             .push(self.transfer_card())
             .push(card(self.server_types()))
+            .push(card(self.server_settings()))
             .push(card(build))
             .push(state.build_feedback_view())
             .push(card(settings))

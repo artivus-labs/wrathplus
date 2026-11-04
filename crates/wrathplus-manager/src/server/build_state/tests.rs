@@ -20,6 +20,7 @@ fn fixture() -> (std::path::PathBuf, setup::Config, Settings) {
         source,
         data: root.join("server-data"),
         reuse_image: true,
+        ..Settings::default()
     };
     (root, config, settings)
 }

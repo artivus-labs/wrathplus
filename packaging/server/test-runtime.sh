@@ -56,21 +56,20 @@ check_policy() {
     done
 }
 check_policy managed_core_config "$work/core-policy"
-for bot_count in 0 1 2 3 4 5; do
-    addclass_pool=$((bot_count * 10))
-    bot_autologin=0
-    if [ "$bot_count" -gt 0 ]; then bot_autologin=1; fi
-    cat > "$work/bot-policy" <<EOF
-PlayerbotsDatabaseInfo = "mysql;3306;acore;fixture_only;acore_playerbots"
-Playerbots.RandomBotAutologin = $bot_autologin
-Playerbots.MinRandomBots = $bot_count
-Playerbots.MaxRandomBots = $bot_count
-Playerbots.EnablePeriodicOnlineOffline = 0
-Playerbots.AddClassAccountPoolSize = $addclass_pool
-Playerbots.RandomBotGuildCount = 0
-EOF
-    check_policy managed_playerbots_config "$work/bot-policy"
-done
+printf 'PlayerbotsDatabaseInfo = "mysql;3306;acore;fixture_only;acore_playerbots"\n' > "$work/bot-policy"
+check_policy managed_playerbots_config "$work/bot-policy"
+# Population and turnover come from AC_PLAYERBOTS_* environment overrides (the Manager's
+# server settings or server-defaults.env): saved values pass through untouched.
+printf 'Playerbots.MinRandomBots = 7\nPlayerbots.MaxRandomBots = 9\nPlayerbots.RandomBotAutologin = 1\nPlayerbots.AddClassAccountPoolSize = 3\nPlayerbots.RandomBotGuildCount = 4\nPlayerbots.EnablePeriodicOnlineOffline = 1\n' > "$work/population"
+managed_playerbots_config < "$work/population" | grep -v -e '^$' -e '^PlayerbotsDatabaseInfo ' > "$work/population-out"
+diff -u "$work/population" "$work/population-out"
+# Without the Manager, Compose falls back to server-defaults.env: every line one quoted
+# AC_ override, nothing else.
+if grep -v -e '^#' -e "^AC_[A-Z0-9_]*='[^']*'\$" "$here/server-defaults.env"; then
+    echo 'server-defaults.env: unexpected line' >&2
+    exit 1
+fi
+grep -q "^AC_PLAYERBOTS_MAX_RANDOM_BOTS='" "$here/server-defaults.env"
 ahbot_account=7
 ahbot_guid=1056
 printf 'AuctionHouseBot.Account = 7\nAuctionHouseBot.GUID = 1056\n' > "$work/ahbot-policy"
