@@ -268,32 +268,20 @@ window remains an ordinary attended window. Probe/unattended options and the old
 launcher's temporary diagnostic capture suite are not imported. Manager continues
 using its checkout-local home selected below; it does not migrate the old script's game settings.
 
-## Local-state directory compatibility
+## Local-state directory
 
-Fresh installations use `wrathplus-config/`, with addons in `wrathplus-config/AddOns/`.
+WrathPlus uses `wrathplus-config/`, with addons in `wrathplus-config/AddOns/`.
 The runtime selects the primary checkout for development builds (shared across linked
 worktrees), or the executable directory for player builds. The entire home is used for reads
 and writes: CVars, account/realmlist login state, macros, bindings, addon enable state,
 SavedVariables, AddOns, screenshots/logs, `manager.json` and `manager-addons.json`.
 
-A home still under the folder's old name, `benilla-config/`, is renamed to `wrathplus-config/`
-the first time the Manager or a client resolves it, and the absolute paths Manager stored in its
-JSON files (module and addon sources, build receipts) are rewritten to the new name. Stop the
-realm, clients and agents first: they hold paths into the old folder. The old home is used as it
-is, unmoved, when both names exist (resolve them offline with backups; do not merge blindly),
-when the old name is a symlink, or when the rename fails. An invalid/unreadable old entry fails
-normally rather than silently selecting a fresh home.
-
-Manager uses the same naming rule under its selected checkout, including when restoring old
+Manager uses the same folder under its selected checkout, including when restoring
 `manager.json` at startup, and explicitly passes that selected home as `WRATHPLUS_HOME` to the
 game. Inherited `WRATHPLUS_HOME` is intentionally not imported by Manager. Direct client launches
-still honor an explicit `WRATHPLUS_HOME` exactly (including an empty value). The variable was
-`BENILLA_HOME` before; the old name is not read. `WOW_CAPTURE` continues to disable all client
-player-state access.
-Private `.azerothbench-test.env` login prefill remains at the checkout root and is unchanged.
-
-Update any explicit `WRATHPLUS_HOME` paths, launch scripts or custom addon source paths that
-point inside the old folder.
+honor an explicit `WRATHPLUS_HOME` exactly (including an empty value). `WOW_CAPTURE` disables all
+client player-state access. Private `.azerothbench-test.env` login prefill lives at the checkout
+root.
 
 ## Addons and custom source folders
 

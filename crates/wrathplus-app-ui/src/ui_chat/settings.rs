@@ -460,10 +460,10 @@ pub(crate) fn restore_chat_looks(world: &mut World, script: &mut UiScript) {
                 }
             });
         let had_file = text.is_some();
-        // No marker (old `benilla-writer` counts too): `ZONECHANNELS` may be empty. Repaired once.
+        // No marker: `ZONECHANNELS` may be empty. Repaired once.
         let damaged = text
             .as_deref()
-            .is_some_and(|t| !t.contains(WRITER_GENERATION) && !t.contains("# benilla-writer 2"));
+            .is_some_and(|t| !t.contains(WRITER_GENERATION));
         parsed = text.map(|t| parse(&t, &rows)).unwrap_or_default();
         if !had_file {
             // The loader's no-file path (`0x4997ad`): window 1 gets each seed row as

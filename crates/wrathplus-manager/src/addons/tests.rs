@@ -241,35 +241,6 @@ fn failed_settings_promotion_rolls_back_new_links() {
 }
 
 #[test]
-fn legacy_registrations_links_and_saved_variables_keep_one_home() {
-    let f = Fixture::new();
-    let legacy = f.config.repo.join("benilla-config");
-    std::fs::create_dir(&legacy).unwrap();
-    // Both names from the start: the old home is not moved, and wins.
-    let new = f.config.repo.join("wrathplus-config");
-    std::fs::create_dir(&new).unwrap();
-    let source = addon(&f.config.repo, "legacy-source", "Demo", "");
-    let settings = Settings {
-        folders: vec![source.clone()],
-        selected: vec![scan_folder(&source)[0].selection()],
-    };
-    save_and_apply(&f.config, &settings).unwrap();
-    let saved = legacy.join("saved/Demo.lua");
-    std::fs::create_dir_all(saved.parent().unwrap()).unwrap();
-    std::fs::write(&saved, "legacy data").unwrap();
-    assert_eq!(load(&f.config).unwrap().selected, settings.selected);
-    assert!(discover(&f.config, &settings)
-        .iter()
-        .any(|e| e.selected(&settings)));
-    assert!(legacy.join("AddOns/Demo/main.lua").is_file());
-    save_and_apply(&f.config, &Settings::default()).unwrap();
-    assert!(!legacy.join("AddOns/Demo").exists());
-    assert_eq!(std::fs::read_to_string(&saved).unwrap(), "legacy data");
-    assert!(source.join("Demo.toc").is_file());
-    assert_eq!(std::fs::read_dir(new).unwrap().count(), 0);
-}
-
-#[test]
 fn manifest_matches_each_directory_and_file_component_case_insensitively() {
     let f = Fixture::new();
     let source = addon(
