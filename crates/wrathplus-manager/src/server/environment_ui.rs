@@ -142,7 +142,7 @@ impl Manager {
     fn environment_list(&self, editable: bool) -> Element<'_, Message> {
         let state = &self.server_state;
         let saved = &state.settings.environment;
-        let mut list = column![text("Every variable the server starts with. AzerothCore reads AC_ plus a config key in upper snake case (Playerbots.MinRandomBots is AC_PLAYERBOTS_MIN_RANDOM_BOTS) as that key, for any module. Values are kept in the Manager's state folder and never logged.").size(12).color(style::MUTED)].spacing(8);
+        let mut list = column![text("Variables the server starts with. AC_ plus a config key in upper snake case sets that key, e.g. AC_PLAYERBOTS_MIN_RANDOM_BOTS.").size(12).color(style::MUTED)].spacing(8);
         for (name, value) in state.settings.environment.effective().iter() {
             let name = name.to_owned();
             let set = name.clone();
@@ -219,7 +219,9 @@ impl Manager {
         };
         let mut card = column![
             text("Server settings").size(18),
-            text("Used the next time the server starts: Stop, then Start. They take the place of the same settings in a module's config file.").size(13).color(style::MUTED),
+            text("Applied on the next server start.")
+                .size(13)
+                .color(style::MUTED),
         ]
         .spacing(12);
         for module in MODULES

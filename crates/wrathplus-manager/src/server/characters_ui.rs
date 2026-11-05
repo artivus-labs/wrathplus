@@ -214,7 +214,7 @@ impl Manager {
                 ),
             ]
             .align_y(iced::Center),
-            text("Move characters to and from any AzerothCore server as character dump files (.pdump). Log a character out before exporting it.")
+            text("Export and import characters as .pdump files. Log out a character before exporting it.")
                 .size(13)
                 .color(style::MUTED),
         ]
