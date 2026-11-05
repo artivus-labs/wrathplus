@@ -17,15 +17,15 @@ fn fault(message: &str) -> Result<String> {
     ))
 }
 
+/// The commands a fake realm was sent, in order.
+type Sent = std::rc::Rc<std::cell::RefCell<Vec<String>>>;
+
 /// A realm answering the way AzerothCore's SOAP does: `create` with `on_create`, and the
 /// expansion flag finding no account `missing` times first.
 fn realm(
     on_create: Result<String>,
     mut missing: usize,
-) -> (
-    impl FnMut(&str) -> Result<String>,
-    std::rc::Rc<std::cell::RefCell<Vec<String>>>,
-) {
+) -> (impl FnMut(&str) -> Result<String>, Sent) {
     let sent = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
     let log = sent.clone();
     let run = move |command: &str| {
