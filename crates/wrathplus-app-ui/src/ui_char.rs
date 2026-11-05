@@ -438,9 +438,6 @@ pub(crate) fn unit_combat_stats(store: &ObjectStore) -> UnitCombatStats {
         offhand_weapon_skill: (0, 0),
         ranged_weapon_skill: (0, 0),
         defense_skill: (0, 0),
-        dodge_percent: 0.0,
-        parry_percent: 0.0,
-        block_percent: 0.0,
     }
 }
 
@@ -477,10 +474,6 @@ fn combat_stats(
         // `UnitDefense`'s pair. The 1.12 player sheet has no Defense row: its `SKILL_LINES_CHANGED`
         // arm (`PaperDollFrame.lua:70-72`) redraws only the Attack row.
         defense_skill: skill_pair(store, SKILL_DEFENSE),
-        // `GetDodgeChance`/`GetParryChance`/`GetBlockChance`: player fields, already percentages.
-        dodge_percent: store.0.player_dodge_percentage().unwrap_or(0.0),
-        parry_percent: store.0.player_parry_percentage().unwrap_or(0.0),
-        block_percent: store.0.player_block_percentage().unwrap_or(0.0),
         ..unit_combat_stats(store)
     }
 }

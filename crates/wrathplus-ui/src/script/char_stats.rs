@@ -113,10 +113,6 @@ pub struct UnitCombatStats {
     pub defense_skill: (i32, i32),
     /// Whether a wand is equipped (`HasWandEquipped`).
     pub has_wand: bool,
-    /// Avoidance chances, already percents on the wire (`PLAYER_DODGE_PERCENTAGE` and siblings).
-    pub dodge_percent: f32,
-    pub parry_percent: f32,
-    pub block_percent: f32,
 }
 
 impl Default for UnitCombatStats {
@@ -153,9 +149,6 @@ impl Default for UnitCombatStats {
             ranged_weapon_skill: (0, 0),
             defense_skill: (0, 0),
             has_wand: false,
-            dodge_percent: 0.0,
-            parry_percent: 0.0,
-            block_percent: 0.0,
         }
     }
 }
@@ -703,29 +696,6 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // GetDodgeChance(), GetParryChance(), GetBlockChance() → one number each, no unit argument
-    // (`0x516f00`, `0x516fc0`, `0x516f60`); 0 before the field streams.
-    for (name, pick) in [
-        ("GetDodgeChance", 0usize),
-        ("GetParryChance", 1),
-        ("GetBlockChance", 2),
-    ] {
-        g.set(
-            name,
-            lua.create_function(move |lua, ()| {
-                let model = lua.app_data_ref::<Model>().expect("model app_data");
-                Ok(model
-                    .player_combat_stats
-                    .as_ref()
-                    .map_or(0.0, |s| match pick {
-                        0 => f64::from(s.dodge_percent),
-                        1 => f64::from(s.parry_percent),
-                        _ => f64::from(s.block_percent),
-                    }))
-            })?,
-        )?;
-    }
-
     // UnitRangedDamage(unit) → (speed, minDamage, maxDamage, physicalBonusPos, physicalBonusNeg,
     // percent), with `UnitDamage`'s school-0 mods.
     g.set(
@@ -956,9 +926,6 @@ mod tests {
             ranged_weapon_skill: (18, 0),
             defense_skill: (55, 4),
             has_wand: false,
-            dodge_percent: 0.0,
-            parry_percent: 0.0,
-            block_percent: 0.0,
         }
     }
 
