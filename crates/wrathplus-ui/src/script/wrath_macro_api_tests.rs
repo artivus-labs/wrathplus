@@ -223,11 +223,62 @@ fn set_macro_spell_falls_back_to_the_pets_book() {
         Some(&super::ExplicitMacroBind {
             spell: 122,
             pet_book: true,
-            item: 0
+            item: 0,
+            target: 0,
         })
     );
-    let before = s.macros_generation();
+    let before = s.macro_explicit_generation();
     s.run("SetMacroSpell(1, 'Fireball')").unwrap();
-    assert!(s.macros_generation() > before, "the bar re-derives");
+    assert!(s.macro_explicit_generation() > before, "the bar re-derives");
     assert!(!s.macro_explicit_binds()[&1].pet_book);
+}
+
+/// A setter refreshes only the bar slots that show its macro, each firing `ACTIONBAR_SLOT_CHANGED`
+/// in slot order within the call (`0x5aa920`), and only when its change test passes: the same
+/// spell again, with no item and the same target, fires nothing; a new target does.
+#[test]
+fn a_setter_fires_slot_changed_for_its_macros_slots_on_a_change() {
+    use crate::script::{macro_action_word, ActionSlot};
+    let mut s = seeded();
+    for (action, id) in [(30, 1), (2, 1), (5, 2)] {
+        let (kind, word) = macro_action_word(id);
+        s.set_action(
+            action,
+            Some(ActionSlot {
+                kind,
+                action: word,
+                ..Default::default()
+            }),
+        );
+    }
+    s.run(
+        "FIRED = {} local f = CreateFrame('Frame') f:RegisterEvent('ACTIONBAR_SLOT_CHANGED') \
+         f:SetScript('OnEvent', function(_, _, slot) FIRED[#FIRED + 1] = slot end)",
+    )
+    .unwrap();
+    let fired = |s: &UiScript| {
+        s.eval::<String>("local t = table.concat(FIRED, ',') FIRED = {} return t")
+            .unwrap()
+    };
+    // Macro 1 derives Fireball from its body: binding it again is no change.
+    s.run("SetMacroSpell(1, 'Fireball')").unwrap();
+    assert_eq!(fired(&s), "", "the derived pair already holds the spell");
+    s.run("SetMacroSpell(1, 'Frost Nova')").unwrap();
+    assert_eq!(fired(&s), "2,30", "macro 1's slots, in slot order");
+    s.run("SetMacroSpell(1, 'Frost Nova', 'player')").unwrap();
+    assert_eq!(
+        fired(&s),
+        "",
+        "no player guid: the target reads 0 as before"
+    );
+    s.run("SetMacroItem(2, 'Hearthstone')").unwrap();
+    assert_eq!(fired(&s), "5");
+    s.run("SetMacroItem(2, 'Hearthstone')").unwrap();
+    assert_eq!(fired(&s), "", "the same item again");
+    s.run("SetMacroSpell(2, 'Nothing')").unwrap();
+    assert_eq!(
+        fired(&s),
+        "5",
+        "an item was bound, so the spell setter refreshes"
+    );
 }

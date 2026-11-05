@@ -9,7 +9,7 @@
 
 use std::collections::HashMap;
 
-use mlua::{Lua, MultiValue, Value};
+use mlua::{Lua, Value};
 
 use crate::bindings_xml::Binding;
 
@@ -108,8 +108,8 @@ fn is_valid_binding_key(key: &str) -> bool {
 
 /// One command a `Bindings.xml` declared.
 #[derive(Clone, Debug)]
-struct Entry {
-    name: String,
+pub(super) struct Entry {
+    pub(super) name: String,
     /// `runOnUp="true"`: the release runs the body again (`0x4b7bf1`).
     run_on_up: bool,
     /// `hidden="true"`: a full binding, left out of `GetNumBindings`/`GetBinding`.
@@ -120,7 +120,7 @@ struct Entry {
 
 /// One row of the list `GetNumBindings`/`GetBinding` walk, in load order.
 #[derive(Clone, Debug)]
-enum Row {
+pub(super) enum Row {
     /// A section header, `HEADER_<header>`: the reference stores `sprintf("HEADER_%s", header)`
     /// (`0x846f58`) as a row of its own with a display ordinal and no script (`0x4b72f5`-`0x4b72fa`).
     Header(String),
@@ -131,13 +131,13 @@ enum Row {
 /// The commands, the key sets and the queued host requests; lives in [`Model`].
 #[derive(Default)]
 pub(crate) struct KeybindState {
-    entries: Vec<Entry>,
+    pub(super) entries: Vec<Entry>,
     /// The display list, headers and commands in load order.
     rows: Vec<Row>,
-    by_name: HashMap<String, usize>,
+    pub(super) by_name: HashMap<String, usize>,
     /// The live keys the dispatcher probes, in bind order: one command per chord, and a command's
     /// keys in the order `GetBindingKey` answers them.
-    live: Vec<KeyBinding>,
+    pub(super) live: Vec<KeyBinding>,
     /// Set 0, the defaults `LoadBindings(0)` restores, in file order.
     defaults: Vec<KeyBinding>,
     /// Stored sets: `[0]` account (set 1), `[1]` character (set 2, if any).
@@ -150,7 +150,9 @@ pub(crate) struct KeybindState {
     requests: Vec<KeybindRequest>,
     /// Build 12340's override bindings (`SetOverrideBinding` `0x563a90` and its kin), in set
     /// order: a layer over [`Self::live`] that dispatch reads, never saved.
-    overrides: Vec<OverrideBinding>,
+    pub(super) overrides: Vec<OverrideBinding>,
+    /// The other three modes of every set (`[rec+0x28+mode*0x10]`), and which are switched on.
+    pub(super) layers: super::wrath_binding_modes::Layers,
 }
 
 /// One override: the owner frame's id, whether it is a priority override, the key and its
@@ -198,7 +200,7 @@ impl KeybindState {
 /// `SetBinding(set, key, command)` on one key list: unbind `key` everywhere, then bind it to the
 /// command unless that is empty (`0x4b7490`, where an empty action is the unbind). The key is one
 /// [`normalize_binding_key`] accepted.
-fn bind_key(list: &mut Vec<KeyBinding>, key: String, command: Option<&str>) {
+pub(super) fn bind_key(list: &mut Vec<KeyBinding>, key: String, command: Option<&str>) {
     list.retain(|(k, _)| k != &key);
     if let Some(command) = command.filter(|c| !c.is_empty()) {
         list.push((key, command.to_owned()));
@@ -217,20 +219,56 @@ fn key_list(pairs: impl IntoIterator<Item = KeyBinding>) -> Vec<KeyBinding> {
     list
 }
 
-/// A `.wtf` bindings file as the reference's reader (`0x4b6140`) takes it: lines split on CR and
-/// LF, a line counted only when it opens with `bind ` in any case (`0x4b61ea`), then the key up to
-/// the next space and the rest of the line as the command (`0x4b620d`), handed to `SetBinding`.
+/// A `.wtf` bindings file's mode-1 keys, as the reader `0x5641c0` takes it
+/// ([`parse_bindings_wtf_lines`]), each handed to `SetBinding`.
 pub fn parse_bindings_wtf(text: &str) -> Vec<KeyBinding> {
-    text.split(['\r', '\n'])
-        .filter_map(|line| {
-            let rest = line
-                .get(..5)
-                .filter(|p| p.eq_ignore_ascii_case("bind "))
-                .map(|_| &line[5..])?;
-            let (key, command) = rest.split_once(' ').unwrap_or((rest, ""));
-            Some((key.to_owned(), command.to_owned()))
-        })
+    parse_bindings_wtf_lines(text)
+        .into_iter()
+        .filter(|(mode, ..)| *mode == 0)
+        .map(|(_, key, command)| (key, command))
         .collect()
+}
+
+/// A `.wtf` bindings file's keys in modes 2-4, as `(mode index, key, command)`.
+pub fn parse_bindings_wtf_layers(text: &str) -> Vec<(u32, String, String)> {
+    parse_bindings_wtf_lines(text)
+        .into_iter()
+        .filter(|(mode, ..)| *mode != 0)
+        .collect()
+}
+
+/// Every `bind` line of a `.wtf` bindings file with the mode index it falls in, as `0x5641c0`
+/// reads it: lines split on CR and LF, leading spaces and tabs skipped; `BINDINGMODE n` (any case)
+/// sets the mode of the lines after it when `atoi(n)` reads below 4 unsigned, so a negative is
+/// ignored and no digits read 0; `bind ` (any case), then the key up to the next space and the
+/// rest of the line as the command.
+fn parse_bindings_wtf_lines(text: &str) -> Vec<(u32, String, String)> {
+    let prefixed = |line: &str, p: &str| -> Option<String> {
+        let head = line.get(..p.len())?;
+        head.eq_ignore_ascii_case(p)
+            .then(|| line[p.len()..].to_owned())
+    };
+    let mut mode = 0;
+    let mut out = Vec::new();
+    for line in text.split(['\r', '\n']) {
+        let line = line.trim_start_matches([' ', '\t']);
+        if let Some(n) = prefixed(line, "BINDINGMODE ") {
+            let n = n.trim_start();
+            if !n.starts_with('-') {
+                let n = n.strip_prefix('+').unwrap_or(n);
+                let digits: String = n.chars().take_while(char::is_ascii_digit).collect();
+                match digits.parse::<u32>() {
+                    Ok(n) if n < 4 => mode = n,
+                    Err(_) if digits.is_empty() => mode = 0,
+                    _ => {}
+                }
+            }
+        } else if let Some(rest) = prefixed(line, "bind ") {
+            let (key, command) = rest.split_once(' ').unwrap_or((&rest, ""));
+            out.push((mode, key.to_owned(), command.to_owned()));
+        }
+    }
+    out
 }
 
 impl KeybindState {
@@ -238,7 +276,7 @@ impl KeybindState {
     /// `hidden="true"` one, which the reference numbers from a second counter, negated
     /// (`0x4b73da`-`0x4b73e5`), so `GetBinding`'s ordinal walk (`0x4b7c80`) never reaches it and
     /// `GetNumBindings` (`0x4b7f40`) counts only the first.
-    fn visible(&self) -> impl Iterator<Item = &Row> {
+    pub(super) fn visible(&self) -> impl Iterator<Item = &Row> {
         self.rows.iter().filter(|r| match r {
             Row::Header(_) => true,
             Row::Command(i) => !self.entries[*i].hidden,
@@ -282,17 +320,21 @@ impl KeybindState {
     /// `LoadBindings(set)`: 0 defaults, 1 account, 2 character, which falls back to the account
     /// set (the reference's starts as a copy), each falling back to the defaults. Loading defaults
     /// keeps the current set, as the window's Reset To Default does.
-    fn load(&mut self, set: u32) {
-        let list = match set {
-            0 => &self.defaults,
-            1 => self.stored[0].as_ref().unwrap_or(&self.defaults),
-            2 => self.stored[1]
-                .as_ref()
-                .or(self.stored[0].as_ref())
-                .unwrap_or(&self.defaults),
+    /// The copy reads the first stored set at or below `set` (`0x562b80` walks down past an empty
+    /// one), all four modes of it.
+    pub(super) fn load(&mut self, set: u32) {
+        let from = match set {
+            0 => 0,
+            1 => usize::from(self.stored[0].is_some()),
+            2 if self.stored[1].is_some() => 2,
+            2 => usize::from(self.stored[0].is_some()),
             _ => return,
         };
-        self.live = list.clone();
+        self.live = match from {
+            0 => self.defaults.clone(),
+            n => self.stored[n - 1].clone().unwrap_or_default(),
+        };
+        self.layers.copy(from, super::wrath_binding_modes::LIVE);
         if set != 0 {
             self.current_set = set;
         }
@@ -306,8 +348,11 @@ impl KeybindState {
             return;
         }
         self.stored[(which - 1) as usize] = Some(self.live.clone());
+        self.layers
+            .copy(super::wrath_binding_modes::LIVE, which as usize);
         if which == 1 {
             self.stored[1] = None;
+            self.layers.clear(2);
         }
         self.current_set = which;
         self.requests.push(KeybindRequest::Save(which));
@@ -393,19 +438,23 @@ impl super::UiScript {
         }
     }
 
-    /// Host-side `LoadBindings` (world entry: character set if it exists, else account).
+    /// Host-side `LoadBindings` (world entry `0x562d60`: character set if it exists, else
+    /// account). Its `UPDATE_BINDINGS` is the app's, fired once the interface is up to hear it.
     pub fn load_binding_set(&mut self, set: u32) {
         self.model_mut().keybinds.load(set);
     }
 
-    /// The keys dispatch reads: the live table with the override layer on top, a non-priority
-    /// override over a normal binding and a priority one over both, a later override of a key
-    /// winning over an earlier one. Labelled: the order between owners at one level is taken as
-    /// set order.
+    /// The keys dispatch reads (`0x563150` passes mode 4): each key's command in the highest
+    /// switched-on mode that sets it, else its base one ([`super::wrath_binding_modes`]), with the
+    /// override layer on top, a non-priority override over a normal binding and a priority one
+    /// over both, a later override of a key winning over an earlier one. A key whose command is
+    /// neither a form nor a declared command is left out, so the press falls through to the next
+    /// chord as the resolver's refusal does (`0x562140`). Labelled: the order between owners at
+    /// one level is taken as set order.
     pub fn effective_binding_keys(&self) -> Vec<KeyBinding> {
         let model = self.model_mut();
         let kb = &model.keybinds;
-        let mut keys = kb.live.clone();
+        let mut keys = kb.layers.effective(&kb.live);
         for priority in [false, true] {
             for o in kb.overrides.iter().filter(|o| o.priority == priority) {
                 match keys.iter_mut().find(|(k, _)| *k == o.key) {
@@ -414,6 +463,7 @@ impl super::UiScript {
                 }
             }
         }
+        keys.retain(|(_, c)| kb.runnable(c));
         keys
     }
 
@@ -518,50 +568,6 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             Ok(model.keybinds.visible().count())
         })?,
     )?;
-    lua.globals().set(
-        "GetBinding",
-        // GetBinding(index[, mode]) (`0x55e8d0`) → the command, then each key bound to it. An
-        // index past the list answers the empty command alone. Labelled: `mode` picks one of four
-        // binding sets; this VM keeps one.
-        lua.create_function(|lua, args: MultiValue| {
-            let i = super::binding_abi::number_arg(
-                lua,
-                args.front().cloned().unwrap_or(Value::Nil),
-                "Usage: GetBinding(index[, mode])",
-            )?;
-            let model = lua.app_data_mut::<Model>().expect("model app_data");
-            let kb = &model.keybinds;
-            let row = usize::try_from(i)
-                .ok()
-                .and_then(|i| i.checked_sub(1))
-                .and_then(|i| kb.visible().nth(i));
-            let Some(row) = row else {
-                return Ok(MultiValue::from_vec(vec![Value::String(
-                    lua.create_string("")?,
-                )]));
-            };
-            let mut out = Vec::new();
-            match row {
-                Row::Header(h) => out.push(Value::String(lua.create_string(h)?)),
-                Row::Command(c) => {
-                    let name = &kb.entries[*c].name;
-                    out.push(Value::String(lua.create_string(name)?));
-                    for k in kb.keys_of(name) {
-                        out.push(Value::String(lua.create_string(k)?));
-                    }
-                }
-            }
-            Ok(MultiValue::from_iter(out))
-        })?,
-    )?;
-    lua.globals().set(
-        "SetBinding",
-        lua.create_function(|lua, (key, command): (String, Option<String>)| {
-            let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-            let ok = model.keybinds.set_binding(&key, command.as_deref());
-            Ok(if ok { Some(1) } else { None })
-        })?,
-    )?;
     // `RunBinding(command[, "up"])` (`0x4b8180`): the command's body through `RunCommand`
     // (`0x4b81e0`), a release when the second argument is `"up"` in any case (`0x4b81c5`), else a
     // press. Not a hardware event, so the movement functions' gate refuses unless a key's own
@@ -579,47 +585,35 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             Ok(())
         })?,
     )?;
-    lua.globals().set(
-        "GetBindingKey",
-        lua.create_function(|lua, command: String| {
-            let model = lua.app_data_mut::<Model>().expect("model app_data");
-            let kb = &model.keybinds;
-            let mut out = Vec::new();
-            // `0x55e9b0`: every key bound to the command, in order.
-            for k in kb.keys_of(&command) {
-                out.push(Value::String(lua.create_string(k)?));
-            }
-            Ok(MultiValue::from_iter(out))
-        })?,
-    )?;
-    lua.globals().set(
-        "GetBindingAction",
-        lua.create_function(|lua, key: String| {
-            let model = lua.app_data_mut::<Model>().expect("model app_data");
-            let key = key.to_ascii_uppercase();
-            let name = model
-                .keybinds
-                .live
-                .iter()
-                .find(|(k, _)| k == &key)
-                .map(|(_, c)| c.as_str())
-                .unwrap_or("");
-            lua.create_string(name)
-        })?,
-    )?;
+    // `LoadBindings(set)` (`0x564070`): the set's copy into the live one (`0x562b80(set, 3)`), which
+    // fires `UPDATE_BINDINGS` in the call (`0x562d4f`); a set past 2 raises the usage line.
+    // Labelled: a negative set loads nothing and still fires (the reference indexes before set 0).
     lua.globals().set(
         "LoadBindings",
-        lua.create_function(|lua, set: u32| {
-            let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-            model.keybinds.load(set);
+        lua.create_function(|lua, set: Value| {
+            let set = super::binding_abi::coerced_number(lua, Some(set)).trunc();
+            if set > 2.0 {
+                return Err(mlua::Error::runtime("Usage: LoadBindings(0||1||2)"));
+            }
+            if set >= 0.0 {
+                let mut model = lua.app_data_mut::<Model>().expect("model app_data");
+                model.keybinds.load(set as u32);
+            }
+            super::event::fire_global(lua, "UPDATE_BINDINGS", &[]);
             Ok(())
         })?,
     )?;
+    // `SaveBindings(which)` (`0x5640c0`): 1 or 2, else the usage line; the copy out of the live set
+    // (`0x562b80(3, which)`) fires no event.
     lua.globals().set(
         "SaveBindings",
-        lua.create_function(|lua, which: u32| {
+        lua.create_function(|lua, which: Value| {
+            let which = super::binding_abi::coerced_number(lua, Some(which)).trunc();
+            if which != 1.0 && which != 2.0 {
+                return Err(mlua::Error::runtime("Usage: SaveBindings(1||2)"));
+            }
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-            model.keybinds.save(which);
+            model.keybinds.save(which as u32);
             Ok(())
         })?,
     )?;
@@ -742,16 +736,19 @@ mod tests {
                 .unwrap(),
             ""
         );
-        // The command is never read (`0x4b7490`): a name no file declared is stored and
-        // answered.
+        // The store never reads the command (`0x562ed0`): a name no file declared is stored,
+        // but `GetBindingAction` answers only a form or a declared command (`0x562490`).
         assert!(s
             .eval::<bool>(r#"return SetBinding("CTRL-Y", "TOGGLESTATS") == 1"#)
             .unwrap());
         assert_eq!(
             s.eval::<String>(r#"return GetBindingAction("CTRL-Y")"#)
                 .unwrap(),
-            "TOGGLESTATS"
+            ""
         );
+        assert!(s
+            .binding_keys()
+            .contains(&("CTRL-Y".into(), "TOGGLESTATS".into())));
         // The wheel binds to a `runOnUp` command: `0x4b7490` never reads the command.
         assert!(s
             .eval::<bool>(r#"return SetBinding("SHIFT-MOUSEWHEELUP", "MOVEFORWARD") == 1"#)

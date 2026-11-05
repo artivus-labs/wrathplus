@@ -38,9 +38,13 @@ use crate::app_core::ui_flags::UiKeyboardCapture;
 use crate::ui_script::{PointerOverUiPanel, UiWheelEaten};
 
 pub(crate) mod chord;
+mod combat_mode;
 mod layout;
 mod script_input;
+mod seed;
 mod store;
+
+pub(crate) use seed::seed_bindings_for_vm;
 
 use chord::{BindKey, Chord};
 pub(crate) use layout::LayoutNames;
@@ -138,7 +142,11 @@ impl Plugin for BindingsPlugin {
                     // The key sets are seeded at the VM's birth, not here: `seed_bindings_for_vm`
                     // runs in `load_ingame_ui_on_world_entry`, before FrameXML and every addon;
                     // the commands come with the load.
-                    (sync_dispatch, latch_and_dispatch)
+                    (
+                        combat_mode::sync_combat_binding_mode,
+                        sync_dispatch,
+                        latch_and_dispatch,
+                    )
                         .chain()
                         .in_set(crate::app_core::schedule::UiInput)
                         .in_set(BindingSet)
@@ -162,68 +170,14 @@ fn clear_native_world_input(native: Res<NativeBindingRoute>, mut state: ResMut<B
     }
 }
 
-/// Seed the key sets at the VM's birth, before any interface file runs: the defaults off the
-/// player's chain (`WTF\DefaultBindings.wtf`), the account set, and the character's set if it has
-/// one. The keys are their own table, so a command a later file declares finds its keys there,
-/// and stock `ActionButton_OnLoad` paints its hotkey corner from `GetBindingKey` at load.
-///
-/// The reference reads the defaults later in `UI_Init` (`0x4b62b0` at `0x4900c7`); here they are
-/// read first because the stored sets are diffs against them ([`store`]'s deviation), and nothing
-/// reads set 0 before `LoadBindings(0)`.
-pub(crate) fn seed_bindings_for_vm(world: &mut World, script: &mut UiScript) {
-    let defaults = crate::ui_script::default_bindings();
-    script.set_default_bindings(defaults);
-    let defaults = script.default_bindings();
-    let account = crate::local_state::bindings_account_path();
-    let overrides = read_diff(&account).unwrap_or_default();
-    script.seed_binding_set(1, Some(store::resolve(&overrides, &defaults)));
-    script.load_binding_set(1);
-
-    // The character's own set: its file existing makes it the active set, the reference's rule.
-    // No roster identity (a rigged or capture run) leaves set 2 unseeded.
-    let id = world
-        .get_resource::<crate::app_core::state::Roster>()
-        .and_then(crate::app_core::state::identity);
-    let character = id
-        .as_ref()
-        .and_then(|(realm, name)| crate::local_state::bindings_character_path(realm, name));
-    match read_diff(&character) {
-        Some(overrides) => {
-            script.seed_binding_set(2, Some(store::resolve(&overrides, &defaults)));
-            script.load_binding_set(2);
-            info!("bindings: character-specific set loaded");
-        }
-        None => {
-            script.seed_binding_set(2, None);
-            script.load_binding_set(1);
-        }
-    }
-    if let Some(mut files) = world.get_resource_mut::<BindingFiles>() {
-        files.account = account;
-        files.character = character;
-    }
-}
-
-/// Read and parse one diff file; `None` (the defaults) when absent or unreadable.
-fn read_diff(path: &Option<std::path::PathBuf>) -> Option<Vec<(String, Vec<String>)>> {
-    let path = path.as_ref()?;
-    match std::fs::read_to_string(path) {
-        Ok(text) => Some(store::from_diff(&text)),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-        Err(e) => {
-            warn!("bindings: reading {}: {e}", path.display());
-            None
-        }
-    }
-}
-
 /// Drain the VM's binding requests: `SaveBindings` writes the set's diff; saving the account set
 /// deletes the character file.
 fn drain_binding_requests(script: Option<NonSendMut<UiScript>>, files: Res<BindingFiles>) {
     let Some(mut script) = script else { return };
     for req in script.take_keybind_requests() {
         let KeybindRequest::Save(which) = req;
-        let text = store::to_diff(&script.keybind_snapshot(), &script.default_bindings());
+        let mut text = store::to_diff(&script.keybind_snapshot(), &script.default_bindings());
+        text.push_str(&store::layer_lines(&script.binding_layer_lines()));
         let path = match which {
             1 => &files.account,
             2 => &files.character,
@@ -246,9 +200,11 @@ fn drain_binding_requests(script: Option<NonSendMut<UiScript>>, files: Res<Bindi
     }
 }
 
-/// Rebuild the dispatch map when the engine table moved (a rebind, a set switch, the seed, a
-/// load), and fire `UPDATE_BINDINGS` so the Lua consumers (the action bar's hotkey corners)
-/// repaint.
+/// Rebuild the dispatch map when the engine table moved (a rebind, a set switch, a mode flip, the
+/// seed, a load). The changes that announce themselves fire `UPDATE_BINDINGS` in the VM call, as
+/// the reference does; this fires it only for a VM's first build, the world-entry load (`0x562d60`
+/// → `0x562b80`, which fires it), once the interface is up to hear it so the action bar's hotkey
+/// corners paint.
 fn sync_dispatch(
     script: Option<NonSendMut<UiScript>>,
     mut dispatch: ResMut<BindingDispatch>,
@@ -262,12 +218,13 @@ fn sync_dispatch(
     let Some(mut script) = script else { return };
     dispatch.looking = script.mouselooking();
     let generation = script.keybinds_generation();
-    if *dispatch.seen_generation.get(&script) == Some(generation) {
+    let seen = *dispatch.seen_generation.get(&script);
+    if seen == Some(generation) {
         return;
     }
     *dispatch.seen_generation.get(&script) = Some(generation);
     dispatch.map.clear();
-    // The live table with build 12340's override layer on top (`SetOverrideBinding`).
+    // The resolved keys with build 12340's override layer on top (`SetOverrideBinding`).
     for (key, command) in script.effective_binding_keys() {
         match Chord::parse(&key) {
             Some(ch) => {
@@ -280,7 +237,9 @@ fn sync_dispatch(
     dispatch.mouselook = looks
         .filter_map(|(k, c)| Some((Chord::parse(&k)?, c)))
         .collect();
-    script.fire_event("UPDATE_BINDINGS", vec![]);
+    if seen.is_none() {
+        script.fire_event("UPDATE_BINDINGS", vec![]);
+    }
 }
 
 /// A wheel delta in lines (notches), whatever unit the OS reported: a trackpad's `Pixel` deltas
@@ -702,6 +661,7 @@ mod tests {
         app.world_mut().resource_mut::<UiKeyboardCapture>().consumed = keys.to_vec();
     }
 
+    mod combat_mode;
     mod mouselook;
     mod wheel;
 

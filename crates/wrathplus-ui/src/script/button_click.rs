@@ -95,6 +95,9 @@ pub(crate) fn click_button(lua: &Lua, id: u32, button: &str, down: bool, scripte
         Ok(s) => Value::String(s),
         Err(_) => return,
     };
+    if !enter_wrapper(lua, id) {
+        return;
+    }
     // The click's button for its handlers, as the Button's click wrapper swaps it (`0x96fd70`).
     let outer = swap_clicked(lua, Some(button.to_string()));
     for script in ["PreClick", "OnClick", "PostClick"] {
@@ -106,6 +109,7 @@ pub(crate) fn click_button(lua: &Lua, id: u32, button: &str, down: bool, scripte
         }
     }
     swap_clicked(lua, outer);
+    leave_wrapper(lua, id);
     // A nameplate click selects its unit, from the pointer or `Click()` alike (the plate's
     // override `0x7cb910` chains the base), after the handler so an erroring hook cannot eat it. A
     // press selects nothing: the plate registers Up clicks only (`0x7cb637`).
@@ -123,10 +127,66 @@ pub(crate) fn click_button(lua: &Lua, id: u32, button: &str, down: bool, scripte
     }
 }
 
+/// The Buttons whose click or double-click wrapper is running (`[button+0x2a8] & 0x10`, which
+/// `0x96fd70` and `0x96fdd0` set around their handlers): a Button's `Click()` of itself from
+/// its own handler fires nothing.
+#[derive(Default)]
+struct InWrapper(std::collections::HashSet<u32>);
+
+/// Enter frame `id`'s wrapper, false when it is already in one. Only a Button has the wrapper.
+fn enter_wrapper(lua: &Lua, id: u32) -> bool {
+    let is_button = {
+        let model = lua.app_data_ref::<Model>().expect("model app_data");
+        let kind = model
+            .id_to_frame
+            .get(&id)
+            .and_then(|&h| model.arena.frame(h));
+        kind.is_some_and(|f| matches!(f.kind_state, KindState::Button(_)))
+    };
+    if !is_button {
+        return true;
+    }
+    if lua.app_data_ref::<InWrapper>().is_none() {
+        lua.set_app_data(InWrapper::default());
+    }
+    let mut set = lua.app_data_mut::<InWrapper>().expect("wrapper set");
+    set.0.insert(id)
+}
+
+fn leave_wrapper(lua: &Lua, id: u32) {
+    if let Some(mut set) = lua.app_data_mut::<InWrapper>() {
+        set.0.remove(&id);
+    }
+}
+
+/// A Button's double click, its `OnDoubleClick` wrapper `0x96fdd0` (the slot after the click
+/// wrapper `0x96fd70` in the Button vtables, `0xaa1038`/`0xaa103c`): only while the Button is
+/// enabled and not already in a wrapper, the clicked button set around `OnDoubleClick(self,
+/// button)` (`0x96f150`). Any other kind's handler fires as [`fire_clicked`] fires it.
+pub(crate) fn double_click(lua: &Lua, id: u32, button: &str, btn: &Value) -> mlua::Result<()> {
+    let enabled = {
+        let model = lua.app_data_ref::<Model>().expect("model app_data");
+        let frame = model
+            .id_to_frame
+            .get(&id)
+            .and_then(|&h| model.arena.frame(h));
+        match frame.map(|f| &f.kind_state) {
+            Some(KindState::Button(bs)) => bs.enabled(),
+            _ => true,
+        }
+    };
+    if !enabled || !enter_wrapper(lua, id) {
+        return Ok(());
+    }
+    let fired = fire_clicked(lua, id, "OnDoubleClick", button, btn);
+    leave_wrapper(lua, id);
+    fired
+}
+
 /// Set `[[0xb499a8]+0x1234]`, the button of the click being dispatched, answering the old one:
 /// what `GetMouseButtonClicked` (`0x50f950`), `IsModifiedClick` and the macro `[button]` option
 /// read. The reference sets it around `OnMouseDown`/`OnMouseUp` (`0x48fc30`, `0x48fce0`) and a
-/// Button's click and double-click (`0x96fd70`, `0x96fdd0`, inferred the double-click), and puts
+/// Button's click and double-click wrappers (`0x96fd70`, `0x96fdd0`), and puts
 /// the outer value back after, so it is nil outside those handlers.
 pub(crate) fn swap_clicked(lua: &Lua, button: Option<String>) -> Option<String> {
     let mut model = lua.app_data_mut::<Model>().expect("model app_data");
@@ -147,4 +207,44 @@ pub(crate) fn fire_clicked(
     let fired = event::fire_widget_handler(lua, id, script, vec![btn.clone()]);
     swap_clicked(lua, outer);
     fired
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::script::UiScript;
+
+    /// The wrappers' gates: a disabled Button's fast second click fires no `OnDoubleClick`, and a
+    /// Button's `Click()` of itself from its own `OnClick` fires nothing (`[+0x2a8] & 0x10`).
+    #[test]
+    fn the_click_wrappers_gate_on_enabled_and_reentry() {
+        let mut s = UiScript::new().unwrap();
+        s.set_screen_size(800.0, 600.0);
+        s.run(
+            r#"
+            clicks, doubles = 0, 0
+            B = CreateFrame("Button", "WrapB")
+            B:SetPoint("BOTTOMLEFT", 0, 0) B:SetWidth(200) B:SetHeight(200) B:EnableMouse(true)
+            B:SetScript("OnClick", function(self) clicks = clicks + 1 self:Click() end)
+            B:SetScript("OnDoubleClick", function() doubles = doubles + 1 end)
+        "#,
+        )
+        .unwrap();
+        s.resolve();
+        s.run("B:Click()").unwrap();
+        assert_eq!(s.eval::<i64>("return clicks").unwrap(), 1, "no re-entry");
+        let pair = |s: &mut UiScript| {
+            for _ in 0..2 {
+                s.mouse_button(50.0, 50.0, "LeftButton", true);
+                s.mouse_button(50.0, 50.0, "LeftButton", false);
+                s.tick(0.05);
+            }
+        };
+        pair(&mut s);
+        assert_eq!(s.eval::<i64>("return doubles").unwrap(), 1);
+        s.tick(1.0);
+        s.run("B:Disable()").unwrap();
+        pair(&mut s);
+        assert_eq!(s.eval::<i64>("return doubles").unwrap(), 1, "disabled");
+        assert!(s.errors().is_empty(), "{:?}", s.errors());
+    }
 }

@@ -41,6 +41,7 @@ pub(crate) use manifest::default_bindings;
 pub use manifest::load_default_ui;
 #[cfg(any(test, feature = "test-support"))]
 pub use manifest::{load_stock_bindings, stock_bindings_file};
+pub(crate) use reference_ui::default_binding_layers;
 
 pub(crate) use crate::app_core::state::{CursorPayloadHeld, PointerOverUi};
 /// A synthetic pointer owns the mouse this frame (the drag probe's gesture), so

@@ -10,6 +10,8 @@
 //!
 //! `bind <COMMAND> [key...]` replaces the command's key list; no tokens means unbound, an absent
 //! command keeps its defaults. Tokens are canonical chord strings and never contain spaces.
+//! Build 12340's modes 2-4 follow as `bindmode <mode> <KEY> <COMMAND>` lines, every key of them
+//! ([`layer_lines`]).
 //! Deviation: the reference saves a full snapshot (`bindings-cache.wtf`); a diff is stored
 //! because a full snapshot would leave every command added later unbound for a saved file.
 
@@ -95,6 +97,29 @@ pub(crate) fn resolve(diff: &[(String, Vec<String>)], defaults: &[KeyBinding]) -
     table
 }
 
+/// The live set's modes 2-4 as `bindmode <mode> <KEY> <COMMAND>` lines, `mode` as Lua numbers it
+/// (2-4): every key, not a diff, since a key set in a higher mode can only be rebound there.
+pub(crate) fn layer_lines(lines: &[(u32, String, String)]) -> String {
+    lines
+        .iter()
+        .map(|(mode, key, command)| format!("bindmode {} {key} {command}\n", mode + 1))
+        .collect()
+}
+
+/// The `bindmode` lines of a bindings file, as `(mode index, key, command)`; malformed ones
+/// skipped.
+pub(crate) fn layers_from(text: &str) -> Vec<(u32, String, String)> {
+    text.lines()
+        .filter_map(|line| {
+            let rest = line.trim().strip_prefix("bindmode ")?;
+            let (mode, rest) = rest.split_once(' ')?;
+            let (key, command) = rest.split_once(' ')?;
+            let mode = mode.parse::<u32>().ok().filter(|m| (2..=4).contains(m))?;
+            Some((mode - 1, key.to_owned(), command.to_owned()))
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -159,6 +184,26 @@ mod tests {
         assert_eq!(keys(&resolved, "JUMP"), ["F"]);
         assert!(keys(&resolved, "TOGGLESHEATH").is_empty());
         assert_eq!(keys(&resolved, "MOVEFORWARD"), ["W", "UP"]);
+    }
+
+    /// The higher modes round-trip as `bindmode` lines, which the diff reader skips; a command
+    /// keeps its spaces and a mode outside 2-4 is dropped.
+    #[test]
+    fn mode_lines_round_trip_beside_the_diff() {
+        let lines = vec![
+            (1, "F".to_string(), "JUMP".to_string()),
+            (3, "CTRL-G".to_string(), "SPELL Holy Light".to_string()),
+        ];
+        let text = layer_lines(&lines);
+        assert_eq!(
+            text,
+            "bindmode 2 F JUMP\nbindmode 4 CTRL-G SPELL Holy Light\n"
+        );
+        assert_eq!(
+            layers_from(&(text.clone() + "bindmode 5 H JUMP\nbindmode 2 H\n")),
+            lines
+        );
+        assert!(from_diff(&text).is_empty());
     }
 
     #[test]

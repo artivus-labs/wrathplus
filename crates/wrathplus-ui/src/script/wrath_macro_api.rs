@@ -7,8 +7,8 @@
 //! list (`[rec+0x574]` cleared, `0x565ad0`), so an explicit pair overrides the derived one until
 //! the body is edited or the macro deleted (inferred from that unlink: the body setter `0x5663a0`
 //! is not decompiled). The `[,target]` argument is the unit whose guid the reference stores at
-//! `[rec+0x578]` (`0x60abf0`); nothing reads it but the re-derive's change test (`0x5650c0`), so it
-//! has no effect to carry.
+//! `[rec+0x578]` (`0x60abf0`); nothing reads it but the setters' change tests and the re-derive's
+//! (`0x5650c0`), so it is kept for the tests alone.
 
 use std::collections::HashMap;
 
@@ -24,6 +24,8 @@ pub struct ExplicitMacroBind {
     pub spell: i32,
     pub pet_book: bool,
     pub item: u32,
+    /// The `[,target]` unit's guid (`[rec+0x578]`), 0 for none.
+    pub target: u64,
 }
 
 type Explicit = ExplicitMacroBind;
@@ -40,6 +42,8 @@ pub struct RunningMacro {
 #[derive(Default)]
 struct State {
     explicit: HashMap<u32, Explicit>,
+    /// Bumped by every setter call: the app's signal to re-derive the bar's bound spells.
+    generation: u64,
     running: RunningMacro,
 }
 
@@ -75,6 +79,12 @@ impl super::UiScript {
     pub fn macro_explicit_binds(&self) -> HashMap<u32, ExplicitMacroBind> {
         state(&self.lua).explicit.clone()
     }
+
+    /// Bumped by every `SetMacroSpell`/`SetMacroItem` call; re-derive the bound spells when it
+    /// moves.
+    pub fn macro_explicit_generation(&self) -> u64 {
+        state(&self.lua).generation
+    }
 }
 
 /// The record's `(spell, item)`: the explicit pair, else the body's derived spell and no item.
@@ -86,8 +96,20 @@ fn bound(lua: &Lua, model: &Model, id: u32) -> Explicit {
     Explicit {
         spell: b.spell,
         pet_book: b.pet_book,
-        item: 0,
+        ..Explicit::default()
     }
+}
+
+/// The `[,target]` argument's guid (`0x60abf0` with no default): a unit token the resolver knows,
+/// else 0. Inferred: a name or a token it refuses reads 0.
+fn target(lua: &Lua, model: &Model, args: &MultiValue) -> u64 {
+    let Some(token) = args
+        .get(2)
+        .and_then(|v| super::binding_abi::optional_string(lua, v))
+    else {
+        return 0;
+    };
+    model.unit_guids.resolve(&token).ok().flatten().unwrap_or(0)
 }
 
 /// The macro record argument 1 names (`0x566df0`), as its id.
@@ -151,15 +173,35 @@ fn carried_link(model: &Model, item: u32) -> Option<String> {
     })
 }
 
-/// The setters' tail: write the pair, unlink the record, answer 1 when the setter's own field
-/// resolved (`0 < id`), else nil. The macro generation moves, so the app re-derives the action
-/// bar's bound spells over the pair and re-fires `ACTIONBAR_SLOT_CHANGED`, the refresh `0x5aa920`
-/// runs. Deviation: the feed re-fires every macro slot, where `0x5aa920` fires that macro's alone.
-fn set(lua: &Lua, id: u32, pair: Explicit, resolved: i64) -> Value {
-    state(lua).explicit.insert(id, pair);
-    lua.app_data_mut::<Model>()
-        .expect("model app_data")
-        .macros_generation += 1;
+/// The setters' tail (`0x567320`, `0x5670d0`): write the pair and, when `changed` (the setter's
+/// own test: the other field was set, or its own field or the target moved), refresh the bar's
+/// slots that show the macro (`0x5aa920`), each firing `ACTIONBAR_SLOT_CHANGED` with its action id
+/// in slot order within the call; the app re-derives the bound spells off the generation. Answer
+/// 1 when the setter's own field resolved (`0 < id`), else nil.
+fn set(lua: &Lua, id: u32, pair: Explicit, changed: bool, resolved: i64) -> Value {
+    {
+        let mut st = state(lua);
+        st.explicit.insert(id, pair);
+        st.generation += 1;
+    }
+    if changed {
+        let mut slots: Vec<u32> = {
+            let model = lua.app_data_ref::<Model>().expect("model app_data");
+            model
+                .actions
+                .iter()
+                .filter(|(&a, s)| {
+                    a <= 144 && super::macros::macro_action_id(s.kind, s.action) == Some(id)
+                })
+                .map(|(&a, _)| a)
+                .collect()
+        };
+        slots.sort_unstable();
+        for a in slots {
+            let arg = super::ScriptValue::Int(i64::from(a));
+            super::event::fire_global(lua, "ACTIONBAR_SLOT_CHANGED", &[arg]);
+        }
+    }
     super::binding_abi::flag(resolved > 0)
 }
 
@@ -254,7 +296,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             };
             let query = text(lua, args.get(1))?;
             let query = query.strip_prefix('!').unwrap_or(&query);
-            let pair = {
+            let (pair, changed) = {
                 let model = lua.app_data_ref::<Model>().expect("model app_data");
                 let pets = super::SpellBookState {
                     tabs: Vec::new(),
@@ -266,14 +308,19 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                     (None, Some(s)) => (s.spell_id as i32, true),
                     (None, None) => (-1, false),
                 };
-                Explicit {
+                let pair = Explicit {
                     spell,
                     pet_book,
                     item: 0,
-                }
+                    target: target(lua, &model, &args),
+                };
+                let old = bound(lua, &model, id);
+                let changed = old.item > 0 || old.spell != spell || old.target != pair.target;
+                (pair, changed)
             };
             let spell = pair.spell;
-            Ok(MultiValue::from_vec(vec![set(lua, id, pair, spell.into())]))
+            let answer = set(lua, id, pair, changed, spell.into());
+            Ok(MultiValue::from_vec(vec![answer]))
         })?,
     )?;
 
@@ -292,17 +339,22 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 return Ok(MultiValue::new());
             };
             let query = text(lua, args.get(1))?;
-            let item = {
+            let (pair, changed) = {
                 let model = lua.app_data_ref::<Model>().expect("model app_data");
-                item_id(&model, &query)
+                let item = item_id(&model, &query);
+                let pair = Explicit {
+                    spell: if item != 0 { 0 } else { -1 },
+                    pet_book: false,
+                    item,
+                    target: target(lua, &model, &args),
+                };
+                let old = bound(lua, &model, id);
+                let changed = old.spell > 0 || old.item != item || old.target != pair.target;
+                (pair, changed)
             };
-            let spell = if item != 0 { 0 } else { -1 };
-            let pair = Explicit {
-                spell,
-                pet_book: false,
-                item,
-            };
-            Ok(MultiValue::from_vec(vec![set(lua, id, pair, item.into())]))
+            let item = pair.item;
+            let answer = set(lua, id, pair, changed, item.into());
+            Ok(MultiValue::from_vec(vec![answer]))
         })?,
     )?;
 
