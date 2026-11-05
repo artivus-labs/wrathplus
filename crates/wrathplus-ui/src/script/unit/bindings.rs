@@ -646,9 +646,9 @@ pub(in crate::script) fn install(lua: &Lua) -> mlua::Result<()> {
             unit_predicate(lua, &token, |u| u.is_pvp_ffa)
         })?,
     )?;
-    // UnitFactionGroup(unit) → FactionGroup.dbc's `InternalName` (field 2), which stock FrameXML
-    // builds texture paths from (`PlayerFrame.lua:68`), and its localized `Name0` (field 3); nil,
-    // nil for a unit with no side or no snapshot.
+    // UnitFactionGroup(unit) → FactionGroup.dbc's `InternalName` (field 2), stock's texture-path
+    // key, and its localized `Name0` (field 3), or nil, nil: `"player"` (`0x60d0e5`) from the
+    // record's race (`0x60d0f4`), others from the live template (`0x60d167`), sideless in GM mode.
     g.set(
         "UnitFactionGroup",
         lua.create_function(|lua, token: Value| {
@@ -657,9 +657,12 @@ pub(in crate::script) fn install(lua: &Lua) -> mlua::Result<()> {
                 token,
                 r#"Usage: UnitFactionGroup("unit")"#,
             )?);
-            let pair = with_unit(lua, &token, (None, None), |u| {
-                (u.faction_group.clone(), u.faction_group_localized.clone())
-            })?;
+            let pair = match player_record_arm(lua, &token, |r| r.faction_group.clone().unzip()) {
+                Some(pair) => pair,
+                None => with_unit(lua, &token, (None, None), |u| {
+                    (u.faction_group.clone(), u.faction_group_localized.clone())
+                })?,
+            };
             match pair {
                 (Some(english), localized) => {
                     let a = Value::String(lua.create_string(&english)?);
@@ -686,18 +689,12 @@ pub(in crate::script) fn install(lua: &Lua) -> mlua::Result<()> {
             )?);
             // The `"player"` arm reads the character-select record's race byte (`0x518269`,
             // `0xc27e80`), never the unit resolver.
-            if let Some(pair) = player_record_arm(lua, &token, |r| r.race.clone()) {
-                return match pair {
-                    Some((loc, file)) => Ok((
-                        Value::String(lua.create_string(&loc)?),
-                        Value::String(lua.create_string(&file)?),
-                    )),
-                    None => Ok((Value::Nil, Value::Nil)),
-                };
-            }
-            let pair = with_unit(lua, &token, None, |u| {
-                u.race.clone().zip(u.race_file.clone())
-            })?;
+            let pair = match player_record_arm(lua, &token, |r| r.race.clone()) {
+                Some(pair) => pair,
+                None => with_unit(lua, &token, None, |u| {
+                    u.race.clone().zip(u.race_file.clone())
+                })?,
+            };
             match pair {
                 Some((loc, file)) => Ok((
                     Value::String(lua.create_string(&loc)?),

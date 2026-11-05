@@ -1319,6 +1319,28 @@ fn the_entry_load_seeds_a_record_the_feed_cannot_take_away() {
         Some("WARRIOR"),
         "…and the same for the other three fields the reference reads off that record"
     );
+    // The snapshot names no side, as GM mode's template 35; the target reads its own template.
+    script.set_unit(
+        "target",
+        Some(wrathplus_ui::script::UnitState {
+            exists: true,
+            faction_group: Some("Horde".into()),
+            ..Default::default()
+        }),
+    );
+    assert_eq!(
+        script
+            .eval::<(Option<String>, Option<String>, Option<String>)>(
+                r#"local a, b = UnitFactionGroup("player") return a, b, UnitFactionGroup("target")"#
+            )
+            .unwrap(),
+        (
+            Some("Alliance".into()),
+            Some("Alliance".into()),
+            Some("Horde".into())
+        ),
+        "`UnitFactionGroup(\"player\")` is the Human row's side (`0x60d0f4`), no other token's"
+    );
 
     // A logout despawn removes the token altogether.
     script.set_unit("player", None);

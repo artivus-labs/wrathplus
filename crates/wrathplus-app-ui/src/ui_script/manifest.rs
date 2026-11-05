@@ -100,6 +100,8 @@ pub(super) fn load_session_ui(script: &mut UiScript, addons: bool) -> Vec<String
             race: Some(("Orc".into(), "Orc".into())),
             class: Some(("Hunter".into(), "HUNTER".into())),
             sex: 2,
+            // `BattlefieldFrame_Update` concatenates it (`BattlefieldFrame.lua:387`).
+            faction_group: Some(("Horde".into(), "Horde".into())),
         });
         script.set_unit(
             "player",
@@ -111,9 +113,6 @@ pub(super) fn load_session_ui(script: &mut UiScript, addons: bool) -> Vec<String
                 race_file: Some("Orc".into()),
                 class: Some("Hunter".into()),
                 class_file: Some("HUNTER".into()),
-                // `BattlefieldFrame_Update` concatenates it (`BattlefieldFrame.lua:387`).
-                faction_group: Some("Horde".into()),
-                faction_group_localized: Some("Horde".into()),
                 ..Default::default()
             }),
         );
@@ -132,6 +131,7 @@ pub(super) fn load_session_ui(script: &mut UiScript, addons: bool) -> Vec<String
                 race: Some(("Orc".into(), "Orc".into())),
                 class: Some(("Hunter".into(), "HUNTER".into())),
                 sex: 2,
+                faction_group: Some(("Horde".into(), "Horde".into())),
             });
         }
     }

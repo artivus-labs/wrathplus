@@ -539,9 +539,9 @@ fn fire_unit_combat(
 
 pub(crate) use crate::app_core::catalogs::{class_names, race_names};
 
-/// A playable race's fixed side, for where no faction template is at hand, as at world entry,
-/// where addons concatenate `UnitFactionGroup("player")` at file scope; [`faction_group`] reads
-/// the live template.
+/// A playable race's fixed side, `UnitFactionGroup("player")`'s race walk (`0x60d0f4`), which no
+/// template sways: AceDB-2.0 concatenates it at file scope. [`faction_group`] reads the live
+/// template, as the other tokens do.
 pub(crate) fn race_faction_group(race: u8) -> Option<&'static str> {
     // The ten playable races; 9 (Goblin) is no player's.
     if !matches!(race, 1..=8 | 10 | 11) {
@@ -994,8 +994,8 @@ fn rest_state_message(prev: u8, new: u8) -> Option<&'static str> {
     }
 }
 
-/// `UnitFactionGroup`'s (`0x516630`) first return: the faction template's group mask `& 6`, named
-/// by `FactionGroup.dbc`. Only the side bits: player and city-guard templates carry
+/// `UnitFactionGroup`'s first return but for `"player"` (`0x60d167`): the template's mask `& 6`,
+/// named by `FactionGroup.dbc`. Only the side bits: player and city-guard templates carry
 /// `Player|<side>`, and the Player and Monster rows have no name and no icon art.
 pub(crate) fn faction_group(store: &ObjectStore, factions: Option<&Factions>) -> Option<String> {
     let catalog = factions?.catalog();
@@ -1225,17 +1225,17 @@ fn feed_units(
         s.guild = crate::guild::unit_guild(&store.0, &mut guild, &commands);
         s
     });
-    // Log once when our template names no side, almost always GM mode (vmangos forces template
-    // 35, group mask 0): every `UnitFactionGroup` surface loses its side, as in the reference.
+    // Log once when our template names no side, almost always GM mode (template 35, group mask
+    // 0): the surfaces reading it lose their side; `UnitFactionGroup("player")` reads the race.
     if let Some(p) = &player {
         let sideless = p.faction_group.is_none();
         if sideless && !feed.warned_sideless {
             warn!(
-                "faction: our own template names no side (usually GM mode — vmangos forces \
-                 template 35, group mask 0). Every UnitFactionGroup-derived surface loses its \
-                 side while this holds — the PvP flag icon stays hidden however flagged you are. \
-                 `.gm off` restores it. (The Honor tab's rank title is NOT one of these: its team \
-                 digit comes from your race, not your template.)"
+                "faction: our own template names no side (usually GM mode: template 35, group \
+                 mask 0). UnitFactionGroup on a token naming us other than \"player\" (a self \
+                 target, our raid slot) and the party members' side lose it while this holds; \
+                 `.gm off` restores it. (UnitFactionGroup(\"player\") and the Honor tab's rank \
+                 title read your race, not your template.)"
             );
         }
         feed.warned_sideless = sideless;

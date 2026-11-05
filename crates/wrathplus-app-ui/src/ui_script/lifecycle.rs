@@ -383,13 +383,10 @@ pub(crate) fn load_ingame_ui_on_world_entry(world: &mut World) {
         script.set_cvar_read_only(name, true);
     }
     // The player too, before the addon walk. The record first: the reference's
-    // `UnitName`/`UnitRace`/`UnitClass`/`UnitSex` read only a copy of the char-enum row made at the
-    // Enter World commit (`0x5abd9e`) and never cleared, and each rebuilt VM is told once. The
-    // snapshot stands in for the descriptor until that streams in.
-    if let Some(record) = world
-        .get_resource::<crate::app_core::state::Roster>()
-        .and_then(record_from_roster)
-    {
+    // `UnitName`/`UnitRace`/`UnitClass`/`UnitSex`/`UnitFactionGroup` read only a copy of the
+    // char-enum row made at the Enter World commit (`0x5abd9e`) and never cleared, and each rebuilt
+    // VM is told once. The snapshot stands in for the descriptor until that streams in.
+    if let Some(record) = record_from_roster(world) {
         script.set_player_record(record);
     }
     if let Some(seat) = world
@@ -495,15 +492,14 @@ fn roster_sex(gender: u8) -> u8 {
 }
 
 /// The local player record the UI loads under: our copy of the char-enum row the reference copies
-/// at the Enter World commit (layout on [`wrathplus_ui::script::PlayerRecord`]). Race and class go
-/// through the same lookups as [`seat_from_roster`]; the reference resolves them through
-/// `ChrRaces`/`ChrClasses` at call time, the same answer. No level: the reference's record has
-/// one at `+0x108`, but its accessor (`0x5abe00`) has no caller, so `UnitLevel("player")` reads
-/// the descriptor.
-pub(crate) fn record_from_roster(
-    roster: &crate::app_core::state::Roster,
-) -> Option<wrathplus_ui::script::PlayerRecord> {
+/// at the Enter World commit (layout on [`wrathplus_ui::script::PlayerRecord`]). Race, class and
+/// side are frozen tables of the reference's `ChrRaces`, `ChrClasses` and race-to-`FactionGroup`
+/// walks (`0x60d0f4`-`0x60d22b`), the side's `Name0` the catalog's when loaded. No level: the
+/// record's accessor (`0x5abe00`, `+0x108`) has no caller, so `UnitLevel` reads the descriptor.
+pub(crate) fn record_from_roster(world: &World) -> Option<wrathplus_ui::script::PlayerRecord> {
+    let roster = world.get_resource::<crate::app_core::state::Roster>()?;
     let row = roster.pending_row()?;
+    let factions = world.get_resource::<crate::app_core::state::Factions>();
     let race = crate::app_core::catalogs::race_names(row.race);
     let class = crate::app_core::catalogs::class_names(row.class);
     Some(wrathplus_ui::script::PlayerRecord {
@@ -511,14 +507,18 @@ pub(crate) fn record_from_roster(
         race: race.map(|(n, f)| (n.to_string(), f.to_string())),
         class: class.map(|(n, f)| (n.to_string(), f.to_string())),
         sex: roster_sex(row.gender),
+        faction_group: crate::ui_unit::race_faction_group(row.race).map(|g| {
+            let bit = if g == "Alliance" { 2 } else { 4 };
+            let name = factions.and_then(|f| f.catalog().faction_group_name(bit));
+            (g.into(), name.unwrap_or(g).into())
+        }),
     })
 }
 
 /// The `"player"` snapshot the UI loads under, from the roster row of the pick in flight, until
 /// the self descriptor streams in; `None` with no pick (a capture, a scenario, a test world).
-/// [`record_from_roster`] answers name, race, class and sex; this carries what else addon file
-/// scope reads, the faction group chief among it. Health and power stay zero, the descriptor's
-/// to say.
+/// [`record_from_roster`] answers name, race, class, sex and faction group; this carries what
+/// else addon file scope reads. Health and power stay zero, the descriptor's to say.
 pub(crate) fn seat_from_roster(
     roster: &crate::app_core::state::Roster,
 ) -> Option<wrathplus_ui::script::UnitState> {
@@ -540,8 +540,6 @@ pub(crate) fn seat_from_roster(
         sex,
         is_player: true,
         player_controlled: true,
-        // AceDB-2.0 concatenates `UnitFactionGroup("player")` at file scope, where nil is an error.
-        faction_group: crate::ui_unit::race_faction_group(row.race).map(str::to_string),
         ..Default::default()
     })
 }

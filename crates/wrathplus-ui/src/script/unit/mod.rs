@@ -28,9 +28,9 @@ pub enum SelectionRequest {
 /// written once at the Enter World commit (`0x5abd9e`) before FrameXML loads, and never cleared.
 /// `UnitName` (`0x517020`), `UnitRace` (`0x518200`), `UnitClass` (`0x518350`) and `UnitSex`
 /// (`0x517e90`) answer `"player"`, matched whole in any case, from it and never from the
-/// descriptor, so they answer before the player object exists. `UnitLevel` reads the descriptor:
-/// the record's level accessor (`0x5abe00`) has no caller. Race and class are held resolved, as
-/// this crate has no DBC.
+/// descriptor, so they answer before the player object exists; so does `UnitFactionGroup`
+/// (`0x60d0e5`). `UnitLevel` reads the descriptor: the record's level accessor (`0x5abe00`) has
+/// no caller. Race, class and faction group are held resolved, as this crate has no DBC.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PlayerRecord {
     /// `+0x08`, the name; empty is the unset record, whose `UnitName("player")` is nil
@@ -45,6 +45,8 @@ pub struct PlayerRecord {
     /// 2, as the reference's all-zero record does: `0x517ef9` indexes `{2,3,1,6}` (`0x808be4`)
     /// with no bounds check.
     pub sex: u8,
+    /// `UnitFactionGroup`'s (`InternalName`, `Name0`) for the race; `None` answers `nil, nil`.
+    pub faction_group: Option<(String, String)>,
 }
 
 /// Raw build-12340 resource values, retained before display scaling.
@@ -183,16 +185,14 @@ pub struct UnitState {
     /// The city-protector title, `PLAYER_BYTES_3` byte 2 (0 none): `UnitPVPName` appends the
     /// `PVP_MEDAL<n>` line for a non-zero one (`0x6093ef`).
     pub pvp_medal: u8,
-    /// `UnitFactionGroup`'s first return, `"Alliance"` or `"Horde"`: `FactionGroup.dbc`'s English
-    /// `InternalName` for the side bit of the faction template's group mask, which stock builds
-    /// texture paths from (`PlayerFrame.lua:68`). `None` for a template with no side.
+    /// `UnitFactionGroup`'s English `InternalName` but for `"player"`: the live template's group
+    /// mask (`0x60d167`) named by `FactionGroup.dbc`; `None` for a template with no side.
     pub faction_group: Option<String>,
     /// `UnitFactionGroup`'s second return, `FactionGroup.dbc`'s localized `Name0`: display text.
     pub faction_group_localized: Option<String>,
-    /// The team digit of `PVP_RANK_<rank>_<team>` (`0x5efe00`): 0 Horde, 1 Alliance, -1 no side.
-    /// It follows the race through `ChrRaces` and `FactionTemplate`, never the live template
-    /// `UnitFactionGroup` reads (`0x5166b8`), so a GM on template 35 keeps the rank title. The
-    /// default 0 is the reference's answer for a unit it cannot resolve (`0x51a9af`).
+    /// The team digit of `PVP_RANK_<rank>_<team>` (`0x5efe00`): 0 Horde, 1 Alliance, -1 no side,
+    /// from the race through `ChrRaces` and `FactionTemplate`, never the live template, so a GM on
+    /// template 35 keeps the rank title; 0 for a unit the reference cannot resolve (`0x51a9af`).
     pub pvp_team: i8,
     /// `OBJECT_FIELD_GUID`, which `UnitIsUnit` and `UnitInParty` compare; 0 is unresolved, and
     /// two zeros never match.
