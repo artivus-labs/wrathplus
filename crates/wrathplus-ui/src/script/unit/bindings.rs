@@ -365,7 +365,7 @@ pub(in crate::script) fn install(lua: &Lua) -> mlua::Result<()> {
     )?;
 
     // UnitIsCivilian(unit): killing the unit would be dishonorable, the predicate `0x612550`. It
-    // shares `is_civilian_kill` with the tooltip's civilian line and `UnitPVPName`, so all agree.
+    // shares `is_civilian_kill` with the tooltip's civilian line, so both agree.
     g.set(
         "UnitIsCivilian",
         lua.create_function(|lua, unit: Value| {
