@@ -288,21 +288,42 @@ impl SpellDisplay {
         Some((doubled.round_ties_even() as i32) >> 1)
     }
 
-    /// The hostility classifier `0x6ea280` reduced to "targets enemies", the gate on the victim's
-    /// flinch at a spell impact (`0x6e8c7b`, `0x6e8cf1`): the ally flag `0x100` wins, then the
-    /// enemy flag `0x80`, then an enemy A or B implicit target (tables `0x6ea338`/`0x6ea378`).
-    pub fn is_harmful(&self) -> bool {
-        const ENEMY_TARGETS: [u32; 8] = [2, 6, 15, 16, 24, 28, 53, 54];
+    /// Build 12340's helpful/harmful classifier `0x7fe1b0`: 1 helpful, 2 harmful, 0 neither.
+    /// `Targets & 0x100` (ally) is helpful and then `& 0x80` (enemy) harmful (`0x7fe1ba`); else
+    /// any implicit target, A then B per effect, in the enemy set is harmful (tables `0x7fe278`,
+    /// `0x7fe2dc`); else one in the friend set, or `TARGET_UNIT_CASTER` (1) on an effect whose
+    /// aura is not `DUMMY` (4), is helpful (`0x7fe340`, `0x7fe38c`, `0x7fe23d`).
+    pub fn benefit(&self) -> u8 {
+        const ENEMY: [u32; 9] = [2, 6, 15, 16, 24, 28, 53, 54, 93];
+        const FRIEND: [u32; 19] = [
+            3, 4, 5, 20, 21, 27, 29, 30, 31, 33, 34, 35, 45, 56, 57, 58, 59, 61, 62,
+        ];
         if self.targets & 0x100 != 0 {
-            return false;
+            return 1;
         }
         if self.targets & 0x80 != 0 {
-            return true;
+            return 2;
         }
-        (0..3).any(|i| {
-            ENEMY_TARGETS.contains(&self.effect_implicit_target_a[i])
-                || ENEMY_TARGETS.contains(&self.effect_implicit_target_b[i])
-        })
+        let (a, b) = (self.effect_implicit_target_a, self.effect_implicit_target_b);
+        if (0..3).any(|i| ENEMY.contains(&a[i]) || ENEMY.contains(&b[i])) {
+            return 2;
+        }
+        let friend =
+            |t: u32, i: usize| FRIEND.contains(&t) || (t == 1 && self.effect_apply_aura[i] != 4);
+        u8::from((0..3).any(|i| friend(a[i], i) || friend(b[i], i)))
+    }
+
+    /// `IsHelpfulSpell` (`0x541893`): the classifier answers helpful. It also picks the friendly
+    /// range pair when no target is given (`0x801692`).
+    pub fn is_helpful(&self) -> bool {
+        self.benefit() == 1
+    }
+
+    /// `IsHarmfulSpell` (`0x541983`): the classifier answers harmful. It also gates the victim's
+    /// flinch at a spell impact: the per-hit loop `0x801f10` hands `== 2` (`0x80200c`) to the kit
+    /// play `0x745230`, whose unit call `0x73b140` then plays the wound `0x736640` (`0x73b413`).
+    pub fn is_harmful(&self) -> bool {
+        self.benefit() == 2
     }
 
     /// The ranged-stance gate, `AttributesEx2 & 0x20` or `Attributes & 0x2`, as tested at

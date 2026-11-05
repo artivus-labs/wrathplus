@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use wrathplus_formats::{SpellDisplay, SpellRange, SpellRangeCatalog};
 
-use super::{catalog_facts, item_facts, polarity, Spells};
+use super::{catalog_facts, item_facts, Spells};
 
 fn spell(targets: u32, a: [u32; 3], b: [u32; 3], aura: [u32; 3]) -> SpellDisplay {
     SpellDisplay {
@@ -19,32 +19,35 @@ fn spell(targets: u32, a: [u32; 3], b: [u32; 3], aura: [u32; 3]) -> SpellDisplay
 #[test]
 fn polarity_follows_the_classifier() {
     assert_eq!(
-        polarity(&spell(0x180, [6, 0, 0], [0; 3], [0; 3])),
+        SpellDisplay::benefit(&spell(0x180, [6, 0, 0], [0; 3], [0; 3])),
         1,
         "0x100 wins"
     );
-    assert_eq!(polarity(&spell(0x80, [0; 3], [0; 3], [0; 3])), 2);
     assert_eq!(
-        polarity(&spell(0, [0, 0, 0], [0, 0x5d, 0], [0; 3])),
+        SpellDisplay::benefit(&spell(0x80, [0; 3], [0; 3], [0; 3])),
+        2
+    );
+    assert_eq!(
+        SpellDisplay::benefit(&spell(0, [0, 0, 0], [0, 0x5d, 0], [0; 3])),
         2,
         "an enemy B"
     );
     assert_eq!(
-        polarity(&spell(0, [0x15, 0, 0], [0; 3], [0; 3])),
+        SpellDisplay::benefit(&spell(0, [0x15, 0, 0], [0; 3], [0; 3])),
         1,
         "a single friend"
     );
     assert_eq!(
-        polarity(&spell(0, [1, 0, 0], [0; 3], [6, 0, 0])),
+        SpellDisplay::benefit(&spell(0, [1, 0, 0], [0; 3], [6, 0, 0])),
         1,
         "self with an aura"
     );
     assert_eq!(
-        polarity(&spell(0, [1, 0, 0], [0; 3], [4, 0, 0])),
+        SpellDisplay::benefit(&spell(0, [1, 0, 0], [0; 3], [4, 0, 0])),
         0,
         "self, a dummy aura"
     );
-    assert_eq!(polarity(&spell(0, [0; 3], [0; 3], [0; 3])), 0);
+    assert_eq!(SpellDisplay::benefit(&spell(0, [0; 3], [0; 3], [0; 3])), 0);
 }
 
 /// The catalog tail: the attack effect, the reagents, and the range row's two pairs.
