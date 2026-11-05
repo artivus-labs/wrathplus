@@ -7,7 +7,6 @@ use mlua::{Lua, Value};
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct WrathStatConversions {
     pub rating_bonus: [f32; 25],
-    pub armor_penetration: f32,
     pub crit_from_agility: f32,
     pub spell_crit_from_intellect: f32,
     pub health_from_spirit: f32,
@@ -77,10 +76,13 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         ("GetCritChance", |s| s.melee_crit as f64),
         ("GetRangedCritChance", |s| s.ranged_crit as f64),
         ("GetShieldBlock", |s| s.shield_block as f64),
-        ("GetSpellBonusHealing", |s| s.spell_healing as f64),
+        // `0x60e3b0`: signed.
+        ("GetSpellBonusHealing", |s| s.spell_healing as i32 as f64),
         ("GetSpellPenetration", |s| s.spell_penetration as f64),
+        // `0x60e4e0`: native CR_ARMOR_PENETRATION (24), at most 100.0 (`0x9e8cc8`, `fcom`).
         ("GetArmorPenetration", |s| {
-            s.conversions.armor_penetration as f64
+            let bonus = s.conversions.rating_bonus[24];
+            f64::from(if bonus > 100.0 { 100.0 } else { bonus })
         }),
     ] {
         lua.globals().set(
@@ -156,7 +158,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 let m = lua.app_data_ref::<Model>().expect("model");
                 let s = &m.wrath_paperdoll_stats;
                 Ok(match name {
-                    "GetCombatRating" => f64::from(s.ratings[i]),
+                    // `0x60de4d`: signed.
+                    "GetCombatRating" => f64::from(s.ratings[i] as i32),
                     "GetCombatRatingBonus" => f64::from(s.conversions.rating_bonus[i]),
                     "GetMaxCombatRatingBonus" if (14..=16).contains(&i) => 33.000001311302185,
                     "GetMaxCombatRatingBonus" => -1.0,
@@ -173,9 +176,11 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 let m = lua.app_data_ref::<Model>().expect("model");
                 let s = &m.wrath_paperdoll_stats;
                 Ok(match name {
-                    "GetExpertisePercent" => {
-                        (s.expertise[0] as f64 * 0.25, s.expertise[1] as f64 * 0.25)
-                    }
+                    // `0x612cb0`: signed, times 0.25.
+                    "GetExpertisePercent" => (
+                        f64::from(s.expertise[0] as i32) * 0.25,
+                        f64::from(s.expertise[1] as i32) * 0.25,
+                    ),
                     _ => (s.expertise[0] as f64, s.expertise[1] as f64),
                 })
             })?,
@@ -239,6 +244,17 @@ mod tests {
             let err = s.run(call).unwrap_err().to_string();
             assert!(err.contains(raise), "{call}: {err}");
         }
+        // The signed words and the armor penetration cap; the unclamped school sum is the
+        // snapshot's (`ui_paperdoll`).
+        let mut signed = WrathPaperDollStats {
+            spell_healing: -40i32 as u32,
+            expertise: [-8i32 as u32, 4],
+            ..Default::default()
+        };
+        signed.ratings[0] = -3i32 as u32;
+        signed.conversions.rating_bonus[24] = 140.0;
+        s.set_wrath_paperdoll_stats(signed);
+        s.run("assert(GetSpellBonusHealing()==-40 and GetCombatRating(1)==-3) assert(GetArmorPenetration()==100 and GetExpertisePercent()==-2)").unwrap();
         s.set_wrath_paperdoll_stats(Default::default());
         s.run("assert(GetCombatRating(1)==0 and GetCritChance()==0 and GetUnitHealthRegenRateFromSpirit('player')==0) local a,b=GetExpertise() assert(a==0 and b==0)").unwrap();
     }
