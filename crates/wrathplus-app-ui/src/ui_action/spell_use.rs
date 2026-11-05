@@ -11,8 +11,8 @@ use bevy::prelude::*;
 
 use wrathplus_formats::SpellDisplay;
 use wrathplus_ui::script::{
-    ItemUseFacts, ItemUseSpellFacts, ItemUseView, RangeRow, RangeUnitFacts, SpellInfoView,
-    SpellRangeFacts, SpellUseView, UiScript,
+    ItemUseFacts, ItemUseSpellFacts, ItemUseView, RangeRow, RangeUnitFacts, SpellCooldownFacts,
+    SpellInfoView, SpellRangeFacts, SpellUseView, UiScript,
 };
 
 use super::Spells;
@@ -35,6 +35,7 @@ pub(super) struct UseMemory {
     range: Option<RangeInputs>,
     auto_repeat: Option<[Option<u32>; 2]>,
     cast_items: Option<Vec<u32>>,
+    cooldowns: crate::ui_script::gate::Watch,
     statics: bool,
 }
 
@@ -71,6 +72,11 @@ pub(crate) fn catalog_facts(d: &SpellDisplay, spells: &Spells) -> SpellInfoView 
             attributes_ex5: d.attributes_ex5,
             attributes_ex6: d.attributes_ex6,
             row,
+        },
+        cooldown: SpellCooldownFacts {
+            category: d.category,
+            start_recovery_category: d.start_recovery_category,
+            excluded: d.cooldown_query_excluded(),
         },
         ..Default::default()
     }
@@ -292,6 +298,10 @@ pub(super) fn feed_spell_use(
     if memory.cast_items.as_ref() != Some(&cast_items) {
         script.set_wrath_cast_items(cast_items.clone());
         memory.cast_items = Some(cast_items);
+    }
+    // The legs change only when a record is added, started from hold, cleared or pruned.
+    if memory.cooldowns.moved(cooldowns.feed_epoch()) {
+        script.set_player_cooldown_legs(super::cooldown_legs::cooldown_legs(cooldowns, &clock));
     }
 }
 

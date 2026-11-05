@@ -39,6 +39,8 @@ pub struct SpellInfoView {
     pub reagents: Vec<(u32, u32)>,
     /// What `IsSpellInRange`'s target gate and range read ([`super::wrath_spell_range`]).
     pub range: super::SpellRangeFacts,
+    /// Its keys into the cooldown list, for `GetSpellCooldown` off the books.
+    pub cooldown: super::SpellCooldownFacts,
 }
 
 impl super::UiScript {
@@ -157,9 +159,13 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     // GetSpellCooldown(spell [, book]) (`0x540e80`) -> start, duration, enable in `GetTime`
     // seconds, as `GetActionCooldown`: enable 0 for an on-hold cooldown; an expired or empty one
     // answers the reference's no-cooldown `(0, 0, 1)`, so a re-feed cannot replay the finish
-    // flash. A lone id picks its book by scanning the player's, then the pet's (`0x540ec7`).
-    // Labelled: the reference asks the cooldown manager (`0x809000`) for any spell; here only a
-    // book slot carries one, so an id outside both books reads cold.
+    // flash. A lone id picks its book by scanning the player's, then the pet's (`0x540ec7`); a
+    // book slot answers from its pushed cooldown, and an id in neither book asks the player's
+    // list (`0x540f98` → `0x809000`) through its pushed legs ([`super::spell_cooldown`]); an id
+    // with no `Spell.dbc` row reads cold there (`0x4cfd20`, `0x8079bf`). Labelled: an id on the
+    // pet bar but in neither book (`0x540f0f`, `0x5d3560`) reads the player's list, where the
+    // reference reads the pet's; a book slot's held cooldown answers its record's start and full
+    // duration, where `0x807980` answers now and, for the spell leg, 1 ms (`0x807af2`).
     lua.globals().set(
         "GetSpellCooldown",
         lua.create_function(|lua, args: MultiValue| {
@@ -174,11 +180,21 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 true => &model.pet_book.slots,
                 false => &model.spellbook.slots,
             };
-            let cooldown = [pet, !pet]
+            let slot = [pet, !pet]
                 .into_iter()
                 .filter(|_| spell_id != 0)
-                .find_map(|pet| slots(pet).iter().rev().find(|s| s.spell_id == spell_id))
-                .and_then(|s| s.cooldown);
+                .find_map(|pet| slots(pet).iter().rev().find(|s| s.spell_id == spell_id));
+            let cooldown = match slot {
+                Some(s) => s.cooldown,
+                None if spell_id != 0 => {
+                    let now_ms = (now * 1000.0).round() as i64;
+                    let row = model.spell_catalog.get(&spell_id);
+                    row.and_then(|r| {
+                        super::spell_cooldown::player_cooldown(lua, spell_id, &r.cooldown, now_ms)
+                    })
+                }
+                None => None,
+            };
             let triple = match cooldown {
                 Some((start_ms, duration_ms, enabled)) => {
                     let (start, duration) =

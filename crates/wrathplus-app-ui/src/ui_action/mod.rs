@@ -13,6 +13,7 @@ pub(crate) mod cast_fail;
 mod drain;
 // A `UseAction` press, applied in call order by `crate::script_calls`.
 pub(crate) use drain::{attack_nearest_probe, use_action, ActionPress, AttackPress, UseOutcome};
+mod cooldown_legs;
 #[cfg(test)]
 mod drain_tests;
 pub(crate) mod drop_item;

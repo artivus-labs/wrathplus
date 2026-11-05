@@ -171,6 +171,7 @@ mod slider;
 mod social;
 mod sound;
 mod spell_arg;
+mod spell_cooldown;
 mod spell_info;
 mod spellbook;
 mod stable;
@@ -428,6 +429,7 @@ pub(crate) use simplehtml::{
 pub use skills::{SkillEntry, SkillsState};
 pub use social::{FriendInfo, SocialRequest, SocialState, WhoInfo};
 pub use sound::{MusicRequest, SoundRequest};
+pub use spell_cooldown::{CooldownKey, CooldownLeg, SpellCooldownFacts};
 pub use spell_info::SpellInfoView;
 pub use spellbook::{
     resolve_spell_by_name, PetBookState, SpellBookState, SpellSlotView, SpellTabView,
