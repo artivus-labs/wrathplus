@@ -4,7 +4,8 @@
 //! server sent this client, and reactions, quest markers and names are the client's own reading.
 //!
 //! Lua (installed by `env`): `AgentPosition()`, `AgentNearby([max_yards])`,
-//! `AgentFindNpc(service [, max_yards])`, `AgentCorpse()`, `AgentTarget(guid)`, `AgentInteract(guid)`. GUIDs travel as `"0x…"` hex strings. `AgentInteract` turns on click-to-move
+//! `AgentFindNpc(service [, max_yards])`, `AgentCorpse()`, `AgentTarget(guid)`, `AgentFace(guid)`,
+//! `AgentInteract(guid)`. GUIDs travel as `"0x…"` hex strings. `AgentInteract` turns on click-to-move
 //! (`autoInteract`), so the character walks to the object first, as a player's right-click would.
 
 use bevy::prelude::*;
@@ -52,6 +53,9 @@ pub(crate) struct Seen {
     pub title: Option<String>,
     /// The quest marker over it: "available", "incomplete" or "reward".
     pub quest: Option<&'static str>,
+    /// A player's quest log as the client has it (the server sends it for party members):
+    /// quest ids, and whether each is complete.
+    pub quests: Vec<(u32, bool)>,
     pub go_type: Option<i32>,
 }
 
@@ -82,6 +86,8 @@ pub(crate) struct Corpse {
 pub(crate) enum Order {
     Target(u64),
     Interact(u64),
+    /// Turn to face this point (world coordinates), without walking.
+    Face([f32; 3]),
 }
 
 /// What the Lua side holds: the latest snapshot and the way to send orders.
@@ -192,6 +198,14 @@ pub(crate) fn snapshot(
                     .and_then(quest_marker),
                 ..default()
             };
+            if net.kind == EntityKind::Player {
+                s.quests = (0..fields.player_quest_log_slots())
+                    .filter_map(|slot| fields.player_quest_log(slot))
+                    .filter(|q| q.quest_id != 0)
+                    // QUEST_STATE_COMPLETE (AzerothCore QuestDef.h).
+                    .map(|q| (q.quest_id, q.state == 1))
+                    .collect();
+            }
             if unit {
                 s.name = names
                     .as_ref()
@@ -244,10 +258,15 @@ pub(crate) fn apply_orders(
     index: Option<Res<GuidIndex>>,
     mut select: SelectCommit,
     mut interact: MessageWriter<Interact>,
+    mut auto: wrathplus_app_world::player::AutoMove,
 ) {
     for order in link.orders.try_iter() {
         match order {
             Order::Target(guid) => select.select_unit(guid),
+            Order::Face(p) => {
+                // World to Bevy (x right, y up, z back), as `wrathplus_assets::coords::wow_to_bevy`.
+                auto.face(Vec3::new(-p[1], p[2], -p[0]));
+            }
             Order::Interact(guid) => {
                 if let Some(entity) = index.as_ref().and_then(|i| i.0.get(&guid).copied()) {
                     interact.write(Interact(entity));
@@ -257,7 +276,7 @@ pub(crate) fn apply_orders(
     }
 }
 
-fn guid_text(guid: u64) -> String {
+pub(crate) fn guid_text(guid: u64) -> String {
     format!("0x{guid:016X}")
 }
 
@@ -332,6 +351,16 @@ fn seen_table(lua: &Lua, s: &Seen) -> mlua::Result<Table> {
     }
     t.set("quest", s.quest)?;
     t.set("go_type", s.go_type)?;
+    if !s.quests.is_empty() {
+        let quests = lua.create_table()?;
+        for &(id, complete) in &s.quests {
+            let q = lua.create_table()?;
+            q.set("id", id)?;
+            q.set("complete", complete)?;
+            quests.push(q)?;
+        }
+        t.set("quests", quests)?;
+    }
     Ok(t)
 }
 
@@ -412,6 +441,21 @@ pub(crate) fn install(lua: &Lua, handles: &Handles) -> mlua::Result<()> {
                 .min_by(|a, b| a.distance.total_cmp(&b.distance))
                 .map(|o| seen_table(lua, o))
                 .transpose()
+        })?,
+    )?;
+    let snap = handles.snapshot.clone();
+    let orders = handles.orders.clone();
+    g.set(
+        "AgentFace",
+        lua.create_function(move |_, guid: String| {
+            let Some(g) = parse_guid(&guid) else {
+                return Ok(false);
+            };
+            let pos = snap
+                .lock()
+                .ok()
+                .and_then(|s| s.objects.iter().find(|o| o.guid == g).map(|o| o.pos));
+            Ok(pos.is_some_and(|p| orders.send(Order::Face(p)).is_ok()))
         })?,
     )?;
     for (name, make) in [

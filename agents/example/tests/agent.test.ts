@@ -1,7 +1,7 @@
 import { describe as group, expect, test } from "bun:test";
 import { Inbox, summarize, TOOLS } from "../src/brain.ts";
 import { configFromEnv } from "../src/index.ts";
-import { describe, PLANNER_EVENTS, watch, type GameEvent } from "../src/watch.ts";
+import { describe, overheard, PLANNER_EVENTS, RepeatedErrors, watch, type GameEvent } from "../src/watch.ts";
 
 const event = (seq: number, name: string, args: unknown[] = []): GameEvent => ({ seq, time: seq, event: name, args });
 
@@ -30,13 +30,63 @@ group("events a player would notice", () => {
     ]);
   });
 
-  test("the planner hears /say only when it names the character", () => {
-    const lines = describe([
+  test("/say wakes the planner from the party or by name; the rest is overheard", () => {
+    const events = [
       event(1, "CHAT_MSG_SAY", ["anyone selling bread?", "Botty"]),
       event(2, "CHAT_MSG_SAY", ["agenttwo, follow me", "Shannon"]),
-      event(3, "CHAT_MSG_PARTY", ["pull the next one", "Shannon"]),
+      event(3, "CHAT_MSG_SAY", ["over here", "Pallytest"]),
+      event(4, "CHAT_MSG_PARTY", ["pull the next one", "Pallytest"]),
+      event(5, "CHAT_MSG_MONSTER_SAY", ["Fresh bread, baked this very morning!", "Kira Songshine"]),
+      event(6, "CHAT_MSG_SAY", ["hello", "Agenttwo"]),
+    ];
+    const party = new Set(["pallytest"]);
+    expect(describe(events, "Agenttwo", PLANNER_EVENTS, party)).toEqual([
+      "Shannon says: agenttwo, follow me",
+      "Pallytest says: over here",
+      "[Party] Pallytest: pull the next one",
+    ]);
+    expect(overheard(events, "Agenttwo", party)).toEqual([
+      "Botty says: anyone selling bread?",
+      "Kira Songshine says: Fresh bread, baked this very morning!",
+    ]);
+  });
+
+  test("the planner hears emotes aimed at it, not other people's or its own", () => {
+    const lines = describe([
+      event(1, "CHAT_MSG_TEXT_EMOTE", ["Kobold Worker ponders Pallytest's actions.", "Kobold Worker"]),
+      event(2, "CHAT_MSG_TEXT_EMOTE", ["Pallytest waves at you.", "Pallytest"]),
+      event(3, "CHAT_MSG_TEXT_EMOTE", ["You wave at Pallytest.", "Agenttwo"]),
+      event(4, "CHAT_MSG_EMOTE", ["pokes Agenttwo with a stick.", "Pallytest"]),
     ], "Agenttwo", PLANNER_EVENTS);
-    expect(lines).toEqual(["Shannon says: agenttwo, follow me", "[Party] Shannon: pull the next one"]);
+    expect(lines).toEqual([
+      'Pallytest waves at you. (an emote; answer with DoEmote("wave", "Pallytest") or in chat)',
+      "Pallytest pokes Agenttwo with a stick. (an emote)",
+    ]);
+  });
+
+  test("an NPC naming the character wakes the planner (unless switched off)", () => {
+    const events = [
+      event(1, "CHAT_MSG_MONSTER_SAY", ["Deep night, and the cows still want their milking. City folk never understand that, Agenttwo.", "Ma Stonefield"]),
+      event(2, "CHAT_MSG_MONSTER_SAY", ["Quiet now, love.", "Ma Stonefield"]),
+    ];
+    expect(describe(events, "Agenttwo", PLANNER_EVENTS)).toEqual([
+      "Ma Stonefield says to you: Deep night, and the cows still want their milking. City folk never understand that, Agenttwo. (an NPC; a reply in /say is welcome, not required)",
+    ]);
+    expect(overheard(events, "Agenttwo")).toEqual(["Ma Stonefield says: Quiet now, love."]);
+    expect(describe(events, "Agenttwo", PLANNER_EVENTS, undefined, false)).toEqual([]);
+    expect(overheard(events, "Agenttwo", undefined, false)).toHaveLength(2);
+  });
+
+  test("a game error that keeps coming back reaches the planner once, with its count", () => {
+    const errors = new RepeatedErrors(3, 15_000, 60_000);
+    const far = (seq: number) => event(seq, "UI_ERROR_MESSAGE", ["You are too far away!"]);
+    expect(errors.notice([far(1), far(2)], 0)).toEqual([]);
+    expect(errors.notice([far(3)], 5_000)).toEqual([
+      'Game error, 3 times in 15s: "You are too far away!". Your Lua keeps doing something the game refuses; fix it.',
+    ]);
+    expect(errors.notice([far(4), far(5)], 6_000)).toEqual([]);
+    expect(errors.notice([far(6), far(7), far(8)], 70_000)).toHaveLength(1);
+    expect(errors.notice([event(9, "UI_ERROR_MESSAGE", ["Not enough rage"])], 70_000)).toEqual([]);
   });
 
   test("the watcher batches a burst into one message", async () => {
@@ -63,6 +113,49 @@ group("events a player would notice", () => {
     await done;
     port.stop(true);
     expect(messages).toEqual(["Game events:\n- You died.\n- Dongle whispers: hi"]);
+  });
+
+  test("a request triage carried out reaches neither the planner nor the fast tier's wake-ups", async () => {
+    let served = false;
+    const port = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      async fetch(request) {
+        const since = Number(new URL(request.url).searchParams.get("since"));
+        if (since >= 1_000_000) return Response.json({ events: [], next: 10, missed: 0 });
+        if (!served && since === 10) {
+          served = true;
+          return Response.json({
+            events: [event(10, "CHAT_MSG_PARTY", ["follow me", "Pallytest"]), event(11, "PLAYER_LEVEL_UP", [8])],
+            next: 12,
+            missed: 0,
+          });
+        }
+        await Bun.sleep(50);
+        return Response.json({ events: [], next: since, missed: 0 });
+      },
+    });
+    const abort = new AbortController();
+    const messages: string[] = [];
+    const seen: string[] = [];
+    const handled: string[] = [];
+    const done = watch({
+      url: port.url.href.replace(/\/$/, ""),
+      token: "t",
+      batchMs: 50,
+      signal: abort.signal,
+      onMessage: (m) => messages.push(m),
+      onEvents: (events) => seen.push(...events.map((e) => e.event)),
+      triage: async (r) => ({ handled: true, note: `${r.sender} said "${r.text}"; the fast loop followed them`, reply: false }),
+      onHandled: (note) => handled.push(note),
+    });
+    while (!messages.length) await Bun.sleep(20);
+    abort.abort();
+    await done;
+    port.stop(true);
+    expect(seen).toEqual(["PLAYER_LEVEL_UP"]);
+    expect(handled).toEqual(['Pallytest said "follow me"; the fast loop followed them']);
+    expect(messages[0]).not.toContain("follow me");
   });
 });
 

@@ -11,10 +11,36 @@
 static_assert(sizeof(dtPolyRef) == 8, "AzerothCore mmaps need 64-bit poly refs");
 static_assert(sizeof(dtNavMeshParams) == 28, "dtNavMeshParams layout");
 
+// The terrain filter, plus circles to keep out of (an agent's hostile mobs): a step whose midpoint
+// or end lies in one costs `mult` times as much, so a route goes round when a fair detour exists
+// and through when none does. Needs DT_VIRTUAL_QUERYFILTER, which AzerothCore's copy defines.
+struct AvoidFilter : public dtQueryFilter {
+    static const int MAX_ZONES = 64;
+    float zones[MAX_ZONES * 3]; // Recast {x, z, radius}
+    int count = 0;
+    float mult = 1.0f;
+    bool inside(float x, float z) const {
+        for (int i = 0; i < count; ++i) {
+            float dx = x - zones[i * 3], dz = z - zones[i * 3 + 1], r = zones[i * 3 + 2];
+            if (dx * dx + dz * dz < r * r) return true;
+        }
+        return false;
+    }
+    float getCost(const float* pa, const float* pb,
+                  const dtPolyRef prevRef, const dtMeshTile* prevTile, const dtPoly* prevPoly,
+                  const dtPolyRef curRef, const dtMeshTile* curTile, const dtPoly* curPoly,
+                  const dtPolyRef nextRef, const dtMeshTile* nextTile, const dtPoly* nextPoly) const override {
+        float cost = dtQueryFilter::getCost(pa, pb, prevRef, prevTile, prevPoly, curRef, curTile, curPoly,
+                                            nextRef, nextTile, nextPoly);
+        if (count && (inside((pa[0] + pb[0]) * 0.5f, (pa[2] + pb[2]) * 0.5f) || inside(pb[0], pb[2])))
+            return cost * mult;
+        return cost;
+    }
+};
 struct NavShim {
     dtNavMesh* mesh;
     dtNavMeshQuery* query;
-    dtQueryFilter filter;
+    AvoidFilter filter;
 };
 
 extern "C" {
@@ -67,6 +93,14 @@ void nav_set_filter(NavShim* s, uint16_t include, uint16_t exclude) {
 }
 
 void nav_set_area_cost(NavShim* s, int area, float cost) { s->filter.setAreaCost(area, cost); }
+// zones: count * {x, z, radius} in Recast order; past MAX_ZONES the rest are ignored.
+void nav_set_avoid(NavShim* s, const float* zones, int count, float mult) {
+    if (count > AvoidFilter::MAX_ZONES) count = AvoidFilter::MAX_ZONES;
+    if (count < 0) count = 0;
+    std::memcpy(s->filter.zones, zones, sizeof(float) * 3 * count);
+    s->filter.count = count;
+    s->filter.mult = mult;
+}
 
 uint32_t nav_find_nearest_poly(NavShim* s, const float* pos, const float* ext, uint64_t* ref, float* nearest) {
     dtPolyRef r = 0;

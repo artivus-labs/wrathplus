@@ -17,6 +17,13 @@ local zone, sub = GetZoneText() or "", GetSubZoneText() or ""
 out[#out + 1] = string.format("in %s%s%s", zone, sub ~= "" and (" / " .. sub) or "",
   p and string.format(" at (%.0f, %.0f, %.0f)", p.x, p.y, p.z) or "")
 if Revive and Revive.state then out[#out + 1] = "revive: " .. Revive.state end
+if Move and Move.mode then out[#out + 1] = "move: " .. (Move.mode == "follow" and "following" or Move.mode) .. (Move.state and (", " .. Move.state) or "") end
+if Quests and Quests.state then out[#out + 1] = "quests: " .. Quests.state end
+if Combat and Combat.state then out[#out + 1] = "combat: " .. Combat.state end
+if Agent and Agent.steps and Agent.steps.at > 0 then
+  local s = Agent.steps.list[Agent.steps.at]
+  out[#out + 1] = string.format("steps: %d of %d, %s", Agent.steps.at, #Agent.steps.list, s and s.name or "?")
+end
 if Upkeep and #Upkeep.log > 0 then out[#out + 1] = "upkeep lately: " .. table.concat(Upkeep.log, "; ") end
 local asks = {}
 for i = 1, 4 do
@@ -24,13 +31,28 @@ for i = 1, 4 do
   if f and f:IsShown() and f.which then asks[#asks + 1] = f.which end
 end
 if #asks > 0 then out[#out + 1] = "waiting on you: " .. table.concat(asks, ", ") end
+local party = {}
+for i = 1, (GetNumPartyMembers() or 0) do
+  local unit = "party" .. i
+  local name = UnitName(unit)
+  if name and UnitIsConnected and not UnitIsConnected(unit) then
+    party[#party + 1] = name .. " (offline)"
+  elseif name then
+    local d
+    for _, u in ipairs(AgentNearby and AgentNearby(100) or {}) do
+      if u.name == name then d = u.distance end
+    end
+    party[#party + 1] = name .. (d and string.format(" %d yd away", d) or " (out of sight)")
+  end
+end
+if #party > 0 then out[#out + 1] = "party: " .. table.concat(party, ", ") end
 local a = Agent and Agent.activity and Agent.activity()
 out[#out + 1] = a and string.format("activity %s for %ds", a.name, a.seconds) or "no activity"
 local w = AgentWalk and AgentWalk()
 if w and w.status ~= "idle" then out[#out + 1] = "walk " .. w.status end
 local quests = {}
 for i = 1, (GetNumQuestLogEntries() or 0) do
-  local title, _, _, _, header, _, complete = GetQuestLogTitle(i)
+  local title, _, _, _, header, _, complete, _, id = GetQuestLogTitle(i)
   if title and not header then
     local goals = {}
     for j = 1, (GetNumQuestLeaderBoards(i) or 0) do
@@ -38,6 +60,10 @@ for i = 1, (GetNumQuestLogEntries() or 0) do
       if text then goals[#goals + 1] = text end
     end
     local state = complete == 1 and "complete" or (complete == -1 and "failed" or table.concat(goals, ", "))
+    local where = complete == 1 and Quests and Quests.where and id and Quests.where(id)
+    if where and where.hand_in then
+      state = state .. string.format(", hand in near (%d, %d)", where.hand_in.x, where.hand_in.y)
+    end
     quests[#quests + 1] = title .. (state ~= "" and (" (" .. state .. ")") or "")
   end
 end

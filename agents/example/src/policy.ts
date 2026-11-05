@@ -19,6 +19,14 @@ export interface Intent {
   timeout?: number;
 }
 
+/** One of the planner's steps: run in order by the client (`Agent.set_steps`). */
+export interface Step {
+  name: string;
+  lua: string;
+  until?: string;
+  timeout?: number;
+}
+
 /** An intent as `Agent.available()` lists it. */
 export interface Registered {
   name: string;
@@ -54,10 +62,13 @@ const WAKE: Record<string, { reason: string; interrupt: boolean }> = {
   AGENT_INTENT_DONE: { reason: "activity ended", interrupt: true },
   AGENT_DECISION: { reason: "decision opened", interrupt: false },
   AGENT_WALK_DONE: { reason: "walk ended", interrupt: false },
+  AGENT_COMBAT_DONE: { reason: "fight ended", interrupt: false },
+  AGENT_PARTY_QUEST: { reason: "a party member's quests changed", interrupt: true },
   PLAYER_REGEN_DISABLED: { reason: "combat started", interrupt: true },
   PLAYER_REGEN_ENABLED: { reason: "combat ended", interrupt: false },
   PLAYER_DEAD: { reason: "died", interrupt: true },
-  PLAYER_ALIVE: { reason: "alive again", interrupt: true },
+  // Fired on releasing to a ghost as well as on a spirit healer's resurrection.
+  PLAYER_ALIVE: { reason: "released or resurrected", interrupt: true },
   PLAYER_UNGHOST: { reason: "alive again", interrupt: true },
   LOOT_OPENED: { reason: "loot window", interrupt: false },
   GOSSIP_SHOW: { reason: "gossip window", interrupt: false },
@@ -70,7 +81,25 @@ const WAKE: Record<string, { reason: string; interrupt: boolean }> = {
 
 /** A compact state for Jev, read through the client's Lua in one call. */
 export const STATE_LUA = `local V = require("wp.values")
-local near = {}
+local near, seen = {}, {}
+for _, o in ipairs(AgentNearby(100)) do if o.name then seen[o.name] = o end end
+local quests = {}
+for _, q in ipairs(Quests and Quests.list and Quests.list() or {}) do
+  local goals = {}
+  for _, o in ipairs(q.objectives) do goals[#goals + 1] = o.text end
+  quests[#quests + 1] = { title = q.title, level = q.level, complete = q.complete or nil, objectives = goals }
+end
+local party = {}
+for i = 1, (GetNumPartyMembers() or 0) do
+  local unit = "party" .. i
+  local name = UnitName(unit)
+  if name then
+    local o = seen[name]
+    party[#party + 1] = { name = name, online = not UnitIsConnected or UnitIsConnected(unit) and true or false,
+      yards = o and math.floor(o.distance) or nil, health = V.health(unit),
+      combat = UnitAffectingCombat(unit) and true or nil }
+  end
+end
 for i, o in ipairs(AgentNearby(60)) do
   if #near >= 15 then break end
   if o.kind ~= "gameobject" or o.name then
@@ -86,7 +115,7 @@ return { level = UnitLevel("player"), health = V.health("player"), power = V.pow
   casting = UnitCastingInfo("player") and true or false,
   target = UnitName("target"), target_health = V.health("target"),
   zone = GetRealZoneText(), subzone = GetSubZoneText(), position = AgentPosition(),
-  quest_log = GetNumQuestLogEntries(), free_bag_slots = V.free_bag_slots(),
+  quests = quests, party = party, free_bag_slots = V.free_bag_slots(),
   gossip_open = GossipFrame and GossipFrame:IsShown() and true or false,
   quest_window_open = QuestFrame and QuestFrame:IsShown() and true or false,
   loot_open = LootFrame and LootFrame:IsShown() and true or false,
@@ -104,7 +133,7 @@ export function luaString(text: string): string {
 }
 
 /** The Lua that registers the planner's intents (and removes ones it no longer lists). */
-export function registerLua(intents: Intent[]): string {
+export function registerLua(intents: Intent[], steps: Step[] = []): string {
   // Planner intents are tagged, so a new plan (or a new harness on the same client) replaces them
   // all, while intents the agent's own modules registered stay.
   const lines = ["for name, spec in pairs(Agent.intents) do if spec.plan then Agent.remove(name) end end"];
@@ -115,6 +144,14 @@ export function registerLua(intents: Intent[]): string {
       `Agent.intent(${JSON.stringify(i.name)}, { when = ${luaString(i.when)}, run = assert(loadstring(${luaString(i.lua)}))${done}${timeout}, plan = true })`,
     );
   }
+  // The steps run as one activity, started at once unless something else is running.
+  const list = steps.map((s) => {
+    const done = s.until ? `, done = assert(loadstring(${luaString(s.until)}))` : "";
+    const timeout = s.timeout ? `, timeout = ${Number(s.timeout)}` : "";
+    return `{ name = ${luaString(s.name)}, run = assert(loadstring(${luaString(s.lua)}))${done}${timeout} }`;
+  });
+  lines.push(`Agent.set_steps({ ${list.join(", ")} })`);
+  if (steps.length) lines.push(`if not Agent.current then Agent.run("follow_steps") end`);
   return lines.join("\n") + "\nreturn true";
 }
 
@@ -124,6 +161,8 @@ export interface PolicyOptions {
   jev: Jev;
   /** With nothing happening, check anyway this often (ms). */
   heartbeatMs?: number;
+  /** The operator's goal, which Jev reads beside the planner's plan. */
+  goal?: string;
   /** Told when the plan stalls, looks complete, or an intent keeps failing. */
   onNotify: (summary: string) => void;
   log?: (line: string) => void;
@@ -146,8 +185,8 @@ export class Policy {
   constructor(readonly options: PolicyOptions) {}
 
   /** The planner's plan and intents: registered in the client's Lua as activities. */
-  async update(plan: string, intents: Intent[]): Promise<string> {
-    const result = await this.#lua(registerLua(intents));
+  async update(plan: string, intents: Intent[], steps: Step[] = []): Promise<string> {
+    const result = await this.#lua(registerLua(intents, steps));
     if (!result.ok) return `Could not register the intents: ${result.error}`;
     this.plan = plan;
     this.intents = intents;
@@ -155,7 +194,7 @@ export class Policy {
     this.#doneStreak = 0;
     this.#told.clear();
     this.wake("new plan", true);
-    return `Plan set with ${intents.length} intents (+ wait).`;
+    return `Plan set with ${intents.length} intents (+ wait)${steps.length ? ` and ${steps.length} steps, started` : ""}.`;
   }
 
   /** Something happened that may need a choice. */
@@ -183,7 +222,14 @@ export class Policy {
   }
 
   #activityEnded(name: string, ok: boolean, why: unknown): void {
-    if (ok) {
+    // The planner's steps ending is its business: all done, or one that failed (not a fight
+    // interrupting them, which Jev resumes).
+    if (name === "follow_steps" && !String(why ?? "").startsWith("replaced")) {
+      this.options.onNotify(ok ? "Your steps are all done." : `Your steps stopped: ${String(why)}. Fix that step or set a new plan.`);
+      return;
+    }
+    // Replaced by another activity (a fight, a request) is not a failure.
+    if (ok || String(why ?? "").startsWith("replaced")) {
       this.#failures.delete(name);
       return;
     }
@@ -234,6 +280,7 @@ export class Policy {
     if (!choose && !decisions.length) return null;
     const response = await this.options.jev.ask(
       {
+        goal: this.options.goal,
         plan: this.plan || "No plan from the planner yet: follow the agent's own registered intents.",
         woke_because: reasons,
         game: game as never,

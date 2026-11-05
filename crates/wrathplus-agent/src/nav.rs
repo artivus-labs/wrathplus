@@ -7,9 +7,11 @@
 //! Lua: `AgentPath(x, y, z | guid)` → `{complete, length, points = {{x, y, z}, ...}}`;
 //! `AgentMoveTo(x, y, z | guid)` starts walking; `AgentInteract(guid)` from farther than a few
 //! yards walks the route, then interacts; `AgentStop()`; `AgentWalk()` → `{status,
-//! remaining, goal, note}` with status `idle`, `walking`, `arrived`, `stopped`, `failed` (refused)
+//! remaining, goal, note, route, interact}` (`route`: the corners still ahead; `interact`: the
+//! guid the walk ends talking to) with status `idle`, `walking`, `arrived`, `stopped`, `failed` (refused)
 //! or `stuck` (a corner not reached). Each end but `stopped` is put on the event stream as
-//! `AGENT_WALK_DONE` with the status.
+//! `AGENT_WALK_DONE` with the status. `AgentAvoid({{x, y, radius}, ...})` gives circles every later
+//! route goes round when a fair detour exists (an agent's hostile mobs); `AgentAvoid({})` clears.
 
 use crate::world;
 use bevy::prelude::*;
@@ -32,11 +34,19 @@ pub(crate) struct Walk {
     retried: bool,
     /// Interact with this object on arrival (`AgentInteract` from afar).
     then_interact: Option<u64>,
+    /// A walk that failed in Lua (no route), to announce from the walker.
+    failed: bool,
+    /// The map the route is on, and how often a stuck walk has been routed again from where the
+    /// player stood.
+    map: u32,
+    replans: u8,
 }
 
 pub(crate) struct Mesh {
     dir: Option<PathBuf>,
     mesh: Option<NavMesh>,
+    /// `AgentAvoid`'s circles, WoW `[x, y, radius]`, applied to each route.
+    avoid: Vec<[f32; 3]>,
 }
 
 #[derive(Clone)]
@@ -53,6 +63,8 @@ pub(crate) struct NavLink {
     started: std::time::Instant,
     /// The world's orders, for the interaction a walk ends in.
     orders: crossbeam_channel::Sender<world::Order>,
+    /// The navmesh, to route a stuck walk again from where the player stands.
+    mesh: Arc<Mutex<Mesh>>,
 }
 
 pub(crate) fn link(
@@ -67,17 +79,19 @@ pub(crate) fn link(
     let mesh = Arc::new(Mutex::new(Mesh {
         dir: std::env::var_os("WOW_NAV_MMAPS").map(PathBuf::from),
         mesh: None,
+        avoid: Vec::new(),
     }));
     (
         Handles {
             walk: walk.clone(),
-            mesh,
+            mesh: mesh.clone(),
         },
         NavLink {
             walk,
             events,
             started,
             orders,
+            mesh,
         },
     )
 }
@@ -86,6 +100,13 @@ pub(crate) fn link(
 fn to_bevy(p: [f32; 3]) -> Vec3 {
     Vec3::new(-p[1], p[2], -p[0])
 }
+
+fn to_wow(b: Vec3) -> [f32; 3] {
+    [-b.z, -b.x, b.y]
+}
+
+/// How often a stuck walk is routed again from where the player stands before it gives up.
+const REPLANS: u8 = 2;
 
 /// Put a walk's end on the event stream.
 fn announce(link: &NavLink, status: &str) {
@@ -106,6 +127,9 @@ pub(crate) fn walk(link: Res<NavLink>, mut auto: AutoMove) {
     let Ok(mut walk) = link.walk.lock() else {
         return;
     };
+    if std::mem::take(&mut walk.failed) {
+        announce(&link, "failed");
+    }
     if walk.stop {
         walk.stop = false;
         walk.queue.clear();
@@ -126,11 +150,29 @@ pub(crate) fn walk(link: Res<NavLink>, mut auto: AutoMove) {
             if !walk.retried {
                 walk.retried = true;
                 walk.queue.push_front(corner);
+            } else if let Some(route) = (walk.replans < REPLANS)
+                .then_some(walk.goal)
+                .flatten()
+                .and_then(|goal| {
+                    let me = world::Me {
+                        pos: to_wow(at),
+                        facing: 0.0,
+                        map: walk.map,
+                    };
+                    route_in(&link.mesh, me, goal).ok()
+                })
+            {
+                // As a player clicks again after bumping a doorframe: a fresh route from here.
+                walk.replans += 1;
+                walk.retried = false;
+                walk.queue = route.points.iter().skip(1).copied().collect();
+                walk.corner = None;
+                return;
             } else {
                 walk.status = "stuck";
                 walk.note = Some(format!(
-                    "click-to-move stopped {short:.0} yd short of the corner at ({:.0}, {:.0}, {:.0}), twice",
-                    corner[0], corner[1], corner[2]
+                    "click-to-move stopped {short:.0} yd short of the corner at ({:.0}, {:.0}, {:.0}), twice, after {} fresh routes",
+                    corner[0], corner[1], corner[2], walk.replans
                 ));
                 walk.queue.clear();
                 walk.corner = None;
@@ -167,8 +209,14 @@ pub(crate) fn walk(link: Res<NavLink>, mut auto: AutoMove) {
 }
 
 fn route_to(handles: &Handles, me: world::Me, to: [f32; 3]) -> Result<Route, String> {
-    let mut mesh = handles
-        .mesh
+    if let Ok(mut walk) = handles.walk.lock() {
+        walk.map = me.map;
+    }
+    route_in(&handles.mesh, me, to)
+}
+
+fn route_in(mesh: &Mutex<Mesh>, me: world::Me, to: [f32; 3]) -> Result<Route, String> {
+    let mut mesh = mesh
         .lock()
         .map_err(|_| "navmesh lock poisoned".to_string())?;
     if mesh.mesh.as_ref().is_none_or(|m| m.map() != me.map) {
@@ -178,21 +226,28 @@ fn route_to(handles: &Handles, me: world::Me, to: [f32; 3]) -> Result<Route, Str
             .ok_or("no navmesh: start the client with WOW_NAV_MMAPS=<server data>/mmaps")?;
         mesh.mesh = Some(NavMesh::open(&dir, me.map)?);
     }
-    mesh.mesh.as_mut().expect("opened above").route(me.pos, to)
+    let avoid = std::mem::take(&mut mesh.avoid);
+    let nav = mesh.mesh.as_mut().expect("opened above");
+    nav.set_avoid(&avoid);
+    let route = nav.route(me.pos, to);
+    mesh.avoid = avoid;
+    route
 }
 
-/// The target point from Lua arguments: `x, y, z` or a `"0x…"` guid from `AgentNearby`.
+/// The target point from Lua arguments: `x, y[, z]` (no height: the player's, and the route search
+/// finds the ground) or a `"0x…"` guid from `AgentNearby`.
 fn target(args: &MultiValue, snapshot: &world::Snapshot) -> Result<[f32; 3], String> {
     let num = |i: usize| match args.get(i) {
         Some(Value::Number(n)) => Some(*n as f32),
         Some(Value::Integer(n)) => Some(*n as f32),
         _ => None,
     };
-    if let (Some(x), Some(y), Some(z)) = (num(0), num(1), num(2)) {
+    if let (Some(x), Some(y)) = (num(0), num(1)) {
+        let z = num(2).or(snapshot.me.map(|m| m.pos[2])).unwrap_or(0.0);
         return Ok([x, y, z]);
     }
     let Some(Value::String(text)) = args.front() else {
-        return Err("expected x, y, z or a guid".into());
+        return Err("expected x, y[, z] or a guid".into());
     };
     let text = text.to_string_lossy();
     let guid = world::parse_guid(&text).ok_or_else(|| format!("not a guid: {text}"))?;
@@ -249,6 +304,7 @@ fn start(lua: &Lua, nav: &Handles, route: &Route, then_interact: Option<u64>) {
     walk.stop = false;
     walk.corner = None;
     walk.retried = false;
+    walk.replans = 0;
     walk.then_interact = then_interact;
 }
 
@@ -278,7 +334,18 @@ pub(crate) fn install(lua: &Lua, nav: &Handles, world: &world::Handles) -> mlua:
         lua.create_function(move |lua, args: MultiValue| {
             let route = match plan(args, &n, &w) {
                 Ok(route) => route,
-                Err(e) => return Ok((None, Some(e))),
+                Err(e) => {
+                    // Announced like any walk's end, so whoever waits on it is woken.
+                    if let Ok(mut walk) = n.walk.lock() {
+                        walk.queue.clear();
+                        walk.corner = None;
+                        walk.then_interact = None;
+                        walk.status = "failed";
+                        walk.note = Some(e.clone());
+                        walk.failed = true;
+                    }
+                    return Ok((None, Some(e)));
+                }
             };
             start(lua, &n, &route, None);
             let summary = route_table(lua, &route)?;
@@ -311,6 +378,30 @@ pub(crate) fn install(lua: &Lua, nav: &Handles, world: &world::Handles) -> mlua:
     )?;
     let n = nav.clone();
     g.set(
+        "AgentAvoid",
+        lua.create_function(move |_, zones: Option<Vec<Table>>| {
+            let zones: Vec<[f32; 3]> = zones
+                .unwrap_or_default()
+                .iter()
+                .filter_map(|z| {
+                    let get = |i: i64, k: &str| -> Option<f32> {
+                        z.get::<Option<f32>>(k)
+                            .ok()
+                            .flatten()
+                            .or_else(|| z.get(i).ok())
+                    };
+                    Some([get(1, "x")?, get(2, "y")?, get(3, "r")?])
+                })
+                .collect();
+            let count = zones.len();
+            if let Ok(mut mesh) = n.mesh.lock() {
+                mesh.avoid = zones;
+            }
+            Ok(count)
+        })?,
+    )?;
+    let n = nav.clone();
+    g.set(
         "AgentStop",
         lua.create_function(move |_, ()| {
             if let Ok(mut walk) = n.walk.lock() {
@@ -329,6 +420,12 @@ pub(crate) fn install(lua: &Lua, nav: &Handles, world: &world::Handles) -> mlua:
                 t.set("remaining", walk.queue.len())?;
                 t.set("goal", walk.goal.map(|g| vec![g[0], g[1], g[2]]))?;
                 t.set("note", walk.note.clone())?;
+                let ahead = walk.corner.iter().chain(walk.queue.iter());
+                t.set(
+                    "route",
+                    ahead.map(|p| vec![p[0], p[1], p[2]]).collect::<Vec<_>>(),
+                )?;
+                t.set("interact", walk.then_interact.map(world::guid_text))?;
             }
             Ok(t)
         })?,
@@ -337,87 +434,5 @@ pub(crate) fn install(lua: &Lua, nav: &Handles, world: &world::Handles) -> mlua:
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn targets_come_from_coordinates_or_a_nearby_guid() {
-        let lua = Lua::new();
-        let snapshot = world::Snapshot {
-            me: None,
-            objects: vec![world::Seen {
-                guid: 0x10,
-                pos: [1.0, 2.0, 3.0],
-                ..Default::default()
-            }],
-            corpse: None,
-        };
-        let args = |code: &str| lua.load(code).eval::<MultiValue>().unwrap();
-        assert_eq!(
-            target(&args("return 4, 5, 6"), &snapshot),
-            Ok([4.0, 5.0, 6.0])
-        );
-        assert_eq!(
-            target(&args("return '0x0000000000000010'"), &snapshot),
-            Ok([1.0, 2.0, 3.0])
-        );
-        assert!(target(&args("return '0x99'"), &snapshot).is_err());
-        assert!(target(&args("return true"), &snapshot).is_err());
-    }
-
-    #[test]
-    fn without_mmaps_a_route_says_how_to_get_one() {
-        let (handles, _) = link(
-            Arc::new(crate::events::EventLog::new()),
-            std::time::Instant::now(),
-            crossbeam_channel::unbounded().0,
-        );
-        handles.mesh.lock().unwrap().dir = None;
-        let me = world::Me {
-            pos: [0.0; 3],
-            facing: 0.0,
-            map: 0,
-        };
-        assert!(route_to(&handles, me, [1.0, 1.0, 0.0])
-            .unwrap_err()
-            .contains("WOW_NAV_MMAPS"));
-    }
-
-    #[test]
-    fn a_far_interaction_without_a_navmesh_falls_back_to_the_straight_approach() {
-        let (world_handles, world_link) = world::link();
-        let (handles, _) = link(
-            Arc::new(crate::events::EventLog::new()),
-            std::time::Instant::now(),
-            world_handles.orders.clone(),
-        );
-        handles.mesh.lock().unwrap().dir = None;
-        {
-            let mut s = world_handles.snapshot.lock().unwrap();
-            s.me = Some(world::Me {
-                pos: [0.0; 3],
-                facing: 0.0,
-                map: 0,
-            });
-            s.objects = vec![world::Seen {
-                guid: 0x10,
-                distance: 24.0,
-                pos: [24.0, 0.0, 0.0],
-                ..Default::default()
-            }];
-        }
-        let lua = Lua::new();
-        world::install(&lua, &world_handles).unwrap();
-        install(&lua, &handles, &world_handles).unwrap();
-        let sent: bool = lua
-            .load("return AgentInteract('0x0000000000000010')")
-            .eval()
-            .unwrap();
-        assert!(sent);
-        assert!(matches!(
-            world_link.orders.try_recv(),
-            Ok(world::Order::Interact(0x10))
-        ));
-        assert_eq!(handles.walk.lock().unwrap().then_interact, None);
-    }
-}
+#[path = "nav_tests.rs"]
+mod tests;

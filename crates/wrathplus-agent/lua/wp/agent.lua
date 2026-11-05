@@ -7,6 +7,7 @@
 --     run = function() Hunt:start() end,                         -- starts the activity
 --     done = function() return Hunt.finished, Hunt.ok end,       -- optional: when it has ended
 --     timeout = 120,                                             -- optional: give up after (s)
+--     while_dead = true,                                         -- optional: offered dead too
 --   })
 -- Choosing an intent starts an *activity*. Without `done` it ends, unannounced, as soon as `run`
 -- returns (a failed `run` is still announced). With
@@ -45,7 +46,8 @@ end
 function A.intent(name, spec)
   assert(valid_name(name), "intent names are snake_case words")
   assert(type(spec) == "table" and type(spec.run) == "function", "intent " .. name .. " needs run")
-  assert(type(spec.when) == "string", "intent " .. name .. " needs when (a description for the fast tier)")
+  assert(type(spec.when) == "string" or type(spec.when) == "function",
+    "intent " .. name .. " needs when (a description for the fast tier)")
   A.intents[name] = spec
   return spec
 end
@@ -55,13 +57,20 @@ function A.remove(name)
   if A.current and A.current.name == name then A.current = nil end
 end
 
--- The intents whose `available` passes now, as { name, when } pairs, for the fast tier.
+-- The intents whose `available` passes now, as { name, when } pairs, for the fast tier. Dead or a
+-- ghost, nothing is offered (wp.revive carries that) but an intent marked `while_dead`.
 function A.available()
   local out = {}
+  local dead = UnitIsDeadOrGhost and UnitIsDeadOrGhost("player")
   for name, spec in pairs(A.intents) do
-    local ok, yes = true, true
-    if spec.available then ok, yes = pcall(spec.available) end
-    if ok and yes then out[#out + 1] = { name = name, when = spec.when } end
+    local ok, yes = not dead or spec.while_dead == true, true
+    if ok and spec.available then ok, yes = pcall(spec.available) end
+    local when = spec.when
+    if type(when) == "function" then
+      local fine, text = pcall(when)
+      when = fine and tostring(text) or name
+    end
+    if ok and yes then out[#out + 1] = { name = name, when = when } end
   end
   table.sort(out, function(a, b) return a.name < b.name end)
   return out
@@ -129,11 +138,11 @@ local function ensure_watcher()
     decision_expiry(now)
     local c = A.current
     if c and c.spec.done then
-      local ok, finished, succeeded = pcall(c.spec.done)
+      local ok, finished, succeeded, why = pcall(c.spec.done)
       if not ok then
         finish(false, "done check failed: " .. tostring(finished))
       elseif finished then
-        finish(succeeded ~= false)
+        finish(succeeded ~= false, why)
       elseif c.spec.timeout and now - c.since >= c.spec.timeout then
         finish(false, "timed out")
       end
@@ -177,6 +186,80 @@ function A.resolve(id, choice)
   note("decision " .. d.name .. ": " .. tostring(choice))
   if d.on then return pcall(d.on, choice, "decided") end
   return true
+end
+
+-- Steps: an ordered list from the planner ("walk here, then there, then talk to X"). They run as
+-- one activity, `follow_steps`, which moves to the next step by itself as each one's `done`
+-- passes, so the tiers above sleep through the whole list. It ends when every step is done, or a
+-- step fails or times out (the reason names the step); another activity (a fight) interrupts it,
+-- and choosing it again resumes at the step it was on.
+--   Agent.set_steps({ { name = "to the lake", run = function() AgentMoveTo(-9400, -90) end,
+--                       done = function() return AgentWalk().status == "arrived" end, timeout = 120 }, ... })
+A.steps = { list = {}, at = 0 }
+
+local function step_now()
+  return A.steps.list[A.steps.at]
+end
+
+local function start_step()
+  local step = step_now()
+  if not step then return end
+  A.steps.since = GetTime()
+  note("step " .. A.steps.at .. ": " .. step.name)
+  step.run()
+end
+
+local function step_check()
+  local step = step_now()
+  if not step then return true, true end
+  local finished, succeeded = true, true
+  if step.done then
+    local ok, f, s2 = pcall(step.done)
+    if not ok then return true, false, "step " .. step.name .. ": done check failed: " .. tostring(f) end
+    finished, succeeded = f, s2
+  end
+  if not finished then
+    if step.timeout and GetTime() - (A.steps.since or GetTime()) >= step.timeout then
+      A.steps.failed = A.steps.at
+      return true, false, "step " .. step.name .. " timed out"
+    end
+    return false
+  end
+  -- A failed step is the planner's to fix: follow_steps is not offered again until it sets new
+  -- steps, or the fast tier re-runs the same failing step over and over.
+  if succeeded == false then
+    A.steps.failed = A.steps.at
+    return true, false, "step " .. step.name .. " failed"
+  end
+  A.steps.at = A.steps.at + 1
+  if not step_now() then
+    A.steps.list, A.steps.at = {}, 0
+    A.intents.follow_steps = nil
+    return true, true, "all steps done"
+  end
+  local ok, err = pcall(start_step)
+  if not ok then return true, false, "step " .. step_now().name .. ": " .. tostring(err) end
+  return false
+end
+
+function A.set_steps(list)
+  A.steps.list, A.steps.at = list or {}, (list and #list > 0) and 1 or 0
+  A.steps.failed = nil
+  if A.steps.at == 0 then
+    A.intents.follow_steps = nil
+    return
+  end
+  A.intents.follow_steps = {
+    when = function()
+      local step = step_now()
+      return step and string.format("Carry on with the planner's steps: step %d of %d, %s.",
+        A.steps.at, #A.steps.list, step.name) or "No steps left."
+    end,
+    available = function() return not A.steps.failed end,
+    run = start_step,
+    done = step_check,
+    plan = true,
+  }
 end
 
 return A

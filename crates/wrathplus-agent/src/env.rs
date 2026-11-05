@@ -3,10 +3,13 @@
 //!
 //! The UI VM is sandboxed (no `require`, `io`, `os`), as addons expect. This adds back exactly one
 //! door: `require(name)` reads `<scripts>/<name with dots as slashes>.lua`, or a built-in module
-//! (`wp.engine`, `wp.values`, `wp.agent`, `wp.revive`, `wp.upkeep`), and nothing else. `wp.agent` is preloaded as
+//! (`wp.engine`, `wp.values`, `wp.agent`, `wp.revive`, `wp.upkeep`, `wp.rotation`, `wp.combat`, `wp.move`, `wp.quest`), and nothing else. `wp.agent` is preloaded as
 //! the global `Agent`: the registry of intents and decisions the fast tier chooses among; `wp.revive`
 //! as `Revive`, which gets a dead character back up; `wp.upkeep` as `Upkeep`, which wears upgrades,
-//! sells junk and trains. `AgentReload(name)` forgets a module and loads it
+//! sells junk and trains; `wp.rotation` as `Rotation`, a
+//! fight's priority list; `wp.combat` as `Combat`, fighting a target kept in range; `wp.move` as
+//! `Move`, going to a unit, following one and holding a spot; `wp.quest` as `Quests`, quest givers'
+//! dialogs and the party's quests. `AgentReload(name)` forgets a module and loads it
 //! again; `AgentModules()` lists the agent's files. If `autoexec.lua` exists, every new in-game
 //! VM runs it, so an agent's logic comes back after `ReloadUI()` or a restart.
 
@@ -21,6 +24,11 @@ const BUILT_IN: &[(&str, &str)] = &[
     ("wp.agent", include_str!("../lua/wp/agent.lua")),
     ("wp.revive", include_str!("../lua/wp/revive.lua")),
     ("wp.upkeep", include_str!("../lua/wp/upkeep.lua")),
+    ("wp.rotation", include_str!("../lua/wp/rotation.lua")),
+    ("wp.combat", include_str!("../lua/wp/combat.lua")),
+    ("wp.move", include_str!("../lua/wp/move.lua")),
+    ("wp.quest", include_str!("../lua/wp/quest.lua")),
+    ("wp.avoid", include_str!("../lua/wp/avoid.lua")),
 ];
 
 /// Where the agent's modules live: `WOW_AGENT_SCRIPTS`, else `<client home>/Agent/scripts`.
@@ -113,6 +121,21 @@ pub(crate) fn install(script: &UiScript, dir: PathBuf) -> mlua::Result<bool> {
     // Chores: wear upgrades, sell junk and repair at merchants, train at class trainers.
     let upkeep = load_module(lua, &dir, "wp.upkeep")?;
     lua.globals().set("Upkeep", upkeep)?;
+    // What to cast in a fight, as a priority list (`Rotation.list`), and fighting a target kept in
+    // range (`Combat.engage(guid)`), which runs it.
+    let rotation = load_module(lua, &dir, "wp.rotation")?;
+    lua.globals().set("Rotation", rotation)?;
+    let combat = load_module(lua, &dir, "wp.combat")?;
+    lua.globals().set("Combat", combat)?;
+    // Going to a unit, following one (with its fights), holding a spot.
+    let movement = load_module(lua, &dir, "wp.move")?;
+    lua.globals().set("Move", movement)?;
+    // Quest givers' dialogs, and keeping in step with the party's quests.
+    let quests = load_module(lua, &dir, "wp.quest")?;
+    lua.globals().set("Quests", quests)?;
+    // Walks kept clear of hostile mobs in sight, unless the fast tier says to fight through.
+    let avoid = load_module(lua, &dir, "wp.avoid")?;
+    lua.globals().set("Avoid", avoid)?;
     Ok(module_path(&dir, "autoexec").is_file())
 }
 
@@ -153,6 +176,26 @@ mod revive_tests;
 #[cfg(test)]
 #[path = "upkeep_tests.rs"]
 mod upkeep_tests;
+
+#[cfg(test)]
+#[path = "combat_tests.rs"]
+mod combat_tests;
+
+#[cfg(test)]
+#[path = "move_tests.rs"]
+mod move_tests;
+
+#[cfg(test)]
+#[path = "quest_tests.rs"]
+mod quest_tests;
+
+#[cfg(test)]
+#[path = "rotation_tests.rs"]
+mod rotation_tests;
+
+#[cfg(test)]
+#[path = "avoid_tests.rs"]
+mod avoid_tests;
 
 #[cfg(test)]
 mod tests {
@@ -293,6 +336,67 @@ mod tests {
         script.tick(0.3);
         let said: String = script.eval("return table.concat(said, ' ')").unwrap();
         assert_eq!(said, "broken=false walk_there=true");
+    }
+
+    #[test]
+    fn steps_run_one_after_another_as_one_activity() {
+        let mut script = UiScript::new().unwrap();
+        install(&script, scratch("steps")).unwrap();
+        let ends: String = script
+            .eval(
+                r#"
+                started, arrived, ends = {}, {}, {}
+                AgentSignal = function(_, name, ok, why) ends[#ends + 1] = name .. "=" .. tostring(ok) .. ":" .. tostring(why) end
+                local function leg(n) return {
+                  name = "leg " .. n,
+                  run = function() started[#started + 1] = n end,
+                  done = function() return arrived[n] == true end,
+                  timeout = 1,
+                } end
+                Agent.set_steps({ leg(1), leg(2) })
+                Agent.run("follow_steps")
+                return table.concat(started, ",") .. " / " .. Agent.available()[1].when
+                "#,
+            )
+            .unwrap();
+        assert_eq!(
+            ends,
+            "1 / Carry on with the planner's steps: step 1 of 2, leg 1."
+        );
+        // Leg 1 arrives: leg 2 starts within the same activity, nobody woken.
+        script.run("arrived[1] = true").unwrap();
+        script.tick(0.3);
+        let (started, ends): (String, String) = script
+            .eval("return table.concat(started, ','), table.concat(ends, ' ')")
+            .unwrap();
+        assert_eq!((started.as_str(), ends.as_str()), ("1,2", ""));
+        script.run("arrived[2] = true").unwrap();
+        script.tick(0.3);
+        let ends: String = script.eval("return table.concat(ends, ' ')").unwrap();
+        assert_eq!(ends, "follow_steps=true:all steps done");
+        assert!(script
+            .eval::<bool>("return Agent.intents.follow_steps == nil")
+            .unwrap());
+        // A step that never finishes times out, and the end names it.
+        script
+            .run("Agent.set_steps({ { name = 'stuck leg', run = function() end, done = function() return false end, timeout = 0.5 } }) Agent.run('follow_steps')")
+            .unwrap();
+        for _ in 0..4 {
+            script.tick(0.3);
+        }
+        let ends: String = script.eval("return ends[#ends]").unwrap();
+        assert_eq!(ends, "follow_steps=false:step stuck leg timed out");
+        // Not offered again until the planner sets new steps: re-running it would just fail again.
+        let offered = |script: &UiScript| -> bool {
+            script
+                .eval("for _, i in ipairs(Agent.available()) do if i.name == 'follow_steps' then return true end end return false")
+                .unwrap()
+        };
+        assert!(!offered(&script));
+        script
+            .run("Agent.set_steps({ { name = 'another way', run = function() end } })")
+            .unwrap();
+        assert!(offered(&script));
     }
 
     #[test]

@@ -23,6 +23,7 @@ extern "C" {
     fn nav_add_tile(shim: *mut Shim, data: *const u8, len: c_int, out_ref: *mut u64) -> u32;
     fn nav_set_filter(shim: *mut Shim, include: u16, exclude: u16);
     fn nav_set_area_cost(shim: *mut Shim, area: c_int, cost: f32);
+    fn nav_set_avoid(shim: *mut Shim, zones: *const f32, count: c_int, mult: f32);
     fn nav_find_straight_path(
         shim: *mut Shim,
         start: *const f32,
@@ -46,6 +47,9 @@ pub const GRID_SIZE: f32 = 533.333_3;
 /// yards; a whole zone needs far more.
 const MAX_NODES: c_int = 65_535;
 const MAX_POINTS: usize = 512;
+/// What a yard inside an avoided circle costs, in yards: a detour up to this many times the
+/// crossing's length is preferred.
+pub const AVOID_COST: f32 = 10.0;
 
 /// Terrain flags (`NavTerrainFlag`), also the area ids.
 pub const NAV_GROUND: u16 = 0x01;
@@ -136,6 +140,15 @@ impl NavMesh {
         })
     }
 
+    /// Circles to route around, as WoW `[x, y, radius]` (an agent's hostile mobs): crossing one
+    /// costs [`AVOID_COST`] times the distance, so a route goes round when a fair detour exists and
+    /// through when none does. Kept for every later route until set again; empty clears them.
+    pub fn set_avoid(&mut self, zones: &[[f32; 3]]) {
+        let flat: Vec<f32> = zones.iter().flat_map(|z| [z[1], z[0], z[2]]).collect();
+        let count = zones.len() as c_int;
+        unsafe { nav_set_avoid(self.shim.as_ptr(), flat.as_ptr(), count, AVOID_COST) };
+    }
+
     pub fn map(&self) -> u32 {
         self.map
     }
@@ -222,9 +235,12 @@ impl NavMesh {
                 &mut polys,
             )
         };
-        if status & DT_FAILURE != 0 {
-            // The server's second try: a taller box, for points above or below the mesh.
-            let tall = [3.0f32, 50.0, 3.0];
+        // The server's second try, a taller box for points above or below the mesh; then a much
+        // taller one, for a height that is simply wrong (an agent's guess).
+        for tall in [[3.0f32, 50.0, 3.0], [3.0f32, 400.0, 3.0]] {
+            if status & DT_FAILURE == 0 && count > 0 {
+                break;
+            }
             status = unsafe {
                 nav_find_straight_path(
                     self.shim.as_ptr(),
@@ -307,6 +323,40 @@ mod tests {
                 .any(|p| (p[0] + 8910.4).abs() < 2.0 && (p[1] + 140.0).abs() < 3.0),
             "{route:?}"
         );
+    }
+
+    /// Goldshire's road to Stormwind with a circle on it, as a wolf pack would be: the route goes
+    /// round, never through the middle, and still arrives.
+    #[test]
+    #[ignore = "needs the server's extracted mmaps"]
+    fn a_route_goes_round_an_avoided_circle() {
+        let dir = std::env::var("WRATHPLUS_MMAPS").expect("set WRATHPLUS_MMAPS");
+        let mut mesh = NavMesh::open(Path::new(&dir), 0).unwrap();
+        let (from, to) = ([-9460.0, 64.0, 56.0], [-9300.0, 140.0, 64.0]);
+        let plain = mesh.route(from, to).unwrap();
+        // A circle around the plain route's middle corner.
+        let mid = plain.points[plain.points.len() / 2];
+        mesh.set_avoid(&[[mid[0], mid[1], 15.0]]);
+        let round = mesh.route(from, to).unwrap();
+        mesh.set_avoid(&[]);
+        assert!(round.complete, "{round:?}");
+        let near = |r: &Route| {
+            r.points
+                .windows(2)
+                .flat_map(|w| {
+                    (0..=10).map(move |i| {
+                        let t = i as f32 / 10.0;
+                        [
+                            w[0][0] + (w[1][0] - w[0][0]) * t,
+                            w[0][1] + (w[1][1] - w[0][1]) * t,
+                        ]
+                    })
+                })
+                .map(|p| (p[0] - mid[0]).hypot(p[1] - mid[1]))
+                .fold(f32::INFINITY, f32::min)
+        };
+        assert!(near(&plain) < 1.0);
+        assert!(near(&round) > 7.5, "{round:?}");
     }
 
     /// The walk an agent got stuck on (#82): out of Northshire toward Goldshire. With steep ground

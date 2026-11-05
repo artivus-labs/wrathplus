@@ -27,11 +27,18 @@ export class Inbox implements AsyncIterable<SDKUserMessage> {
   #wake: (() => void) | undefined;
   #closed = false;
 
-  push(text: string): void {
+  /** A message for the planner, with a PNG (base64) of the game when there is one. */
+  push(text: string, png?: string): void {
     if (this.#closed) return;
+    const content = png
+      ? [
+          { type: "image" as const, source: { type: "base64" as const, media_type: "image/png" as const, data: png } },
+          { type: "text" as const, text },
+        ]
+      : text;
     this.#items.push({
       type: "user",
-      message: { role: "user", content: text },
+      message: { role: "user", content },
       parent_tool_use_id: null,
     });
     this.#wake?.();
@@ -173,9 +180,20 @@ export function planServer(policy: Policy) {
               }),
             )
             .max(254),
+          steps: z
+            .array(
+              z.object({
+                name: z.string().describe("What this step does, in a few words."),
+                lua: z.string().describe("Lua that starts it."),
+                until: z.string().optional().describe("Lua returning true once it has finished (and false as a second value if it failed). Without it the step is done as soon as its Lua returns."),
+                timeout: z.number().positive().optional().describe("Seconds before the step counts as failed."),
+              }),
+            )
+            .optional()
+            .describe("A sequence the client runs in order, by itself, as one activity (follow_steps): each step starts when the one before is done. You are woken when all are done or one fails or times out. Use it for anything with several legs (a route in waypoints, walk then talk then hand in) instead of doing one leg per turn."),
         },
-        async ({ plan, intents }) => ({
-          content: [{ type: "text", text: await policy.update(plan, intents) }],
+        async ({ plan, intents, steps }) => ({
+          content: [{ type: "text", text: await policy.update(plan, intents, steps ?? []) }],
         }),
       ),
       tool(

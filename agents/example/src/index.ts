@@ -16,6 +16,7 @@ import { claudeAuth, loadEnv } from "./env.ts";
 import { Notes } from "./notes.ts";
 import { Policy } from "./policy.ts";
 import { kickoff } from "./prompt.ts";
+import { Triage } from "./triage.ts";
 import { statusLine, Waker } from "./wake.ts";
 import { watch } from "./watch.ts";
 
@@ -59,13 +60,38 @@ export async function runAgent(config: Config, options: RunOptions): Promise<voi
   const { abortController } = options;
   const inbox = new Inbox();
   const notes = new Notes(options.notesHome);
+  // Speech nearby that was not to us rides along with the next wake-up (the latest few lines), and
+  // so do requests the fast tier carried out for the party.
+  let heard: string[] = [];
+  let handled: string[] = [];
   // Everything that reaches the planner also goes in the session log, with the character's
   // status at that moment, so a wake-up needs no calls to see where things stand.
+  // A half-size frame of the game rides along with a wake-up, at most one every 30 s, so the
+  // planner sees the scene without asking (WRATHPLUS_WAKE_SHOTS=0 turns it off).
+  let shotAt = 0;
+  const glance = async (): Promise<string | undefined> => {
+    if (process.env.WRATHPLUS_WAKE_SHOTS === "0" || Date.now() - shotAt < 30_000) return undefined;
+    try {
+      const response = await fetch(`${config.url}/screenshot?scale=0.5`, {
+        headers: { Authorization: `Bearer ${config.token}` },
+        signal: AbortSignal.timeout(3_000),
+      });
+      if (!response.ok || !(response.headers.get("content-type") ?? "").startsWith("image/png")) return undefined;
+      shotAt = Date.now();
+      return Buffer.from(await response.arrayBuffer()).toString("base64");
+    } catch {
+      return undefined;
+    }
+  };
   const tell = (kind: string, text: string) => {
-    void statusLine(config.url, config.token).then((status) => {
-      const message = status ? `${text}\n\n[Now: ${status}]` : text;
-      notes.record(kind, message);
-      inbox.push(message);
+    void Promise.all([statusLine(config.url, config.token), glance()]).then(([status, png]) => {
+      const nearby = heard.length ? `\n\nHeard nearby (no need to answer):\n- ${heard.join("\n- ")}` : "";
+      const done = handled.length ? `\n\nDone for the party by the fast loop (already answered):\n- ${handled.join("\n- ")}` : "";
+      heard = [];
+      handled = [];
+      const message = status ? `${text}${done}${nearby}\n\n[Now: ${status}]` : `${text}${done}${nearby}`;
+      notes.record(kind, png ? `${message}\n\n[with a screenshot]` : message);
+      inbox.push(message, png);
     });
   };
   const waker = new Waker((text) => tell("wake-up", text));
@@ -76,22 +102,73 @@ export async function runAgent(config: Config, options: RunOptions): Promise<voi
         token: config.token,
         jev: new Jev(process.env.TYPESAFE_API_KEY, process.env.WRATHPLUS_JEV_MODEL ?? "jev-latest"),
         heartbeatMs: Number(process.env.WRATHPLUS_JEV_HEARTBEAT_MS ?? 20_000),
+        goal: config.goal,
         onNotify: (summary) => tell("fast loop", summary),
         log: (line) => console.log(line),
       })
     : undefined;
   if (policy) void policy.run(abortController.signal);
+  // Requests from the party, sorted by Jev before the planner hears them (`triage.ts`).
+  const lua = async (code: string) => {
+    const response = await fetch(`${config.url}/lua`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${config.token}` },
+      body: code,
+    });
+    return (await response.json()) as { ok: boolean; values?: unknown[]; error?: string };
+  };
+  const triage =
+    policy && process.env.TYPESAFE_API_KEY && process.env.WRATHPLUS_AGENT_TRIAGE !== "0"
+      ? new Triage(
+          new Jev(process.env.TYPESAFE_API_KEY, process.env.WRATHPLUS_JEV_MODEL ?? "jev-latest"),
+          lua,
+          async (text, channel, to) => {
+            await lua(`SendChatMessage(${JSON.stringify(text)}, ${JSON.stringify(channel)}, nil, ${JSON.stringify(to)}) return true`);
+          },
+        )
+      : undefined;
   const opening = kickoff(config.goal, notes.briefing());
   inbox.push(opening);
   let self: string | undefined;
+  // The party's names, refreshed every 15 s: their /say is meant for us.
+  let party = new Set<string>();
+  const partyLua = 'local t = {} for i = 1, 4 do local n = UnitName("party" .. i) if n then t[#t + 1] = n end end return t';
+  const refreshParty = async () => {
+    try {
+      const response = await fetch(`${config.url}/lua`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${config.token}` },
+        body: partyLua,
+        signal: AbortSignal.timeout(2000),
+      });
+      const answer = (await response.json()) as { values?: unknown[] };
+      const names = Array.isArray(answer.values?.[0]) ? (answer.values[0] as string[]) : [];
+      party = new Set(names.map((n) => n.toLowerCase()));
+    } catch {
+      // The client may be loading; keep the last list.
+    }
+  };
+  void refreshParty();
+  const partyTimer = setInterval(() => void refreshParty(), 15_000);
+  abortController.signal.addEventListener("abort", () => clearInterval(partyTimer));
   void watch({
     url: config.url,
     token: config.token,
     self: () => self,
+    party: () => party,
+    npcReplies: process.env.WRATHPLUS_AGENT_NPC_REPLIES !== "0",
+    ...(triage ? { triage: async (request) => triage.handle(request, await statusLine(config.url, config.token), policy?.plan) } : {}),
+    onHandled: (note) => {
+      handled = [...handled, note].slice(-8);
+    },
+    onOverheard: (lines) => {
+      heard = [...heard, ...lines].slice(-8);
+    },
     signal: abortController.signal,
     onEvents: (events) => {
       policy?.notice(events);
-      waker.notice(events);
+      // Our own chat echoing back is not news to wake on.
+      waker.notice(events.filter((e) => !(e.event.startsWith("CHAT_MSG_") && self !== undefined && e.args[1] === self)));
     },
     onMessage: (text) => {
       console.log(`\n[events] ${text.replace(/\n/g, " ")}`);

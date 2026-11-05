@@ -265,8 +265,8 @@ impl AutoMove<'_, '_> {
         self.arm(Toward::Melee(anchor), at, stop)
     }
 
-    /// `0x6100a0`, for an attack on an enemy in melee: turn to face `at`.
-    pub(crate) fn face(&mut self, at: Vec3) -> bool {
+    /// `0x6100a0`, for an attack on an enemy in melee: turn to face `at` (also the agent port).
+    pub fn face(&mut self, at: Vec3) -> bool {
         if !self.can_auto_interact() {
             return false;
         }

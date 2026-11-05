@@ -1,0 +1,128 @@
+//! `wp.combat` against a stubbed world: chasing a moving target, swinging in reach, the outcomes.
+
+use wrathplus_ui::script::UiScript;
+
+const GAME: &str = r#"
+calls = {}
+wolf = { guid = "0xW", name = "Mangy Wolf", x = 20, y = 0, z = 0, distance = 20, dead = false }
+walking = false
+AgentNearby = function() return wolf and { wolf } or {} end
+AgentTarget = function(g) calls[#calls + 1] = "target " .. g end
+AgentMoveTo = function(x) calls[#calls + 1] = "move " .. x walking = true end
+AgentStop = function() calls[#calls + 1] = "stop" walking = false end
+AgentWalk = function() return { status = walking and "walking" or "arrived" } end
+AgentInteract = function(g) calls[#calls + 1] = "swing " .. g end
+UnitIsDeadOrGhost = function() return false end
+signals = {}
+AgentSignal = function(name, guid, outcome) signals[#signals + 1] = name .. " " .. guid .. " " .. outcome end
+"#;
+
+fn combat() -> UiScript {
+    let dir = std::env::temp_dir().join(format!("wp-agent-combat-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let script = UiScript::new().unwrap();
+    super::install(&script, dir).unwrap();
+    script.run(GAME).unwrap();
+    script
+}
+
+fn calls(script: &UiScript) -> String {
+    script.eval("return table.concat(calls, ' | ')").unwrap()
+}
+
+#[test]
+fn it_chases_a_moving_target_swings_in_reach_and_reports_the_kill() {
+    let mut script = combat();
+    assert!(script.eval::<bool>("return Combat.engage('0xW')").unwrap());
+    script.tick(0.25);
+    assert_eq!(calls(&script), "target 0xW | move 20");
+    // Still walking and the wolf has barely moved: no new route.
+    script.run("wolf.x, wolf.distance = 21, 12").unwrap();
+    script.tick(0.25);
+    assert_eq!(calls(&script), "target 0xW | move 20");
+    // It runs on: route again to where it is now.
+    script.run("wolf.x, wolf.distance = 26, 10").unwrap();
+    script.tick(0.25);
+    assert_eq!(calls(&script), "target 0xW | move 20 | move 26");
+    // In reach: stop and swing (the right-click attack faces it).
+    script.run("wolf.distance = 2").unwrap();
+    script.tick(0.25);
+    assert_eq!(
+        calls(&script),
+        "target 0xW | move 20 | move 26 | stop | swing 0xW"
+    );
+    let state: String = script.eval("return Combat.state").unwrap();
+    assert_eq!(state, "fighting Mangy Wolf");
+    // Dead: the fight ends, signalled, and `engaged` says it was won.
+    script.run("wolf.dead = true").unwrap();
+    script.tick(0.25);
+    let (over, won): (bool, bool) = script.eval("return Combat.engaged('0xW')").unwrap();
+    assert!(over && won);
+    let signals: String = script.eval("return table.concat(signals, ' | ')").unwrap();
+    assert_eq!(signals, "COMBAT_DONE 0xW killed");
+}
+
+#[test]
+fn a_target_out_of_sight_is_lost() {
+    let mut script = combat();
+    script
+        .run("Combat.lose_after = 0.5 Combat.engage('0xW') wolf = nil")
+        .unwrap();
+    for _ in 0..4 {
+        script.tick(0.25);
+    }
+    let outcome: String = script.eval("return Combat.last.outcome").unwrap();
+    assert_eq!(outcome, "lost");
+    assert!(script.eval::<bool>("return Combat.active == nil").unwrap());
+}
+
+#[test]
+fn attacked_with_no_fight_of_its_own_it_fights_back_and_turns_on_a_closer_attacker() {
+    let mut script = combat();
+    // Resting between pulls: a wolf attacks. Nothing engaged it before; now Combat does.
+    script
+        .run("UnitGUID = function() return '0xME' end wolf.in_combat, wolf.target, wolf.reaction = true, '0xME', 'hostile'")
+        .unwrap();
+    script.tick(0.25);
+    assert_eq!(
+        script.eval::<String>("return Combat.active").unwrap(),
+        "0xW"
+    );
+    // Switched off (to run away): stopping the fight is not undone.
+    script.run("Combat.defend = false Combat.stop()").unwrap();
+    script.tick(0.25);
+    assert!(script.eval::<bool>("return Combat.active == nil").unwrap());
+    // Chasing a far target while a second wolf bites in melee: fight the biter.
+    script
+        .run(
+            "Combat.defend = true \
+             far = { guid = '0xF', name = 'Far Wolf', x = 40, y = 0, z = 0, distance = 40 } \
+             wolf.distance = 2 \
+             AgentNearby = function() return { far, wolf } end \
+             Combat.engage('0xF')",
+        )
+        .unwrap();
+    script.tick(0.25);
+    assert_eq!(
+        script.eval::<String>("return Combat.active").unwrap(),
+        "0xW"
+    );
+}
+
+#[test]
+fn a_walk_a_defensive_fight_broke_off_is_walked_on_after_it() {
+    let mut script = combat();
+    script
+        .run(
+            "UnitGUID = function() return '0xME' end \
+             walking = true AgentWalk = function() return { status = walking and 'walking' or 'arrived', goal = { -8880, 600, 90 } } end \
+             wolf.distance, wolf.in_combat, wolf.target, wolf.reaction = 2, true, '0xME', 'hostile'",
+        )
+        .unwrap();
+    script.tick(0.25);
+    script.tick(0.25);
+    script.run("calls = {} wolf.dead = true").unwrap();
+    script.tick(0.25);
+    assert_eq!(calls(&script), "stop | move -8880");
+}
