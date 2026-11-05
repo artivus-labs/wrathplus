@@ -340,17 +340,12 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
     // GetItemCount(item[, includeBank[, includeCharges]]) (`0x51c2e0`) → the carried count
-    // ([`get_item_count`]); both flags read through `0x815500`.
+    // ([`get_item_count`]); both flags read through `GetBoolOrDefault` (`0x51c2f1`, `0x51c2fd`).
     g.set(
         "GetItemCount",
-        item_binding(lua, |lua, model, state, item, args| {
-            let flag_at = |i: usize| -> mlua::Result<bool> {
-                super::wrath_surface::wrath_spell_queries::pet_flag(
-                    lua,
-                    args.get(i).cloned().unwrap_or(Value::Nil),
-                )
-            };
-            let n = get_item_count(model, state, item, flag_at(1)?, flag_at(2)?);
+        item_binding(lua, |_, model, state, item, args| {
+            let flag_at = |i: usize| super::binding_abi::bool_or_default(args.get(i), false);
+            let n = get_item_count(model, state, item, flag_at(1), flag_at(2));
             one(Value::Integer(i64::from(n)))
         })?,
     )?;

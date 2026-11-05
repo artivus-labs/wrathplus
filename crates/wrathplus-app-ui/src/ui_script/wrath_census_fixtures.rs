@@ -327,7 +327,6 @@ pub(super) fn seed(s: &mut UiScript) {
         ..Default::default()
     }));
 
-    // Currency: a header and a token.
     s.set_wrath_currency_snapshot(WrathCurrencySnapshot {
         entries: vec![
             WrathCurrencyEntry {
@@ -349,6 +348,7 @@ pub(super) fn seed(s: &mut UiScript) {
         ],
         honor_current: Some(100),
         arena_current: Some(10),
+        token_stacks: vec![(49426, 12)],
     });
 
     // The player's cast and channel.

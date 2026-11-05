@@ -50,24 +50,26 @@ fn known_currencies(player: &ObjectFields) -> Option<u64> {
     )
 }
 
-fn token_counts<'a>(
+/// The hidden token bag's stacks in slot order, `(entry, count)`.
+fn token_stacks<'a>(
     player: &ObjectFields,
     mut object: impl FnMut(u64) -> Option<&'a ObjectFields>,
-) -> BTreeMap<u32, u32> {
-    let mut counts = BTreeMap::<u32, u32>::new();
+) -> Vec<(u32, u32)> {
     // AzerothCore Player.h: CURRENCYTOKEN_SLOT_START..END has 32 GUID positions.
-    for slot in 0..32u16 {
-        let Some(item) = player
-            .get_field_guid(Field::PlayerCurrencytokenSlot1, slot * 2)
-            .filter(|&guid| guid != 0)
-            .and_then(&mut object)
-        else {
-            continue;
-        };
-        if let Some((entry, count)) = item.object_entry().zip(item.item_stack_count()) {
-            // Installed GetCurrencyListInfo (0x5b0680): first matching hidden stack wins.
-            counts.entry(entry).or_insert(count);
-        }
+    (0..32u16)
+        .filter_map(|slot| {
+            let guid = player.get_field_guid(Field::PlayerCurrencytokenSlot1, slot * 2);
+            let item = object(guid.filter(|&g| g != 0)?)?;
+            item.object_entry().zip(item.item_stack_count())
+        })
+        .collect()
+}
+
+/// Installed GetCurrencyListInfo (0x5b0680): first matching hidden stack wins.
+fn token_counts(stacks: &[(u32, u32)]) -> BTreeMap<u32, u32> {
+    let mut counts = BTreeMap::<u32, u32>::new();
+    for &(entry, count) in stacks {
+        counts.entry(entry).or_insert(count);
     }
     counts
 }
@@ -132,8 +134,10 @@ pub fn feed(
     if let Ok(player) = me.single() {
         fresh.honor_current = player.0.get(Field::PlayerHonorCurrency);
         fresh.arena_current = player.0.get(Field::PlayerArenaCurrency);
+        // GetItemCount counts the bag whatever the known bits (`0x753a50`, bit `0x200`).
+        fresh.token_stacks = token_stacks(&player.0, |guid| objects.object(guid));
         if let (Some(known), Some(data)) = (known_currencies(&player.0), data.as_deref()) {
-            let mut counts = token_counts(&player.0, |guid| objects.object(guid));
+            let mut counts = token_counts(&fresh.token_stacks);
             // Native special rows bypass the hidden bag; never create rows without known bits.
             counts.insert(43307, fresh.arena_current.unwrap_or(0));
             counts.insert(43308, fresh.honor_current.unwrap_or(0));

@@ -131,12 +131,15 @@ fn script() -> UiScript {
 #[test]
 fn item_count_sums_bags_worn_currency_and_the_bank_on_request() {
     let mut s = script();
+    s.model_mut().unit_guids.player = 1;
+    // The currency list's honor row is a player field; the token bag holds two stacks.
     s.set_wrath_currency_snapshot(WrathCurrencySnapshot {
         entries: vec![WrathCurrencyEntry {
-            item_id: 29434,
-            count: 12,
+            item_id: 43308,
+            count: 500,
             ..Default::default()
         }],
+        token_stacks: vec![(29434, 12), (29434, 4)],
         ..Default::default()
     });
     s.run(
@@ -144,11 +147,16 @@ fn item_count_sums_bags_worn_currency_and_the_bank_on_request() {
         assert(GetItemCount(118) == 3 and GetItemCount(118, 1) == 8)
         assert(GetItemCount("Minor Healing Potion", true) == 8)
         assert(GetItemCount("|cffffffff|Hitem:118:0:0:0|h[Minor Healing Potion]|h|r") == 3)
-        assert(GetItemCount(2129) == 1 and GetItemCount(29434) == 12)
+        assert(GetItemCount(2129) == 1 and GetItemCount(29434) == 16)
+        assert(GetItemCount(43308) == 0 and GetItemCount(118, "yes") == 8)
         assert(GetItemCount(999) == 0 and GetItemCount("nothing") == 0)
+        -- `0xffffffff` sums every item: the backpack's 205, the worn shield, the 16 tokens.
+        assert(GetItemCount(-1) == 222)
         "#,
     )
     .unwrap();
+    s.model_mut().unit_guids.player = 0;
+    s.run("assert(GetItemCount(118) == 0)").unwrap();
 }
 
 #[test]
@@ -248,6 +256,7 @@ fn the_arena_gate_refuses_spent_items() {
 #[test]
 fn item_count_skips_broken_copies_and_counts_charges() {
     let mut s = script();
+    s.model_mut().unit_guids.player = 1;
     let mut worn: InventorySlots = Default::default();
     worn[17] = Some(InvSlotView {
         item_id: SHIELD,
