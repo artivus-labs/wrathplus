@@ -203,17 +203,21 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // `0x517a40`: the number 1 or nil, never a boolean; an argument neither string nor number
-    // raises the reference's usage (`0x517a48`). Only the player is tracked, as the stock UI asks
-    // about no other unit.
+    // `0x60f350`: the number 1 or nil, never a boolean; an argument neither string nor number
+    // raises the usage (`0xa23244`). Any held unit (`0x60c1f0`) answers its `UNIT_FIELD_FLAGS`
+    // bit 20 (`0x60f39c`); the player's bit also arrives by its own push, which can precede the
+    // player's snapshot.
     g.set(
         "UnitOnTaxi",
         lua.create_function(|lua, unit: mlua::Value| {
             let unit =
                 crate::script::binding_abi::string_arg(lua, unit, r#"Usage: UnitOnTaxi("unit")"#)?;
             let model = lua.app_data_ref::<Model>().expect("model");
+            let flagged = model
+                .unit(&unit)
+                .is_some_and(|u| u.has_object && u.flags & 0x0010_0000 != 0);
             Ok(crate::script::binding_abi::flag(
-                unit.eq_ignore_ascii_case("player") && model.taxi_riding,
+                flagged || (unit.eq_ignore_ascii_case("player") && model.taxi_riding),
             ))
         })?,
     )?;

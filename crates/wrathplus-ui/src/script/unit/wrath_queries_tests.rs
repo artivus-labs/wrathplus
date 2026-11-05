@@ -43,6 +43,20 @@ fn the_flag_readers_read_their_descriptor_bits() {
         )
         .unwrap());
     assert!(s.run("UnitIsAFK()").is_err());
+    // An attackable AFK player reads nil (`0x60cccd`); DND has no such gate.
+    let enemy = UnitState {
+        exists: true,
+        has_object: true,
+        is_player: true,
+        can_attack: true,
+        player_flags: 0x2 | 0x4,
+        guid: 2,
+        ..Default::default()
+    };
+    s.set_unit("target", Some(enemy));
+    assert!(s
+        .eval::<bool>("return UnitIsAFK('target') == nil and UnitIsDND('target') == 1")
+        .unwrap());
     s.set_party(PartyState {
         raid: vec![RaidMemberInfo {
             guid: 2,
