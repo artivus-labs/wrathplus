@@ -389,7 +389,16 @@ fn equip_cursor_item_routes_through_pickup() {
     let mut s = UiScript::new().unwrap();
     s.set_inventory_slots(doll_slots());
     s.set_container(0, Some(one_fitting_bag_item()));
+    // An empty cursor equips nothing and picks nothing up (`0x51a452`).
+    s.run("EquipCursorItem(1)").unwrap();
+    assert!(s.cursor_payload().is_none());
     s.run("PickupContainerItem(0, 1)").unwrap();
+    // The predicates push the number 1 or nil (`0x515125`, `0x5ea880`).
+    let held = "return CursorHasItem(), CursorCanGoInSlot(1), CursorCanGoInSlot(2)";
+    assert_eq!(
+        s.eval::<(i64, i64, Option<i64>)>(held).unwrap(),
+        (1, 1, None)
+    );
 
     assert!(s.eval::<bool>("return EquipCursorItem(1)").unwrap());
     assert!(s.cursor_item().is_none());

@@ -142,9 +142,10 @@ pub(super) fn pickup_inventory_item(model: &mut Model, id: u32) -> bool {
     }
 }
 
-/// `EquipCursorItem(id)`: placing the held item on doll slot `id`.
+/// `EquipCursorItem(id)` (`0x51a3d0`): placing the held item on doll slot `id`; with no item
+/// held (`[0xbd0768]` zero, `0x51a452`) it does nothing, never a pickup.
 pub(super) fn equip_cursor_item(model: &mut Model, id: u32) -> bool {
-    pickup_inventory_item(model, id)
+    matches!(model.cursor, Some(CursorPayload::Item(_))) && pickup_inventory_item(model, id)
 }
 
 /// `CursorCanGoInSlot(id)`, the doll slot's highlight on `CURSOR_UPDATE`
@@ -243,7 +244,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         "CursorCanGoInSlot",
         lua.create_function(|lua, id: u32| {
             let model = lua.app_data_ref::<Model>().expect("model app_data");
-            Ok(cursor_can_go_in_slot(&model, id))
+            Ok(flag(cursor_can_go_in_slot(&model, id)))
         })?,
     )?;
     g.set(

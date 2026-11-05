@@ -560,7 +560,10 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         "CursorHasItem",
         lua.create_function(|lua, ()| {
             let model = lua.app_data_ref::<Model>().expect("model app_data");
-            Ok(matches!(model.cursor, Some(CursorPayload::Item(_))))
+            Ok(super::binding_abi::flag(matches!(
+                model.cursor,
+                Some(CursorPayload::Item(_))
+            )))
         })?,
     )?;
     g.set(
