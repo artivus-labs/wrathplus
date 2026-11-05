@@ -428,6 +428,8 @@ pub(crate) fn unit_combat_stats(store: &ObjectStore) -> UnitCombatStats {
         ranged_attack_power: f.unit_ranged_attack_power().unwrap_or(0),
         ranged_attack_power_pos: i32::from(rap_pos),
         ranged_attack_power_neg: i32::from(rap_neg),
+        attack_power_multiplier: f.unit_attack_power_multiplier().unwrap_or(0.0),
+        ranged_attack_power_multiplier: f.unit_ranged_attack_power_multiplier().unwrap_or(0.0),
         ranged_attack_time_ms: base_swing(f.unit_ranged_attack_time()),
         ranged_min_damage: f.unit_min_ranged_damage().unwrap_or(0.0),
         ranged_max_damage: f.unit_max_ranged_damage().unwrap_or(0.0),
@@ -806,6 +808,7 @@ pub(crate) fn fire_stat_transitions(
             i64::from(s.attack_power),
             i64::from(s.attack_power_pos),
             i64::from(s.attack_power_neg),
+            i64::from(s.attack_power_multiplier.to_bits()),
         ]
     }) {
         script.fire_event("UNIT_ATTACK_POWER", vec![tok()]);
@@ -815,6 +818,7 @@ pub(crate) fn fire_stat_transitions(
             i64::from(s.ranged_attack_power),
             i64::from(s.ranged_attack_power_pos),
             i64::from(s.ranged_attack_power_neg),
+            i64::from(s.ranged_attack_power_multiplier.to_bits()),
             i64::from(s.has_wand),
         ]
     }) {

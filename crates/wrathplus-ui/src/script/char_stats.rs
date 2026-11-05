@@ -95,6 +95,9 @@ pub struct UnitCombatStats {
     pub ranged_attack_power: i32,
     pub ranged_attack_power_pos: i32,
     pub ranged_attack_power_neg: i32,
+    /// `UNIT_FIELD_ATTACK_POWER_MULTIPLIER` / `_RANGED_`, the percent bonus minus 1.0.
+    pub attack_power_multiplier: f32,
+    pub ranged_attack_power_multiplier: f32,
     /// Ranged attack speed in ms (`UNIT_FIELD_RANGEDATTACKTIME`).
     pub ranged_attack_time_ms: u32,
     /// Ranged damage range (`UNIT_FIELD_MINRANGEDDAMAGE`/`MAXRANGEDDAMAGE`).
@@ -141,6 +144,8 @@ impl Default for UnitCombatStats {
             ranged_attack_power: 0,
             ranged_attack_power_pos: 0,
             ranged_attack_power_neg: 0,
+            attack_power_multiplier: 0.0,
+            ranged_attack_power_multiplier: 0.0,
             ranged_attack_time_ms: 0,
             ranged_min_damage: 0.0,
             ranged_max_damage: 0.0,
@@ -368,6 +373,13 @@ fn with_unit_stats<T>(
         _ => None,
     };
     f(pushed.unwrap_or(&absent))
+}
+
+/// One attack-power value as `0x610b60` pushes it: times `multiplier + 1.0` (`0x9e1130`), stored
+/// as a float, then `fistp` under the default control word, to nearest with ties to even.
+fn scaled_ap(value: i32, multiplier: f32) -> i64 {
+    let scaled = ((f64::from(multiplier) + 1.0) * f64::from(value)) as f32;
+    scaled.round_ties_even() as i64
 }
 
 /// The clamp `UnitDefense` (`0x519298`) and each hand of `UnitAttackBothHands` (`0x5188a7`) apply:
@@ -609,34 +621,26 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // UnitAttackPower(unit) → (base, posBuff, negBuff): `UNIT_FIELD_ATTACK_POWER` and the signed
-    // halves of `_MODS` (vmangos `StatSystem.cpp:335-336`).
-    g.set(
-        "UnitAttackPower",
-        lua.create_function(|lua, token: Option<String>| {
-            Ok(with_unit_stats(lua, &token, |s| {
-                (
-                    i64::from(s.attack_power),
-                    i64::from(s.attack_power_pos),
-                    i64::from(s.attack_power_neg),
-                )
-            }))
-        })?,
-    )?;
-
-    // UnitRangedAttackPower(unit) → (base, posBuff, negBuff), from the ranged fields.
-    g.set(
-        "UnitRangedAttackPower",
-        lua.create_function(|lua, token: Option<String>| {
-            Ok(with_unit_stats(lua, &token, |s| {
-                (
-                    i64::from(s.ranged_attack_power),
-                    i64::from(s.ranged_attack_power_pos),
-                    i64::from(s.ranged_attack_power_neg),
-                )
-            }))
-        })?,
-    )?;
+    // UnitAttackPower(unit) / UnitRangedAttackPower(unit) → (base, posBuff, negBuff): AP and the
+    // signed halves of `_MODS`, each scaled by the multiplier (`0x610b60`, `0x610ca0`).
+    for (name, ranged) in [("UnitAttackPower", false), ("UnitRangedAttackPower", true)] {
+        g.set(
+            name,
+            lua.create_function(move |lua, token: Option<String>| {
+                Ok(with_unit_stats(lua, &token, |s| {
+                    let (m, ap) = if ranged {
+                        let ap = s.ranged_attack_power;
+                        let mods = (s.ranged_attack_power_pos, s.ranged_attack_power_neg);
+                        (s.ranged_attack_power_multiplier, (ap, mods.0, mods.1))
+                    } else {
+                        let ap = (s.attack_power, s.attack_power_pos, s.attack_power_neg);
+                        (s.attack_power_multiplier, ap)
+                    };
+                    (scaled_ap(ap.0, m), scaled_ap(ap.1, m), scaled_ap(ap.2, m))
+                }))
+            })?,
+        )?;
+    }
 
     // UnitAttackBothHands(unit) → (mainBase, mainMod, offBase, offMod): `0x518810` calls
     // `[vtbl+0xb0]` for hand 0 then hand 1. Stock reads only the first pair
@@ -918,6 +922,8 @@ mod tests {
             ranged_attack_power: 52,
             ranged_attack_power_pos: 0,
             ranged_attack_power_neg: -3,
+            attack_power_multiplier: 0.0,
+            ranged_attack_power_multiplier: 0.0,
             ranged_attack_time_ms: 2800,
             ranged_min_damage: 31.0,
             ranged_max_damage: 47.0,
@@ -1171,6 +1177,16 @@ mod tests {
                 .unwrap(),
             (2.8, 31.0, 47.0, 25, -3, f64::from(1.1f32))
         );
+        // Each value times the multiplier plus one, rounded to nearest, ties to even.
+        s.set_player_combat_stats(Some(UnitCombatStats {
+            attack_power_multiplier: 0.1,
+            ranged_attack_power_multiplier: 0.5,
+            ..stats()
+        }));
+        let both =
+            "local a,b,c=UnitAttackPower('player') return a,b,c,UnitRangedAttackPower('player')";
+        let got = s.eval::<(i64, i64, i64, i64, i64, i64)>(both).unwrap();
+        assert_eq!(got, (86, 33, -11, 78, 0, -4));
         assert_eq!(
             s.eval::<(i64, i64, i64)>(r#"return UnitAttackPower("target")"#)
                 .unwrap(),
