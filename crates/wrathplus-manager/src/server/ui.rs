@@ -113,7 +113,7 @@ impl Manager {
             status = status.push(text(error).color(style::GOLD));
         }
         let settings = column![
-            text("Server files (advanced)").size(18),
+            text("Server files").size(18),
             text("Filled in by the steps above, or enter your own folders.")
                 .size(13)
                 .color(style::MUTED),
@@ -148,13 +148,14 @@ impl Manager {
         if let Some(guide) = self.server_guide() {
             page = page.push(guide);
         }
+        // The server files sit right under the status: nothing else works until they are set.
         page.push(card(status))
+            .push(card(settings))
             .push(self.transfer_card())
             .push(card(self.server_types()))
             .push(card(self.server_settings()))
             .push(card(build))
             .push(state.build_feedback_view())
-            .push(card(settings))
             .into()
     }
 }
