@@ -32,7 +32,6 @@ pub struct WrathPaperDollStats {
     pub spell_penetration: i32,
     pub shield_block: u32,
     pub expertise: [u32; 2],
-    pub mana_regen: [f32; 2],
     /// `PLAYER_PET_SPELL_POWER`, `GetPetSpellBonusDamage` (`0x60e410` reads player word 1177).
     pub pet_spell_power: i32,
     pub conversions: WrathStatConversions,
@@ -131,14 +130,13 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             })?,
         )?;
     }
-    for name in ["GetExpertise", "GetExpertisePercent", "GetManaRegen"] {
+    for name in ["GetExpertise", "GetExpertisePercent"] {
         lua.globals().set(
             name,
             lua.create_function(move |lua, ()| {
                 let m = lua.app_data_ref::<Model>().expect("model");
                 let s = &m.wrath_paperdoll_stats;
                 Ok(match name {
-                    "GetManaRegen" => (s.mana_regen[0] as f64, s.mana_regen[1] as f64),
                     "GetExpertisePercent" => {
                         (s.expertise[0] as f64 * 0.25, s.expertise[1] as f64 * 0.25)
                     }
@@ -166,7 +164,6 @@ mod tests {
             spell_healing: 456,
             spell_penetration: 34,
             expertise: [12, 8],
-            mana_regen: [2.5, 1.25],
             ..Default::default()
         };
         for i in 0..25 {
@@ -183,7 +180,7 @@ mod tests {
         stats.conversions.health_from_spirit = 3.5;
         stats.conversions.mana_from_spirit = 4.5;
         s.set_wrath_paperdoll_stats(stats);
-        s.run("assert(GetDodgeChance()==5.5 and GetParryChance()==6.5 and GetBlockChance()==7.5) assert(GetCritChance()==8.5 and GetRangedCritChance()==9.5) assert(GetShieldBlock()==123 and GetSpellBonusHealing()==456 and GetSpellPenetration()==34) for i=1,25 do assert(GetCombatRating(i)==99+i) assert(GetCombatRatingBonus(i)==i-.5) assert(GetMaxCombatRatingBonus(i)==33) end for i=1,7 do assert(GetSpellCritChance(i)==i+3.5) assert(GetSpellBonusDamage(i)==49+i) end assert(GetCombatRating(0)==0 and GetCombatRating(26)==0 and GetSpellCritChance(8)==0) local a,b=GetExpertise() assert(a==12 and b==8) a,b=GetExpertisePercent() assert(a==3 and b==2) a,b=GetManaRegen() assert(a==2.5 and b==1.25) assert(GetCritChanceFromAgility('player')==1.5 and GetSpellCritChanceFromIntellect('player')==2.5) assert(GetUnitHealthRegenRateFromSpirit('player')==3.5 and GetUnitManaRegenRateFromSpirit('player')==4.5) assert(GetUnitHealthRegenRateFromSpirit('target')==0)").unwrap();
+        s.run("assert(GetDodgeChance()==5.5 and GetParryChance()==6.5 and GetBlockChance()==7.5) assert(GetCritChance()==8.5 and GetRangedCritChance()==9.5) assert(GetShieldBlock()==123 and GetSpellBonusHealing()==456 and GetSpellPenetration()==34) for i=1,25 do assert(GetCombatRating(i)==99+i) assert(GetCombatRatingBonus(i)==i-.5) assert(GetMaxCombatRatingBonus(i)==33) end for i=1,7 do assert(GetSpellCritChance(i)==i+3.5) assert(GetSpellBonusDamage(i)==49+i) end assert(GetCombatRating(0)==0 and GetCombatRating(26)==0 and GetSpellCritChance(8)==0) local a,b=GetExpertise() assert(a==12 and b==8) a,b=GetExpertisePercent() assert(a==3 and b==2) assert(GetCritChanceFromAgility('player')==1.5 and GetSpellCritChanceFromIntellect('player')==2.5) assert(GetUnitHealthRegenRateFromSpirit('player')==3.5 and GetUnitManaRegenRateFromSpirit('player')==4.5) assert(GetUnitHealthRegenRateFromSpirit('target')==0)").unwrap();
         s.set_wrath_paperdoll_stats(Default::default());
         s.run("assert(GetCombatRating(1)==0 and GetCritChance()==0 and GetUnitHealthRegenRateFromSpirit('player')==0) local a,b=GetExpertise() assert(a==0 and b==0)").unwrap();
     }

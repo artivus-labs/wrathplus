@@ -143,11 +143,6 @@ fn snapshot(f: &ObjectFields) -> WrathPaperDollStats {
             word(Field::PlayerExpertise),
             word(Field::PlayerOffhandExpertise),
         ],
-        // Mana is power slot zero; descriptor rates are mana/second, not mana/5.
-        mana_regen: [
-            float(Field::UnitPowerRegenFlatModifier),
-            float(Field::UnitPowerRegenInterruptedFlatModifier),
-        ],
         pet_spell_power: word(Field::PlayerPetSpellPower) as i32,
         // No fabricated rating/primary-stat ratios while GameTables are unavailable.
         conversions: Default::default(),
@@ -192,12 +187,6 @@ mod tests {
             (Field::PlayerOffhandExpertise, 0, 9),
             (Field::PlayerShieldBlock, 0, 234),
             (Field::PlayerModHealingDonePos, 0, 345),
-            (Field::UnitPowerRegenFlatModifier, 0, 2.5f32.to_bits()),
-            (
-                Field::UnitPowerRegenInterruptedFlatModifier,
-                0,
-                1.25f32.to_bits(),
-            ),
         ];
         let pairs: Vec<_> = data
             .iter()
@@ -213,7 +202,6 @@ mod tests {
         assert_eq!(stats.expertise, [12, 9]);
         assert_eq!(stats.shield_block, 234);
         assert_eq!(stats.spell_healing, 345);
-        assert_eq!(stats.mana_regen, [2.5, 1.25]);
         assert_eq!(stats.conversions, Default::default());
     }
     #[test]
