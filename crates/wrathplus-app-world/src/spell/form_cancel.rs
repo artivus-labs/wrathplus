@@ -9,8 +9,9 @@
 //! While it is set, the form byte reads as 0 (`0x71af70`) and a `MOD_SHAPESHIFT` spell is not
 //! active (`0x802cb0`), so the stance bar, `GetShapeshiftForm` and the next press see no form. The
 //! form byte's field callback `0x6da130` clears it when the server's update arrives, restores the
-//! form display it swapped and fires `0x179` again; here the clear is a change of the byte
-//! (whether an unchanged rewrite also clears is not read).
+//! form display it swapped and fires `0x179` again. It is registered always-fire (`0x6e5393`,
+//! `crate::net::FieldWritten`), so any player update whose mask carries the `UNIT_FIELD_BYTES_2`
+//! word, or a re-create of the player, clears it even when the form byte is unchanged.
 //!
 //! `0x802f80` also returns before the prediction for a spell on the stance bar (`0xbe8e2c`) when
 //! the Lua call is tainted (`0xd4139c`); this client has no taint, so that arm never runs.
@@ -117,10 +118,12 @@ impl FormCancelPrediction {
         FormCancel::Plain
     }
 
-    /// `0x6da130`: the form byte moved, so the prediction ends, owing the event.
-    pub fn observe(&mut self, raw: u8) {
-        if self.over.is_some_and(|over| over != raw) {
-            debug!("form cancel: cleared by form byte {raw}");
+    /// `0x6da130`, run by any update that wrote the `UNIT_FIELD_BYTES_2` word (`written`), moved
+    /// or not, since it is registered always-fire: the prediction ends, owing the event. A move
+    /// of the byte with no such write (a store with no create block) clears it too.
+    pub fn observe(&mut self, raw: u8, written: bool) {
+        if self.over.is_some_and(|over| written || over != raw) {
+            debug!("form cancel: cleared by form byte {raw} (written: {written})");
             *self = Self {
                 announce: true,
                 ..Self::default()
@@ -129,13 +132,19 @@ impl FormCancelPrediction {
     }
 }
 
-/// Clear the prediction on the form byte's move, or with no player to hold it.
+/// Clear the prediction on a write of the player's form word, or with no player to hold it.
 pub(super) fn observe_form_byte(
     mut prediction: ResMut<FormCancelPrediction>,
-    me: Query<&ObjectStore, With<SelfPlayer>>,
+    mut writes: MessageReader<crate::net::FieldWritten>,
+    me: Query<(Entity, &ObjectStore), With<SelfPlayer>>,
 ) {
-    match me.iter().next() {
-        Some(store) => prediction.observe(store.0.unit_shapeshift_form()),
+    let me = me.iter().next();
+    let written = writes.read().any(|w| {
+        w.field == wrathplus_protocol::types::Field::UnitBytes2
+            && me.is_some_and(|(entity, _)| w.entity == entity)
+    });
+    match me {
+        Some((_, store)) => prediction.observe(store.0.unit_shapeshift_form(), written),
         None if prediction.predicted() => *prediction = FormCancelPrediction::default(),
         None => {}
     }

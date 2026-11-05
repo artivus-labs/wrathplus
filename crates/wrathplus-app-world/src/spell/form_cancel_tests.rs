@@ -128,15 +128,90 @@ fn the_form_bytes_move_clears_it_and_owes_the_event() {
     let bear = form_spell(i32::from(BEAR));
     p.on_cancel(&bear, &me(BEAR, BEAR_DISPLAY), &forms());
     p.take_announce();
-    p.observe(BEAR);
+    p.observe(BEAR, false);
     assert!(p.predicted(), "the byte has not moved");
     assert!(!p.take_announce());
-    p.observe(0);
+    p.observe(0, false);
     assert!(!p.predicted());
     assert_eq!(p.display(), None, "0x6da130 restores the form display");
     assert_eq!(p.form_byte(0), 0);
     assert!(p.take_announce(), "0x6da130 fires UPDATE_SHAPESHIFT_FORM");
-    // Unpredicted, a move owes nothing here: the stance feed's own diff fires.
-    p.observe(BEAR);
+    // Unpredicted, a move or a write owes nothing here: the stance feed's own diff fires.
+    p.observe(BEAR, true);
     assert!(!p.take_announce());
+}
+
+#[test]
+fn an_unchanged_write_of_the_form_word_clears_it() {
+    let mut p = FormCancelPrediction::default();
+    let bear = form_spell(i32::from(BEAR));
+    p.on_cancel(&bear, &me(BEAR, BEAR_DISPLAY), &forms());
+    p.take_announce();
+    // `0x6da130` is always-fire: the server rewrote BYTES_2 with the same form.
+    p.observe(BEAR, true);
+    assert!(!p.predicted());
+    assert_eq!(p.form_byte(BEAR), BEAR, "the form reads again");
+    assert_eq!(p.display(), None);
+    assert!(p.take_announce());
+}
+
+/// A predicting app with our player streamed in bear form, through the drain's merge.
+fn predicting_app() -> (App, Entity) {
+    let mut app = App::new();
+    app.add_message::<crate::net::FieldChanged>()
+        .add_message::<crate::net::FieldWritten>()
+        .init_resource::<FormCancelPrediction>()
+        .add_systems(Update, observe_form_byte);
+    let created = ObjectFields::from_pairs(&[
+        (Field::UnitBytes2.index(), u32::from(BEAR) << 24),
+        (Field::UnitDisplayId.index(), BEAR_DISPLAY),
+        (Field::UnitNativeDisplayId.index(), NATIVE_DISPLAY),
+    ])
+    .into_created(wrathplus_protocol::types::ObjectType::Player);
+    let player = app
+        .world_mut()
+        .spawn((SelfPlayer, ObjectStore(created)))
+        .id();
+    let world = app.world_mut();
+    let store = world.get::<ObjectStore>(player).unwrap().clone();
+    let bear = form_spell(i32::from(BEAR));
+    let mut p = world.resource_mut::<FormCancelPrediction>();
+    assert_eq!(p.on_cancel(&bear, &store, &forms()), FormCancel::Predicted);
+    p.take_announce();
+    (app, player)
+}
+
+#[test]
+fn a_same_value_bytes_2_update_clears_it() {
+    let (mut app, player) = predicting_app();
+    let same = ObjectFields::from_pairs(&[(Field::UnitBytes2.index(), u32::from(BEAR) << 24)]);
+    crate::net::apply_fields_for_test(app.world_mut(), player, same);
+    app.update();
+    let mut p = app.world_mut().resource_mut::<FormCancelPrediction>();
+    assert!(!p.predicted(), "0x6da130 is always-fire");
+    assert!(p.take_announce());
+}
+
+#[test]
+fn an_update_without_bytes_2_keeps_it() {
+    let (mut app, player) = predicting_app();
+    let stand = ObjectFields::from_pairs(&[
+        (Field::UnitBytes1.index(), 1),
+        (Field::UnitHealth.index(), 50),
+    ]);
+    crate::net::apply_fields_for_test(app.world_mut(), player, stand);
+    app.update();
+    let p = app.world().resource::<FormCancelPrediction>();
+    assert!(p.predicted(), "the form word was not in the mask");
+    assert_eq!(p.form_byte(BEAR), 0);
+}
+
+#[test]
+fn a_re_create_of_our_player_clears_it() {
+    let (mut app, player) = predicting_app();
+    let recreate = ObjectFields::from_pairs(&[(Field::UnitBytes2.index(), u32::from(BEAR) << 24)])
+        .into_created(wrathplus_protocol::types::ObjectType::Player);
+    crate::net::apply_fields_for_test(app.world_mut(), player, recreate);
+    app.update();
+    assert!(!app.world().resource::<FormCancelPrediction>().predicted());
 }

@@ -28,7 +28,7 @@ pub struct ShapeshiftFormView {
 pub(crate) struct ShapeshiftBar {
     /// The forms, in bar order.
     pub(crate) forms: Vec<StoredShapeshiftForm>,
-    /// The player's form id (`UNIT_FIELD_BYTES_1` byte 3), 0 out of any form.
+    /// The player's form id (`UNIT_FIELD_BYTES_2` byte 3, descriptor byte 0x1eb), 0 out of any form.
     pub(crate) form_byte: u8,
 }
 

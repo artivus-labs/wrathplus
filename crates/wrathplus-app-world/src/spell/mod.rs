@@ -89,6 +89,7 @@ impl Plugin for SpellPlugin {
             .init_resource::<AutoSelfCast>()
             .init_resource::<secure_toggle::RecentCastRequests>()
             .init_resource::<form_cancel::FormCancelPrediction>()
+            .add_message::<crate::net::FieldWritten>()
             .init_resource::<SpellTargeting>()
             .init_resource::<targeting::glyph::GlyphPlacements>()
             .add_systems(
