@@ -1669,7 +1669,7 @@ fn a_key_dropped_on_the_button_files_itself() {
     // Full: each slot needs a texture, since `PutKeyInKeyRing` reads a slot as free from
     // `GetContainerItemInfo`'s first return, the icon (`ContainerFrame.lua:744-746`).
     let mut full = keyring(4, true);
-    for slot in 2..=4 {
+    for slot in 2..=32 {
         full.slots.insert(
             slot,
             ContainerSlot {

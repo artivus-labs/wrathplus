@@ -1,4 +1,4 @@
-//! Repair mode against the bag clicks, and `ContainerIDToInventoryID`.
+//! Repair mode against the bag clicks, `ContainerIDToInventoryID` and the bag-id shapes.
 
 use super::*;
 
@@ -214,42 +214,73 @@ fn container_item_cooldown_reads_the_gettime_triple() {
         .unwrap());
 }
 
-// ── `ContainerIDToInventoryID` (`0x4f94e0`) ─────────────────────────────────────
+// ── `ContainerIDToInventoryID` (`0x5d6f60`) and the bag-id shapes ─────────────────────────
 
 #[test]
-fn container_id_to_inventory_id_is_two_lines_with_no_clamp() {
+fn container_id_to_inventory_id_maps_bags_1_to_11_and_raises_elsewhere() {
     let s = UiScript::new().unwrap();
-    let slot = |id: &str| {
-        s.eval::<i64>(&format!("return ContainerIDToInventoryID({id})"))
-            .unwrap()
+    let slot = |id: &str| s.eval::<i64>(&format!("return ContainerIDToInventoryID({id})"));
+    assert_eq!(
+        (slot("1").unwrap(), slot("4").unwrap(), slot("5").unwrap()),
+        (20, 23, 68)
+    );
+    assert_eq!(
+        (slot("11").unwrap(), slot("2.9").unwrap()),
+        (74, 21),
+        "truncated"
+    );
+    for id in ["0", "-1", "-2", "12", "99"] {
+        let err = slot(id).unwrap_err().to_string();
+        assert!(
+            err.contains("ContainerIDToInventoryID(): invalid container ID"),
+            "{id}: {err}"
+        );
+    }
+}
+
+/// The bag verbs take the resolver's (`0x5d7380`) bag ids: constants for the backpack, vault and
+/// keyring, bank bags only with the banker, and the vault and keyring nameless.
+#[test]
+fn the_bag_verbs_answer_the_resolvers_shapes() {
+    let mut s = UiScript::new().unwrap();
+    s.set_container(0, Some(backpack()));
+    let bank_bag = ContainerState {
+        name: Some("Bag".into()),
+        num_slots: 6,
+        slots: Default::default(),
     };
-    // The `id <= 4` line: the keyring, -1, the backpack, the four worn bags.
-    assert_eq!(slot("-2"), 17, "keyring — an ordinary point, not a case");
-    assert_eq!(slot("-1"), 18);
-    assert_eq!(slot("0"), 19, "backpack — likewise");
+    s.set_container(5, Some(bank_bag));
+    let nums = "return GetContainerNumSlots(0), GetContainerNumSlots(-1), \
+                GetContainerNumSlots(-2), GetContainerNumSlots(-4), GetContainerNumSlots(5)";
     assert_eq!(
-        (slot("1"), slot("2"), slot("3"), slot("4")),
-        (20, 21, 22, 23)
+        s.eval::<(i64, i64, i64, i64, i64)>(nums).unwrap(),
+        (16, 28, 32, 32, 0)
     );
-    // The `id >= 5` line: the bank bags.
-    // Build 12340: the bank bags start at 68, so the line is +63.
-    assert_eq!(slot("5"), 68, "the jump — +63, not +19");
-    assert_eq!((slot("6"), slot("11")), (69, 74));
-    // No range check, no clamp, and never nil: out of range is an ordinary number.
+    // `0x88b9c0` reads math.huge and NaN as `i32::MIN`, no bag.
+    let huge = "return GetContainerNumSlots(math.huge), GetContainerNumSlots(0/0)";
+    assert_eq!(s.eval::<(i64, i64)>(huge).unwrap(), (0, 0));
+    assert_eq!(s.arity("GetContainerNumFreeSlots(0/0)").unwrap(), 1);
     assert_eq!(
-        slot("99"),
-        162,
-        "the value `SetInventoryItem` would receive"
-    );
-    assert_eq!(slot("-100"), -81, "negatives run off the line too");
-    assert_eq!(
-        s.arity("ContainerIDToInventoryID(99)").unwrap(),
+        s.arity("GetContainerNumFreeSlots(5)").unwrap(),
         1,
-        "one value on every non-raising path"
+        "banker away"
     );
-    // `0x40a2b0` truncates toward zero, a C cast, not `floor`.
-    assert_eq!(slot("2.9"), 21, "2.9 -> 2");
-    assert_eq!(slot("-2.9"), 17, "-2.9 -> -2, NOT -3");
+    assert_eq!(s.arity("GetContainerFreeSlots(5)").unwrap(), 0);
+    let names = "return GetBagName(-1) == nil and GetBagName(-2) == nil and GetBagName(5) == nil";
+    assert!(s.eval::<bool>(names).unwrap());
+    s.set_bank(Some(crate::script::BankState::default()));
+    assert_eq!(s.eval::<i64>("return GetContainerNumSlots(5)").unwrap(), 6);
+    assert_eq!(s.eval::<String>("return GetBagName(5)").unwrap(), "Bag");
+    // The slots go in through `lua_settable` (`0x84e8d0`), so a `__newindex` hears each one.
+    let free = "local n = 0 local t = setmetatable({}, {__newindex = function(t, k, v) \
+                n = n + 1 rawset(t, k, v) end}) GetContainerFreeSlots(5, t) \
+                return #t, n, GetContainerNumFreeSlots(5)";
+    assert_eq!(s.eval::<(i64, i64, i64)>(free).unwrap(), (6, 6, 6));
+    // Empty and unknown slots answer (0, 0, 0); an item with no cooldown (0, 0, 1).
+    let cd =
+        |at: &str| s.eval::<(f64, f64, i64)>(&format!("return GetContainerItemCooldown({at})"));
+    assert_eq!((cd("0, 2").unwrap().2, cd("12, 1").unwrap().2), (0, 0));
+    assert_eq!(cd("0, 1").unwrap(), (0.0, 0.0, 1));
 }
 
 /// A missing or non-number argument raises: the type test's error `0x6f4940` does not return.

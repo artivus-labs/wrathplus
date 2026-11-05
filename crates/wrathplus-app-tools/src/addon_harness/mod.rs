@@ -3460,10 +3460,10 @@ mod dependency_tests {
 
         // The backpack: 16 slots, two filled.
         assert_eq!(s.eval::<i64>("return GetContainerNumSlots(0)").unwrap(), 16);
-        assert_eq!(
-            s.eval::<String>("return GetBagName(0)").unwrap(),
-            "Backpack"
-        );
+        // The backpack's name is the stock `BACKPACK_TOOLTIP` string, absent without an install.
+        assert!(s
+            .eval::<bool>("return GetBagName(0) == BACKPACK_TOOLTIP")
+            .unwrap());
         assert_eq!(
             s.eval::<i64>("local _, c = GetContainerItemInfo(0, 5) return c")
                 .unwrap(),

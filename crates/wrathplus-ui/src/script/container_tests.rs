@@ -93,13 +93,15 @@ fn clear_cursor_cancels_an_armed_gift_wrap() {
 #[test]
 fn container_snapshot_reads() {
     let mut s = UiScript::new().unwrap();
-    assert_eq!(s.eval::<i64>("return GetContainerNumSlots(0)").unwrap(), 0);
+    // The backpack's 16 is a constant (`0x5d7507`), pushed or not.
+    assert_eq!(s.eval::<i64>("return GetContainerNumSlots(0)").unwrap(), 16);
     assert!(s
         .eval::<bool>("return GetContainerItemInfo(0, 1) == nil")
         .unwrap());
 
     s.set_container(0, Some(backpack()));
-    assert_eq!(s.eval::<i64>("return GetContainerNumSlots(0)").unwrap(), 16);
+    // The backpack's name is the global string `BACKPACK_TOOLTIP` (`0x5d8cdc`).
+    s.run("BACKPACK_TOOLTIP = 'Backpack'").unwrap();
     assert_eq!(
         s.eval::<String>("return GetBagName(0)").unwrap(),
         "Backpack"
