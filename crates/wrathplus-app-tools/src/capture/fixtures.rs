@@ -638,8 +638,9 @@ pub(super) fn seed_ui_fixture(
             player.pos = wrathplus_assets::coords::wow_to_bevy(scenario.eye);
             // Alternating explore bits, so about half of each zone's overlays reveal.
             script.set_world_map_explored(vec![0x5555_5555; 64]);
-            // The Elwynn zone map: continent 2, zone 10 in the alphabetical zone list.
-            if let Err(e) = script.run("ToggleWorldMap(); SetMapZoom(2, 10)") {
+            // Opened as the stock TOGGLEWORLDMAP binding does (3.3.5 has no ToggleWorldMap); the
+            // Elwynn zone map: continent 2, zone 10 in the alphabetical zone list.
+            if let Err(e) = script.run("ToggleFrame(WorldMapFrame); SetMapZoom(2, 10)") {
                 warn!("capture: ui-worldmap seed failed to open the map: {e}");
             }
         }
