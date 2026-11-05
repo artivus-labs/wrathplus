@@ -359,11 +359,10 @@ pub(super) fn reference_atoi(s: &str) -> i64 {
     }
 }
 
-/// `GetItemInfo`'s argument as the reference parses it (`0x48e0a3`-`0x48e16d`): a number, or a
-/// string `lua_isnumber` (`0x6f34d0`) coerces, is the id alone; another string (`0x6f3510`) must
-/// pass `strnicmp(s, "item:", 5)` (`0x64a4c0`) for its four fields, else it is id 0, so a name or
-/// a hyperlink finds nothing; anything else raises the usage error (`0x842d24`, via `0x6f4940`).
-/// `GetItemInfo`'s argument (`0x516c60`).
+/// `GetItemInfo`'s argument (`0x516c60`): a number, or a string `lua_isnumber` (`0x84df20`)
+/// accepts, truncates to the id (`0x84e030` + `__ftol`); another string holding `item:` (a
+/// case-sensitive `strstr`) parses as an item string (`0x50f630`), any other string is a name
+/// (`0x709de0`), and any other type raises the usage error (`0x516eb1`).
 enum ItemArg {
     /// An id with the item string's enchant, random property and suffix fields.
     Id(i64, u32, u32, u32),
@@ -373,24 +372,17 @@ enum ItemArg {
 
 const ITEM_INFO_USAGE: &str = "Usage: GetItemInfo(itemID|\"name\"|\"itemlink\")";
 
-/// A number (or numeric string) is an id; a string holding `item:` anywhere is build 12340's item
-/// string (`id:enchant:gem1:gem2:gem3:gem4:suffix:unique:level`), so a full hyperlink parses;
-/// any other string is a name.
-fn parse_item_arg(v: &Value) -> mlua::Result<ItemArg> {
-    let as_number = match v {
-        Value::Integer(i) => Some(*i as f64),
-        Value::Number(n) => Some(*n),
-        Value::String(s) => s.to_str().ok().and_then(|s| s.trim().parse::<f64>().ok()),
-        _ => None,
-    };
-    if let Some(n) = as_number {
+/// The item string's fields are `id:enchant:gem1:gem2:gem3:gem4:suffix:unique:level`, so a full
+/// hyperlink parses.
+fn parse_item_arg(lua: &Lua, v: &Value) -> mlua::Result<ItemArg> {
+    if let Some(n) = lua.coerce_number(v.clone())? {
         return Ok(ItemArg::Id(n as i64, 0, 0, 0));
     }
     let Value::String(s) = v else {
         return Err(mlua::Error::RuntimeError(ITEM_INFO_USAGE.into()));
     };
     let s = s.to_string_lossy();
-    let Some(at) = s.to_ascii_lowercase().find("item:") else {
+    let Some(at) = s.find("item:") else {
         return Ok(ItemArg::Name(s));
     };
     let fields: Vec<i64> = s[at + 5..]
@@ -440,17 +432,13 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     lua.globals().set(
         "GetItemInfo",
         lua.create_function(|lua, arg: Value| {
-            let (id, enchant, random_property, suffix) = match parse_item_arg(&arg)? {
+            let (id, enchant, random_property, suffix) = match parse_item_arg(lua, &arg)? {
                 ItemArg::Id(id, e, r, x) => (id, e, r, x),
                 ItemArg::Name(name) => {
                     let model = lua.app_data_ref::<Model>().expect("model app_data");
-                    match model
-                        .item_templates
-                        .iter()
-                        .find(|(_, t)| !name.is_empty() && t.name.eq_ignore_ascii_case(&name))
-                    {
-                        Some((id, _)) => (i64::from(*id), 0, 0, 0),
-                        None => return Ok(MultiValue::new()),
+                    match super::item_arg::name_id(&model, &name) {
+                        0 => return Ok(MultiValue::new()),
+                        id => (i64::from(id), 0, 0, 0),
                     }
                 }
             };
@@ -796,7 +784,7 @@ mod get_item_info_tests {
         let mut s = UiScript::new().unwrap();
         s.set_item_template(25, worn_shortsword());
 
-        for arg in ["25", "\"25\"", "25.7"] {
+        for arg in ["25", "\"25\"", "25.7", "\" 0x19 \""] {
             assert_eq!(
                 s.eval::<String>(&format!("return (GetItemInfo({arg}))"))
                     .unwrap(),
@@ -814,9 +802,9 @@ mod get_item_info_tests {
             link,
             "|cffffffff|Hitem:25:2564:0:0:0:0:7:3:0|h[Worn Shortsword]|h|r"
         );
-        // Case-insensitive, short, inside a full hyperlink, or a cached name.
+        // Short, inside a full hyperlink, or a cached name.
         for arg in [
-            "\"ITEM:25\"",
+            "\"item:25\"",
             "\"|cffffffff|Hitem:25:0:0:0:0:0:0:0:80|h[Worn Shortsword]|h|r\"",
             "\"worn shortsword\"",
         ] {
@@ -827,8 +815,8 @@ mod get_item_info_tests {
                 "argument {arg}"
             );
         }
-        // An unknown name or the empty string: no values and no ask.
-        for arg in ["\"Nothing Such\"", "\"\""] {
+        // An unknown name, `item:` in another case (a name), the empty string: no values, no ask.
+        for arg in ["\"Nothing Such\"", "\"ITEM:25\"", "\"\""] {
             assert_eq!(
                 s.arity(&format!("GetItemInfo({arg})")).unwrap(),
                 0,

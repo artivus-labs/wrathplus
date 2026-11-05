@@ -133,24 +133,6 @@ fn text(lua: &Lua, v: Option<&Value>) -> mlua::Result<String> {
         .unwrap_or_default())
 }
 
-/// `SetMacroItem`'s item (`0x709de0`): the number after an `item:` anywhere in the text, else the
-/// template whose name matches; 0 for neither. Labelled: the name leg (`0x53f3b0`) reads the
-/// client's item cache, which the VM's templates stand in for.
-fn item_id(model: &Model, query: &str) -> u32 {
-    if let Some(at) = query.find("item:") {
-        let digits: String = query[at + 5..]
-            .chars()
-            .take_while(|c| c.is_ascii_digit())
-            .collect();
-        return digits.parse().unwrap_or(0);
-    }
-    model
-        .item_templates
-        .iter()
-        .find(|(_, t)| !query.is_empty() && t.name.eq_ignore_ascii_case(query))
-        .map_or(0, |(id, _)| *id)
-}
-
 /// The link of a carried copy of `item` (`0x754a20(item, 0)`): the equipped slots in slot order,
 /// then the backpack and the four bags, each in slot order. Inferred: that search order, and
 /// that the bank is not searched.
@@ -341,7 +323,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             let query = text(lua, args.get(1))?;
             let (pair, changed) = {
                 let model = lua.app_data_ref::<Model>().expect("model app_data");
-                let item = item_id(&model, &query);
+                let item = super::item_arg::item_string_id(&model, &query);
                 let pair = Explicit {
                     spell: if item != 0 { 0 } else { -1 },
                     pet_book: false,

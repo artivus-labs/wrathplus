@@ -125,6 +125,7 @@ pub use surface::widget_method_census;
 mod input_verbs;
 mod inspect;
 mod inventory_verbs;
+mod item_arg;
 mod item_stats;
 mod item_text;
 pub mod keybind;

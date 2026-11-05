@@ -150,29 +150,27 @@ fn number(lua: &Lua, args: &MultiValue, i: usize) -> Option<f64> {
         .and_then(|v| lua.coerce_number(v.clone()).ok().flatten())
 }
 
-/// An item argument as the inventory finders take it (`0x754a20`/`0x754a50` by id, `0x754af0`/
-/// `0x754b90` by name or link): a number is an item id, a string with `item:` its link's id, and
-/// any other string a name.
+/// An item argument as the inventory finders' callers take it (SpellTargetItem `0x80083f`,
+/// EquipItemByName `0x51ce0d`): `lua_isnumber` first, an id (labelled: rounded, where
+/// SpellTargetItem truncates); another string an `item:` link's id or a name for the by-name
+/// search (`0x754af0`); anything else the caller's usage error.
 enum ItemQuery {
     Id(u32),
     Name(String),
 }
 
 fn item_query(lua: &Lua, v: Value, usage: &str) -> mlua::Result<ItemQuery> {
-    if let Value::String(s) = &v {
-        let text = s.to_str()?.to_string();
-        if let Some(rest) = text.split_once("item:").map(|(_, r)| r) {
-            let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
-            return Ok(ItemQuery::Id(digits.parse().unwrap_or(0)));
-        }
-        return Ok(ItemQuery::Name(text));
+    if let Some(n) = lua.coerce_number(v.clone())? {
+        return Ok(ItemQuery::Id(super::item_arg::tointeger(n)));
     }
-    let n = lua
-        .coerce_number(v)?
-        .ok_or_else(|| mlua::Error::runtime(usage.to_string()))?;
-    Ok(ItemQuery::Id(
-        u32::try_from(n.round_ties_even() as i64).unwrap_or(0),
-    ))
+    let Value::String(s) = &v else {
+        return Err(mlua::Error::runtime(usage.to_string()));
+    };
+    let text = s.to_str()?.to_string();
+    Ok(match text.split_once("item:") {
+        Some((_, rest)) => ItemQuery::Id(super::item_stats::reference_atoi(rest) as u32),
+        None => ItemQuery::Name(text),
+    })
 }
 
 /// The first carried bag slot (backpack, then bags 1-4, each in slot order) holding the item.
@@ -283,17 +281,9 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     g.set(
         "PickupItem",
         lua.create_function(|lua, item: Value| {
-            // Neither a number nor a string names nothing: no usage error.
-            let query = item_query(lua, item, "").unwrap_or(ItemQuery::Id(0));
+            // The shared item resolver (`0x522fbd`): neither a number nor a string names nothing.
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-            let id = match query {
-                ItemQuery::Id(id) => id,
-                ItemQuery::Name(name) => model
-                    .item_templates
-                    .iter()
-                    .find(|(_, t)| t.name.eq_ignore_ascii_case(&name))
-                    .map_or(0, |(id, _)| *id),
-            };
+            let id = super::item_arg::item_id_arg(lua, &model, &item);
             super::cursor::clear_cursor(&mut model);
             if id != 0 {
                 let template = model.item_templates.get(&id);
@@ -622,24 +612,18 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             ]))
         })?,
     )?;
-    // IsEquippableItem(item) (`0x511150`): the template's `InventoryType` is not 0. Labelled: read
-    // as `GetItemInfo`'s equip location, which is empty for type 0.
+    // IsEquippableItem(item) (`0x511150`, the shared item resolver) → 1 for a cached template with
+    // an `InventoryType` (`0x5111c3`), else nil; a miss queries nothing.
     g.set(
         "IsEquippableItem",
         lua.create_function(|lua, item: Value| {
-            let Ok(info) = lua.globals().get::<mlua::Function>("GetItemInfo") else {
-                return Ok(Value::Nil);
-            };
-            let v: MultiValue = info.call(item).unwrap_or_default();
-            let equip = v.get(8).and_then(|x| match x {
-                Value::String(s) => Some(s.to_string_lossy()),
-                _ => None,
-            });
-            Ok(if equip.is_some_and(|e| !e.is_empty()) {
-                Value::Number(1.0)
-            } else {
-                Value::Nil
-            })
+            let model = lua.app_data_ref::<Model>().expect("model app_data");
+            let id = super::item_arg::item_id_arg(lua, &model, &item);
+            let equip = model
+                .item_templates
+                .get(&id)
+                .is_some_and(|t| t.inventory_type != 0);
+            Ok(equip.then_some(1))
         })?,
     )?;
     g.set(

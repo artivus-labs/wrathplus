@@ -38,33 +38,6 @@ pub(super) fn on_event(lua: &Lua, event: &str) {
     }
 }
 
-/// `GetItemIcon`'s item argument (`0x517020`): a number, numeric strings included, rounds to the
-/// entry; a string carrying `item:` reads the integer after it (`0x709de0`); any other string is
-/// a cached item's name. Labelled: the name lookup `0x53f3b0` was not decompiled; this matches
-/// `GetItemInfo`'s, case-insensitive.
-fn item_entry(lua: &Lua, arg: &Value) -> Option<u32> {
-    if let Some(n) = number_arg(lua, arg) {
-        return u32::try_from(n.round() as i64).ok();
-    }
-    let Value::String(s) = arg else {
-        return None;
-    };
-    let s = s.to_string_lossy();
-    if let Some(at) = s.find("item:") {
-        let digits: String = s[at + 5..]
-            .chars()
-            .take_while(|c| c.is_ascii_digit())
-            .collect();
-        return digits.parse().ok();
-    }
-    let model = lua.app_data_ref::<Model>()?;
-    model
-        .item_templates
-        .iter()
-        .find(|(_, t)| !s.is_empty() && t.name.eq_ignore_ascii_case(&s))
-        .map(|(id, _)| *id)
-}
-
 /// `lua_isnumber`'s test: a number, or a string Lua converts to one.
 fn number_arg(lua: &Lua, v: &Value) -> Option<f64> {
     match v {
@@ -121,9 +94,11 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         "GetItemIcon",
         lua.create_function(|lua, args: MultiValue| {
             let arg = args.into_iter().next().unwrap_or(Value::Nil);
-            let Some(entry) = item_entry(lua, &arg) else {
-                return Ok(MultiValue::new());
-            };
+            let entry = super::item_arg::item_id_arg(
+                lua,
+                &lua.app_data_ref::<Model>().expect("model app_data"),
+                &arg,
+            );
             let icon = {
                 let Some(icons) = lua.app_data_ref::<ItemIcons>() else {
                     return Ok(MultiValue::new());

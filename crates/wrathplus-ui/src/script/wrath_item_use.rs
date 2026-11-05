@@ -75,10 +75,9 @@ impl UiScript {
     }
 }
 
-/// `0x709de0` behind the number test: the item an argument names, 0 for none.
-fn item_of(model: &Model, v: Option<&Value>) -> u32 {
-    v.and_then(|v| super::wrath_item_spell::item_id(model, v))
-        .unwrap_or(0)
+/// The shared item argument ([`super::item_arg::item_id_arg`]), 0 for none.
+fn item_of(lua: &Lua, model: &Model, v: Option<&Value>) -> u32 {
+    v.map_or(0, |v| super::item_arg::item_id_arg(lua, model, v))
 }
 
 /// The item's spell: the template's first on-use spell (`0x706b90`), else, when it has none, the
@@ -109,7 +108,7 @@ where
     lua.create_function(move |lua, args: MultiValue| {
         let model = lua.app_data_ref::<Model>().expect("model app_data");
         let state = lua.app_data_ref::<SpellUse>().expect("spell use app_data");
-        let item = item_of(&model, args.front());
+        let item = item_of(lua, &model, args.front());
         answer(lua, &model, &state, item, &args)
     })
 }

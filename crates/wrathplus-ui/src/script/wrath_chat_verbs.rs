@@ -465,31 +465,14 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         }
         none()
     })?;
-    // IsDressableItem(item) (`0x517530`) → 1 for an item with a display (labelled: read as a cached
-    // template with an icon; native's pet-summon fallback for a displayless item is not read).
+    // IsDressableItem(item) (`0x517530`, the shared item resolver) → 1 for an item with a display
+    // (labelled: read as a cached template with an icon; the pet-summon fallback is not read).
     set(lua, "IsDressableItem", |lua, args| {
         let model = lua.app_data_ref::<Model>().expect("model app_data");
-        let first = arg(&args, 0);
-        let id = match &first {
-            Value::Integer(_) | Value::Number(_) => number(lua, &first).map(|n| n as u32),
-            Value::String(s) => {
-                let s = s.to_string_lossy();
-                s.split("item:")
-                    .nth(1)
-                    .and_then(|r| r.split(|c: char| !c.is_ascii_digit()).next())
-                    .and_then(|d| d.parse().ok())
-                    .or_else(|| {
-                        model
-                            .item_templates
-                            .iter()
-                            .find(|(_, t)| t.name.eq_ignore_ascii_case(&s))
-                            .map(|(id, _)| *id)
-                    })
-            }
-            _ => None,
-        };
-        let dressable = id
-            .and_then(|id| model.item_templates.get(&id))
+        let id = super::item_arg::item_id_arg(lua, &model, &arg(&args, 0));
+        let dressable = model
+            .item_templates
+            .get(&id)
             .is_some_and(|t| t.icon.is_some());
         Ok(MultiValue::from_vec(vec![super::binding_abi::flag(
             dressable,
