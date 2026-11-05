@@ -183,7 +183,7 @@ impl Manager {
 
     pub(super) fn profiles(&self) -> Element<'_, Message> {
         let mut list = Column::new().spacing(10);
-        for name in ["Local adventures", "Classic essentials", "Bot workshop"] {
+        for name in crate::profiles::NAMES {
             list = list.push(card(
                 row![
                     text(name).size(17).width(Fill),
@@ -198,7 +198,7 @@ impl Manager {
             ));
         }
         column![
-            text("Sample profiles · in-memory selection only")
+            text("Each profile keeps its own server modules (the server type) and server settings; the client, addons and characters are shared. Switching applies to the next server build and start.")
                 .size(12)
                 .color(style::MUTED),
             list,

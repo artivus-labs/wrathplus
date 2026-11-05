@@ -113,32 +113,8 @@ impl Manager {
         self.module_state.notice = format!("Selecting {}…", preset.title());
         let (sender, receiver) = iced::futures::channel::oneshot::channel();
         std::thread::spawn(move || {
-            let result = std::panic::catch_unwind(|| -> Result<String, String> {
-                let mut catalog = modules::Catalog::load(&config, &core)?;
-                let change = presets::plan(catalog.entries(), preset);
-                for name in &change.add {
-                    match STANDARD.iter().find(|m| m.name == *name).map(|m| &m.origin) {
-                        Some(standard::Origin::Github(repository)) => {
-                            catalog.import_github(&config, repository)?
-                        }
-                        Some(standard::Origin::Bundled(folder)) => {
-                            catalog.register_local(&config.repo.join(folder))?
-                        }
-                        None => return Err(format!("{name} is not a standard module")),
-                    }
-                    // Keep each import recorded even if a later one fails.
-                    catalog.save(&config)?;
-                }
-                for name in &change.enable {
-                    catalog.set_enabled(name, true)?;
-                }
-                for name in &change.disable {
-                    catalog.set_enabled(name, false)?;
-                }
-                catalog.save(&config)?;
-                Ok(preset.saved().into())
-            })
-            .unwrap_or_else(|_| Err("Selecting the server type stopped unexpectedly".into()));
+            let result = std::panic::catch_unwind(|| select_modules(&config, &core, preset))
+                .unwrap_or_else(|_| Err("Selecting the server type stopped unexpectedly".into()));
             let _ = sender.send(result);
         });
         iced::Task::perform(
@@ -150,4 +126,36 @@ impl Manager {
             |r| Message::Modules(Input::Finished(r)),
         )
     }
+}
+
+/// Make the catalog build a server type's standard modules: import the ones it lacks, then switch
+/// standard modules on and off. The player's own modules stay as they are. Blocking (imports).
+pub(crate) fn select_modules(
+    config: &crate::setup::Config,
+    core: &std::path::Path,
+    preset: Preset,
+) -> Result<String, String> {
+    let mut catalog = modules::Catalog::load(config, core)?;
+    let change = presets::plan(catalog.entries(), preset);
+    for name in &change.add {
+        match STANDARD.iter().find(|m| m.name == *name).map(|m| &m.origin) {
+            Some(standard::Origin::Github(repository)) => {
+                catalog.import_github(config, repository)?
+            }
+            Some(standard::Origin::Bundled(folder)) => {
+                catalog.register_local(&config.repo.join(folder))?
+            }
+            None => return Err(format!("{name} is not a standard module")),
+        }
+        // Keep each import recorded even if a later one fails.
+        catalog.save(config)?;
+    }
+    for name in &change.enable {
+        catalog.set_enabled(name, true)?;
+    }
+    for name in &change.disable {
+        catalog.set_enabled(name, false)?;
+    }
+    catalog.save(config)?;
+    Ok(preset.saved().into())
 }

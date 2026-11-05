@@ -1,4 +1,5 @@
-//! Native client/addon setup and isolated managed-server controls; profiles remain previews.
+//! Native client/addon setup and isolated managed-server controls; profiles carry server module
+//! selections and server settings.
 mod addons;
 mod agents;
 mod branding;
@@ -11,6 +12,7 @@ mod modules;
 mod pages;
 mod preflight;
 mod prerequisites;
+mod profiles;
 mod server;
 mod setup;
 mod style;
@@ -151,7 +153,7 @@ impl Default for Manager {
             agents: agents::Agents::default(),
             module_state: module_ui::State::default(),
             config_editor: module_config::State::default(),
-            profile: "Local adventures".into(),
+            profile: profiles::NAMES[0].into(),
             assets: String::new(),
             build_directory: setup::Config::defaults()
                 .target
@@ -254,11 +256,7 @@ impl Manager {
             column![
                 text("ACTIVE PROFILE").size(10).color(style::MUTED),
                 pick_list(
-                    vec![
-                        "Local adventures".to_owned(),
-                        "Classic essentials".to_owned(),
-                        "Bot workshop".to_owned()
-                    ],
+                    profiles::NAMES.map(String::from).to_vec(),
                     Some(self.profile.clone()),
                     Message::Profile
                 )
@@ -279,7 +277,7 @@ impl Manager {
         };
         let content = column![
             header,
-            text("Client, addon and managed server setup · Profiles are previews")
+            text("Client, addon and managed server setup · Profiles carry server modules and settings")
                 .size(11)
                 .color(style::GOLD),
             scrollable(body).height(Fill),
@@ -376,6 +374,7 @@ fn main() -> iced::Result {
             manager.assets = manager.config.data.to_string_lossy().into_owned();
             manager.locale = manager.config.locale.clone();
             manager.host = manager.config.server.clone();
+            manager.profile = profiles::active(&manager.config);
             manager.refresh_addons();
             manager
         },

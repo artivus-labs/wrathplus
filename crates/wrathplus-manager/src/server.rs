@@ -1,4 +1,5 @@
 //! Native managed disposable server workflow; no existing-realm adoption or reset.
+mod account;
 mod build_feedback;
 mod build_state;
 mod characters;
@@ -27,7 +28,9 @@ mod ui;
 mod worker;
 
 use crate::{Manager, Message};
+pub(crate) use account::{create as create_account, local as local_account, Created, LOCAL_REALM};
 pub(crate) use data_prep::Navmesh;
+pub(crate) use environment::Environment;
 use settings::Settings;
 pub use setup_job::SetupTask;
 use std::path::PathBuf;
@@ -61,6 +64,8 @@ pub enum Input {
     SetupFinished(SetupTask, Result<String, String>),
     /// Edit the server settings (typed module settings and environment variables).
     Environment(environment_ui::EnvInput),
+    /// The guided setup's Create your account step.
+    Account(account::AccountInput),
 }
 pub struct Server {
     settings: Settings,
@@ -92,6 +97,7 @@ pub struct Server {
     /// How the last first-install task ended.
     job_result: Option<setup_job::Finished>,
     env_form: environment_ui::EnvForm,
+    account: account::AccountForm,
 }
 impl Default for Server {
     fn default() -> Self {
@@ -123,12 +129,28 @@ impl Default for Server {
             job: None,
             job_result: None,
             env_form: environment_ui::EnvForm::default(),
+            account: account::AccountForm::default(),
         }
     }
 }
 impl Server {
     pub(crate) fn module_source(&self) -> &std::path::Path {
         &self.settings.source
+    }
+    pub(crate) fn environment(&self) -> &Environment {
+        &self.settings.environment
+    }
+    /// Take a profile's server settings: saved at once, without saving other unsaved edits.
+    pub(crate) fn set_environment(
+        &mut self,
+        config: &crate::setup::Config,
+        environment: Environment,
+    ) -> Result<(), String> {
+        let mut saved = Settings::load(config)?;
+        saved.environment = environment.clone();
+        saved.save(config)?;
+        self.settings.environment = environment;
+        Ok(())
     }
     pub(crate) fn module_editable(&self) -> bool {
         !self.locked() && !self.choosing
@@ -179,6 +201,7 @@ impl Manager {
             return;
         }
         self.server_state.loaded = true;
+        self.server_state.load_account(&self.config);
         match Settings::load(&self.config) {
             Ok(settings) => {
                 self.server_state.source = settings.source.to_string_lossy().into_owned();
@@ -316,6 +339,7 @@ impl Manager {
             Input::Environment(input) if !state.locked() && !self.module_state.busy => {
                 state.environment_update(input)
             }
+            Input::Account(input) => return self.account_update(input),
             Input::Transfer(input) => return self.transfer_update(input),
             Input::Setup(task) => return self.setup_start(task, Navmesh::All),
             Input::SetupFinished(task, result) => self.setup_finished(task, result),

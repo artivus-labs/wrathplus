@@ -76,7 +76,7 @@ only the database, path, console and SOAP keys (and the auction seller); it no l
 the bot population.
 
 Playerbots defaults (the "Playerbots" server types; Plain AzerothCore writes autologin off,
-0 bots and an addclass pool of 0):
+0 bots, an addclass pool of 0 and no bot guilds):
 
 | Setting | Default | Upstream |
 | --- | --- | --- |
@@ -87,6 +87,7 @@ Playerbots defaults (the "Playerbots" server types; Plain AzerothCore writes aut
 | `DowngradeMaxLevelBot` | 1 | 0 |
 | `MinRandomBotRandomizeTime` / `MaxRandomBotRandomizeTime` | 7200 / 172800 (2 h / 2 days) | 7200 / 1209600 (14 days) |
 | `EnablePeriodicOnlineOffline` / `PeriodicOnlineOfflineRatio` | 0 / 2.0 | 0 / 2.0 |
+| `RandomBotGuildCount` | 20 | 20 |
 
 Turnover (#33): a random bot's periodic re-randomize keeps its level (new gear and spec) unless
 it is at `RandomBotMaxLevel` and `DowngradeMaxLevelBot` is on; then it restarts at
@@ -99,7 +100,9 @@ through the world and level-80 bots come back as new low-level bots, at most
 bots and swaps them in and out; offline bots do not level, so it varies faces without changing
 the level spread, and is off by default. Bot accounts (ten characters each) are created on the
 first start after raising the population, which takes a while. Already scheduled re-randomize
-times keep their old deadline. Random-bot guilds use upstream's `RandomBotGuildCount` (20).
+times keep their old deadline. Random bots form up to
+`RandomBotGuildCount` guilds of their own (upstream 20, at most `RandomBotGuildSizeMax` = 15 bots
+each); 0 keeps them out of guilds.
 
 Stopping auth/world preserves MySQL and named volumes. No reset/delete action is
 provided. Do not reuse a project name belonging to another installation. Do not

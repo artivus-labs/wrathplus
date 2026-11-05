@@ -76,7 +76,7 @@ impl Server {
 
     /// The steps, in order, for a player with `client` (whether the Client page holds a WoW
     /// client folder).
-    pub(super) fn guide(&self, client: bool) -> [Step; 5] {
+    pub(super) fn guide(&self, client: bool) -> [Step; 6] {
         let source = if let Some(stage) = self.running_task(SetupTask::Source) {
             Step::new("Get the server source", Mark::Now, stage)
         } else if self.source_ready() {
@@ -149,6 +149,7 @@ impl Server {
             Step::new("Start and play", Mark::Now, "Start the server (the first start sets up its database and takes a few minutes), then press Use this server for the client.")
                 .with(self.control_label(), self.control_input().map(Message::Server))
         };
+        let account = self.account_step();
         let navmesh = if let Some(stage) = self.running_task(SetupTask::Navmesh) {
             Step::new("Navigation meshes (recommended)", Mark::Now, stage)
         } else if self.navmesh_ready() {
@@ -167,7 +168,29 @@ impl Server {
             Step::new("Navigation meshes (recommended)", Mark::Now, "Help bots and agents find their way around. Making them takes several hours and about 6 GB; you can play meanwhile, and a stopped run continues where it left off. Restart the server afterwards.")
                 .with("Make navigation meshes", self.setup(SetupTask::Navmesh))
         };
-        [source, build, data, start, navmesh]
+        [source, build, data, start, account, navmesh]
+    }
+}
+
+impl Server {
+    /// After the realm is up: the player's own account, which the client then logs in with.
+    fn account_step(&self) -> Step {
+        const TITLE: &str = "Create your account";
+        let form = self.account();
+        if form.busy {
+            Step::new(TITLE, Mark::Now, format!("Creating {}…", form.name.trim()))
+        } else if let Some(account) = &form.created {
+            Step::new(TITLE, Mark::Done, format!("{account} · Play fills in this account and its password while the client uses this server."))
+        } else if !self.running() {
+            Step::new(
+                TITLE,
+                Mark::Later,
+                "After the server is running: the account you log in with.",
+            )
+        } else {
+            Step::new(TITLE, Mark::Now, "The account you log in with on this realm. The password is filled in for you (this realm is only on your computer); change it if you like. Play then fills both in.")
+                .with("Create account", self.account_input())
+        }
     }
 }
 
@@ -202,13 +225,16 @@ impl Manager {
                 if let Some((label, done, total)) = job.progress().filter(|_| {
                     matches!(
                         (index, job.task),
-                        (0, SetupTask::Source) | (2, SetupTask::Data) | (4, SetupTask::Navmesh)
+                        (0, SetupTask::Source) | (2, SetupTask::Data) | (5, SetupTask::Navmesh)
                     )
                 }) {
                     body = body
                         .push(text(format!("{label}: {done} / {total}")).size(12))
                         .push(progress_bar(0.0..=total as f32, done as f32).girth(5));
                 }
+            }
+            if index == 4 && step.mark == Mark::Now && !state.account().busy {
+                body = body.push(state.account_fields());
             }
             let mut line = row![text(badge).size(13).color(colour).width(44), body]
                 .spacing(12)

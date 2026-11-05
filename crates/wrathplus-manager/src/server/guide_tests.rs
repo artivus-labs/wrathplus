@@ -32,7 +32,14 @@ fn a_fresh_install_starts_with_the_source_and_the_client() {
     let steps = server.guide(false);
     assert_eq!(
         marks(&server, false),
-        [Mark::Now, Mark::Later, Mark::Now, Mark::Later, Mark::Later]
+        [
+            Mark::Now,
+            Mark::Later,
+            Mark::Now,
+            Mark::Later,
+            Mark::Later,
+            Mark::Later
+        ]
     );
     assert_eq!(action(&steps[0]), Some(("Get server source", true)));
     assert_eq!(action(&steps[2]), Some(("Open Client page", true)));
@@ -62,9 +69,15 @@ fn each_finished_step_hands_on_to_the_next() {
     let steps = server.guide(true);
     assert_eq!(steps[2].mark, Mark::Done);
     assert_eq!(action(&steps[3]), Some(("Start", true)));
-    assert_eq!(action(&steps[4]), Some(("Make navigation meshes", true)));
+    assert_eq!(steps[4].mark, Mark::Later);
+    assert_eq!(action(&steps[5]), Some(("Make navigation meshes", true)));
 
     server.health = Health::Running;
+    assert_eq!(
+        action(&server.guide(true)[4]),
+        Some(("Create account", true))
+    );
+    server.account.created = Some("PLAYER".into());
     std::fs::write(root.join("data/.wrathplus-mmaps-done"), "done").unwrap();
     assert!(marks(&server, true).iter().all(|m| *m == Mark::Done));
     let _ = std::fs::remove_dir_all(root);
@@ -83,8 +96,8 @@ fn one_setup_task_at_a_time_and_no_new_source_under_a_build() {
         receiver,
     ));
     let steps = server.guide(true);
-    assert_eq!(steps[4].mark, Mark::Now);
-    assert!(steps[4].action.is_none());
+    assert_eq!(steps[5].mark, Mark::Now);
+    assert!(steps[5].action.is_none());
     assert!(!server.can_setup(SetupTask::Data) && !server.can_setup(SetupTask::Source));
     server.job = None;
     server.busy = true;

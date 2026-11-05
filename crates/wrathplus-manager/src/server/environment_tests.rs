@@ -61,6 +61,10 @@ fn env_names_match_azerothcore_ini_key_conversion() {
             "Playerbots.PeriodicOnlineOfflineRatio",
             "AC_PLAYERBOTS_PERIODIC_ONLINE_OFFLINE_RATIO",
         ),
+        (
+            "Playerbots.RandomBotGuildCount",
+            "AC_PLAYERBOTS_RANDOM_BOT_GUILD_COUNT",
+        ),
     ];
     let surfaced: Vec<_> = MODULES.iter().flat_map(|m| m.settings).collect();
     assert_eq!(surfaced.len(), expected.len());
@@ -189,6 +193,10 @@ fn server_types_write_defaults_or_no_bots() {
         environment.get("AC_PLAYERBOTS_ADD_CLASS_ACCOUNT_POOL_SIZE"),
         Some("0")
     );
+    assert_eq!(
+        environment.get("AC_PLAYERBOTS_RANDOM_BOT_GUILD_COUNT"),
+        Some("0")
+    );
     PLAYERBOTS.apply_defaults(&mut environment);
     assert_eq!(
         environment.get("AC_PLAYERBOTS_MAX_RANDOM_BOTS"),
@@ -197,6 +205,10 @@ fn server_types_write_defaults_or_no_bots() {
     assert_eq!(
         environment.get("AC_PLAYERBOTS_RANDOM_BOT_AUTOLOGIN"),
         Some("1")
+    );
+    assert_eq!(
+        environment.get("AC_PLAYERBOTS_RANDOM_BOT_GUILD_COUNT"),
+        Some("20")
     );
     assert_eq!(environment.get("AC_OTHER"), Some("kept"));
     assert_eq!(environment, environment.effective());
