@@ -851,8 +851,8 @@ fn count_fontstring_follows_is_consumable_action_not_the_bag_count() {
             texture: Some("Interface\\Icons\\Spell_A".into()),
             kind: 0x00, // SPELL
             action: 111,
-            count: 42, // the app never sets this for a spell; the XML must ignore it
-            consumable: false,
+            count: 42, // a reagent spell's casts (`0x7ffa30`)
+            consumable: true,
         }),
     );
     s.set_action(
@@ -886,8 +886,8 @@ fn count_fontstring_follows_is_consumable_action_not_the_bag_count() {
     };
     assert_eq!(
         count_of(&s, 1),
-        "",
-        "SPELL kind never shows a count, however GetActionCount answers"
+        "42",
+        "a reagent SPELL shows its casts (`0x5a9360`)"
     );
     assert_eq!(
         count_of(&s, 2),

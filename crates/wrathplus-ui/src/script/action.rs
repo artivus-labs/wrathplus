@@ -25,10 +25,10 @@ pub struct ActionSlot {
     pub kind: u8,
     /// The spell, macro or item id (bits 0-23 of the packed slot word).
     pub action: u32,
-    /// `GetActionCount`'s bag count for an item slot, 0 otherwise.
+    /// `GetActionCount` (`0xc1e118`): an item's bag count, a reagent spell's casts (`0x7ffa30`).
     pub count: u32,
-    /// `IsConsumableAction`: `0x4e5250` reads only the slot's item template, so this rides the
-    /// icon's push, not [`ActionState`]'s.
+    /// `IsConsumableAction` (`0x5a9360`): the item template or the spell's reagents, so this
+    /// rides the icon's push, not [`ActionState`]'s.
     pub consumable: bool,
 }
 
@@ -272,11 +272,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         "GetActionCount",
         lua.create_function(|lua, action: u32| {
             let model = lua.app_data_ref::<Model>().expect("model app_data");
-            Ok(model
-                .actions
-                .get(&action)
-                .filter(|s| s.kind == ACTION_KIND_ITEM)
-                .map_or(0, |s| s.count))
+            Ok(model.actions.get(&action).map_or(0, |s| s.count))
         })?,
     )?;
 
