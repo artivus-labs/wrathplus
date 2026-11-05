@@ -6,23 +6,13 @@ fn backpack() -> ContainerState {
     slots.insert(
         1,
         ContainerSlot {
-            duration_ms: None,
-            petition: None,
-            already_bound: false,
             bar_placeable: true,
-            durability: None,
             texture: Some("Interface\\Icons\\INV_Misc_Food_16".into()),
             count: 5,
             quality: Some(1),
             item_id: 117,
             link: Some("|cffffffff|Hitem:117|h[Tough Jerky]|h|r".into()),
-            locked: false,
-            equip_slots: Vec::new(),
-            cooldown: None,
-            readable: false,
-            creator: None,
-            flags: 0,
-            enchants: Vec::new(),
+            ..Default::default()
         },
     );
     // An in-flight slot: the create arrived, the template answer hasn't.
@@ -122,7 +112,8 @@ fn container_snapshot_reads() {
         )
         .unwrap();
     assert_eq!(icon, "Interface\\Icons\\INV_Misc_Food_16");
-    assert_eq!((count, quality), (5, 1));
+    // Food is `InventoryType` 0, which answers quality -1 (`0x5d7ba7`); a weapon its own.
+    assert_eq!((count, quality), (5, -1));
     assert_eq!(
         s.eval::<i64>(
             "local _, _, id = string.find(GetContainerItemLink(0, 1), 'item:(%d+)') \
@@ -138,6 +129,13 @@ fn container_snapshot_reads() {
     assert!(s
         .eval::<bool>("local _, _, _, _, readable = GetContainerItemInfo(0, 4) return readable")
         .unwrap());
+
+    let mut bag = backpack();
+    let jerky = bag.slots.get_mut(&1).unwrap();
+    (jerky.inventory_type, jerky.lootable) = (13, true);
+    s.set_container(0, Some(bag));
+    let read = "local _, _, _, q, _, lootable = GetContainerItemInfo(0, 1) return q, lootable";
+    assert_eq!(s.eval::<(i64, i64)>(read).unwrap(), (1, 1));
 
     // An in-flight slot: texture nil, quality -1 (`0x5d7a90`), itemCount real; seven values.
     assert!(s
@@ -246,23 +244,13 @@ fn pickup_place_onto_occupied_different_item_swaps_and_clears() {
     state.slots.insert(
         5,
         ContainerSlot {
-            duration_ms: None,
-            petition: None,
-            already_bound: false,
             bar_placeable: true,
-            durability: None,
             texture: Some("Interface\\Icons\\INV_Misc_Gem_01".into()),
             count: 1,
             quality: Some(2),
             item_id: 200, // item B, a different id
             link: Some("|Hitem:200|h[Shiny Gem]|h".into()),
-            locked: false,
-            equip_slots: Vec::new(),
-            cooldown: None,
-            readable: false,
-            creator: None,
-            flags: 0,
-            enchants: Vec::new(),
+            ..Default::default()
         },
     );
     s.set_container(0, Some(state));

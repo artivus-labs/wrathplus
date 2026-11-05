@@ -381,23 +381,13 @@ fn bag_tooltip_hangs_left_when_the_slot_sits_in_the_right_half() {
     slots.insert(
         1,
         ContainerSlot {
-            duration_ms: None,
-            petition: None,
-            already_bound: false,
             bar_placeable: true,
-            durability: None,
             texture: Some("Interface\\Icons\\INV_ThrowingKnife_02".into()),
             count: 200,
             quality: Some(1),
             item_id: 2947,
             link: Some("|cffffffff|Hitem:2947|h[Small Throwing Knife]|h|r".into()),
-            locked: false,
-            equip_slots: Vec::new(),
-            cooldown: None,
-            readable: false,
-            creator: None,
-            flags: 0,
-            enchants: Vec::new(),
+            ..Default::default()
         },
     );
     s.set_container(
@@ -457,23 +447,13 @@ fn hovered_bag_tooltip_fills_itself_when_the_stats_land() {
     slots.insert(
         1,
         ContainerSlot {
-            duration_ms: None,
-            petition: None,
-            already_bound: false,
             bar_placeable: true,
-            durability: None,
             texture: Some("Interface\\Icons\\INV_Sword_04".into()),
             count: 1,
             quality: Some(1),
             item_id: 25,
             link: Some("|cffffffff|Hitem:25|h[Worn Shortsword]|h|r".into()),
-            locked: false,
-            equip_slots: Vec::new(),
-            cooldown: None,
-            readable: false,
-            creator: None,
-            flags: 0,
-            enchants: Vec::new(),
+            ..Default::default()
         },
     );
     s.set_container(
@@ -564,45 +544,25 @@ fn vendor_bag_hover_shows_sell_price_and_arms_the_pouch_cursor() {
     slots.insert(
         1,
         ContainerSlot {
-            duration_ms: None,
-            petition: None,
-            already_bound: false,
             bar_placeable: true,
-            durability: None,
             texture: Some("Interface\\Icons\\INV_Misc_Pelt_Wolf_01".into()),
             count: 4,
             quality: Some(1),
             item_id: 2318,
             link: Some("|cffffffff|Hitem:2318|h[Light Leather]|h|r".into()),
-            locked: false,
-            equip_slots: Vec::new(),
-            cooldown: None,
-            readable: false,
-            creator: None,
-            flags: 0,
-            enchants: Vec::new(),
+            ..Default::default()
         },
     );
     slots.insert(
         2,
         ContainerSlot {
-            duration_ms: None,
-            petition: None,
-            already_bound: false,
             bar_placeable: true,
-            durability: None,
             texture: Some("Interface\\Icons\\INV_Misc_Key_03".into()),
             count: 1,
             quality: Some(1),
             item_id: 9999,
             link: Some("|cffffffff|Hitem:9999|h[Shadowforge Key]|h|r".into()),
-            locked: false,
-            equip_slots: Vec::new(),
-            cooldown: None,
-            readable: false,
-            creator: None,
-            flags: 0,
-            enchants: Vec::new(),
+            ..Default::default()
         },
     );
     s.set_container(
@@ -771,23 +731,13 @@ fn drag_across_two_slots_queues_the_same_move_a_click_pickup_would() {
     slots.insert(
         1,
         ContainerSlot {
-            duration_ms: None,
-            petition: None,
-            already_bound: false,
             bar_placeable: true,
-            durability: None,
             texture: Some("Interface\\Icons\\INV_Misc_Food_16".into()),
             count: 5,
             quality: Some(3),
             item_id: 117,
             link: Some("|cffffffff|Hitem:117|h[Tough Jerky]|h|r".into()),
-            locked: false,
-            equip_slots: Vec::new(),
-            cooldown: None,
-            readable: false,
-            creator: None,
-            flags: 0,
-            enchants: Vec::new(),
+            ..Default::default()
         },
     );
     s.set_container(
@@ -856,23 +806,13 @@ fn a_second_bag_window_feeds_and_paints_via_the_bag_bar() {
     slots.insert(
         1,
         ContainerSlot {
-            duration_ms: None,
-            petition: None,
-            already_bound: false,
             bar_placeable: true,
-            durability: None,
             texture: Some("Interface\\Icons\\INV_Misc_Gem_01".into()),
             count: 1,
             quality: Some(2),
             item_id: 200,
             link: Some("|cffffffff|Hitem:200|h[Shiny Gem]|h|r".into()),
-            locked: false,
-            equip_slots: Vec::new(),
-            cooldown: None,
-            readable: false,
-            creator: None,
-            flags: 0,
-            enchants: Vec::new(),
+            ..Default::default()
         },
     );
     s.set_container(
@@ -990,23 +930,13 @@ fn open_backpack_with_a_five_stack(s: &mut UiScript) -> (f32, f32) {
     slots.insert(
         1,
         ContainerSlot {
-            duration_ms: None,
-            petition: None,
-            already_bound: false,
             bar_placeable: true,
-            durability: None,
             texture: Some("Interface\\Icons\\INV_Misc_Food_16".into()),
             count: 5,
             quality: Some(1),
             item_id: 117,
             link: Some("|cffffffff|Hitem:117|h[Tough Jerky]|h|r".into()),
-            locked: false,
-            equip_slots: Vec::new(),
-            cooldown: None,
-            readable: false,
-            creator: None,
-            flags: 0,
-            enchants: Vec::new(),
+            ..Default::default()
         },
     );
     s.set_container(

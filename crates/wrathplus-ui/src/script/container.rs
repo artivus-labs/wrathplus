@@ -43,9 +43,15 @@ pub struct ContainerSlot {
     pub durability: Option<(u32, u32)>,
     /// The use cooldown, `(start_ms on the GetTime clock, duration_ms, enabled)`; `None` if cold.
     pub cooldown: Option<(i64, u32, bool)>,
-    /// The instance carries `ITEM_FIELD_ITEM_TEXT_ID` (a mail copy): `GetContainerItemInfo`'s
-    /// `readable`, which shows the Inspect cursor (`ContainerFrame.lua:638`).
+    /// `GetContainerItemInfo`'s `readable` (`0x5d7bc3`-`0x5d7be6`): the template's `PageText`
+    /// (`CGItem` vfunc `0xdc`, `[rec+0x180]`) or `ITEM_FIELD_FLAGS & 0x200` (a mail copy); it
+    /// shows the Inspect cursor (`ContainerFrame.lua:306`, `:787-788`).
     pub readable: bool,
+    /// `GetContainerItemInfo`'s `lootable` (`0x5d7c04`): the template's `Flags & 0x4`, read
+    /// through the item's flag accessor (`0x707390`, `[rec+0x18]`).
+    pub lootable: bool,
+    /// The template's `InventoryType`: 0 (a Hearthstone, food) answers quality -1 (`0x5d7ba7`).
+    pub inventory_type: u32,
     /// The `ITEM_FIELD_CREATOR` name for the "Written by" or "<Made by>" line, once resolved.
     pub creator: Option<String>,
     /// `ITEM_FIELD_FLAGS`; the tooltip reads UNLOCKED `0x4` and WRAPPED `0x8`.
@@ -583,8 +589,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // GetContainerItemInfo(bag, slot) (`0x4f9670`) → texture, itemCount, locked, quality,
-    // readable, the five `ContainerFrame.lua:241` reads; no values for an empty or unknown slot.
+    // GetContainerItemInfo(bag, slot) (`0x5d7a90`) → texture, itemCount, locked, quality,
+    // readable, lootable, link; no values for an empty or unknown slot.
     lua.globals().set(
         "GetContainerItemInfo",
         lua.create_function(|lua, (bag, slot): (i64, u32)| {
@@ -612,9 +618,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             let Some(s) = info else {
                 return Ok(mlua::MultiValue::new());
             };
-            // `0x5d7a90`: texture, count, locked, quality, readable, lootable, link; the flags are
-            // 1 or nil. An uncached template's quality is -1. Lootable reads `ITEM_FIELD_FLAGS`
-            // bit 2 as the binding does (labelled: the bit's meaning for every item is unread).
+            // The flags are 1 or nil; an uncached template, or one with `InventoryType` 0, answers
+            // quality -1 (`0x5d7ba5`-`0x5d7bb1`).
             let text = |v: &Option<String>| -> mlua::Result<Value> {
                 Ok(match v {
                     Some(p) => Value::String(lua.create_string(p.as_str())?),
@@ -627,9 +632,13 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 // A held item's source slot reads locked, derived from the cursor so the app's
                 // re-push cannot wipe it.
                 super::binding_abi::flag(s.locked || held_here),
-                Value::Integer(s.quality.map_or(-1, i64::from)),
+                Value::Integer(
+                    s.quality
+                        .filter(|_| s.inventory_type != 0)
+                        .map_or(-1, i64::from),
+                ),
                 super::binding_abi::flag(s.readable),
-                super::binding_abi::flag(s.flags & 4 != 0),
+                super::binding_abi::flag(s.lootable),
                 text(&s.link)?,
             ]))
         })?,

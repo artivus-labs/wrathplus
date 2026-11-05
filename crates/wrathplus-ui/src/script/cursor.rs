@@ -615,23 +615,13 @@ mod tests {
         slots.insert(
             1,
             crate::script::container::ContainerSlot {
-                duration_ms: None,
-                petition: None,
-                already_bound: false,
                 bar_placeable: true,
-                durability: None,
                 texture: Some("Interface\\Icons\\INV_Misc_Food_16".into()),
                 count: 5,
                 quality: Some(3),
                 item_id: 117,
                 link: Some("|cffffffff|Hitem:117|h[Tough Jerky]|h|r".into()),
-                locked: false,
-                equip_slots: Vec::new(),
-                cooldown: None,
-                readable: false,
-                creator: None,
-                flags: 0,
-                enchants: Vec::new(),
+                ..Default::default()
             },
         );
         crate::script::container::ContainerState {

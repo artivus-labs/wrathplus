@@ -66,23 +66,15 @@ fn one_fitting_bag_item() -> ContainerState {
     slots.insert(
         1,
         ContainerSlot {
-            duration_ms: None,
-            petition: None,
-            already_bound: false,
             bar_placeable: true,
-            durability: None,
             texture: Some("Interface\\Icons\\INV_Helmet_02".into()),
             count: 1,
             quality: Some(3),
             item_id: 2000,
             link: Some("|cff0070dd|Hitem:2000:0:0:0|h[Another Helm]|h|r".into()),
-            locked: false,
             equip_slots: vec![1], // fits HeadSlot only
             cooldown: None,
-            readable: false,
-            creator: None,
-            flags: 0,
-            enchants: Vec::new(),
+            ..Default::default()
         },
     );
     ContainerState {
@@ -247,23 +239,15 @@ fn place_a_bag_onto_a_bag_slot_queues_the_equip_move() {
     slots.insert(
         3,
         ContainerSlot {
-            duration_ms: None,
-            petition: None,
-            already_bound: false,
             bar_placeable: true,
-            durability: None,
             texture: Some("Interface\\Icons\\INV_Misc_Bag_08".into()),
             count: 1,
             quality: Some(1),
             item_id: 4496,
             link: Some("|cffffffff|Hitem:4496:0:0:0|h[Small Brown Pouch]|h|r".into()),
-            locked: false,
             equip_slots: vec![20, 21, 22, 23], // INVTYPE_BAG → any bag slot
             cooldown: None,
-            readable: false,
-            creator: None,
-            flags: 0,
-            enchants: Vec::new(),
+            ..Default::default()
         },
     );
     s.set_container(

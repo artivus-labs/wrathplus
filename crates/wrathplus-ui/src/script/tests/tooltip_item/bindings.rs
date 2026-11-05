@@ -64,23 +64,13 @@ fn merchant_compare_renders_the_compare_shape_and_no_hover_seats_a_plate() {
     slots.insert(
         1,
         ContainerSlot {
-            duration_ms: None,
-            petition: None,
-            already_bound: false,
             bar_placeable: true,
-            durability: None,
-            texture: None,
             count: 1,
             quality: Some(2),
             item_id: 7002,
             link: Some("|cff1eff00|Hitem:7002:0:0:0|h[New Loop]|h|r".into()),
-            locked: false,
             equip_slots: vec![11, 12],
-            cooldown: None,
-            readable: false,
-            creator: None,
-            flags: 0,
-            enchants: Vec::new(),
+            ..Default::default()
         },
     );
     s.set_container(
