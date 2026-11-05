@@ -105,8 +105,6 @@ fn conversions(f: &ObjectFields, tables: &WrathGameTables) -> WrathStatConversio
         rating_bonus,
         // Native CR_ARMOR_PENETRATION is 24 (Lua 25).
         armor_penetration: rating_bonus[24],
-        // Caps and defense skill remain unavailable rather than inferred from ratings.
-        ..Default::default()
     }
 }
 

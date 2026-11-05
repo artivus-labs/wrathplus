@@ -1,13 +1,12 @@
 //! Wrath player descriptor values and separately supplied GameTables conversions.
 //! Missing conversions remain zero until the app has the corresponding table rows.
 
-use super::{Model, UiScript};
-use mlua::Lua;
+use super::{binding_abi, Model, UiScript};
+use mlua::{Lua, Value};
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct WrathStatConversions {
     pub rating_bonus: [f32; 25],
-    pub rating_max_bonus: [f32; 25],
     pub armor_penetration: f32,
     pub crit_from_agility: f32,
     pub spell_crit_from_intellect: f32,
@@ -43,11 +42,28 @@ impl UiScript {
     }
 }
 
-fn index(value: u32, length: usize) -> Option<usize> {
-    value
-        .checked_sub(1)
-        .map(|n| n as usize)
-        .filter(|&n| n < length)
+/// The rating verbs' index (`0x60ddb0`, `0x60de70`, `0x6082c0`): `isnumber` or the Usage, `fistp`
+/// under a chop control word, less one, unsigned below 25 or `0xa1f780`'s range error.
+fn rating_index(lua: &Lua, v: Value, usage: &'static str) -> mlua::Result<usize> {
+    let i = binding_abi::number_arg(lua, v, usage)?.wrapping_sub(1) as u32;
+    if i < 25 {
+        Ok(i as usize)
+    } else {
+        Err(mlua::Error::RuntimeError(
+            "ratingIndex is in the range 1 .. 25".into(),
+        ))
+    }
+}
+
+/// The school verbs' index (`0x60e290`, `0x60e310`): a bare `tonumber`, so nil is 0, truncated
+/// (`0x88b9c0`), less one, unsigned at most 6 or the Usage.
+fn school_index(lua: &Lua, v: Value, usage: &'static str) -> mlua::Result<usize> {
+    let i = (binding_abi::coerced_number(lua, Some(v)) as i64 as i32).wrapping_sub(1) as u32;
+    if i <= 6 {
+        Ok(i as usize)
+    } else {
+        Err(mlua::Error::RuntimeError(usage.into()))
+    }
 }
 
 pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
@@ -99,30 +115,54 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             })?,
         )?;
     }
-    for name in [
-        "GetCombatRating",
-        "GetCombatRatingBonus",
-        "GetMaxCombatRatingBonus",
-        "GetSpellCritChance",
-        "GetSpellBonusDamage",
+    // One number each; the player's values, 0 without one. GetMaxCombatRatingBonus is a client
+    // constant (`0x608333`): `0xa1f778`'s 33.000001311302185 for native ratings 14 to 16, the
+    // crit-taken trio, and `0x9ec208`'s -1 for the rest.
+    for (name, usage, rating) in [
+        (
+            "GetCombatRating",
+            "Usage: GetCombatRating(ratingIndex)",
+            true,
+        ),
+        (
+            "GetCombatRatingBonus",
+            "Usage: GetCombatRatingBonus(ratingIndex)",
+            true,
+        ),
+        (
+            "GetMaxCombatRatingBonus",
+            "Usage: GetMaxCombatRatingBonus(ratingIndex)",
+            true,
+        ),
+        (
+            "GetSpellCritChance",
+            "Usage: GetSpellCritChance(school)",
+            false,
+        ),
+        (
+            "GetSpellBonusDamage",
+            "Usage: GetSpellBonusDamage(school)",
+            false,
+        ),
     ] {
         lua.globals().set(
             name,
-            lua.create_function(move |lua, value: u32| {
+            lua.create_function(move |lua, value: Value| {
+                let i = if rating {
+                    rating_index(lua, value, usage)?
+                } else {
+                    school_index(lua, value, usage)?
+                };
                 let m = lua.app_data_ref::<Model>().expect("model");
                 let s = &m.wrath_paperdoll_stats;
-                let result = match name {
-                    "GetCombatRating" => index(value, 25).map(|i| s.ratings[i] as f64),
-                    "GetCombatRatingBonus" => {
-                        index(value, 25).map(|i| s.conversions.rating_bonus[i] as f64)
-                    }
-                    "GetMaxCombatRatingBonus" => {
-                        index(value, 25).map(|i| s.conversions.rating_max_bonus[i] as f64)
-                    }
-                    "GetSpellCritChance" => index(value, 7).map(|i| s.spell_crit[i] as f64),
-                    _ => index(value, 7).map(|i| s.spell_damage[i] as f64),
-                };
-                Ok(result.unwrap_or(0.0))
+                Ok(match name {
+                    "GetCombatRating" => f64::from(s.ratings[i]),
+                    "GetCombatRatingBonus" => f64::from(s.conversions.rating_bonus[i]),
+                    "GetMaxCombatRatingBonus" if (14..=16).contains(&i) => 33.000001311302185,
+                    "GetMaxCombatRatingBonus" => -1.0,
+                    "GetSpellCritChance" => f64::from(s.spell_crit[i]),
+                    _ => f64::from(s.spell_damage[i]),
+                })
             })?,
         )?;
     }
@@ -169,7 +209,6 @@ mod tests {
         for i in 0..25 {
             stats.ratings[i] = (i + 100) as u32;
             stats.conversions.rating_bonus[i] = i as f32 + 0.5;
-            stats.conversions.rating_max_bonus[i] = 33.;
         }
         for i in 0..7 {
             stats.spell_crit[i] = i as f32 + 4.5;
@@ -180,7 +219,26 @@ mod tests {
         stats.conversions.health_from_spirit = 3.5;
         stats.conversions.mana_from_spirit = 4.5;
         s.set_wrath_paperdoll_stats(stats);
-        s.run("assert(GetDodgeChance()==5.5 and GetParryChance()==6.5 and GetBlockChance()==7.5) assert(GetCritChance()==8.5 and GetRangedCritChance()==9.5) assert(GetShieldBlock()==123 and GetSpellBonusHealing()==456 and GetSpellPenetration()==34) for i=1,25 do assert(GetCombatRating(i)==99+i) assert(GetCombatRatingBonus(i)==i-.5) assert(GetMaxCombatRatingBonus(i)==33) end for i=1,7 do assert(GetSpellCritChance(i)==i+3.5) assert(GetSpellBonusDamage(i)==49+i) end assert(GetCombatRating(0)==0 and GetCombatRating(26)==0 and GetSpellCritChance(8)==0) local a,b=GetExpertise() assert(a==12 and b==8) a,b=GetExpertisePercent() assert(a==3 and b==2) assert(GetCritChanceFromAgility('player')==1.5 and GetSpellCritChanceFromIntellect('player')==2.5) assert(GetUnitHealthRegenRateFromSpirit('player')==3.5 and GetUnitManaRegenRateFromSpirit('player')==4.5) assert(GetUnitHealthRegenRateFromSpirit('target')==0)").unwrap();
+        s.run("assert(GetDodgeChance()==5.5 and GetParryChance()==6.5 and GetBlockChance()==7.5) assert(GetCritChance()==8.5 and GetRangedCritChance()==9.5) assert(GetShieldBlock()==123 and GetSpellBonusHealing()==456 and GetSpellPenetration()==34) for i=1,25 do assert(GetCombatRating(i)==99+i) assert(GetCombatRatingBonus(i)==i-.5) assert(GetMaxCombatRatingBonus(i)==(i>=15 and i<=17 and 33.000001311302185 or -1)) end for i=1,7 do assert(GetSpellCritChance(i)==i+3.5) assert(GetSpellBonusDamage(i)==49+i) end local a,b=GetExpertise() assert(a==12 and b==8) a,b=GetExpertisePercent() assert(a==3 and b==2) assert(GetCritChanceFromAgility('player')==1.5 and GetSpellCritChanceFromIntellect('player')==2.5) assert(GetUnitHealthRegenRateFromSpirit('player')==3.5 and GetUnitManaRegenRateFromSpirit('player')==4.5) assert(GetUnitHealthRegenRateFromSpirit('target')==0)").unwrap();
+        for (call, raise) in [
+            ("GetCombatRating(0)", "ratingIndex is in the range 1 .. 25"),
+            (
+                "GetMaxCombatRatingBonus(26)",
+                "ratingIndex is in the range 1 .. 25",
+            ),
+            (
+                "GetCombatRatingBonus('x')",
+                "Usage: GetCombatRatingBonus(ratingIndex)",
+            ),
+            ("GetSpellCritChance()", "Usage: GetSpellCritChance(school)"),
+            (
+                "GetSpellBonusDamage(8)",
+                "Usage: GetSpellBonusDamage(school)",
+            ),
+        ] {
+            let err = s.run(call).unwrap_err().to_string();
+            assert!(err.contains(raise), "{call}: {err}");
+        }
         s.set_wrath_paperdoll_stats(Default::default());
         s.run("assert(GetCombatRating(1)==0 and GetCritChance()==0 and GetUnitHealthRegenRateFromSpirit('player')==0) local a,b=GetExpertise() assert(a==0 and b==0)").unwrap();
     }
