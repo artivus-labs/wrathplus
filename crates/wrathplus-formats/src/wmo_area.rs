@@ -25,6 +25,9 @@ pub struct WmoArea {
     pub zone_music: u32,
     /// `ZoneIntroMusicTable.dbc` id, the entry fanfare.
     pub intro_sound: u32,
+    /// `Flags`: `4` outdoors and `2` indoors, which the outdoor test `0x77fbf0` reads (`+0x24`)
+    /// ahead of the group's own exterior bit.
+    pub flags: u32,
     /// The `AreaTable.dbc` area this group counts as (0 = none), read by the area resolver
     /// `0x670250` when the down-ray keeps the WMO over the terrain: Ironforge reports its own area.
     pub area_table_id: u32,
@@ -74,6 +77,7 @@ impl WmoAreaCatalog {
             ambience: 0,
             zone_music: 0,
             intro_sound: 0,
+            flags: 0,
             area_table_id: 0,
             name: String::new(),
         });
@@ -88,6 +92,7 @@ impl WmoAreaCatalog {
             ambience: nz(g.ambience, base.ambience),
             zone_music: nz(g.zone_music, base.zone_music),
             intro_sound: nz(g.intro_sound, base.intro_sound),
+            flags: g.flags,
             area_table_id: nz(g.area_table_id, base.area_table_id),
             name: if g.name.is_empty() {
                 base.name
@@ -148,6 +153,7 @@ pub fn load_wmo_area_catalog(chain: &mut Chain) -> Result<WmoAreaCatalog> {
             ambience: u32_at(r, 6).unwrap_or(0),
             zone_music: u32_at(r, 7).unwrap_or(0),
             intro_sound: u32_at(r, 8).unwrap_or(0),
+            flags: u32_at(r, 9).unwrap_or(0),
             area_table_id: u32_at(r, 10).unwrap_or(0),
             name: str_at(&rs, r, 11).unwrap_or_default(),
         };
@@ -158,4 +164,35 @@ pub fn load_wmo_area_catalog(chain: &mut Chain) -> Result<WmoAreaCatalog> {
         }
     }
     Ok(WmoAreaCatalog { groups, defaults })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn row(id: u32, flags: u32, intro_sound: u32) -> WmoArea {
+        WmoArea {
+            id,
+            sound_provider: [0, 0],
+            ambience: 0,
+            zone_music: 0,
+            intro_sound,
+            flags,
+            area_table_id: 0,
+            name: String::new(),
+        }
+    }
+
+    #[test]
+    fn a_resolved_group_keeps_its_own_flags_over_the_whole_wmo_row() {
+        let catalog = WmoAreaCatalog {
+            groups: HashMap::from([((7, 0, 3), row(30, 2, 0)), ((7, 0, 4), row(40, 0, 0))]),
+            defaults: HashMap::from([((7, 0), row(1, 4, 221))]),
+        };
+        assert_eq!(catalog.group_row(7, 0, 3).map(|r| r.flags), Some(2));
+        let room = catalog.resolve(7, 0, 3).unwrap();
+        assert_eq!((room.flags, room.intro_sound), (2, 221));
+        assert_eq!(catalog.resolve(7, 0, 4).unwrap().flags, 0);
+        assert_eq!(catalog.resolve(7, 0, 9).unwrap().flags, 4);
+    }
 }

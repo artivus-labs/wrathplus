@@ -54,45 +54,8 @@ fn tab_trace_on() -> bool {
     *ON.get_or_init(|| std::env::var_os("WOW_TAB_TRACE").is_some())
 }
 
-/// The reference's scan mode: the `TargetNearest*` shims (`0x489a80` enemy 1, `0x489aa0` friend 2,
-/// `0x489ac0`/`0x489ae0` party and raid 3/4) all call one cycler, `0x493f60(reverse, mode)`, and
-/// the mode reaches only the per-candidate filter `0x493e40`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ScanSide {
-    /// Mode 1 (`0x493e73`): alive by the reads-dead triple `0x605f90`, and `CanAttack 0x606980`.
-    Enemy,
-    /// Mode 2 (`0x493eca`): `CanAssist 0x6066f0`, friendly or better (`0x60671e`), whose
-    /// `IsPvP 0x605ff0` leg refuses a creature without `UNIT_FLAG_PVP`; then health > 0 with no
-    /// dynflag leg, so a feigning ally counts.
-    Friend,
-    /// Mode 3 (`0x493eed`): not us, then `0x4e7f70`, a member of our party slots. No health, dead
-    /// or reaction leg.
-    Party,
-    /// Mode 4 (`0x493f15`): not us, then `0x4918e0`, party (`0x4e7f70`) or raid roster
-    /// (`0x4baee0`).
-    Raid,
-    /// Build 12340's `TargetNearestEnemyPlayer` (`0x525b10` → `0x524fc0`): mode 1's test on a
-    /// player. Labelled: the player cycler `0x524fc0` is read as the TAB cycler with a player
-    /// filter, not traced.
-    EnemyPlayer,
-    /// `TargetNearestFriendPlayer` (`0x525b90`): mode 2's test on a player, likewise.
-    FriendPlayer,
-}
-
-impl ScanSide {
-    /// The side a `TargetNearest*` call's mode names.
-    pub(crate) fn of(mode: wrathplus_ui::script::NearestMode) -> Self {
-        use wrathplus_ui::script::NearestMode;
-        match mode {
-            NearestMode::Enemy => Self::Enemy,
-            NearestMode::Friend => Self::Friend,
-            NearestMode::EnemyPlayer => Self::EnemyPlayer,
-            NearestMode::FriendPlayer => Self::FriendPlayer,
-            NearestMode::PartyMember => Self::Party,
-            NearestMode::RaidMember => Self::Raid,
-        }
-    }
-}
+mod side;
+pub(crate) use side::ScanSide;
 
 /// `score`, lower is better, includes the fighting-me bonus; `on_screen` is the tier-1 gate.
 #[derive(Clone, Copy, Debug)]
@@ -256,6 +219,8 @@ impl TargetScan<'_, '_> {
             s.0.object_type() == Some(wrathplus_protocol::types::ObjectType::Player)
         });
         match side {
+            // Mode 0 (`0x518e40` default arm): every unit the scan admits.
+            ScanSide::Any => true,
             ScanSide::EnemyPlayer => {
                 player && self.is_valid(ScanSide::Enemy, guid, store, self_store)
             }
@@ -374,6 +339,7 @@ impl TargetScan<'_, '_> {
                         ScanSide::Raid => "REJECT not-in-party-or-raid",
                         ScanSide::EnemyPlayer => "REJECT not-an-attackable-player",
                         ScanSide::FriendPlayer => "REJECT not-an-assistable-player",
+                        ScanSide::Any => "REJECT",
                     },
                 );
                 continue;

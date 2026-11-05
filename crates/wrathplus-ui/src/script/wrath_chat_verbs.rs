@@ -281,7 +281,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     })?;
     set(lua, "Dismount", |lua, _| {
         if has_player(lua) {
-            call(lua, super::ScriptCall::Dismount);
+            super::wrath_char_state::dismount(lua);
         }
         none()
     })?;

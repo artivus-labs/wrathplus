@@ -118,6 +118,64 @@ impl RangeUnits<'_, '_> {
     pub fn caster_attack_target(&self) -> Option<RangeUnit> {
         self.attack_target(self.caster.iter().next()?)
     }
+
+    /// Build 12340's `GetUnitSpeed` (`0x613290`) and `GetUnitPitch` (`0x613330`) reads of `entity`:
+    /// [`speed_12340`] over its movement word, speeds and spline, and its pitch (the mover pitch
+    /// for the body we drive, the reported pitch for any other). `None` before its descriptor.
+    pub fn speed_and_pitch(&self, entity: Entity) -> Option<(f32, f32)> {
+        let (_, remote, spline, modes, speeds, swimming, driven) = self.units.get(entity).ok()?;
+        let (flags, pitch) = if driven {
+            let player = self.player.as_deref();
+            (
+                player.map_or(0, Player::move_flags),
+                player.map_or(0.0, Player::mover_pitch),
+            )
+        } else {
+            let flags = unify(None, remote, spline, swimming, modes).flags;
+            (flags, remote.map_or(0.0, |r| r.pitch))
+        };
+        // A zero duration reads 0: `0x987570` divides only by a non-zero one.
+        let spline_speed = spline.map(|sp| {
+            if sp.duration.is_zero() {
+                0.0
+            } else {
+                sp.speed()
+            }
+        });
+        let speed = speeds.map_or(0.0, |s| speed_12340(&s.0, flags, spline_speed));
+        Some((speed, pitch))
+    }
+}
+
+/// `CMovement`'s current speed as build 12340 refreshes it (`0x987570`, into `+0x8c`): 0 without a
+/// direction or vertical bit (`0xc0000f`); a live spline's length over its duration; then flight,
+/// swim, walk mode, or run, each taking its back speed when moving backward and it is no faster.
+/// Unlike [`current_speed`], flight is tested before swimming.
+pub fn speed_12340(s: &MoveSpeeds, flags: u32, spline_speed: Option<f32>) -> f32 {
+    use move_flags as f;
+    if flags & (f::ANY_MOVE | f::ASCENDING | f::DESCENDING) == 0 {
+        return 0.0;
+    }
+    if let Some(speed) = spline_speed {
+        return speed;
+    }
+    let back = |fwd: f32, back: f32| {
+        if flags & f::BACKWARD != 0 && back <= fwd {
+            back
+        } else {
+            fwd
+        }
+    };
+    if flags & f::FLYING != 0 {
+        return back(s.flight, s.flight_back);
+    }
+    if flags & f::SWIMMING != 0 {
+        return back(s.swim, s.swim_back);
+    }
+    if flags & f::WALK_MODE != 0 {
+        return if s.walk < s.run { s.walk } else { s.run };
+    }
+    back(s.run, s.run_back)
 }
 
 #[cfg(test)]
@@ -151,6 +209,31 @@ mod tests {
             run_mode: Some(true),
             deck: None,
         }
+    }
+
+    /// `0x987570`: no direction or vertical bit is 0; a spline wins; flight before swim; the back
+    /// speeds when backward; walk mode the slower of walk and run.
+    #[test]
+    fn the_12340_speed_tests_flight_before_swim_and_takes_back_speeds() {
+        let s = MoveSpeeds {
+            flight: 14.0,
+            flight_back: 7.5,
+            ..speeds()
+        };
+        assert_eq!(speed_12340(&s, 0, Some(3.0)), 0.0);
+        assert_eq!(speed_12340(&s, f::FALLING, None), 0.0);
+        assert_eq!(speed_12340(&s, f::FORWARD, Some(3.0)), 3.0);
+        assert_eq!(speed_12340(&s, f::FORWARD, None), 7.0);
+        assert_eq!(speed_12340(&s, f::BACKWARD, None), 4.5);
+        assert_eq!(speed_12340(&s, f::FORWARD | f::WALK_MODE, None), 2.5);
+        assert_eq!(speed_12340(&s, f::BACKWARD | f::SWIMMING, None), 2.5);
+        let both = f::FORWARD | f::SWIMMING | f::FLYING;
+        assert_eq!(speed_12340(&s, both, None), 14.0);
+        assert_eq!(speed_12340(&s, f::ASCENDING | f::FLYING, None), 14.0);
+        assert_eq!(speed_12340(&s, f::BACKWARD | f::FLYING, None), 7.5);
+        // A back speed above the forward one is not taken.
+        let odd = MoveSpeeds { run_back: 9.0, ..s };
+        assert_eq!(speed_12340(&odd, f::BACKWARD, None), 7.0);
     }
 
     /// `0x7c4c90` for a forward runner answers the run speed, and `0x5fc350` finds it above twice

@@ -141,6 +141,7 @@ impl PluginGroup for GamePlugins {
             .add(crate::combat_log::FactionStandingPlugin)
             .add(crate::death::DeathPlugin)
             .add(crate::ui_death::UiDeathPlugin)
+            .add(wrathplus_app_ui::ui_char_state::UiCharStatePlugin)
             .add(crate::glue::GluePlugin)
             .add(crate::char_select::CharSelectPlugin { start: self.start })
             .add(crate::login::LoginPlugin)
@@ -763,11 +764,18 @@ pub(crate) mod schedule_tests {
     ///   billboard facing and the quest markers' seat bake over `Transform`: the range test reads
     ///   unit bodies, never a booth card or a marker seat; and against the camera-pose load over
     ///   `Player`, as `feed_action_state` is: it reads the movement flags the load never writes.
+    /// - the character-state feed (`ui_char_state::feed_char_state`) against the camera-pose load
+    ///   (`Player`) and the terrain release and rescatter (`TerrainStreamer`): it reads the
+    ///   movement flags, ride and collision height, and the area and liquid under the player,
+    ///   while those write the camera rig and `login_pitch`, the clutter lists, and (on leaving
+    ///   the world) the tiles, which the next frame's feed reads again. Its drain
+    ///   (`drain_char_state`) pairs with the collider finish as the other `.after(UiInput)` drains
+    ///   do.
     ///
     /// Raising the ceiling is a claim that a new undeclared order is acceptable: make it with the
     /// reason read off the dump, or declare the order (`.after`, a set, a `chain`). A resource
     /// that commutes by construction belongs in [`Classes`].
-    const UPDATE_ACTIONABLE_CEILING: usize = 4_502;
+    const UPDATE_ACTIONABLE_CEILING: usize = 4_506;
     const UPDATE_ACTIONABLE_SLACK: usize = 40;
 
     fn ratchet(what: &str, n: usize, ceiling: usize, slack: usize) {
