@@ -231,10 +231,14 @@ impl Plugin for UiActionPlugin {
                         .in_set(UnitFeed)
                         .in_set(CooldownEvents)
                         .after(feed::feed_actions),
-                    // The use queries' inputs, beside the bar's state from the same walks.
+                    // The use queries' inputs, beside the bar's state from the same walks: after
+                    // this frame's local cancel, vehicle state and transport poses it reads.
                     spell_use::feed_spell_use
                         .in_set(UnitFeed)
-                        .after(state::feed_action_state),
+                        .after(state::feed_action_state)
+                        .after(crate::spell::LocalCancel)
+                        .after(crate::net::wrath_vehicle::derive_vehicle_state)
+                        .after(crate::transport::TransportPose),
                     drain::drain_action_sets.after(UiInput),
                     // The target chain queues the openers earlier in the frame.
                     drain::drain_go_openers.after(UiInput),
