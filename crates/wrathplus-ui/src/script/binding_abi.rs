@@ -159,6 +159,12 @@ fn trim_g(s: &str) -> &str {
 ///
 /// So `"0"` is false and `"0.5"` goes by its first byte: the Interface panel passes its options
 /// the strings `"0"` and `"1"`.
+///
+/// Build 12340's twin is `0x815500(L, idx, default)`, by `lua_type`: nil 0, boolean itself, number
+/// through `0x88b9c0` (the same truncation, low dword), string through `0x815400` (the same byte
+/// switch, then `0x76e780` against `"off"` (`0xa09e84`), `"disabled"`, `"on"` (`0xa09e88`) and
+/// `"enabled"`; case-insensitivity inferred), any other type `default`. `GetShapeshiftForm`'s flag
+/// is one. A number past ±2^63 stores the x87 integer indefinite, whose low dword is 0: false.
 pub(crate) fn bool_or_default(v: Option<&Value>, default: bool) -> bool {
     let Some(v) = v else {
         return default; // LUA_TNONE
@@ -169,7 +175,7 @@ pub(crate) fn bool_or_default(v: Option<&Value>, default: bool) -> bool {
         Value::LightUserData(_) => default,
         // Truncated like `0x40a2b0`, testing only the low dword.
         Value::Integer(i) => (*i as i32) != 0,
-        Value::Number(n) => (*n as i64 as i32) != 0,
+        Value::Number(n) => n.abs() < -(i64::MIN as f64) && (*n as i64 as i32) != 0,
         Value::String(s) => {
             let bytes = s.as_bytes();
             match bytes.first() {
@@ -280,6 +286,47 @@ mod tests {
         let tbl = Value::Table(lua.create_table().unwrap());
         assert!(bool_or_default(Some(&tbl), true));
         assert!(!bool_or_default(Some(&tbl), false));
+        let func = lua.load("return function() end").eval::<Value>().unwrap();
+        assert!(bool_or_default(Some(&func), true));
+        assert!(!bool_or_default(Some(&func), false));
+
+        // A boolean is itself.
+        assert!(bool_or_default(Some(&Value::Boolean(true)), false));
+        assert!(!bool_or_default(Some(&Value::Boolean(false)), true));
+
+        // A number truncates toward zero, then tests the low dword.
+        for (n, want) in [
+            (1.0, true),
+            (-1.0, true),
+            (0.5, false),
+            (-0.9, false),
+            (0.0, false),
+        ] {
+            assert_eq!(bool_or_default(Some(&Value::Number(n)), true), want, "{n}");
+        }
+        assert!(bool_or_default(Some(&Value::Integer(7)), false));
+        assert!(!bool_or_default(Some(&Value::Integer(1 << 32)), true));
+        for n in [4_294_967_296.0, 1e19, f64::INFINITY, f64::NAN] {
+            assert!(!bool_or_default(Some(&Value::Number(n)), true), "{n}");
+        }
+
+        // A string by its first byte, then the four keywords, else the default.
+        for s in ["0", "0.5", "F", "false", "N", "no", "f", "n"] {
+            assert!(!bool_or_default(Some(&st(s)), true), "{s}");
+        }
+        for s in ["1", "9", "10", "T", "true", "Y", "yes", "t", "y"] {
+            assert!(bool_or_default(Some(&st(s)), false), "{s}");
+        }
+        for s in ["off", "OFF", "disabled", "Disabled"] {
+            assert!(!bool_or_default(Some(&st(s)), true), "{s}");
+        }
+        for s in ["on", "On", "enabled", "ENABLED"] {
+            assert!(bool_or_default(Some(&st(s)), false), "{s}");
+        }
+        for s in ["", "maybe", "-1", "offf", "onx"] {
+            assert!(bool_or_default(Some(&st(s)), true), "{s}");
+            assert!(!bool_or_default(Some(&st(s)), false), "{s}");
+        }
     }
 
     #[test]

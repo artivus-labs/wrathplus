@@ -82,6 +82,7 @@ pub(super) fn refresh_live_display(
             &AppliedDisplay,
             Option<&CollisionHeight>,
             &Transform,
+            Has<crate::app_core::session::SelfPlayer>,
         ),
         // A torn-down unit is freed, not rebuilt (`0x464920`).
         (
@@ -90,10 +91,15 @@ pub(super) fn refresh_live_display(
         ),
     >,
     mut swapped: MessageWriter<DisplaySwapped>,
+    // A predicted form cancel shows our native display until the server's form update (`0x721cf0`).
+    prediction: Option<Res<crate::spell::form_cancel::FormCancelPrediction>>,
 ) {
-    for (entity, guid, mut net, store, applied, height, tf) in &mut entities {
+    let predicted = prediction.as_deref().and_then(|p| p.display());
+    for (entity, guid, mut net, store, applied, height, tf, is_self) in &mut entities {
         // ── The display-id swap ──────────────────────────────────────────────────────────────
-        let live = live_display_id(net.kind, store);
+        let live = predicted
+            .filter(|_| is_self)
+            .or_else(|| live_display_id(net.kind, store));
         if let Some(live) = live {
             if applied.0 != Some(live) {
                 info!(

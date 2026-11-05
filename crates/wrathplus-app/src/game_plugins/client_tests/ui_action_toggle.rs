@@ -35,6 +35,21 @@ fn press_with(
     fields: &[(u16, u32)],
     prep: &dyn Fn(&mut World),
 ) -> Vec<ClientCommand> {
+    press_in(lua, display, aura, fields, prep).0
+}
+
+/// [`press_with`], keeping the client and the command stream for a second press.
+fn press_in(
+    lua: &str,
+    display: wrathplus_formats::SpellDisplay,
+    aura: Option<bool>,
+    fields: &[(u16, u32)],
+    prep: &dyn Fn(&mut World),
+) -> (
+    Vec<ClientCommand>,
+    App,
+    crossbeam_channel::Receiver<ClientCommand>,
+) {
     let mut app = crate::game_plugins::schedule_tests::headless_client();
     let (tx, rx) = crossbeam_channel::unbounded();
     app.insert_resource(NetCommands(tx));
@@ -87,6 +102,12 @@ fn press_with(
     prep(world);
     script.run(lua).expect("the script runs");
     world.insert_non_send_resource(script);
+    let sent = apply(&mut app, &rx);
+    (sent, app, rx)
+}
+
+/// Apply the queued script calls and take the spell commands they sent.
+fn apply(app: &mut App, rx: &crossbeam_channel::Receiver<ClientCommand>) -> Vec<ClientCommand> {
     app.world_mut()
         .run_system_once(apply_script_calls)
         .expect("the calls apply as a one-shot system");
@@ -241,4 +262,60 @@ fn the_secure_toggle_holds_a_double_press_for_1500_ms() {
         sent.len() == 1 && cancel(&sent[0]),
         "the CVar off: {sent:?}"
     );
+}
+
+/// `0x802f80`'s form arm: re-pressing the active form (the stance bar's click, `CastSpellByName`'s
+/// form match) predicts its cancel (`player+0x9f4`, `0x721cf0`), so the form reads as none, the
+/// model shows the native display and a second press casts the form again; a form whose row is
+/// not cancelable sends nothing and predicts nothing.
+#[test]
+fn the_active_forms_cancel_is_predicted() {
+    use crate::spell::form_cancel::FormCancelPrediction;
+    const FORM: u8 = 16;
+    let wolf = || wrathplus_formats::SpellDisplay {
+        shapeshift_form: Some(u32::from(FORM)),
+        effect_apply_aura: [0x24, 0, 0],
+        effect_misc_value: [i32::from(FORM), 0, 0],
+        ..Default::default()
+    };
+    let fields = [
+        (Field::UnitBytes2.index(), u32::from(FORM) << 24),
+        (Field::UnitDisplayId.index(), 4613),
+        (Field::UnitNativeDisplayId.index(), 55),
+    ];
+    let row = |flags: u32| {
+        move |world: &mut World| {
+            let row = wrathplus_formats::ShapeshiftForm {
+                flags,
+                creature_display: [4613, 0, 0, 0],
+                ..Default::default()
+            };
+            let mut spells = world.resource_mut::<crate::app_core::state::Spells>();
+            spells.forms.insert(u32::from(FORM), row);
+        }
+    };
+    for lua in [
+        "CastShapeshiftForm(1)",
+        r#"CastSpellByName("Devotion Aura")"#,
+    ] {
+        let (sent, mut app, rx) = press_in(lua, wolf(), None, &fields, &row(0x40));
+        assert!(sent.len() == 1 && cancel(&sent[0]), "{lua}: {sent:?}");
+        let p = app.world().resource::<FormCancelPrediction>();
+        assert!(p.predicted(), "{lua}");
+        assert_eq!(p.form_byte(FORM), 0, "{lua}");
+        assert_eq!(p.display(), Some(55), "{lua}: the native display");
+        app.world_mut()
+            .non_send_resource_mut::<UiScript>()
+            .run(lua)
+            .expect("the script runs");
+        let again = apply(&mut app, &rx);
+        assert!(
+            again.len() == 1 && cast(&again[0]),
+            "{lua}, predicted: no form, so it casts: {again:?}"
+        );
+
+        let (sent, app, _) = press_in(lua, wolf(), None, &fields, &row(0x2));
+        assert!(sent.is_empty(), "{lua}, non-cancelable: {sent:?}");
+        assert!(!app.world().resource::<FormCancelPrediction>().predicted());
+    }
 }

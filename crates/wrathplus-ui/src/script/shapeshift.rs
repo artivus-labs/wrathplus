@@ -59,7 +59,8 @@ impl super::UiScript {
             .collect();
     }
 
-    /// The player's form id, which `GetShapeshiftForm` reads beside the bar.
+    /// The player's form id as `0x71af70` reads it (0 while the app predicts a form cancel), which
+    /// `GetShapeshiftForm` reads beside the bar.
     pub fn set_shapeshift_form_byte(&mut self, form: u8) {
         self.model_mut().shapeshift.form_byte = form;
     }
@@ -101,13 +102,14 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     // `0x53de10` (through `0x53d4b0`): the highest bar slot whose form is active, the same test as
     // GetShapeshiftFormInfo's third return, scanned top down; 0 for none, never nil. With the flag
     // (macro conditionals) a player in no form (byte 0: a paladin aura, a presence) answers 0, and
-    // a form byte with no lit slot answers one past the bar.
+    // a form byte with no lit slot answers one past the bar. The flag is `0x815500`'s boolean read
+    // ([`super::binding_abi::bool_or_default`], default false), so `"1"` sets it and a table not.
     g.set(
         "GetShapeshiftForm",
-        lua.create_function(|lua, flag: Value| {
+        lua.create_function(|lua, args: mlua::Variadic<Value>| {
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             let form = model.shapeshift.form_byte;
-            if super::action::truthy_nonzero(&flag) && form == 0 {
+            if super::binding_abi::bool_or_default(args.first(), false) && form == 0 {
                 return Ok(0);
             }
             let forms = &model.shapeshift.forms;
@@ -212,6 +214,15 @@ mod tests {
         s.set_shapeshift_form_byte(0);
         assert_eq!(s.eval::<i64>("return GetShapeshiftForm()").unwrap(), 1);
         assert_eq!(s.eval::<i64>("return GetShapeshiftForm(1)").unwrap(), 0);
+        // The flag is `0x815500`'s read, not Lua truth: strings parse, a table or 0.5 is false.
+        for flag in ["\"1\"", "\"on\"", "\"yes\"", "true"] {
+            let lua = format!("return GetShapeshiftForm({flag})");
+            assert_eq!(s.eval::<i64>(&lua).unwrap(), 0, "{flag}");
+        }
+        for flag in ["\"0\"", "\"off\"", "\"maybe\"", "{}", "0.5", "nil", "false"] {
+            let lua = format!("return GetShapeshiftForm({flag})");
+            assert_eq!(s.eval::<i64>(&lua).unwrap(), 1, "{flag}");
+        }
         // A form byte and no lit slot: one past the bar.
         let mut unlit = forms();
         unlit[0].active = false;

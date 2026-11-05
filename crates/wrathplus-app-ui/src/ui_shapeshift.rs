@@ -13,6 +13,10 @@
 //! without `MOD_SHAPESHIFT` going up or down (`0x72213f`, `0x727830`), which lights a paladin aura.
 //! A cooldown pushes silently: the cooldown flush fires `UPDATE_SHAPESHIFT_COOLDOWN` just ahead of
 //! `SPELL_UPDATE_COOLDOWN` (`0x53bac0`), so the feed runs before it; an expiry fires nothing.
+//!
+//! A predicted form cancel ([`crate::spell::form_cancel`], `player+0x9f4`) reads as no form, so no
+//! form spell is lit and `GetShapeshiftForm` answers 0 until the server's form byte arrives; its
+//! start and its clear each fire `UPDATE_SHAPESHIFT_FORM` once (`0x721cf0`, `0x6da130`).
 
 use std::time::Instant;
 
@@ -75,6 +79,8 @@ pub(crate) struct StanceMemory {
     pushed: Option<Vec<ShapeshiftFormView>>,
     /// The stance auras the last push saw ([`push_stance`]).
     stance_auras: Vec<u32>,
+    /// Whether the last push fired `UPDATE_SHAPESHIFT_FORM` ([`fire_owed_form_event`]).
+    fired_form: bool,
 }
 
 /// The edge one push crossed, as [`push_forms`] announces it.
@@ -152,12 +158,21 @@ pub(crate) fn push_stance(
         memory.stance_auras = a;
         moved
     });
-    if edge == FormsEdge::Form || form_too || auras_moved {
+    memory.fired_form = edge == FormsEdge::Form || form_too || auras_moved;
+    if memory.fired_form {
         script.fire_event("UPDATE_SHAPESHIFT_FORM", vec![]);
     }
     match edge {
         FormsEdge::Unchanged | FormsEdge::Silent if auras_moved => FormsEdge::Form,
         _ => edge,
+    }
+}
+
+/// The predicted cancel's `UPDATE_SHAPESHIFT_FORM`, at its start (`0x721cf0`) and its clear
+/// (`0x6da130`), unless this frame's push already fired it for the bar's own move: one event each.
+pub(crate) fn fire_owed_form_event(script: &mut UiScript, memory: &StanceMemory, owed: bool) {
+    if owed && !memory.fired_form {
+        script.fire_event("UPDATE_SHAPESHIFT_FORM", vec![]);
     }
 }
 
@@ -211,11 +226,12 @@ fn feed_shapeshift_bar(
     commands: Res<NetCommands>,
     clock: Res<crate::app_core::ui_flags::UiClock>,
     // One tuple for Bevy's 16-param ceiling: the talent modifiers, build 12340's combo points and
-    // the packet auras behind a force-admitted form's `isActive`.
-    (spell_mods, combo, packets): (
+    // the packet auras behind a force-admitted form's `isActive`, and the predicted form cancel.
+    (spell_mods, combo, packets, mut form_cancel): (
         Res<crate::spell::SpellModifiers>,
         Res<crate::net::wrath_combo_points::NativeComboPoints>,
         Option<Res<PacketAuras>>,
+        Option<ResMut<crate::spell::form_cancel::FormCancelPrediction>>,
     ),
     relations: crate::target::RelationInputs,
     mut memory: Local<crate::app_core::vm_memo::VmMemo<StanceMemory>>,
@@ -229,7 +245,9 @@ fn feed_shapeshift_bar(
     };
     let me = self_q.iter().next();
     let store = me.map(|(s, _)| s);
-    let form_byte = store.map(|s| s.0.unit_shapeshift_form()).unwrap_or(0);
+    // As `0x71af70` reads it: no form while a cancel is predicted, so no form spell is lit.
+    let raw = store.map_or(0, |s| s.0.unit_shapeshift_form());
+    let form_byte = form_cancel.as_deref().map_or(raw, |p| p.form_byte(raw));
     script.set_shapeshift_form_byte(form_byte);
     let auras: &[StampedAura] = me
         .and_then(|(_, g)| packets.as_deref()?.by_guid.get(&g.0))
@@ -315,6 +333,10 @@ fn feed_shapeshift_bar(
 
     let count = fresh.len();
     let edge = push_stance(&mut script, memory, fresh, Some(stance_auras));
+    let owed = form_cancel
+        .as_deref_mut()
+        .is_some_and(|p| p.take_announce());
+    fire_owed_form_event(&mut script, memory, owed);
     if edge != FormsEdge::Unchanged {
         debug!("ui_shapeshift: {count} form(s), active form byte {form_byte}, {edge:?} edge");
     }
@@ -323,16 +345,19 @@ fn feed_shapeshift_bar(
 /// `CastShapeshiftForm` (12340 `0x53c0f0`, into the cast entry `0x80da80`), forked on the form id
 /// like the info call: the active form cancels unless `SpellShapeshiftForm.dbc` `flags1 & 0x2`
 /// makes it a silent no-op (`0x4b4963`, warrior stances); a force-admitted spell that is lit (its
-/// aura up) cancels, with no DBC guard since it has no form id. Anything else casts.
+/// aura up) cancels, with no DBC guard since it has no form id. Anything else casts. The form is
+/// the byte as `0x71af70` reads it, and a form's cancel is predicted
+/// ([`crate::spell::form_cancel`]).
 pub(crate) fn cast_form(cast: &mut crate::spell::ScriptCast, spell_id: u32) {
     let crate::spell::ScriptCast {
         targeting,
         ladder,
         recent,
+        form_cancel,
     } = cast;
     let now = std::time::Instant::now();
     let store = targeting.self_store.iter().next();
-    let form_byte = store.map(|s| s.0.unit_shapeshift_form()).unwrap_or(0);
+    let form_byte = form_cancel.form_byte(store.map_or(0, |s| s.0.unit_shapeshift_form()));
     let d = ladder.spells.as_ref().and_then(|s| s.catalog.get(spell_id));
     // The active form's row, for the `0x4b4963` guard (shared with `crate::ui_action::toggle`).
     let row = ladder
@@ -357,11 +382,18 @@ pub(crate) fn cast_form(cast: &mut crate::spell::ScriptCast, spell_id: u32) {
                 crate::ui_action::toggle::press_again_held(recent, spell_id, s, now)
             }) => {}
         Some(true) => {
-            debug!("ui_shapeshift: cancel form aura {spell_id}");
-            let _ = ladder
-                .commands
-                .0
-                .send(ClientCommand::CancelAura { spell_id });
+            // `0x802f80`'s form arm runs ahead of the cancel.
+            let refused = d.zip(store).is_some_and(|(d, me)| {
+                let p = crate::ui_action::toggle::predict_form_cancel(ladder, form_cancel, d, me);
+                p == crate::spell::form_cancel::FormCancel::Refused
+            });
+            if !refused {
+                debug!("ui_shapeshift: cancel form aura {spell_id}");
+                let _ = ladder
+                    .commands
+                    .0
+                    .send(ClientCommand::CancelAura { spell_id });
+            }
         }
         Some(false) => {}
         None => {
