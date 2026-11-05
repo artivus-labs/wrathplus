@@ -344,3 +344,23 @@ fn item_gem_reads_links_and_named_items() {
     s.run(r#"assert(select('#', GetItemGem("item:1:0:3261", 1)) == 0)"#)
         .unwrap();
 }
+
+/// An uncached template is asked for: by IsUsableItem only when held with a player
+/// (`0x51c4e3` before `0x80ac26`), by GetItemCooldown for any id (`0x809046`).
+#[test]
+fn usable_and_cooldown_ask_for_an_uncached_template() {
+    let mut s = script();
+    s.set_container(1, bag(&[(1, 777, 1)]));
+    s.run("IsUsableItem(777) IsUsableItem(778) GetItemCooldown(118)")
+        .unwrap();
+    assert!(
+        s.take_item_stat_asks().is_empty(),
+        "no player, unheld, cached"
+    );
+    s.model_mut().unit_guids.player = 1;
+    s.run("IsUsableItem(777) IsUsableItem(778) GetItemCooldown(779)")
+        .unwrap();
+    let mut asks = s.take_item_stat_asks();
+    asks.sort_unstable();
+    assert_eq!(asks, [777, 779]);
+}

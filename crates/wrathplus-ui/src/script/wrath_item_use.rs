@@ -114,6 +114,30 @@ where
     })
 }
 
+/// [`item_binding`] that first asks for the item's template when it is uncached and `asks`
+/// allows: `0x67ca30` with the request callback `0x80abe0`.
+fn asking_binding<A, F>(lua: &Lua, asks: A, answer: F) -> mlua::Result<mlua::Function>
+where
+    A: Fn(&Model, u32) -> bool + Send + 'static,
+    F: Fn(&Lua, &Model, &SpellUse, u32, &MultiValue) -> mlua::Result<MultiValue> + Send + 'static,
+{
+    lua.create_function(move |lua, args: MultiValue| {
+        let (item, ask) = {
+            let model = lua.app_data_ref::<Model>().expect("model app_data");
+            let item = item_of(lua, &model, args.front());
+            let uncached = item != 0 && !model.item_templates.contains_key(&item);
+            (item, uncached && asks(&model, item))
+        };
+        if ask {
+            let mut model = lua.app_data_mut::<Model>().expect("model app_data");
+            model.item_stat_asks.insert(item);
+        }
+        let model = lua.app_data_ref::<Model>().expect("model app_data");
+        let state = lua.app_data_ref::<SpellUse>().expect("spell use app_data");
+        answer(lua, &model, &state, item, &args)
+    })
+}
+
 fn one(v: Value) -> mlua::Result<MultiValue> {
     Ok(MultiValue::from_vec(vec![v]))
 }
@@ -223,10 +247,14 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
     // IsUsableItem(item) (`0x51c450`) → usable, notEnoughMana, 1 or nil each: a carried or worn
-    // item ([`ItemUseView`], the walk with the item), less [`arena_refuses`].
+    // item ([`ItemUseView`], the walk with the item), less [`arena_refuses`]. A held item's
+    // uncached template is asked for: with a player and a count (`0x51c4e3`), `0x80ac10` passes
+    // the request callback (`0x80ac26`).
+    let held =
+        |model: &Model, item| model.unit_guids.player != 0 && item_count(model, item, false) != 0;
     g.set(
         "IsUsableItem",
-        item_binding(lua, |_, model, state, item, _| {
+        asking_binding(lua, held, |_, model, state, item, _| {
             let v = state
                 .items
                 .get(&item)
@@ -263,28 +291,33 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     )?;
     // GetItemCooldown(item) (`0x510fc0`) → start, duration, enable, in seconds (`* 0.001`,
     // `0x9e56b0`). Without an item or a use spell, (0, 0, 0); with one, its cooldown (`0x807980`)
-    // or (0, 0, 1). The app prices every cached template with a use spell.
+    // or (0, 0, 1). The app prices every cached template with a use spell. An uncached template
+    // is asked for: `0x809030` passes the request callback (`0x809046`) for any nonzero id.
     g.set(
         "GetItemCooldown",
-        item_binding(lua, |lua, _, state, item, _| {
-            let spell = use_spell(state, item).filter(|&s| (s as i32) > 0);
-            let now = super::clock::now(lua);
-            let cd = state
-                .items
-                .get(&item)
-                .and_then(|v| v.cooldown)
-                .map(|(s, d, e)| (s as f64 / 1000.0, f64::from(d) / 1000.0, e));
-            let (start, duration, enable) = match (spell, cd) {
-                (None, _) => (0.0, 0.0, 0),
-                (Some(_), Some((s, d, e))) if s + d > now || !e => (s, d, i64::from(e)),
-                (Some(_), _) => (0.0, 0.0, 1),
-            };
-            Ok(MultiValue::from_vec(vec![
-                Value::Number(start),
-                Value::Number(duration),
-                Value::Integer(enable),
-            ]))
-        })?,
+        asking_binding(
+            lua,
+            |_, _| true,
+            |lua, _, state, item, _| {
+                let spell = use_spell(state, item).filter(|&s| (s as i32) > 0);
+                let now = super::clock::now(lua);
+                let cd = state
+                    .items
+                    .get(&item)
+                    .and_then(|v| v.cooldown)
+                    .map(|(s, d, e)| (s as f64 / 1000.0, f64::from(d) / 1000.0, e));
+                let (start, duration, enable) = match (spell, cd) {
+                    (None, _) => (0.0, 0.0, 0),
+                    (Some(_), Some((s, d, e))) if s + d > now || !e => (s, d, i64::from(e)),
+                    (Some(_), _) => (0.0, 0.0, 1),
+                };
+                Ok(MultiValue::from_vec(vec![
+                    Value::Number(start),
+                    Value::Number(duration),
+                    Value::Integer(enable),
+                ]))
+            },
+        )?,
     )?;
     // GetItemCount(item[, includeBank[, includeCharges]]) (`0x51c2e0`) → the carried count
     // ([`get_item_count`]); both flags read through `GetBoolOrDefault` (`0x51c2f1`, `0x51c2fd`).
