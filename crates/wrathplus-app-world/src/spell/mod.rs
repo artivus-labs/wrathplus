@@ -25,6 +25,7 @@ mod mods;
 mod native_control;
 pub mod native_failure;
 pub(crate) mod net;
+pub use net::LastItemCast;
 mod range_units;
 pub mod reagents;
 pub mod secure_toggle;
@@ -47,7 +48,7 @@ pub use inflight::{
 #[cfg(any(test, feature = "test-support"))]
 pub use mods::OP_CAST_TIME;
 pub use mods::{ModsDiff, SpellModifiers, SpellsCastTime, OP_COST, OP_GCD, OP_RADIUS};
-pub use mods::{OP_COOLDOWN, OP_RANGE};
+pub use mods::{SpellMod, OP_COOLDOWN, OP_RANGE};
 pub use range_units::{RangeUnits, DEFAULT_REACH};
 // `TargetingWants` is exported for the ground reticle, which draws for the location word alone.
 pub use targeting::{

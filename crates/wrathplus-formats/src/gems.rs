@@ -16,6 +16,10 @@ const GEM_PROPERTIES: &str = "DBFilesClient\\GemProperties.dbc";
 const ENCHANT_FIELDS: usize = 38;
 /// `m_src_itemID`, the gem the enchant comes from.
 const ENCHANT_GEM: usize = 33;
+/// `Effect[3]` and `EffectArg[3]`; effect 7 casts the arg's spell on use.
+const ENCHANT_EFFECT: usize = 2;
+const ENCHANT_ARG: usize = 11;
+const USE_SPELL: u32 = 7;
 const GEM_PROPERTIES_FIELDS: usize = 5;
 const GEM_COLOR: usize = 4;
 
@@ -29,6 +33,8 @@ pub const SOCKET_COLOR_BLUE: u32 = 8;
 pub struct GemCatalog {
     gems: HashMap<u32, u32>,
     colors: HashMap<u32, u32>,
+    /// The use-spell enchants: id → `(EffectArg, Charges)` of the first `Effect` 7.
+    use_spells: HashMap<u32, (u32, i32)>,
 }
 
 impl GemCatalog {
@@ -42,9 +48,25 @@ impl GemCatalog {
         self.colors.get(&gem_properties).copied()
     }
 
+    /// Every `(enchant, gem item)` pair.
+    pub fn gem_enchants(&self) -> impl Iterator<Item = (u32, u32)> + '_ {
+        self.gems.iter().map(|(&e, &g)| (e, g))
+    }
+
+    /// A use-spell enchant (`Effect` 7, `ITEM_ENCHANTMENT_TYPE_USE_SPELL`): its spell
+    /// (`EffectArg`, `+0x2c`) and the row's `Charges` (`+0x4`), as `0x707c60` and `0x706f40` read
+    /// them.
+    pub fn use_spell(&self, enchant_id: u32) -> Option<(u32, i32)> {
+        self.use_spells.get(&enchant_id).copied()
+    }
+
     /// Build from explicit maps, for tests.
     pub fn from_rows(gems: HashMap<u32, u32>, colors: HashMap<u32, u32>) -> Self {
-        GemCatalog { gems, colors }
+        GemCatalog {
+            gems,
+            colors,
+            use_spells: HashMap::new(),
+        }
     }
 }
 
@@ -69,6 +91,18 @@ pub fn parse_gem_catalog(enchants: &[u8], gem_properties: &[u8]) -> Result<GemCa
         .filter_map(|r| Some((u32_at(r, 0)?, u32_at(r, ENCHANT_GEM)?)))
         .filter(|&(_, gem)| gem != 0)
         .collect();
+    let use_spells = rs
+        .records()
+        .iter()
+        .filter_map(|r| {
+            // The first effect 7 with a spell (`0x706ec0`: `[+0x2c] != 0 && [+8] == 7`).
+            let arg = |i| u32_at(r, ENCHANT_ARG + i).unwrap_or(0);
+            let effect = (0..3)
+                .find(|&i| u32_at(r, ENCHANT_EFFECT + i) == Some(USE_SPELL) && arg(i) != 0)?;
+            let spell = arg(effect);
+            Some((u32_at(r, 0)?, (spell, u32_at(r, 1)? as i32)))
+        })
+        .collect();
     let rs = parse(
         gem_properties,
         raw_schema("GemProperties", GEM_PROPERTIES_FIELDS),
@@ -79,7 +113,11 @@ pub fn parse_gem_catalog(enchants: &[u8], gem_properties: &[u8]) -> Result<GemCa
         .iter()
         .filter_map(|r| Some((u32_at(r, 0)?, u32_at(r, GEM_COLOR)?)))
         .collect();
-    Ok(GemCatalog { gems, colors })
+    Ok(GemCatalog {
+        gems,
+        colors,
+        use_spells,
+    })
 }
 
 pub fn load_gem_catalog(chain: &mut Chain) -> Result<GemCatalog> {
@@ -118,6 +156,10 @@ mod tests {
         gem_enchant[ENCHANT_GEM] = 40_111;
         let mut plain = vec![0; ENCHANT_FIELDS];
         plain[0] = 1_900;
+        // A tinker: charges -1, effect 7 in the second slot casting 54_758.
+        plain[1] = (-1i32) as u32;
+        plain[ENCHANT_EFFECT + 1] = USE_SPELL;
+        plain[ENCHANT_ARG + 1] = 54_758;
         let props = vec![
             vec![25, 3_312, 0, 0, SOCKET_COLOR_RED],
             vec![26, 0, 0, 0, 10],
@@ -125,9 +167,15 @@ mod tests {
         let cat = parse_gem_catalog(&wdbc(&[gem_enchant, plain]), &wdbc(&props)).unwrap();
         assert_eq!(cat.gem_of_enchant(3_312), Some(40_111));
         assert_eq!(cat.gem_of_enchant(1_900), None, "an enchant no gem grants");
+        assert_eq!(cat.use_spell(1_900), Some((54_758, -1)));
+        assert_eq!(cat.use_spell(3_312), None, "a gem enchant casts nothing");
         assert_eq!(cat.color(25), Some(SOCKET_COLOR_RED));
         assert_eq!(cat.color(26), Some(SOCKET_COLOR_RED | SOCKET_COLOR_BLUE));
         assert_eq!(cat.color(27), None);
+        assert_eq!(
+            cat.gem_enchants().collect::<Vec<_>>(),
+            vec![(3_312, 40_111)]
+        );
     }
 
     #[test]

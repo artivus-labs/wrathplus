@@ -116,6 +116,12 @@ impl ItemSubClassCatalog {
             .map(|(_, _, name)| name.as_str())
     }
 
+    /// Every `ItemSubClassMask.dbc` row with a name, `(class, subclass mask, name)`, in file
+    /// order: the third table `IsEquippedItemType`'s class form (`0x517740`) matches.
+    pub fn mask_groups(&self) -> &[(u32, u32, String)] {
+        &self.mask_groups
+    }
+
     /// The catalog's keys for `class` whose subclass bit is set in `mask`, in file order.
     fn masked(&self, class: u32, mask: u32) -> impl Iterator<Item = (u32, u32)> + '_ {
         self.order

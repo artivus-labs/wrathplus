@@ -45,6 +45,9 @@ struct PendingCastState {
     /// (`0x6e5026`) and discriminates at the gate instead; a ranged shot is recorded here without
     /// guarding, so the `modalNextSpell` test (`0x6e7408`) still matches it.
     guards: bool,
+    /// The item an item use was sent from (`CMSG_USE_ITEM`'s guid): the spell object the client
+    /// creates at the send carries it, which `IsCurrentItem` (`0x805fc0`) reads until the reply.
+    item: Option<u64>,
 }
 
 impl PendingCast {
@@ -78,18 +81,27 @@ impl PendingCast {
             spell_id,
             deadline: now + SEND_PROVISIONAL,
             guards,
+            item: None,
         });
     }
 
     /// Arm on an item use: the client's item use (`0x5d9258`) goes through `TryCast 0x6e4b60`
     /// via `0x6e5a90`, so it writes the same inflight id and meets the same gate. Only the
     /// deadline differs.
-    pub(crate) fn arm_item(&mut self, spell_id: u32, now: Instant) {
+    pub(crate) fn arm_item(&mut self, spell_id: u32, item_guid: u64, now: Instant) {
         self.0 = Some(PendingCastState {
             spell_id,
             deadline: now + ITEM_SEND_PROVISIONAL,
             guards: true,
+            item: Some(item_guid),
         });
+    }
+
+    /// The outstanding item use, `(spell, item guid)`, inside its deadline: cleared with the
+    /// record by the reply ([`Self::clear_if`]), as the reference frees its spell object.
+    pub fn item_use(&self, now: Instant) -> Option<(u32, u64)> {
+        let p = self.0.as_ref().filter(|p| now < p.deadline)?;
+        Some((p.spell_id, p.item?))
     }
 
     /// Tighten the deadline to the server's real cast time once `SMSG_SPELL_START` names it.
@@ -450,6 +462,23 @@ mod tests {
             Some(24322),
             "the wire edge arms the mirror regardless of what the bar does with it"
         );
+    }
+
+    /// An item use carries its item from the send until the reply clears the record (`IsCurrentItem`
+    /// `0x805fc0`); a spell cast carries none, and a lapsed deadline frees it too.
+    #[test]
+    fn an_item_use_carries_its_item_until_the_reply() {
+        let t0 = Instant::now();
+        let mut p = PendingCast::default();
+        p.arm_item(439, 0x4000_0000_0000_0042, t0);
+        assert_eq!(p.item_use(t0), Some((439, 0x4000_0000_0000_0042)));
+        assert_eq!(p.item_use(t0 + ITEM_SEND_PROVISIONAL), None, "lapsed");
+        p.clear_if(133);
+        assert!(p.item_use(t0).is_some(), "another spell's reply leaves it");
+        p.clear_if(439);
+        assert_eq!(p.item_use(t0), None);
+        p.arm(FIREBALL, t0, true);
+        assert_eq!(p.item_use(t0), None, "a spell cast is from no item");
     }
 
     #[test]

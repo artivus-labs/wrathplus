@@ -21,6 +21,14 @@ pub struct SpellInfoView {
     pub passive: bool,
     /// Optional trade link, the second GetSpellLink return used by SpellBookFrame.lua:372.
     pub trade_skill_link: Option<String>,
+    /// `Effect[0]` is 78, ATTACK: `IsAttackSpell` (`0x541420`).
+    pub attack: bool,
+    /// The classifier `0x7fe1b0`: 1 aimed at friends, 2 at enemies, 0 neither.
+    pub polarity: u8,
+    /// The set `Reagent[8]` with their `ReagentCount[8]`: `IsConsumableSpell`, `GetSpellCount`.
+    pub reagents: Vec<(u32, u32)>,
+    /// What `IsSpellInRange`'s target gate and range read ([`super::wrath_spell_range`]).
+    pub range: super::SpellRangeFacts,
 }
 
 impl super::UiScript {

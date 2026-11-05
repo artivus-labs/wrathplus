@@ -32,7 +32,7 @@ impl UiScript {
 
 // Native optional flag helper 0x815500: boolean, number, or numeric string; other types keep
 // default zero. This is not ordinary Lua truthiness (0 and "0" both select the player).
-fn pet_flag(lua: &Lua, value: Value) -> mlua::Result<bool> {
+pub(crate) fn pet_flag(lua: &Lua, value: Value) -> mlua::Result<bool> {
     if let Value::Boolean(b) = value {
         return Ok(b);
     }

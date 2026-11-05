@@ -29,6 +29,7 @@ use crate::net::{GuidIndex, NetCommands, NetHandlerApp};
 /// Register the spell's handlers; called from [`super::SpellPlugin`].
 pub(super) fn register(app: &mut App) {
     use SessionEventKind as K;
+    app.init_resource::<LastItemCast>();
     app.net_handler(K::SpellBook, on_spell_book)
         .net_handler(K::ActionButtons, on_action_buttons)
         .net_handler(K::SpellLearned, on_spell_learned)
@@ -94,7 +95,13 @@ pub(crate) struct Scene<'w, 's> {
     text: MessageWriter<'w, crate::combat_text::CombatTextSpawn>,
     go_lid: MessageWriter<'w, crate::go_anim::GoLidOpen>,
     sheaths: MessageWriter<'w, crate::creature_anim::SheathRequest>,
+    last_item_cast: ResMut<'w, LastItemCast>,
 }
+
+/// The player's last cast start, `(spell, item guid)` when our `CMSG_USE_ITEM` sent it: what
+/// `IsCurrentItem` (`0x805fc0`) reads through the cast bar or channel of that spell.
+#[derive(Resource, Default, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LastItemCast(pub Option<(u32, u64)>);
 
 /// `SMSG_INITIAL_SPELLS`, once at login, into the action store the UI feed reads.
 fn on_spell_book(In(ev): In<SessionEvent>, mut l: Lifecycle) {
@@ -233,6 +240,16 @@ fn on_spell_start(In(ev): In<SessionEvent>, mut l: Lifecycle, mut sc: Scene) {
         cast_count,
     } = ev
     {
+        if l.self_guid.0 == Some(caster) {
+            // The item comes from our own `CMSG_USE_ITEM` send, still pending for this spell.
+            let now = l
+                .pending
+                .item_use(Instant::now())
+                .filter(|&(spell, _)| spell == spell_id);
+            if sc.last_item_cast.0 != now {
+                sc.last_item_cast.0 = now;
+            }
+        }
         if let Some(cast_count) = cast_count {
             l.unit_casts.push(super::unit_cast::CastEdge::Start {
                 caster,

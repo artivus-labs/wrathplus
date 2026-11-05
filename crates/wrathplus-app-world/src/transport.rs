@@ -32,6 +32,11 @@ use wrathplus_world::ride_frame::RideFrame;
 use wrathplus_world::vis_chain::VisChainOnly;
 use wrathplus_world::world_map::CurrentMap;
 
+/// The transport pose chain (decks ticked, riders composed and grounded), after the net drain and
+/// before input: a reader of this frame's unit positions orders `.after(TransportPose)`.
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TransportPose;
+
 pub struct TransportPlugin;
 
 impl Plugin for TransportPlugin {
@@ -60,6 +65,7 @@ impl Plugin for TransportPlugin {
                     ground_deck_riders,
                 )
                     .chain()
+                    .in_set(TransportPose)
                     .after(wrathplus_world::schedule::WorldStage::Net)
                     .before(wrathplus_world::schedule::WorldStage::Input),
             )

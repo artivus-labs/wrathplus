@@ -508,9 +508,7 @@ pub(crate) fn feed_item_stats(
             })
             .collect()
     };
-    for (id, view) in views {
-        script.set_item_template(id, view);
-    }
+    crate::ui_action::spell_use::push_templates(&mut script, views, &items);
 }
 
 /// The player state the tooltip's red requirement lines check: level, class, race, skills,

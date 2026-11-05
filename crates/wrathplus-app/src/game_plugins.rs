@@ -759,11 +759,15 @@ pub(crate) mod schedule_tests {
     ///   the object stores it reads only.
     /// - the vehicle UI feed (`ui_vehicle::feed_vehicles`) against the camera-pose load: the feed
     ///   reads only `Player::mover_pitch`, which the load never writes.
+    /// - the spell and item use feed (`ui_action::spell_use::feed_spell_use`) against the booth's
+    ///   billboard facing and the quest markers' seat bake over `Transform`: the range test reads
+    ///   unit bodies, never a booth card or a marker seat; and against the camera-pose load over
+    ///   `Player`, as `feed_action_state` is: it reads the movement flags the load never writes.
     ///
     /// Raising the ceiling is a claim that a new undeclared order is acceptable: make it with the
     /// reason read off the dump, or declare the order (`.after`, a set, a `chain`). A resource
     /// that commutes by construction belongs in [`Classes`].
-    const UPDATE_ACTIONABLE_CEILING: usize = 4_577;
+    const UPDATE_ACTIONABLE_CEILING: usize = 4_502;
     const UPDATE_ACTIONABLE_SLACK: usize = 40;
 
     fn ratchet(what: &str, n: usize, ceiling: usize, slack: usize) {

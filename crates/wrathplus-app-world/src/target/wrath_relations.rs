@@ -273,14 +273,24 @@ pub(super) fn attack(
     }
 }
 
-pub(super) fn assist(actor: &ObjectStore, target: &ObjectStore, toward: u8, ctx: Context) -> bool {
+/// `CanAssist` (`0x7293d0`) with its third argument: `lenient` (1) skips the immune-to-PC/NPC test against the
+/// actor's controller bit and the non-PvP refusal of a player-controlled actor (`0x7293f0`
+/// branch), so only the not-selectable bit, the reaction, the duel and FFA arms and the
+/// sanctuary arm decide.
+pub(super) fn assist_in(
+    actor: &ObjectStore,
+    target: &ObjectStore,
+    toward: u8,
+    ctx: Context,
+    lenient: bool,
+) -> bool {
     let actor_creature_flags = ctx.creature_flags(actor);
     let (apc, tpc) = (
         actor.0.unit_flags() & PC != 0,
         target.0.unit_flags() & PC != 0,
     );
     let t = target.0.unit_flags();
-    if t & (1 << 25) != 0 || t & if apc { 0x100 } else { 0x200 } != 0 {
+    if t & (1 << 25) != 0 || (!lenient && t & if apc { 0x100 } else { 0x200 } != 0) {
         return false;
     }
     if toward < 4 && actor_creature_flags & RAID_UNIT == 0 {
@@ -305,12 +315,20 @@ pub(super) fn assist(actor: &ObjectStore, target: &ObjectStore, toward: u8, ctx:
             && !target.0.unit_is_in_sanctuary()
             && target.0.unit_is_pvp());
     }
-    !apc || target.0.unit_is_pvp() || ctx.creature_flags(target) & (0x1000 | RAID_UNIT) != 0
+    lenient
+        || !apc
+        || target.0.unit_is_pvp()
+        || ctx.creature_flags(target) & (0x1000 | RAID_UNIT) != 0
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The strict mode every caller but the range test asks.
+    fn assist(actor: &ObjectStore, target: &ObjectStore, toward: u8, ctx: Context) -> bool {
+        assist_in(actor, target, toward, ctx, false)
+    }
     use crate::names::{CreatureRecord, NameCache};
     use std::collections::HashMap;
     use wrathplus_protocol::types::{Field, ObjectFields};
@@ -410,6 +428,9 @@ mod tests {
             Context::none()
         ));
         assert!(assist(&actor, &unit(false, 0, 1, 0), 4, Context::none()));
+        // Lenient (`0x7293d0`'s third argument 1): a non-PvP creature passes for a PvP actor.
+        assert!(assist_in(&actor, &target, 4, Context::none(), true));
+        assert!(!assist(&actor, &target, 4, Context::none()));
         let names = names(0x1000);
         assert!(!assist(
             &actor,

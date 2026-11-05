@@ -111,7 +111,7 @@ pub fn corpse_friendly(
 }
 
 /// `CanAssist 007293d0` (Lua `UnitCanAssist`) from the local player: 12340's gate
-/// ([`super::wrath_relations::assist`]), on the player's reaction toward the unit and `ctx`'s live
+/// ([`super::wrath_relations::assist_in`] strict), on the player's reaction toward the unit and `ctx`'s live
 /// owner lookup and creature metadata.
 pub fn can_assist(
     store: Option<&ObjectStore>,
@@ -119,6 +119,18 @@ pub fn can_assist(
     reputations: &Reputations,
     self_store: Option<&ObjectStore>,
     ctx: Context,
+) -> bool {
+    can_assist_in(store, factions, reputations, self_store, ctx, false)
+}
+
+/// [`can_assist`] with `0x7293d0`'s third argument ([`super::wrath_relations::assist_in`]).
+pub fn can_assist_in(
+    store: Option<&ObjectStore>,
+    factions: Option<&Factions>,
+    reputations: &Reputations,
+    self_store: Option<&ObjectStore>,
+    ctx: Context,
+    lenient: bool,
 ) -> bool {
     let (Some(store), Some(actor)) = (store, self_store) else {
         return false;
@@ -131,7 +143,7 @@ pub fn can_assist(
         self_store,
         ctx,
     );
-    super::wrath_relations::assist(actor, store, toward, ctx)
+    super::wrath_relations::assist_in(actor, store, toward, ctx, lenient)
 }
 
 #[cfg(test)]
