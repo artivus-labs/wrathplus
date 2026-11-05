@@ -2,11 +2,12 @@
 //! `IsAttackSpell`, `IsAutoRepeatSpell`, `IsHarmfulSpell`, `IsHelpfulSpell`, `IsConsumableSpell`,
 //! `GetSpellCount` and `FindSpellBookSlotByID`.
 //!
-//! All but the last read their spell through the shared reader `0x540670`: a `(slot, bookType)`
-//! pair, or a name with an optional rank or unit. The static answers come from the Spell.dbc
-//! catalog ([`super::SpellInfoView`]); usability from [`SpellUseView`], which the app computes
-//! with the action bar's walk for each book spell (the pet as caster for the pet's book); range
-//! from [`super::wrath_spell_range`] over the units the app pushes.
+//! All but the last read their spell through the shared reader `0x540670`
+//! ([`super::spell_arg`]): a `(slot, bookType)` pair, or a name with an optional rank or unit.
+//! The static answers come from the Spell.dbc catalog ([`super::SpellInfoView`]); usability
+//! from [`SpellUseView`], which the app computes with the action bar's walk for each book spell
+//! (the pet as caster for the pet's book); range from [`super::wrath_spell_range`] over the
+//! units the app pushes.
 
 use std::collections::HashMap;
 
@@ -110,113 +111,22 @@ pub(crate) struct SpellArg {
     pub(crate) next: usize,
 }
 
-fn is_number(lua: &Lua, v: Option<&Value>) -> bool {
-    v.is_some_and(|v| lua.coerce_number(v.clone()).ok().flatten().is_some())
-}
-
-fn as_string(lua: &Lua, v: Option<&Value>) -> Option<String> {
-    match v? {
-        Value::String(_) | Value::Integer(_) | Value::Number(_) => lua
-            .coerce_string(v?.clone())
-            .ok()
-            .flatten()
-            .map(|s| s.to_string_lossy()),
-        _ => None,
-    }
-}
-
-/// `0x540670`. `(slot, bookType)` when the first argument is a number and the second a string or
-/// number: the slot less one must fall in `[0, 0x400)` (`0x5406a5`..`0x5406c2`), else
-/// `"<verb>(): Invalid spell slot"` raises, and `"pet"` (`0x9ff164`) selects the pet's book.
-/// Otherwise a string names the spell: with a second string that is not a unit token, that is
-/// its rank (`0x5401d0`); else the name may carry `!` and `(Rank)` (`0x540200`), and a unit, if
-/// any, is the second argument. A name that misses, or names a spell outside its book
-/// (`0x53b4e0`), answers `Ok(None)`: the bindings then return nothing.
-///
-/// Inferred: the name map (`0x53f5e0`) is read as the two books, the player's first, and a name
-/// without a rank as its last (highest) rank in book order.
+/// `0x540670` ([`super::spell_arg::spell_arg_typed`]) as the spell its slot holds: a name that
+/// resolves to no slot answers `Ok(None)`, and the bindings then return nothing.
 pub(crate) fn spell_arg(
     lua: &Lua,
     model: &Model,
     args: &MultiValue,
     verb: &str,
 ) -> mlua::Result<Option<SpellArg>> {
-    let (a1, a2) = (args.front(), args.get(1));
-    let a2_string = as_string(lua, a2);
-    if is_number(lua, a1) && a2_string.is_some() {
-        let n = lua
-            .coerce_number(a1.cloned().unwrap_or(Value::Nil))?
-            .unwrap_or(0.0);
-        let index = (n - 1.0).trunc();
-        if !(0.0..1024.0).contains(&index) {
-            return Err(mlua::Error::runtime(format!(
-                "{verb}(): Invalid spell slot"
-            )));
-        }
-        let pet = a2_string.is_some_and(|b| b.eq_ignore_ascii_case("pet"));
-        let book = if pet {
-            &model.pet_book.slots
-        } else {
-            &model.spellbook.slots
-        };
-        let spell_id = book.get(index as usize).map_or(0, |s| s.spell_id);
-        return Ok(Some(SpellArg {
-            spell_id,
-            pet,
-            next: 3,
-        }));
-    }
-    let Some(name) = as_string(lua, a1) else {
-        return Err(mlua::Error::runtime(format!(
-            "{verb}(): Invalid spell slot"
-        )));
-    };
-    let rank = a2_string.filter(|s| model.unit_guids.resolve(s).is_err());
-    let found = match &rank {
-        Some(rank) => lookup(model, &name, Some(rank)).map(|f| (f, 3)),
-        None => by_name(model, &name).map(|f| (f, 2)),
-    };
-    Ok(found.map(|((spell_id, pet), next)| SpellArg {
-        spell_id,
-        pet,
+    let nil = Value::Nil;
+    let (a1, a2) = (args.front().unwrap_or(&nil), args.get(1).unwrap_or(&nil));
+    let at = super::spell_arg::spell_arg_typed(lua, model, a1, a2, verb, true)?;
+    Ok(at.map(|(id, book, next)| SpellArg {
+        spell_id: super::spellbook::book_slot(model, id, &book).map_or(0, |s| s.spell_id),
+        pet: super::spellbook::is_pet_book(&book),
         next,
     }))
-}
-
-/// `0x540200`: the whole string (less a leading `!`) as a name, else the text before the first
-/// `(` as the name, uncut, and up to the `)` as the rank.
-fn by_name(model: &Model, text: &str) -> Option<(u32, bool)> {
-    let text = text.strip_prefix('!').unwrap_or(text);
-    lookup(model, text, None).or_else(|| {
-        let (name, rest) = text.split_once('(')?;
-        let rank = rest.split(')').next().unwrap_or("");
-        lookup(model, name, Some(rank))
-    })
-}
-
-/// `0x53f5e0` then `0x53b4e0`: a known spell by name and rank, both case-insensitive; an empty
-/// rank is no rank.
-fn lookup(model: &Model, name: &str, rank: Option<&str>) -> Option<(u32, bool)> {
-    if name.is_empty() {
-        return None;
-    }
-    let rank = rank.filter(|r| !r.is_empty());
-    let find = |slots: &[super::SpellSlotView]| {
-        slots
-            .iter()
-            .rfind(|s| {
-                s.name.eq_ignore_ascii_case(name)
-                    && rank.is_none_or(|r| {
-                        s.rank
-                            .as_deref()
-                            .is_some_and(|have| have.eq_ignore_ascii_case(r))
-                    })
-            })
-            .map(|s| s.spell_id)
-    };
-    find(&model.spellbook.slots)
-        .map(|id| (id, false))
-        .or_else(|| find(&model.pet_book.slots).map(|id| (id, true)))
 }
 
 /// A binding over `0x540670`: nothing when the name misses, else `answer`'s values.

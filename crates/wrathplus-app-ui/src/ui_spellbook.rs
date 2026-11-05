@@ -564,7 +564,7 @@ mod tests {
                 local n,r,i,c,f,p,t,min,max = GetSpellInfo(42)
                 assert(n == 'Unlearned' and r == 'Rank 2' and i == 'Interface\\Icons\\Test')
                 assert(c == 27 and f and p == -2 and t == 1500 and min == 5 and max == 30)
-                assert(IsPassiveSpell(42) and GetSpellInfo('Unlearned') == nil)
+                assert(select('#', IsPassiveSpell(42)) == 0 and GetSpellInfo('Unlearned') == nil)
             "#,
                 )
                 .unwrap();

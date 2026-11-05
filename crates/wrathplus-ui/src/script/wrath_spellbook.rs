@@ -7,7 +7,7 @@
 
 use mlua::{Lua, MultiValue, Value};
 
-use super::spellbook::{book_slot, spell_slot_args};
+use super::spellbook::book_slot;
 use super::{Model, UiScript};
 
 impl UiScript {
@@ -83,20 +83,12 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             Ok(full)
         })?,
     )?;
-    g.set(
-        "IsSelectedSpell",
-        lua.create_function(|lua, (id, book_type): (Value, Value)| {
-            let (id, book_type) = spell_slot_args(id, book_type, "IsSelectedSpell")?;
-            let model = lua.app_data_ref::<Model>().expect("model app_data");
-            Ok(
-                if book_slot(&model, id, &book_type).is_some_and(|s| s.current) {
-                    Value::Integer(1)
-                } else {
-                    Value::Nil
-                },
-            )
-        })?,
-    )?;
+    super::spell_arg::set_slot_verb(lua, "IsSelectedSpell", |lua, id, book_type| {
+        let model = lua.app_data_ref::<Model>().expect("model app_data");
+        Ok(super::binding_abi::flag(
+            book_slot(&model, id, book_type).is_some_and(|s| s.current),
+        ))
+    })?;
     Ok(())
 }
 

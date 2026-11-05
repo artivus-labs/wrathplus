@@ -170,6 +170,7 @@ mod slash;
 mod slider;
 mod social;
 mod sound;
+mod spell_arg;
 mod spell_info;
 mod spellbook;
 mod stable;
