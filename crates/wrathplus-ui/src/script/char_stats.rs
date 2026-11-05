@@ -360,7 +360,7 @@ pub(super) fn recompute_inventory_alerts(model: &mut Model) {
     model.inventory_alerts = alerts;
 }
 
-pub(super) fn with_unit_stats<T>(
+fn with_unit_stats<T>(
     lua: &Lua,
     token: &Option<String>,
     f: impl FnOnce(&UnitCombatStats) -> T,
@@ -1117,6 +1117,18 @@ mod tests {
             "local a,b,c=UnitAttackPower('player') return a,b,c,UnitRangedAttackPower('player')";
         let got = s.eval::<(i64, i64, i64, i64, i64, i64)>(both).unwrap();
         assert_eq!(got, (86, 33, -11, 78, 0, -4));
+        // Each skill rating adds round(bonus - 0.5), ties to even: CR 0 1.5 is 1, CR 1 2.0 is 2,
+        // CR 20 3.0 is 2, CR 21 1.0 is 0, CR 22 2.6 is 2.
+        let mut paper = crate::script::WrathPaperDollStats::default();
+        for (cr, bonus) in [(0, 1.5), (1, 2.0), (20, 3.0), (21, 1.0), (22, 2.6)] {
+            paper.conversions.rating_bonus[cr] = bonus;
+        }
+        s.set_wrath_paperdoll_stats(paper);
+        let skills =
+            "local a,b,c,d=UnitAttackBothHands('player') local e,f=UnitRangedAttack('player') \
+            return {a,b,c,d,e,f,UnitDefense('player')}";
+        let got = s.eval::<Vec<i64>>(skills).unwrap();
+        assert_eq!(got, [25, 5, 20, 1, 18, 3, 55, 6]);
         assert_eq!(
             s.eval::<(i64, i64, i64)>(r#"return UnitAttackPower("target")"#)
                 .unwrap(),
