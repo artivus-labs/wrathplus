@@ -249,7 +249,9 @@ impl Plugin for UiCharStatePlugin {
             (
                 feed_char_state
                     .in_set(UiFeed)
-                    .after(crate::app_core::schedule::UnitFeed),
+                    .after(crate::app_core::schedule::UnitFeed)
+                    // The ignore list `IsIgnored` reads lands first.
+                    .after(crate::ui_social::feed::feed_social),
                 drain_char_state.after(UiInput),
             ),
         );
