@@ -30,6 +30,12 @@ pub(crate) fn number_arg(lua: &Lua, v: Value, usage: &'static str) -> mlua::Resu
     }
 }
 
+/// `0x5e7c00`'s number leg, an inventory verb's 0-based slot: [`ftol`] less one, wrapping; any
+/// other argument 0, the head (the slot-name leg, `0xad4350`, is not read).
+pub(crate) fn inventory_slot0(lua: &Lua, v: Value) -> mlua::Result<i32> {
+    Ok(lua.coerce_number(v)?.map_or(0, |n| ftol(n).wrapping_sub(1)))
+}
+
 /// Build 12340's `__ftol2_sse` (`0x88b9c0`): with SSE2 present (`0x414e28`'s CPUID test) a
 /// `cvttsd2si`, so the value truncates toward zero and NaN or anything outside `i32` is `i32::MIN`.
 pub(crate) fn ftol(n: f64) -> i32 {

@@ -1,7 +1,7 @@
 //! Build-12340 item use queries: `IsCurrentItem`, `IsUsableItem`, `IsItemInRange`,
-//! `ItemHasRange`, `GetItemCooldown`, `GetItemCount`, `GetItemFamily`, `IsEquippedItemType`,
-//! `IsConsumableItem`, `IsHarmfulItem` and `IsHelpfulItem`; `GetItemGem` is
-//! [`super::wrath_item_lookups`]'s.
+//! `ItemHasRange`, `GetItemCooldown`, `GetInventoryItemCooldown`, `GetItemCount`,
+//! `GetItemFamily`, `IsEquippedItemType`, `IsConsumableItem`, `IsHarmfulItem` and
+//! `IsHelpfulItem`; `GetItemGem` is [`super::wrath_item_lookups`]'s.
 //!
 //! An item argument is an id, an `item:` string or link, or a cached name (`0x709de0`). The
 //! item's spell is its template's first on-use spell (`0x706b90`: trigger 0, nonzero id), else
@@ -99,6 +99,28 @@ fn use_record<'m>(
     item: u32,
 ) -> Option<&'m super::SpellInfoView> {
     model.spell_catalog.get(&use_spell(state, item)?)
+}
+
+/// An item's use-spell cooldown as start, duration, enable in seconds (`* 0.001`, `0x9e56b0`):
+/// (0, 0, 0) without a use spell, its running cooldown (`0x807980`), else (0, 0, 1).
+fn cooldown_values(lua: &Lua, state: &SpellUse, item: u32) -> MultiValue {
+    let spell = use_spell(state, item).filter(|&s| (s as i32) > 0);
+    let now = super::clock::now(lua);
+    let cd = state
+        .items
+        .get(&item)
+        .and_then(|v| v.cooldown)
+        .map(|(s, d, e)| (s as f64 / 1000.0, f64::from(d) / 1000.0, e));
+    let (start, duration, enable) = match (spell, cd) {
+        (None, _) => (0.0, 0.0, 0),
+        (Some(_), Some((s, d, e))) if s + d > now || !e => (s, d, i64::from(e)),
+        (Some(_), _) => (0.0, 0.0, 1),
+    };
+    MultiValue::from_vec(vec![
+        Value::Number(start),
+        Value::Number(duration),
+        Value::Integer(enable),
+    ])
 }
 
 /// A one-argument item predicate binding.
@@ -289,35 +311,37 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             one(flag(hit))
         })?,
     )?;
-    // GetItemCooldown(item) (`0x510fc0`) → start, duration, enable, in seconds (`* 0.001`,
-    // `0x9e56b0`). Without an item or a use spell, (0, 0, 0); with one, its cooldown (`0x807980`)
-    // or (0, 0, 1). The app prices every cached template with a use spell. An uncached template
-    // is asked for: `0x809030` passes the request callback (`0x809046`) for any nonzero id.
+    // GetItemCooldown(item) (`0x510fc0`) → [`cooldown_values`]. The app prices every cached
+    // template with a use spell. An uncached template is asked for: `0x809030` passes the request
+    // callback (`0x809046`) for any nonzero id.
     g.set(
         "GetItemCooldown",
         asking_binding(
             lua,
             |_, _| true,
-            |lua, _, state, item, _| {
-                let spell = use_spell(state, item).filter(|&s| (s as i32) > 0);
-                let now = super::clock::now(lua);
-                let cd = state
-                    .items
-                    .get(&item)
-                    .and_then(|v| v.cooldown)
-                    .map(|(s, d, e)| (s as f64 / 1000.0, f64::from(d) / 1000.0, e));
-                let (start, duration, enable) = match (spell, cd) {
-                    (None, _) => (0.0, 0.0, 0),
-                    (Some(_), Some((s, d, e))) if s + d > now || !e => (s, d, i64::from(e)),
-                    (Some(_), _) => (0.0, 0.0, 1),
-                };
-                Ok(MultiValue::from_vec(vec![
-                    Value::Number(start),
-                    Value::Number(duration),
-                    Value::Integer(enable),
-                ]))
-            },
+            |lua, _, state, item, _| Ok(cooldown_values(lua, state, item)),
         )?,
+    )?;
+    // GetInventoryItemCooldown(unit, slot) (`0x5e7e60`) → zero values for a slot the reader
+    // (`0x5e7c00`) refuses; (0, 0, 0) for the ammo slot, a unit not the player or the inspected
+    // one (`0x5e7a00`) or an empty slot; else the worn item's [`cooldown_values`] (`0x8090c0` →
+    // `0x807980` with `0x707c60`'s spell). Labelled: an item whose charges are spent (`0x706f40`,
+    // `0x707dc0`), (0, 0, 0) natively, reads its cooldown.
+    g.set(
+        "GetInventoryItemCooldown",
+        lua.create_function(|lua, (unit, slot): (Value, Value)| {
+            let usage = "Usage: GetInventoryItemCooldown(unit, slot)";
+            let token = super::binding_abi::string_arg(lua, unit, usage)?;
+            let slot0 = super::binding_abi::inventory_slot0(lua, slot)?;
+            let model = lua.app_data_ref::<Model>().expect("model app_data");
+            if !model.inventory_slot_reader_accepts(slot0) {
+                return Ok(MultiValue::new());
+            }
+            let worn = usize::try_from(slot0 + 1).ok().filter(|&i| i > 0);
+            let item = worn.and_then(|i| model.inv_slot(&token, i));
+            let state = lua.app_data_ref::<SpellUse>().expect("spell use app_data");
+            Ok(cooldown_values(lua, &state, item.map_or(0, |v| v.item_id)))
+        })?,
     )?;
     // GetItemCount(item[, includeBank[, includeCharges]]) (`0x51c2e0`) → the carried count
     // ([`get_item_count`]); both flags read through `GetBoolOrDefault` (`0x51c2f1`, `0x51c2fd`).

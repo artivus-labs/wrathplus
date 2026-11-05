@@ -225,6 +225,40 @@ fn usable_range_and_cooldown_read_the_live_views() {
         "#,
     )
     .unwrap();
+    // GetInventoryItemCooldown (`0x5e7e60`): the worn item's cooldown by entry; (0, 0, 0) for the
+    // ammo slot, an empty slot, an item with no use spell or another unit; zero values for a slot
+    // the reader refuses; a worn copy's use-spell enchant counts as its spell (`0x707c60`).
+    let mut worn: InventorySlots = Default::default();
+    let item = |item_id| InvSlotView {
+        item_id,
+        ..Default::default()
+    };
+    (worn[0], worn[13], worn[17]) = (Some(item(ARROW)), Some(item(POTION)), Some(item(SHIELD)));
+    s.set_inventory_slots(worn);
+    s.run(
+        r#"
+        local s, d, e = GetInventoryItemCooldown("player", 13); assert(s == 90 and d == 60 and e == 1)
+        for _, at in ipairs({0, 2, 17}) do
+            s, d, e = GetInventoryItemCooldown("player", at); assert(s == 0 and d == 0 and e == 0, at)
+        end
+        s, d, e = GetInventoryItemCooldown("target", 13); assert(e == 0)
+        assert(select('#', GetInventoryItemCooldown("player", 30)) == 0)
+        assert(select('#', GetInventoryItemCooldown("player", -2^31)) == 0)
+        assert(not pcall(GetInventoryItemCooldown, nil, 13))
+        "#,
+    )
+    .unwrap();
+    let shield = ItemUseView {
+        enchant_spell: Some((439, 0)),
+        cooldown: Some((95_000, 10_000, true)),
+        ..Default::default()
+    };
+    s.set_wrath_item_use([(SHIELD, shield)].into_iter().collect());
+    let enchanted = "local s, d, e = GetInventoryItemCooldown('player', 17) return s, d, e";
+    assert_eq!(
+        s.eval::<(f64, f64, i64)>(enchanted).unwrap(),
+        (95.0, 10.0, 1)
+    );
 }
 
 /// On an arena map a used-up potion is refused unless flagged usable in arena.
