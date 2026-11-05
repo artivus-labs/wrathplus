@@ -18,8 +18,8 @@ use wrathplus_world::vis_chain::VisChainOnly;
 mod speed;
 mod transport_seed;
 use super::{
-    merge_store_fields, FieldChanged, Guid, GuidIndex, NetCommands, NetEntity, NetHandlerApp,
-    ObjectStore, SelfGuid, SpeedChangeMessage, UnitSpeeds,
+    merge_store_fields, Guid, GuidIndex, NetCommands, NetEntity, NetHandlerApp, ObjectStore,
+    SelfGuid, SpeedChangeMessage, UnitSpeeds,
 };
 use speed::set_speed;
 
@@ -81,7 +81,7 @@ pub(crate) struct Scene<'w, 's> {
     stores: Query<'w, 's, &'static mut ObjectStore>,
     countdowns: Query<'w, 's, &'static mut crate::items::Countdowns>,
     speeds: Query<'w, 's, &'static mut UnitSpeeds>,
-    field_changes: MessageWriter<'w, FieldChanged>,
+    field_changes: super::FieldWriters<'w>,
     speed_changes: MessageWriter<'w, SpeedChangeMessage>,
     self_moves: MessageWriter<'w, super::SelfMoveMessage>,
     go_custom_anims: MessageWriter<'w, crate::app_core::anim::GoCustomAnim>,
@@ -364,7 +364,7 @@ fn object_create(
     index: &mut GuidIndex,
     transforms: &mut Query<&mut Transform>,
     stores: &mut Query<&mut ObjectStore>,
-    edges: &mut MessageWriter<FieldChanged>,
+    edges: &mut super::FieldWriters,
     names: &NameCache,
     go_templates: &GameObjectTemplates,
     net_commands: &NetCommands,
@@ -517,7 +517,7 @@ fn item_create(
     commands: &mut Commands,
     index: &mut GuidIndex,
     stores: &mut Query<&mut ObjectStore>,
-    edges: &mut MessageWriter<FieldChanged>,
+    edges: &mut super::FieldWriters,
     items: &mut Items,
 ) {
     debug!("net: item create {guid:#x} (container: {container})");
@@ -546,7 +546,7 @@ fn object_values(
     commands: &mut Commands,
     index: &GuidIndex,
     stores: &mut Query<&mut ObjectStore>,
-    edges: &mut MessageWriter<FieldChanged>,
+    edges: &mut super::FieldWriters,
 ) {
     if let Some(&e) = index.0.get(&guid) {
         merge_fields(commands, stores, edges, e, guid, fields);
@@ -623,19 +623,23 @@ fn gameobject_info(
     go_templates.insert(entry, type_id, name, data);
 }
 
-/// Merges a descriptor delta into an object's store and reports its [`FieldChanged`] edges. An
-/// indexed entity with no store should not happen, and is seeded from the delta.
+/// Merges a descriptor delta into an object's store and reports its [`super::FieldChanged`] edges and
+/// its always-fire writes ([`super::FieldWritten`]). An indexed entity with no store should not
+/// happen, and is seeded from the delta.
 fn merge_fields(
     commands: &mut Commands,
     stores: &mut Query<&mut ObjectStore>,
-    edges: &mut MessageWriter<FieldChanged>,
+    edges: &mut super::FieldWriters,
     entity: Entity,
     guid: u64,
     delta: ObjectFields,
 ) {
     if let Ok(mut s) = stores.get_mut(entity) {
+        super::always_fire_writes(&s.0, &delta, entity, guid, |w| {
+            edges.written.write(w);
+        });
         merge_store_fields(&mut s.0, delta, entity, guid, |e| {
-            edges.write(e);
+            edges.changed.write(e);
         });
     } else {
         warn!(

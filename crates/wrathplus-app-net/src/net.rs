@@ -19,6 +19,10 @@ use wrathplus_protocol::{
 use wrathplus_world::schedule::WorldStage;
 
 pub mod apply;
+mod field_written;
+#[cfg(any(test, feature = "test-support"))]
+pub use field_written::apply_fields_for_test;
+pub use field_written::{always_fire_writes, FieldWriters, FieldWritten};
 pub mod handlers;
 pub mod io;
 pub mod objects;
@@ -170,6 +174,7 @@ impl Plugin for NetPlugin {
             .init_resource::<crate::app_core::state::WorldStates>()
             .add_message::<TeleportMessage>()
             .add_message::<FieldChanged>()
+            .add_message::<FieldWritten>()
             .add_message::<StandingChanged>()
             .add_message::<MemberDeactivated>()
             .add_message::<SelfMoveMessage>()
@@ -374,27 +379,6 @@ pub fn merge_store_fields(
             new,
         });
     });
-}
-
-/// Apply a descriptor update the way the drain does. The first one must be
-/// [`ObjectFields::into_created`], like a real create block.
-#[cfg(any(test, feature = "test-support"))]
-pub fn apply_fields_for_test(world: &mut World, entity: Entity, delta: ObjectFields) {
-    let guid = world.get::<Guid>(entity).map_or(0, |g| g.0);
-    let mut edges = Vec::new();
-    match world.get_mut::<ObjectStore>(entity) {
-        Some(mut store) => merge_store_fields(&mut store.0, delta, entity, guid, |e| edges.push(e)),
-        None => {
-            assert!(
-                delta.created_as().is_some(),
-                "a fixture's first descriptor is a create block: chain `.into_created(..)`"
-            );
-            world.entity_mut(entity).insert(ObjectStore(delta));
-        }
-    }
-    world
-        .resource_mut::<Messages<FieldChanged>>()
-        .write_batch(edges);
 }
 
 /// The unit this client authors motion for: the reference's active-mover global
