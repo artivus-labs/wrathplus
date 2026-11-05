@@ -148,6 +148,34 @@ fn a_skill_pair_folds_the_permanent_bonus_into_the_base() {
     assert_eq!(skill_pair(&cursed, 95), (-5, 0));
 }
 
+#[test]
+fn a_wand_reads_the_damage_bonus_of_its_own_school() {
+    use wrathplus_protocol::types::ItemDamage;
+    let pos = Field::PlayerModDamageDonePos.index();
+    let neg = Field::PlayerModDamageDoneNeg.index();
+    let pct = Field::PlayerModDamageDonePct.index();
+    let f = ObjectFields::from_pairs(&[
+        (pos, 3),
+        (pos + 5, 120),
+        (neg + 5, (-7i32) as u32),
+        (pct, 1.0f32.to_bits()),
+        (pct + 5, 1.5f32.to_bits()),
+    ]);
+    let block = |min: f32, school: u32| ItemDamage {
+        min,
+        max: 30.0,
+        school,
+    };
+    // A Shadow wand: school 5's split, not physical's.
+    assert_eq!(ranged_bonus(&f, &[block(20.0, 5)]), (120, -7, 1.5));
+    // A block with no minimum is skipped; no damage at all is physical.
+    assert_eq!(
+        ranged_bonus(&f, &[block(0.0, 5), block(1.0, 0)]),
+        (3, 0, 1.0)
+    );
+    assert_eq!(ranged_bonus(&f, &[]), (3, 0, 1.0));
+}
+
 /// `PLAYER_FIELD_BANK_BAG_SLOT_1`, bank bag slot 0's guid pair.
 const F_BANK_BAG_1: u16 = Field::PlayerBankbagSlot1.index();
 /// `OBJECT_FIELD_ENTRY` on the item object.

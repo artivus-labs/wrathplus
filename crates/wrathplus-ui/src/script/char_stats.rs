@@ -103,6 +103,10 @@ pub struct UnitCombatStats {
     /// Ranged damage range (`UNIT_FIELD_MINRANGEDDAMAGE`/`MAXRANGEDDAMAGE`).
     pub ranged_min_damage: f32,
     pub ranged_max_damage: f32,
+    /// `UnitRangedDamage`'s bonuses: the `MOD_DAMAGE_DONE` split of the ranged weapon's school.
+    pub ranged_bonus_pos: i32,
+    pub ranged_bonus_neg: i32,
+    pub ranged_damage_percent: f32,
     /// The main hand's skill line (picked by [`weapon_subclass_skill`]) as `(value + perm, temp)`,
     /// the split the reference's skill reader `0x5ea460` makes for all four skill pairs.
     pub main_weapon_skill: (i32, i32),
@@ -149,6 +153,9 @@ impl Default for UnitCombatStats {
             ranged_attack_time_ms: 0,
             ranged_min_damage: 0.0,
             ranged_max_damage: 0.0,
+            ranged_bonus_pos: 0,
+            ranged_bonus_neg: 0,
+            ranged_damage_percent: 1.0,
             main_weapon_skill: (0, 0),
             offhand_weapon_skill: (0, 0),
             ranged_weapon_skill: (0, 0),
@@ -630,8 +637,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
 
     super::char_skill::install(lua)?;
 
-    // UnitRangedDamage(unit) → (speed, minDamage, maxDamage, physicalBonusPos, physicalBonusNeg,
-    // percent), with `UnitDamage`'s school-0 mods.
+    // UnitRangedDamage(unit) → (speed, minDamage, maxDamage, posBonus, negBonus, percent), the
+    // bonuses the ranged weapon's school's (`0x610611`): a wand's is its element's.
     g.set(
         "UnitRangedDamage",
         lua.create_function(|lua, token: Option<String>| {
@@ -640,9 +647,9 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                     f64::from(s.ranged_attack_time_ms) / 1000.0,
                     f64::from(s.ranged_min_damage),
                     f64::from(s.ranged_max_damage),
-                    i64::from(s.physical_bonus_pos),
-                    i64::from(s.physical_bonus_neg),
-                    f64::from(s.damage_percent),
+                    i64::from(s.ranged_bonus_pos),
+                    i64::from(s.ranged_bonus_neg),
+                    f64::from(s.ranged_damage_percent),
                 )
             }))
         })?,
@@ -857,6 +864,9 @@ mod tests {
             ranged_attack_time_ms: 2800,
             ranged_min_damage: 31.0,
             ranged_max_damage: 47.0,
+            ranged_bonus_pos: 9,
+            ranged_bonus_neg: -1,
+            ranged_damage_percent: 1.25,
             main_weapon_skill: (25, 2),
             offhand_weapon_skill: (20, 0),
             ranged_weapon_skill: (18, 0),
@@ -1105,7 +1115,7 @@ mod tests {
         assert_eq!(
             s.eval::<(f64, f64, f64, i64, i64, f64)>(r#"return UnitRangedDamage("player")"#)
                 .unwrap(),
-            (2.8, 31.0, 47.0, 25, -3, f64::from(1.1f32))
+            (2.8, 31.0, 47.0, 9, -1, 1.25)
         );
         // Each value times the multiplier plus one, rounded to nearest, ties to even.
         s.set_player_combat_stats(Some(UnitCombatStats {

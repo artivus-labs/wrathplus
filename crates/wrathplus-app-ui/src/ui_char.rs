@@ -6,7 +6,7 @@
 
 use bevy::prelude::*;
 
-use wrathplus_protocol::types::PLAYER_SKILL_SLOTS;
+use wrathplus_protocol::types::{ItemDamage, ObjectFields, PLAYER_SKILL_SLOTS};
 use wrathplus_ui::script::{
     weapon_subclass_skill, BankBagSlots, InvSlotView, InventorySlots, ScriptValue, SkillEntry,
     SkillsState, UiScript, UnitCombatStats, BANK_BAG_SLOT_COUNT, EQUIPMENT_BAG, SKILL_DEFENSE,
@@ -374,6 +374,24 @@ fn skill_pair(store: &ObjectStore, skill_id: u32) -> (i32, i32) {
     (0, 0)
 }
 
+/// `UnitRangedDamage`'s bonus school (`0x610611`-`0x61066d`): of the ranged item's two damage
+/// blocks, the first whose minimum is above 0 names it, else physical; then that school's
+/// `PLAYER_FIELD_MOD_DAMAGE_DONE_POS`, `_NEG` and `_PCT`.
+fn ranged_bonus(f: &ObjectFields, damages: &[ItemDamage]) -> (i32, i32, f32) {
+    let school = damages
+        .iter()
+        .take(2)
+        .find(|d| d.min > 0.0)
+        .and_then(|d| u8::try_from(d.school).ok())
+        .filter(|&s| s < 7)
+        .unwrap_or(0);
+    (
+        f.player_mod_damage_done_pos(school).unwrap_or(0),
+        f.player_mod_damage_done_neg(school).unwrap_or(0),
+        f.player_mod_damage_done_pct(school).unwrap_or(1.0),
+    )
+}
+
 /// A swing time in ms, with 0 or absent read as not yet streamed: the vanilla 2000, never zero,
 /// as the reference divides damage by it.
 fn base_swing(streamed: Option<u32>) -> u32 {
@@ -433,6 +451,10 @@ pub(crate) fn unit_combat_stats(store: &ObjectStore) -> UnitCombatStats {
         ranged_attack_time_ms: base_swing(f.unit_ranged_attack_time()),
         ranged_min_damage: f.unit_min_ranged_damage().unwrap_or(0.0),
         ranged_max_damage: f.unit_max_ranged_damage().unwrap_or(0.0),
+        // Physical; the player's snapshot takes its ranged weapon's school (`combat_stats`).
+        ranged_bonus_pos: f.player_mod_damage_done_pos(0).unwrap_or(0),
+        ranged_bonus_neg: f.player_mod_damage_done_neg(0).unwrap_or(0),
+        ranged_damage_percent: f.player_mod_damage_done_pct(0).unwrap_or(1.0),
         // The equipment and skill half is `combat_stats`'s; any other unit keeps these defaults.
         has_offhand: false,
         has_wand: false,
@@ -461,10 +483,13 @@ fn combat_stats(
 
     let main_skill = weapon_skill_id(store, objects, items, commands, SLOT_MAIN_HAND);
     let offhand_skill = weapon_skill_id(store, objects, items, commands, SLOT_OFF_HAND);
-    let ranged_skill_id = slot_entry(store, objects, SLOT_RANGED)
-        .and_then(|e| items.template(e, 0, commands))
+    let ranged =
+        slot_entry(store, objects, SLOT_RANGED).and_then(|e| items.template(e, 0, commands));
+    let ranged_skill_id = ranged
         .filter(|t| t.class == ITEM_CLASS_WEAPON)
         .and_then(|t| weapon_subclass_skill(t.subclass));
+    let (ranged_bonus_pos, ranged_bonus_neg, ranged_damage_percent) =
+        ranged_bonus(&store.0, ranged.map_or(&[], |t| t.damages.as_slice()));
 
     UnitCombatStats {
         has_offhand,
@@ -476,6 +501,9 @@ fn combat_stats(
         // `UnitDefense`'s pair. The 1.12 player sheet has no Defense row: its `SKILL_LINES_CHANGED`
         // arm (`PaperDollFrame.lua:70-72`) redraws only the Attack row.
         defense_skill: skill_pair(store, SKILL_DEFENSE),
+        ranged_bonus_pos,
+        ranged_bonus_neg,
+        ranged_damage_percent,
         ..unit_combat_stats(store)
     }
 }
@@ -829,6 +857,9 @@ pub(crate) fn fire_stat_transitions(
             fixed(s.ranged_min_damage),
             fixed(s.ranged_max_damage),
             i64::from(s.ranged_attack_time_ms),
+            i64::from(s.ranged_bonus_pos),
+            i64::from(s.ranged_bonus_neg),
+            fixed(s.ranged_damage_percent),
         ]
     }) {
         script.fire_event("UNIT_RANGEDDAMAGE", vec![tok()]);
