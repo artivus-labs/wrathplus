@@ -307,7 +307,12 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
 
     g.set(
         "IsActionInRange",
-        lua.create_function(|lua, action: u32| {
+        lua.create_function(|lua, action: Value| {
+            // Nil for a non-number, no Usage raise (`0x5a9d67`); a number truncates (`0x88b9c0`).
+            let n = lua.coerce_number(action)?.map(super::binding_abi::ftol);
+            let Some(action) = n.and_then(|n| u32::try_from(n).ok()) else {
+                return Ok(Value::Nil);
+            };
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             Ok(
                 match model
@@ -355,22 +360,21 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         lua.create_function(|lua, action: u32| Ok(state_flag(lua, action, |s| s.equipped)))?,
     )?;
 
-    // GetActionCooldown(action) → start, duration, enable, in `GetTime` seconds. An absent or
-    // elapsed enabled cooldown answers `(0, 0, 1)`, or a later `CooldownFrame_SetTimer` would
-    // replay the sweep and its finish flash.
+    // GetActionCooldown(action) (`0x5a91c0`) → start, duration, enable, in `GetTime` seconds: an
+    // empty slot (0, 0, 0) (`0x5a8e40` writes nothing), else (0, 0, 1) when none runs, lest a later
+    // `CooldownFrame_SetTimer` replay the flash. Labelled: a slot with no item or spell, (0, 0, 1).
     g.set(
         "GetActionCooldown",
         lua.create_function(|lua, action: u32| {
             let now = crate::script::clock::now(lua);
             let model = lua.app_data_ref::<Model>().expect("model app_data");
-            Ok(
-                match model.action_states.get(&action).and_then(|s| s.cooldown) {
-                    Some((start, duration, enabled)) if start + duration > now || !enabled => {
-                        (start, duration, i32::from(enabled))
-                    }
-                    _ => (0.0, 0.0, 1),
-                },
-            )
+            let state = model.action_states.get(&action);
+            Ok(match state.and_then(|s| s.cooldown) {
+                Some((start, duration, enabled)) if start + duration > now || !enabled => {
+                    (start, duration, i32::from(enabled))
+                }
+                _ => (0.0, 0.0, i32::from(state.is_some())),
+            })
         })?,
     )?;
 

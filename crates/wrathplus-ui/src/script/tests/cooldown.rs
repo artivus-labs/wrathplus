@@ -11,8 +11,14 @@ fn action_state_bindings_answer_the_reference_conventions() {
 
     assert!(s.eval::<bool>("return IsUsableAction(3) == nil").unwrap());
     assert!(s.eval::<bool>("return IsActionInRange(3) == nil").unwrap());
+    assert!(
+        s.eval::<bool>("return IsActionInRange('x') == nil")
+            .unwrap(),
+        "no raise"
+    );
+    // An empty slot's enable is 0 (`0x5a8e40` writes nothing).
     assert!(s
-        .eval::<bool>("local st, d, e = GetActionCooldown(3); return st == 0 and d == 0 and e == 1")
+        .eval::<bool>("local st, d, e = GetActionCooldown(3); return st == 0 and d == 0 and e == 0")
         .unwrap());
 
     s.tick(100.0); // an arbitrary clock epoch
