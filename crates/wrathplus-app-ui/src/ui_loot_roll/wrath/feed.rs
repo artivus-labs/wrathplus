@@ -43,6 +43,37 @@ pub(super) fn load_limits(
     }
 }
 
+/// `GetItemUniqueness`'s table: each answered template's `ItemLimitCategory` (`+0x1ec`) with its
+/// row's quantity, for a category with a row. The metadata only grows within a session, and an
+/// entry asked for first answers later, so the entries and the answered ones gate the rebuild.
+pub(super) fn feed_item_limits(
+    script: Option<NonSendMut<UiScript>>,
+    templates: Res<NativeRollTemplates>,
+    limits: Option<Res<CategoryLimits>>,
+    mut last: Local<crate::app_core::vm_memo::VmMemo<Option<(usize, usize, bool)>>>,
+) {
+    let Some(mut script) = script else {
+        return;
+    };
+    let answered = templates.metadata.values().flatten().count();
+    let seen = (templates.metadata.len(), answered, limits.is_some());
+    let last = last.get(&script);
+    if *last == Some(seen) {
+        return;
+    }
+    *last = Some(seen);
+    let rows = templates
+        .metadata
+        .iter()
+        .filter_map(|(&entry, m)| {
+            let category = m.as_ref()?.item_limit_category;
+            let row = limits.as_ref()?.0.get(category).filter(|_| category != 0)?;
+            Some((entry, (category, row.quantity())))
+        })
+        .collect();
+    script.set_item_limit_categories(rows);
+}
+
 /// `0x754dd0`: entry limit precedes category limit; only a proven violation is false.
 fn capacity(
     max_count: u32,

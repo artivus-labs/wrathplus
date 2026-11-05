@@ -47,6 +47,7 @@ fn snapshot() -> WrathCurrencySnapshot {
         entries,
         honor_current: Some(42),
         arena_current: Some(12),
+        token_stacks: Vec::new(),
     }
 }
 

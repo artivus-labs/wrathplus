@@ -1093,24 +1093,26 @@ mod find_item_tests {
         );
     }
 
-    /// `HasKey()` (`0x48ae90`) at mode `0x4f`: a key counts anywhere, the bank included.
+    /// `HasKey()` (`0x51ae80`) at mode `0x4f`: a key counts anywhere, the bank included.
     #[test]
     fn has_key_finds_a_key_anywhere_the_reference_looks() {
-        use crate::inventory::{has_key, BAG_FAMILY_KEYS};
+        use crate::inventory::has_key;
         use crate::items::{test_template, Items};
         use crate::net::NetCommands;
 
-        const KEY: u32 = 7_146; // The Scarlet Key (bag_family 9)
-        const BREAD: u32 = 4_540;
+        const KEY: u32 = 7_146; // The Scarlet Key (BagFamily 0x100 in 3.3.5)
+        const BREAD: u32 = 4_540; // BagFamily 9: a mask, and 9 has no key bit
         let (tx, _rx) = crossbeam_channel::unbounded();
         let commands = NetCommands(tx);
 
         let mut objs = TestObjects::new();
         let mut items = Items::default();
         let mut key_tpl = test_template("The Scarlet Key");
-        key_tpl.bag_family = BAG_FAMILY_KEYS;
+        key_tpl.bag_family = 0x100;
         items.insert_template(KEY, Some(key_tpl));
-        items.insert_template(BREAD, Some(test_template("Tough Hunk of Bread")));
+        let mut bread = test_template("Tough Hunk of Bread");
+        bread.bag_family = 9;
+        items.insert_template(BREAD, Some(bread));
         item(&mut objs, 0xF1, KEY, None);
         item(&mut objs, 0xF2, BREAD, None);
 

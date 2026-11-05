@@ -23,6 +23,8 @@ fn seat_wearable(s: &mut UiScript, item_id: u32, name: &str, icon: &str) {
             name: name.into(),
             quality: 1,
             icon: Some(icon.into()),
+            // Some worn type: IsDressableItem reads only that it is nonzero (`0x5175a3`).
+            inventory_type: 4,
             ..Default::default()
         },
     );

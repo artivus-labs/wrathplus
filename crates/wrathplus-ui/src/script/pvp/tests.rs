@@ -316,9 +316,8 @@ fn a_missing_rank_global_reads_nil_not_empty() {
     assert!(s.eval::<bool>("return GetPVPRankInfo(9) == nil").unwrap());
 }
 
-/// `UnitFactionGroup` reads the live faction template (`0x516630`) and the title's team digit the
-/// race (`0x5efe00`), so a vmangos GM (template 35, no side) keeps his title, in both the key and
-/// `UnitPVPName`'s decoration (`0x5efe60`).
+/// The title's team digit reads the race (`0x5efe00`), never the live template, so a GM (template
+/// 35, no side) keeps his title, in both the key and `UnitPVPName`'s decoration (`0x5efe60`).
 #[test]
 fn a_sideless_player_still_has_a_team_digit_because_his_race_has_one() {
     let mut s = seated();

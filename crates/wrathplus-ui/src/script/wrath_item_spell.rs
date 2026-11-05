@@ -4,42 +4,20 @@
 use super::Model;
 use mlua::{Lua, Value};
 
-pub(super) fn item_id(model: &Model, query: &Value) -> Option<u32> {
-    match query {
-        Value::Integer(n) => u32::try_from(*n).ok(),
-        Value::Number(n) if n.is_finite() && *n > 0.0 && *n <= u32::MAX as f64 => Some(*n as u32),
-        Value::String(s) => {
-            let text = s.to_str().ok()?;
-            if let Ok(id) = text.parse() {
-                return Some(id);
-            }
-            if let Some(start) = text.find("item:") {
-                return text[start + 5..].split(':').next()?.parse().ok();
-            }
-            model
-                .item_templates
-                .iter()
-                .find(|(_, row)| row.name.eq_ignore_ascii_case(&text))
-                .map(|(&id, _)| id)
-        }
-        _ => None,
-    }
-}
-
 pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     lua.globals().set(
         "GetItemSpell",
         lua.create_function(|lua, query: Value| {
             let result = {
                 let mut model = lua.app_data_mut::<Model>().expect("model");
-                let id = item_id(&model, &query);
-                if let Some(id) = id.filter(|id| *id != 0) {
-                    if !model.item_templates.contains_key(&id) {
-                        model.item_stat_asks.insert(id);
-                    }
+                // The shared item resolver (`0x51711e`); a negative id names no record to ask for.
+                let id = super::item_arg::item_id_arg(lua, &model, &query);
+                if (id as i32) > 0 && !model.item_templates.contains_key(&id) {
+                    model.item_stat_asks.insert(id);
                 }
-                let spell = id
-                    .and_then(|id| model.item_templates.get(&id))
+                let spell = model
+                    .item_templates
+                    .get(&id)
                     .and_then(|row| {
                         row.item_spells
                             .iter()

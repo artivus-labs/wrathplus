@@ -22,14 +22,17 @@ pub(super) fn quiet(s: &UiScript) {
 pub(super) fn session() -> UiScript {
     let mut s = UiScript::new().unwrap();
     s.set_screen_size(1024.0, 768.0);
+    // `PVPBattleground_UpdateQueueStatus` concatenates the record's side (the load seats it).
+    s.set_player_record(wrathplus_ui::script::PlayerRecord {
+        name: "Tester".into(),
+        ..Default::default()
+    });
     s.set_unit(
         "player",
         Some(UnitState {
             exists: true,
             name: Some("Probefour".into()),
             level: 60,
-            // `PVPBattleground_UpdateQueueStatus` concatenates `UnitFactionGroup`.
-            faction_group: Some("Alliance".into()),
             ..Default::default()
         }),
     );

@@ -11,8 +11,8 @@ use bevy::prelude::*;
 
 use wrathplus_formats::SpellDisplay;
 use wrathplus_ui::script::{
-    ItemUseFacts, ItemUseSpellFacts, ItemUseView, RangeRow, RangeUnitFacts, SpellInfoView,
-    SpellRangeFacts, SpellUseView, UiScript,
+    ItemUseFacts, ItemUseSpellFacts, ItemUseView, RangeRow, RangeUnitFacts, SpellCooldownFacts,
+    SpellInfoView, SpellRangeFacts, SpellUseView, UiScript,
 };
 
 use super::Spells;
@@ -35,6 +35,7 @@ pub(super) struct UseMemory {
     range: Option<RangeInputs>,
     auto_repeat: Option<[Option<u32>; 2]>,
     cast_items: Option<Vec<u32>>,
+    cooldowns: crate::ui_script::gate::Watch,
     statics: bool,
 }
 
@@ -55,7 +56,7 @@ pub(crate) fn catalog_facts(d: &SpellDisplay, spells: &Spells) -> SpellInfoView 
     });
     SpellInfoView {
         attack: d.is_melee_auto_attack(),
-        polarity: polarity(d),
+        polarity: d.benefit(),
         reagents: d
             .reagents
             .iter()
@@ -72,54 +73,13 @@ pub(crate) fn catalog_facts(d: &SpellDisplay, spells: &Spells) -> SpellInfoView 
             attributes_ex6: d.attributes_ex6,
             row,
         },
+        cooldown: SpellCooldownFacts {
+            category: d.category,
+            start_recovery_category: d.start_recovery_category,
+            excluded: d.cooldown_query_excluded(),
+        },
         ..Default::default()
     }
-}
-
-/// `0x7fe1b0`: 1 when the spell aims at friends, 2 at enemies, 0 neither. `Targets & 0x100`
-/// friends; `& 0x80` enemies; an enemy implicit target A or B; then, per effect, a friendly A or
-/// B, or the caster (1) with an aura other than the dummy (4).
-fn polarity(d: &SpellDisplay) -> u8 {
-    if d.targets & 0x100 != 0 {
-        return 1;
-    }
-    if d.targets & 0x80 != 0 {
-        return 2;
-    }
-    let ab = |i: usize| [d.effect_implicit_target_a[i], d.effect_implicit_target_b[i]];
-    let enemy = |t: u32| matches!(t, 2 | 6 | 0xf | 0x10 | 0x18 | 0x1c | 0x35 | 0x36 | 0x5d);
-    if (0..3).any(|i| ab(i).into_iter().any(enemy)) {
-        return 2;
-    }
-    let friend = |t: u32| {
-        matches!(
-            t,
-            3 | 4
-                | 5
-                | 0x14
-                | 0x15
-                | 0x1b
-                | 0x1d
-                | 0x1e
-                | 0x1f
-                | 0x21
-                | 0x22
-                | 0x23
-                | 0x2d
-                | 0x38
-                | 0x39
-                | 0x3a
-                | 0x3b
-                | 0x3d
-                | 0x3e
-        )
-    };
-    let helps = |i: usize| {
-        ab(i)
-            .into_iter()
-            .any(|t| friend(t) || t == 1 && d.effect_apply_aura[i] != 4)
-    };
-    u8::from((0..3).any(helps))
 }
 
 /// Push templates with their [`ItemUseFacts`]: `BagFamily` and the on-use spell blocks.
@@ -338,6 +298,10 @@ pub(super) fn feed_spell_use(
     if memory.cast_items.as_ref() != Some(&cast_items) {
         script.set_wrath_cast_items(cast_items.clone());
         memory.cast_items = Some(cast_items);
+    }
+    // The legs change only when a record is added, started from hold, cleared or pruned.
+    if memory.cooldowns.moved(cooldowns.feed_epoch()) {
+        script.set_player_cooldown_legs(super::cooldown_legs::cooldown_legs(cooldowns, &clock));
     }
 }
 

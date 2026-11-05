@@ -98,8 +98,8 @@ pub struct ItemTemplateView {
     /// `GetItemInfo`'s `itemTexture`, the `Interface\Icons\…` path through `ItemDisplayInfo.dbc`
     /// (`0x48e2dd`); `None` for a display row with no icon.
     pub icon: Option<String>,
-    /// `RandomProperty` (template `+0x1b8`): the item can roll a suffix, so a template tooltip
-    /// prints `<Random enchantment>` (`0x52cc33`).
+    /// `RandomProperty`: the item can roll a suffix, so a template tooltip prints
+    /// `<Random enchantment>` (`0x52cc33`).
     pub random_property: u32,
     /// Socket colour masks (1 meta, 2 red, 4 yellow, 8 blue): `GetItemStats` `EMPTY_SOCKET_*`.
     pub socket_colors: [u32; 3],
@@ -269,10 +269,10 @@ impl super::UiScript {
     }
 }
 
-/// The 1.12 item-quality palette: the ARGB literals the static init `0x5291d0` writes to the BGRA
-/// array `0xc0d3c8`, and the escape strings at `0x854124`. `GetItemQualityColor` (`0x48dfb0`)
-/// answers each channel times 1/255.
-const QUALITY_COLORS: [(u8, u8, u8, &str); 7] = [
+/// The item-quality palette: the BGRA rows at `0xad2d84` and the escape strings `0xad2a84`, eight
+/// live rows, 7 Heirloom sharing Artifact's colour. `0x61a510`/`0x61a530` bound an unsigned
+/// quality at 8: anything else is row 1, Common.
+const QUALITY_COLORS: [(u8, u8, u8, &str); 8] = [
     (0x9d, 0x9d, 0x9d, "|cff9d9d9d"), // 0 Poor
     (0xff, 0xff, 0xff, "|cffffffff"), // 1 Common
     (0x1e, 0xff, 0x00, "|cff1eff00"), // 2 Uncommon
@@ -280,17 +280,32 @@ const QUALITY_COLORS: [(u8, u8, u8, &str); 7] = [
     (0xa3, 0x35, 0xee, "|cffa335ee"), // 4 Epic
     (0xff, 0x80, 0x00, "|cffff8000"), // 5 Legendary
     (0xe6, 0xcc, 0x80, "|cffe6cc80"), // 6 Artifact
+    (0xe6, 0xcc, 0x80, "|cffe6cc80"), // 7 Heirloom
 ];
 
-/// The client's item-link builder `0x52adb0` as the trade-skill link verbs call it:
-/// `|c<rrggbb>|Hitem:<id>:0:0:0|h[<name>]|h|r`. A quality of 7 or more selects index 1, white,
-/// by `0x52ad90`'s unsigned `cmp ecx,7; jb`.
-pub(super) fn item_link(item_id: u32, name: &str, quality: u32) -> String {
-    let hex = QUALITY_COLORS
+fn quality_row(quality: u32) -> (u8, u8, u8, &'static str) {
+    *QUALITY_COLORS
         .get(quality as usize)
         .unwrap_or(&QUALITY_COLORS[1])
-        .3;
-    format!("{hex}|Hitem:{item_id}:0:0:0|h[{name}]|h|r")
+}
+
+/// The client's item-link builder as the trade-skill link verbs call it:
+/// `|c<rrggbb>|Hitem:<id>:0:0:0|h[<name>]|h|r`, its colour bounded at 8 (`0x61e2d1`).
+pub(super) fn item_link(item_id: u32, name: &str, quality: u32) -> String {
+    format!(
+        "{}|Hitem:{item_id}:0:0:0|h[{name}]|h|r",
+        quality_row(quality).3
+    )
+}
+
+/// `GetItemInfo`'s link (`0x61e290`): the nine-field hyperlink, the item string's enchant, random
+/// property and suffix kept, carrying the player's level.
+pub(super) fn info_link(id: u32, fields: [u32; 3], level: u32, t: &ItemTemplateView) -> String {
+    let ([enchant, random_property, suffix], hex) = (fields, quality_row(t.quality).3);
+    format!(
+        "{hex}|Hitem:{id}:{enchant}:0:0:0:0:{random_property}:{suffix}:{level}|h[{}]|h|r",
+        t.name
+    )
 }
 
 /// `InventoryType` → `GetItemInfo`'s `itemEquipLoc`, the reference's 30-pointer table at
@@ -359,11 +374,10 @@ pub(super) fn reference_atoi(s: &str) -> i64 {
     }
 }
 
-/// `GetItemInfo`'s argument as the reference parses it (`0x48e0a3`-`0x48e16d`): a number, or a
-/// string `lua_isnumber` (`0x6f34d0`) coerces, is the id alone; another string (`0x6f3510`) must
-/// pass `strnicmp(s, "item:", 5)` (`0x64a4c0`) for its four fields, else it is id 0, so a name or
-/// a hyperlink finds nothing; anything else raises the usage error (`0x842d24`, via `0x6f4940`).
-/// `GetItemInfo`'s argument (`0x516c60`).
+/// `GetItemInfo`'s argument (`0x516c60`): a number, or a string `lua_isnumber` (`0x84df20`)
+/// accepts, truncates to the id (`0x84e030` + `__ftol`); another string holding `item:` (a
+/// case-sensitive `strstr`) parses as an item string (`0x50f630`), any other string is a name
+/// (`0x709de0`), and any other type raises the usage error (`0x516eb1`).
 enum ItemArg {
     /// An id with the item string's enchant, random property and suffix fields.
     Id(i64, u32, u32, u32),
@@ -373,24 +387,17 @@ enum ItemArg {
 
 const ITEM_INFO_USAGE: &str = "Usage: GetItemInfo(itemID|\"name\"|\"itemlink\")";
 
-/// A number (or numeric string) is an id; a string holding `item:` anywhere is build 12340's item
-/// string (`id:enchant:gem1:gem2:gem3:gem4:suffix:unique:level`), so a full hyperlink parses;
-/// any other string is a name.
-fn parse_item_arg(v: &Value) -> mlua::Result<ItemArg> {
-    let as_number = match v {
-        Value::Integer(i) => Some(*i as f64),
-        Value::Number(n) => Some(*n),
-        Value::String(s) => s.to_str().ok().and_then(|s| s.trim().parse::<f64>().ok()),
-        _ => None,
-    };
-    if let Some(n) = as_number {
+/// The item string's fields are `id:enchant:gem1:gem2:gem3:gem4:suffix:unique:level`, so a full
+/// hyperlink parses.
+fn parse_item_arg(lua: &Lua, v: &Value) -> mlua::Result<ItemArg> {
+    if let Some(n) = lua.coerce_number(v.clone())? {
         return Ok(ItemArg::Id(n as i64, 0, 0, 0));
     }
     let Value::String(s) = v else {
         return Err(mlua::Error::RuntimeError(ITEM_INFO_USAGE.into()));
     };
     let s = s.to_string_lossy();
-    let Some(at) = s.to_ascii_lowercase().find("item:") else {
+    let Some(at) = s.find("item:") else {
         return Ok(ItemArg::Name(s));
     };
     let fields: Vec<i64> = s[at + 5..]
@@ -411,18 +418,16 @@ fn parse_item_arg(v: &Value) -> mlua::Result<ItemArg> {
 
 pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     item_stat_table::install(lua)?;
-    // GetItemQualityColor(quality) → r, g, b, escapeString (`0x48dfb0`). 7 and up, or a negative
-    // quality, answer Common (`0x52ad70`/`0x52ad90`: an unsigned `cmp ecx,7; jb`), so
-    // `ITEM_QUALITY_COLORS[-1]` is white, the colour of an uncached loot row (`0x4c2435`).
+    // GetItemQualityColor(quality) → r, g, b, escapeString (`0x510e20`): a number, truncated
+    // (`fldcw` 0xc00) to its low 32 bits, compared unsigned, so -1 is Common, the colour of an
+    // uncached loot row; anything else raises the usage error.
     lua.globals().set(
         "GetItemQualityColor",
-        lua.create_function(|lua, quality: i64| {
-            // A 32-bit int (`__ftol`), compared unsigned.
-            let i = match quality as i32 as u32 {
-                q if q >= 7 => 1,
-                q => q as usize,
+        lua.create_function(|lua, quality: Value| {
+            let Some(q) = lua.coerce_number(quality)? else {
+                return Err(mlua::Error::runtime("Usage: GetItemQualityColor(index)"));
             };
-            let (r, g, b, hex) = QUALITY_COLORS[i];
+            let (r, g, b, hex) = quality_row(q.trunc() as i64 as u32);
             Ok(mlua::MultiValue::from_vec(vec![
                 Value::Number(f64::from(r) / 255.0),
                 Value::Number(f64::from(g) / 255.0),
@@ -440,17 +445,13 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     lua.globals().set(
         "GetItemInfo",
         lua.create_function(|lua, arg: Value| {
-            let (id, enchant, random_property, suffix) = match parse_item_arg(&arg)? {
+            let (id, enchant, random_property, suffix) = match parse_item_arg(lua, &arg)? {
                 ItemArg::Id(id, e, r, x) => (id, e, r, x),
                 ItemArg::Name(name) => {
                     let model = lua.app_data_ref::<Model>().expect("model app_data");
-                    match model
-                        .item_templates
-                        .iter()
-                        .find(|(_, t)| !name.is_empty() && t.name.eq_ignore_ascii_case(&name))
-                    {
-                        Some((id, _)) => (i64::from(*id), 0, 0, 0),
-                        None => return Ok(MultiValue::new()),
+                    match super::item_arg::name_id(&model, &name) {
+                        0 => return Ok(MultiValue::new()),
+                        id => (i64::from(id), 0, 0, 0),
                     }
                 }
             };
@@ -474,15 +475,10 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 .expect("model app_data")
                 .unit("player")
                 .map_or(0, |u| u.level);
-            let hex = QUALITY_COLORS
-                .get(v.quality.min(6) as usize)
-                .map_or("|cffffffff", |c| c.3);
+            let fields = [enchant, random_property, suffix];
             Ok(MultiValue::from_vec(vec![
                 Value::String(lua.create_string(&v.name)?),
-                Value::String(lua.create_string(format!(
-                    "{hex}|Hitem:{item_id}:{enchant}:0:0:0:0:{random_property}:{suffix}:{level}|h[{}]|h|r",
-                    v.name
-                ))?),
+                Value::String(lua.create_string(info_link(item_id, fields, level, &v))?),
                 Value::Integer(i64::from(v.quality)),
                 Value::Integer(i64::from(v.item_level)),
                 Value::Integer(i64::from(v.required_level)),
@@ -796,7 +792,7 @@ mod get_item_info_tests {
         let mut s = UiScript::new().unwrap();
         s.set_item_template(25, worn_shortsword());
 
-        for arg in ["25", "\"25\"", "25.7"] {
+        for arg in ["25", "\"25\"", "25.7", "\" 0x19 \""] {
             assert_eq!(
                 s.eval::<String>(&format!("return (GetItemInfo({arg}))"))
                     .unwrap(),
@@ -814,9 +810,9 @@ mod get_item_info_tests {
             link,
             "|cffffffff|Hitem:25:2564:0:0:0:0:7:3:0|h[Worn Shortsword]|h|r"
         );
-        // Case-insensitive, short, inside a full hyperlink, or a cached name.
+        // Short, inside a full hyperlink, or a cached name.
         for arg in [
-            "\"ITEM:25\"",
+            "\"item:25\"",
             "\"|cffffffff|Hitem:25:0:0:0:0:0:0:0:80|h[Worn Shortsword]|h|r\"",
             "\"worn shortsword\"",
         ] {
@@ -827,8 +823,8 @@ mod get_item_info_tests {
                 "argument {arg}"
             );
         }
-        // An unknown name or the empty string: no values and no ask.
-        for arg in ["\"Nothing Such\"", "\"\""] {
+        // An unknown name, `item:` in another case (a name), the empty string: no values, no ask.
+        for arg in ["\"Nothing Such\"", "\"ITEM:25\"", "\"\""] {
             assert_eq!(
                 s.arity(&format!("GetItemInfo({arg})")).unwrap(),
                 0,

@@ -1829,18 +1829,17 @@ fn unit_on_taxi_is_one_or_nil_and_raises_the_reference_usage() {
 #[test]
 fn the_player_record_outlives_every_snapshot() {
     let mut s = UiScript::new().unwrap();
-
     // Before Enter World the record is empty: nil.
     assert!(s
         .eval::<bool>(r#"return UnitName("player") == nil"#)
         .unwrap());
-
     // Enter World seeds it from the character row, before any addon file runs.
     s.set_player_record(PlayerRecord {
         name: "Nelprifour".into(),
         race: Some(("Night Elf".into(), "NightElf".into())),
         class: Some(("Priest".into(), "PRIEST".into())),
         sex: 2,
+        faction_group: Some(("Alliance".into(), "Alliance".into())),
     });
     assert_eq!(
         s.eval::<String>(r#"return UnitName("player")"#).unwrap(),
@@ -1848,7 +1847,6 @@ fn the_player_record_outlives_every_snapshot() {
         "the buffer answers with no player snapshot at all — the reference runs addon OnUpdate \
          for many frames with no local player object and this verb still answers"
     );
-
     // The descriptor has landed, but the name cache missed our own guid.
     let nameless = UnitState {
         exists: true,
@@ -1875,6 +1873,8 @@ fn the_player_record_outlives_every_snapshot() {
         "UnitClass's second return is the UPPERCASE token"
     );
     assert_eq!(s.eval::<i64>(r#"return UnitSex("player")"#).unwrap(), 2);
+    let side = r#"return table.concat({ UnitFactionGroup("PLAYER") }, ",")"#;
+    assert_eq!(s.eval::<String>(side).unwrap(), "Alliance,Alliance");
     // `UnitLevel` reads the snapshot: the record's level accessor (`0x5abe00`) has no caller.
     assert_eq!(s.eval::<i64>(r#"return UnitLevel("player")"#).unwrap(), 5);
 

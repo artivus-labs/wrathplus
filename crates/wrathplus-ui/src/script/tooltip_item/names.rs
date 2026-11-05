@@ -4,8 +4,8 @@
 //! `INVTYPE_WEAPONOFFHAND` both read "Off Hand" in enUS and differ elsewhere. [`CLASS_NAMES`] and
 //! [`RACE_NAMES`] are English literals; the reference reads `ChrClasses.dbc` and `ChrRaces.dbc`.
 
-/// The reference's quality colour table, `0xc0d3c8`, read by `GetItemQualityColor` (`0x48dfb0`).
-pub(super) const QUALITY_RGB: [[f32; 3]; 7] = [
+/// The reference's quality colour table, `0xad2d84`, eight rows (`0x61a510`).
+pub(super) const QUALITY_RGB: [[f32; 3]; 8] = [
     [0.616, 0.616, 0.616], // 0 Poor      9d9d9d
     [1.0, 1.0, 1.0],       // 1 Common    ffffff
     [0.118, 1.0, 0.0],     // 2 Uncommon  1eff00
@@ -13,6 +13,7 @@ pub(super) const QUALITY_RGB: [[f32; 3]; 7] = [
     [0.639, 0.208, 0.933], // 4 Epic      a335ee
     [1.0, 0.502, 0.0],     // 5 Legendary ff8000
     [0.902, 0.8, 0.502],   // 6 Artifact  e6cc80
+    [0.902, 0.8, 0.502],   // 7 Heirloom  e6cc80
 ];
 
 // The tooltip colours: white `0xc0cf60` ffffffff, red `0xc0d390` ffff2020, green `0xc0d3ac`

@@ -544,8 +544,8 @@ fn feign_death_reads_dead_without_touching_the_raw_health_field() {
     assert_eq!(ObjectFields::default().unit_shown_health(), None);
 }
 
-/// vmangos sends rage max 1000 and happiness max 1050000 (`GetCreatePowers`); the table at
-/// `0x86f978` divides them to the 100 and 1050 the reference shows.
+/// The server sends rage and runic power max 1000 and happiness max 1050000; the table at
+/// `0xaf5220` (`0x7fde00`) divides them to the 100 and 1050 the reference shows.
 #[test]
 fn rage_and_happiness_divide_for_display_but_not_for_the_raw_readers() {
     const RAGE: u8 = 1;
@@ -554,13 +554,11 @@ fn rage_and_happiness_divide_for_display_but_not_for_the_raw_readers() {
     let warrior = ObjectFields::from_pairs(&[
         (FIELD_UNIT_POWER1 + u16::from(RAGE), 350),
         (FIELD_UNIT_MAXPOWER1 + u16::from(RAGE), 1000),
+        (FIELD_UNIT_POWER1 + 6, 250),
     ]);
-    assert_eq!(
-        warrior.unit_power(RAGE),
-        Some(350),
-        "the wire value, untouched"
-    );
+    assert_eq!(warrior.unit_power(RAGE), Some(350), "the wire value");
     assert_eq!(warrior.unit_shown_power(RAGE), Some(35));
+    assert_eq!(warrior.unit_shown_power(6), Some(25), "runic power too");
     assert_eq!(warrior.unit_shown_max_power(RAGE), Some(100), "not 1000");
 
     let pet = ObjectFields::from_pairs(&[

@@ -327,23 +327,29 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         );
         none()
     })?;
-    // Enable/DisableSpellAutocast(spell) (`0x541140`/`0x5411a0`): the pet action slot holding the
-    // named spell has its autocast set, through the existing toggle when it differs.
+    // Enable/DisableSpellAutocast(spell [, book]) (`0x541140`/`0x5411a0`): the shared resolver; a
+    // pet-book slot (`0x54116c`) sets its spell's autocast (`0x5d5e10`): the pet action's toggle
+    // is queued when the state, after this frame's queued toggles, differs. No values.
     for (global, on) in [
         ("EnableSpellAutocast", true),
         ("DisableSpellAutocast", false),
     ] {
-        set(lua, global, move |lua, args| {
-            let Some(spell) = text(lua, &arg(&args, 0))? else {
-                return none();
-            };
+        super::spell_arg::set_slot_verb(lua, global, move |lua, id, book| {
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-            if let Some(index) = super::pet::slot_index_by_name(&model, &spell)
-                .filter(|i| super::pet::autocast_state(&model, *i) == Some(!on))
+            let spell = super::spellbook::book_slot(&model, id, book)
+                .filter(|_| super::spellbook::is_pet_book(book))
+                .map(|s| s.spell_id);
+            let queued = &model.pet_autocast_toggles;
+            if let Some(index) = spell
+                .and_then(|spell| super::pet::slot_index_by_spell(&model, spell))
+                .filter(|&i| {
+                    let flips = queued.iter().filter(|&&q| q == i).count();
+                    super::pet::autocast_state(&model, i).map(|s| s ^ (flips % 2 == 1)) == Some(!on)
+                })
             {
                 model.pet_autocast_toggles.push(index);
             }
-            none()
+            Ok(())
         })?;
     }
     // UseItemByName(nameOrId [, target]) (`0x51cd00`): the first bag slot holding the item is
@@ -465,32 +471,17 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         }
         none()
     })?;
-    // IsDressableItem(item) (`0x517530`) → 1 for an item with a display (labelled: read as a cached
-    // template with an icon; native's pet-summon fallback for a displayless item is not read).
+    // IsDressableItem(item) (`0x517530`, the shared item resolver) → 1 for a cached template with
+    // an InventoryType (`0x5175a3`). Labelled: the fallback for a type-0 item whose first spell
+    // has `Effect[0]` 36, learn spell (`0x5175f2`), then tests the taught spell's row
+    // (`0x51763f`), is not decoded or read.
     set(lua, "IsDressableItem", |lua, args| {
         let model = lua.app_data_ref::<Model>().expect("model app_data");
-        let first = arg(&args, 0);
-        let id = match &first {
-            Value::Integer(_) | Value::Number(_) => number(lua, &first).map(|n| n as u32),
-            Value::String(s) => {
-                let s = s.to_string_lossy();
-                s.split("item:")
-                    .nth(1)
-                    .and_then(|r| r.split(|c: char| !c.is_ascii_digit()).next())
-                    .and_then(|d| d.parse().ok())
-                    .or_else(|| {
-                        model
-                            .item_templates
-                            .iter()
-                            .find(|(_, t)| t.name.eq_ignore_ascii_case(&s))
-                            .map(|(id, _)| *id)
-                    })
-            }
-            _ => None,
-        };
-        let dressable = id
-            .and_then(|id| model.item_templates.get(&id))
-            .is_some_and(|t| t.icon.is_some());
+        let id = super::item_arg::item_id_arg(lua, &model, &arg(&args, 0));
+        let dressable = model
+            .item_templates
+            .get(&id)
+            .is_some_and(|t| t.inventory_type != 0);
         Ok(MultiValue::from_vec(vec![super::binding_abi::flag(
             dressable,
         )]))
@@ -899,17 +890,26 @@ mod tests {
             ..Default::default()
         });
         s.set_inventory_slots(slots);
-        s.set_item_template(
-            7,
-            ItemTemplateView {
-                name: "Blade".into(),
-                icon: Some("I".into()),
-                ..Default::default()
-            },
-        );
+        // The InventoryType decides, not the icon: 8 has an icon and no type, 9 the reverse.
+        for (id, name, inventory_type, icon) in [
+            (7, "Blade", 13, Some("I")),
+            (8, "Bread", 0, Some("I")),
+            (9, "Robe", 20, None),
+        ] {
+            let (name, icon) = (name.into(), icon.map(Into::into));
+            s.set_item_template(
+                id,
+                ItemTemplateView {
+                    name,
+                    inventory_type,
+                    icon,
+                    ..Default::default()
+                },
+            );
+        }
         s.run("CancelItemTempEnchantment(1) CancelItemTempEnchantment(2) Sound_GameSystem_RestartSoundSystem()").unwrap();
         assert!(s.run("CancelItemTempEnchantment(3)").is_err());
-        assert!(s.eval::<bool>("return IsDressableItem(7) == 1 and IsDressableItem('Blade') == 1 and IsDressableItem(8) == nil").unwrap());
+        assert!(s.eval::<bool>("return IsDressableItem(7) == 1 and IsDressableItem('Blade') == 1 and IsDressableItem(8) == nil and IsDressableItem(9) == 1 and IsDressableItem(10) == nil").unwrap());
         assert_eq!(
             s.take_wrath_chat_verb_requests(),
             vec![R::CancelTempEnchantment { slot: 1 }, R::RestartSoundSystem]

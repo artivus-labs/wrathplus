@@ -33,7 +33,7 @@ pub(crate) fn run(script: &UiScript, code: &str, budget: u64) -> Value {
         let _ = globals.set("print", capture);
     }
     script.set_instruction_budget(budget);
-    let result = load(lua, code).and_then(|f| f.call::<MultiValue>(()));
+    let result = load(lua, code).and_then(|f| call_packed(lua, f));
     script.clear_instruction_budget();
     let _ = globals.set("print", saved_print);
     let output = std::mem::take(&mut *output.lock().expect("output lock"));
@@ -45,6 +45,20 @@ pub(crate) fn run(script: &UiScript, code: &str, budget: u64) -> Value {
         }),
         Err(e) => json!({"ok": false, "error": e.to_string(), "output": output}),
     }
+}
+
+/// Call `f` and collect its results through a Lua-side pack, one table back to Rust. mlua 0.11's
+/// `call::<MultiValue>` copies each string or table result with `lua_pushvalue` and no stack check
+/// after a `LUA_MULTRET` call, which leaves no free slot: some 20+ such results abort a debug
+/// build (`lapi.c` api check) and write past the frame in a release one.
+fn call_packed(lua: &Lua, f: mlua::Function) -> mlua::Result<Vec<LuaValue>> {
+    let pack: mlua::Function = lua
+        .load("local f = ... local function pack(...) return { n = select('#', ...), ... } end return pack(f())")
+        .set_name("=agent")
+        .into_function()?;
+    let packed: mlua::Table = pack.call(f)?;
+    let n: usize = packed.raw_get("n")?;
+    (1..=n).map(|i| packed.raw_get(i)).collect()
 }
 
 /// `return <code>` when that compiles (an expression), else the code as a chunk.
@@ -117,6 +131,17 @@ mod tests {
         let script = UiScript::new().unwrap();
         let reply = run(&script, "1 + 2, 'x'", BUDGET);
         assert_eq!(reply, json!({"ok": true, "values": [3, "x"], "output": []}));
+        // Many string results, trailing nils kept: mlua's multi-value read had no stack check.
+        let reply = run(
+            &script,
+            "local t = {} for i = 1, 40 do t[i] = 's' .. i end return unpack(t, 1, 41)",
+            BUDGET,
+        );
+        let values = reply["values"].as_array().unwrap();
+        assert_eq!(
+            (values.len(), &values[39], &values[40]),
+            (41, &json!("s40"), &Value::Null)
+        );
     }
 
     #[test]

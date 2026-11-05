@@ -125,6 +125,7 @@ pub use surface::widget_method_census;
 mod input_verbs;
 mod inspect;
 mod inventory_verbs;
+mod item_arg;
 mod item_stats;
 mod item_text;
 pub mod keybind;
@@ -169,6 +170,8 @@ mod slash;
 mod slider;
 mod social;
 mod sound;
+mod spell_arg;
+mod spell_cooldown;
 mod spell_info;
 mod spellbook;
 mod stable;
@@ -244,6 +247,7 @@ pub use wrath_currency::{WrathCurrencyEntry, WrathCurrencySnapshot};
 pub use wrath_tutorial::WrathTutorialRequest;
 mod wrath_achievement_progress;
 mod wrath_item_count;
+mod wrath_item_lookups;
 mod wrath_item_services;
 mod wrath_item_spell;
 mod wrath_item_use;
@@ -425,6 +429,7 @@ pub(crate) use simplehtml::{
 pub use skills::{SkillEntry, SkillsState};
 pub use social::{FriendInfo, SocialRequest, SocialState, WhoInfo};
 pub use sound::{MusicRequest, SoundRequest};
+pub use spell_cooldown::{CooldownKey, CooldownLeg, SpellCooldownFacts};
 pub use spell_info::SpellInfoView;
 pub use spellbook::{
     resolve_spell_by_name, PetBookState, SpellBookState, SpellSlotView, SpellTabView,
@@ -807,6 +812,7 @@ impl UiScript {
             wrath_item_spell::install(&lua)?;
             wrath_spell_use::install(&lua)?;
             wrath_item_use::install(&lua)?;
+            wrath_item_lookups::install(&lua)?;
             wrath_currency::install(&lua)?;
             wrath_equipment::install(&lua)?;
             wrath_modifiers::install(&lua)?;

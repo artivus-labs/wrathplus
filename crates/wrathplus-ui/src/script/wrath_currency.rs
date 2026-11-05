@@ -34,6 +34,9 @@ pub struct WrathCurrencySnapshot {
     /// Native getters project a missing Player to numeric zero, not nil.
     pub honor_current: Option<u32>,
     pub arena_current: Option<u32>,
+    /// The hidden token bag's stacks (slots 118-149) as `(entry, count)`, whatever the known
+    /// bits: `GetItemCount`'s default walk counts them (`0x753a50`, bit `0x200`).
+    pub token_stacks: Vec<(u32, u32)>,
 }
 
 impl WrathCurrencySnapshot {

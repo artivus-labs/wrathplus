@@ -718,8 +718,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             Ok(())
         })?,
     )?;
-    // HasKey() (`0x48ae90`) → the number 1 if the player owns a key (`BagFamily` 9) anywhere, else
-    // nil, never a boolean; the app does the search.
+    // HasKey() (`0x51ae80`) → the number 1 if the player owns a key (`BagFamily & 0x100`)
+    // anywhere, else nil, never a boolean; the app does the search.
     lua.globals().set(
         "HasKey",
         lua.create_function(|lua, ()| {

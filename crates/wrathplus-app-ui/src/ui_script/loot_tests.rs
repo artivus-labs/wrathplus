@@ -1091,7 +1091,7 @@ fn loot_row_awaiting_its_template_opens_clean() {
     );
 
     // Line 85 ran: the row text wears `ITEM_QUALITY_COLORS[-1]`, Common white, because
-    // `GetItemQualityColor`'s clamp is unsigned and -1 takes the 7-and-up branch.
+    // `GetItemQualityColor`'s clamp is unsigned and -1 takes the 8-and-up branch.
     let painted: (f64, f64, f64) = s
         .eval("local r, g, b = LootButton1Text:GetTextColor()\nreturn r, g, b")
         .unwrap();

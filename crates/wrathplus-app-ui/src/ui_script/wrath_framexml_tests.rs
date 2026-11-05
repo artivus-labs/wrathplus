@@ -162,8 +162,6 @@ fn stock_player(level: u32) -> UnitState {
         race_file: Some("Human".into()),
         class: Some("Warrior".into()),
         class_file: Some("WARRIOR".into()),
-        faction_group: Some("Alliance".into()),
-        faction_group_localized: Some("Alliance".into()),
         health: 60,
         max_health: 60,
         ..Default::default()
@@ -198,6 +196,7 @@ fn stock_session(data: &std::path::Path) -> (UiScript, Vec<String>) {
         race: Some(("Human".into(), "Human".into())),
         class: Some(("Warrior".into(), "WARRIOR".into())),
         sex: 2,
+        faction_group: Some(("Alliance".into(), "Alliance".into())),
     });
     script.set_unit("player", Some(stock_player(1)));
     eprintln!(

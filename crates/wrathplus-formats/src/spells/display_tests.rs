@@ -20,6 +20,27 @@ fn is_harmful_follows_the_client_classifier() {
     assert!(d.is_harmful(), "the enemy cone in the third effect");
     d.targets = 0x100;
     assert!(!d.is_harmful(), "the ally flag short-circuits the walk");
+    assert!(d.is_helpful(), "and is helpful");
+    d.targets = 0;
+    d.effect_implicit_target_a = [21, 0, 0];
+    d.effect_implicit_target_b = [0, 93, 0];
+    assert!(
+        d.is_harmful() && !d.is_helpful(),
+        "an enemy corpse area beats a friend target"
+    );
+    d.effect_implicit_target_b = [0, 0, 0];
+    assert!(d.is_helpful(), "TARGET_UNIT_TARGET_ALLY alone is helpful");
+    d.effect_implicit_target_a = [1, 0, 0];
+    d.effect_apply_aura = [4, 0, 0];
+    assert!(
+        !d.is_helpful() && !d.is_harmful(),
+        "a self dummy aura is neither"
+    );
+    d.effect_apply_aura = [0, 0, 0];
+    assert!(
+        d.is_helpful(),
+        "a self effect without the dummy aura is helpful"
+    );
 }
 
 #[test]

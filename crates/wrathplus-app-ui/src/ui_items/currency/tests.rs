@@ -37,15 +37,15 @@ fn hidden_bag_last_slot_and_streamed_stack_counts_without_templates() {
         (Field::ObjectEntry, 0, 49426),
         (Field::ItemStackCount, 0, 4),
     ]);
-    assert_eq!(
-        token_counts(&player, |g| match g {
-            7 => Some(&a),
-            8 => Some(&b),
-            _ => None,
-        }),
-        BTreeMap::from([(49426, 12)])
-    );
-    assert!(token_counts(&player, |_| None).is_empty());
+    let stacks = token_stacks(&player, |g| match g {
+        7 => Some(&a),
+        8 => Some(&b),
+        _ => None,
+    });
+    // GetItemCount sums every stack; the currency list keeps the first.
+    assert_eq!(stacks, [(49426, 12), (49426, 4)]);
+    assert_eq!(token_counts(&stacks), BTreeMap::from([(49426, 12)]));
+    assert!(token_stacks(&player, |_| None).is_empty());
 }
 
 #[test]

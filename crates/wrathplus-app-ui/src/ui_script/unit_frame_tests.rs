@@ -8,8 +8,7 @@ use super::test_ui::load_ui as load_xml;
 mod text;
 
 /// A snapshot as the app's feed pushes one: the active power in its slot of the seven 3.3.5
-/// resources (`UnitPower` reads only those), and a player with a side, which the stock PvP panes
-/// concatenate on their own events (`PVPBattlegroundFrame.lua:123`, `BattlefieldFrame.lua:387`).
+/// resources (`UnitPower` reads only those).
 trait Seat {
     fn seat(&mut self, token: &str, state: Option<UnitState>);
 }
@@ -32,9 +31,6 @@ impl Seat for UiScript {
                     };
                 }
                 u.powers = Some(powers);
-            }
-            if token == "player" && u.faction_group.is_none() {
-                u.faction_group = Some("Alliance".into());
             }
             u
         });
@@ -799,12 +795,16 @@ fn pvp_icon_follows_the_three_branch_law() {
         level: 10,
         is_player: true,
         player_controlled: true,
-        faction_group: Some("Alliance".into()),
         pvp,
         is_pvp_ffa: ffa,
         ..UnitState::default()
     };
-
+    // The player icon's side is the Enter World record's (`0x60d0f4`), never the snapshot's.
+    s.set_player_record(wrathplus_ui::script::PlayerRecord {
+        name: "Benilla".into(),
+        faction_group: Some(("Alliance".into(), "Alliance".into())),
+        ..Default::default()
+    });
     s.seat("player", Some(alliance_player(false, false)));
     s.fire_event("UNIT_FACTION", vec![ScriptValue::Str("player".into())]);
     assert!(!icon_shown(&s, "PlayerPVPIcon"), "unflagged shows none");

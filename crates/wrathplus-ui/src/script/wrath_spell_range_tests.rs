@@ -135,8 +135,8 @@ fn the_gate_picks_the_unit_and_the_pad_reaches_it() {
         assert(IsSpellInRange("Heal", "target") == nil)
         assert(IsSpellInRange("Heal", "player") == nil)  -- the player is not assistable here
         assert(IsSpellInRange("Fireball", "nonsense") == nil)
-        -- A valid token naming nobody falls back to the target (`0x809610` on guid 0).
-        assert(IsSpellInRange("Fireball", "party1") == 1)
+        -- An empty token is the target; a valid one naming nobody is nil (`0x60b00c`).
+        assert(IsSpellInRange(1, "spell", "") == 1 and IsSpellInRange("Fireball", "party1") == nil)
         "#,
     )
     .unwrap();

@@ -136,25 +136,20 @@ pub(crate) fn has_range(state: &SpellUse, spell: &SpellInfoView, caster: u64) ->
     min.abs() >= f32::EPSILON || max.abs() >= f32::EPSILON
 }
 
-/// The unit a spell argument names (`0x60abf0` with its empty-is-target flag): an empty or
-/// missing token is the target, and so is a token naming nobody (`0x809610` on guid 0). `None`
-/// for an unknown token.
+/// The unit a spell argument names (`0x60abf0` with its empty-is-target flag, pushed at
+/// `0x541d37` and `0x51ca7a`): an empty or missing token is the target (`0x60b029`). A token
+/// naming nobody stores the sentinel `0xffffffff_fffffffe` (`0x60b00c`), which passes
+/// `0x809610`'s zero test (`0x80961c`) and finds no unit, so it is `None`, as an unknown token is.
 fn unit_guid(model: &Model, unit: Option<&Value>) -> Option<u64> {
     let token = match unit {
         Some(Value::String(s)) => s.to_string_lossy(),
         Some(v @ (Value::Integer(_) | Value::Number(_))) => v.to_string().ok()?,
         _ => String::new(),
     };
-    let guid = if token.is_empty() {
-        0
-    } else {
-        model.unit_guids.resolve(&token).ok()?.unwrap_or(0)
-    };
-    Some(if guid == 0 {
-        model.unit_guids.target
-    } else {
-        guid
-    })
+    if token.is_empty() {
+        return Some(model.unit_guids.target);
+    }
+    model.unit_guids.resolve(&token).ok()?
 }
 
 /// `0x809610`'s target word: `Targets` adjusted by each `EffectImplicitTargetA`, and whether one

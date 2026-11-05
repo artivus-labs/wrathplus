@@ -1,6 +1,7 @@
 //! Build-12340 item use queries: `IsCurrentItem`, `IsUsableItem`, `IsItemInRange`,
-//! `ItemHasRange`, `GetItemCooldown`, `GetItemCount`, `GetItemFamily`, `GetItemGem`,
-//! `IsEquippedItemType`, `IsConsumableItem`, `IsHarmfulItem` and `IsHelpfulItem`.
+//! `ItemHasRange`, `GetItemCooldown`, `GetItemCount`, `GetItemFamily`, `IsEquippedItemType`,
+//! `IsConsumableItem`, `IsHarmfulItem` and `IsHelpfulItem`; `GetItemGem` is
+//! [`super::wrath_item_lookups`]'s.
 //!
 //! An item argument is an id, an `item:` string or link, or a cached name (`0x709de0`). The
 //! item's spell is its template's first on-use spell (`0x706b90`: trigger 0, nonzero id), else
@@ -75,10 +76,9 @@ impl UiScript {
     }
 }
 
-/// `0x709de0` behind the number test: the item an argument names, 0 for none.
-fn item_of(model: &Model, v: Option<&Value>) -> u32 {
-    v.and_then(|v| super::wrath_item_spell::item_id(model, v))
-        .unwrap_or(0)
+/// The shared item argument ([`super::item_arg::item_id_arg`]), 0 for none.
+fn item_of(lua: &Lua, model: &Model, v: Option<&Value>) -> u32 {
+    v.map_or(0, |v| super::item_arg::item_id_arg(lua, model, v))
 }
 
 /// The item's spell: the template's first on-use spell (`0x706b90`), else, when it has none, the
@@ -109,7 +109,31 @@ where
     lua.create_function(move |lua, args: MultiValue| {
         let model = lua.app_data_ref::<Model>().expect("model app_data");
         let state = lua.app_data_ref::<SpellUse>().expect("spell use app_data");
-        let item = item_of(&model, args.front());
+        let item = item_of(lua, &model, args.front());
+        answer(lua, &model, &state, item, &args)
+    })
+}
+
+/// [`item_binding`] that first asks for the item's template when it is uncached and `asks`
+/// allows: `0x67ca30` with the request callback `0x80abe0`.
+fn asking_binding<A, F>(lua: &Lua, asks: A, answer: F) -> mlua::Result<mlua::Function>
+where
+    A: Fn(&Model, u32) -> bool + Send + 'static,
+    F: Fn(&Lua, &Model, &SpellUse, u32, &MultiValue) -> mlua::Result<MultiValue> + Send + 'static,
+{
+    lua.create_function(move |lua, args: MultiValue| {
+        let (item, ask) = {
+            let model = lua.app_data_ref::<Model>().expect("model app_data");
+            let item = item_of(lua, &model, args.front());
+            let uncached = item != 0 && !model.item_templates.contains_key(&item);
+            (item, uncached && asks(&model, item))
+        };
+        if ask {
+            let mut model = lua.app_data_mut::<Model>().expect("model app_data");
+            model.item_stat_asks.insert(item);
+        }
+        let model = lua.app_data_ref::<Model>().expect("model app_data");
+        let state = lua.app_data_ref::<SpellUse>().expect("spell use app_data");
         answer(lua, &model, &state, item, &args)
     })
 }
@@ -182,60 +206,6 @@ fn inventory_type_of(lua: &Lua, want: &str) -> Option<u32> {
         .map(|i| i as u32 + 1)
 }
 
-/// `GetItemGem`'s gem for a link: the gem enchant at `index` (1..=3) of the item string's gem
-/// fields (`item:id:enchant:gem1:gem2:gem3`, `0x50f630`) through `GemID`.
-fn link_gem(state: &SpellUse, text: &str, index: usize) -> Option<u32> {
-    let fields = &text[text.find("item:")? + 5..];
-    let enchant: u32 = fields.split([':', '|']).nth(1 + index)?.parse().ok()?;
-    state.gem_enchants.get(&enchant).copied()
-}
-
-/// `GetItemGem`'s gem for a name (`0x754b90` → `0x753b20` on the default walk, then
-/// `0x518b30`): the first carried or worn item of that name, in the walker's slot order (the
-/// equipment, each bag slot then its contents, the backpack, the keyring), and its socket's gem.
-fn named_gem(model: &Model, name: &str, index: usize) -> Option<u32> {
-    use super::cursor::EQUIPMENT_BAG;
-    let mut order: Vec<(i64, u32, u32)> = (1..=19u32)
-        .filter_map(|s| {
-            Some((
-                EQUIPMENT_BAG,
-                s,
-                model.inventory_slots[s as usize].as_ref()?.item_id,
-            ))
-        })
-        .collect();
-    let contents = |bag: i64| {
-        let mut v: Vec<(i64, u32, u32)> = model
-            .containers
-            .get(&bag)
-            .map(|c| c.slots.iter().map(|(&s, v)| (bag, s, v.item_id)).collect())
-            .unwrap_or_default();
-        v.sort_unstable();
-        v
-    };
-    for bag in 1..=4i64 {
-        let slot = 19 + bag as u32;
-        if let Some(s) = &model.inventory_slots[slot as usize] {
-            order.push((EQUIPMENT_BAG, slot, s.item_id));
-        }
-        order.extend(contents(bag));
-    }
-    order.extend(contents(0));
-    order.extend(contents(-2));
-    let (bag, slot, _) = order.into_iter().find(|&(_, _, id)| {
-        model
-            .item_templates
-            .get(&id)
-            .is_some_and(|t| t.name.eq_ignore_ascii_case(name))
-    })?;
-    let gems = model
-        .wrath_item_gems
-        .iter()
-        .find(|&&(b, s, _)| b == bag && s == slot)
-        .map_or([None; 3], |r| r.2);
-    gems[index - 1]
-}
-
 /// `IsUsableItem`'s arena gate (`0x51c450`): on an arena map (`Map.dbc` `InstanceType` 4) a
 /// template without `ITEM_FLAG_USEABLE_IN_ARENA` (`0x200000`) is refused when its use spell's
 /// block spends the item or its cooldown or category cooldown passes 15 minutes. For an enchant
@@ -277,10 +247,14 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
     // IsUsableItem(item) (`0x51c450`) → usable, notEnoughMana, 1 or nil each: a carried or worn
-    // item ([`ItemUseView`], the walk with the item), less [`arena_refuses`].
+    // item ([`ItemUseView`], the walk with the item), less [`arena_refuses`]. A held item's
+    // uncached template is asked for: with a player and a count (`0x51c4e3`), `0x80ac10` passes
+    // the request callback (`0x80ac26`).
+    let held =
+        |model: &Model, item| model.unit_guids.player != 0 && item_count(model, item, false) != 0;
     g.set(
         "IsUsableItem",
-        item_binding(lua, |_, model, state, item, _| {
+        asking_binding(lua, held, |_, model, state, item, _| {
             let v = state
                 .items
                 .get(&item)
@@ -317,41 +291,41 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     )?;
     // GetItemCooldown(item) (`0x510fc0`) → start, duration, enable, in seconds (`* 0.001`,
     // `0x9e56b0`). Without an item or a use spell, (0, 0, 0); with one, its cooldown (`0x807980`)
-    // or (0, 0, 1). The app prices every cached template with a use spell.
+    // or (0, 0, 1). The app prices every cached template with a use spell. An uncached template
+    // is asked for: `0x809030` passes the request callback (`0x809046`) for any nonzero id.
     g.set(
         "GetItemCooldown",
-        item_binding(lua, |lua, _, state, item, _| {
-            let spell = use_spell(state, item).filter(|&s| (s as i32) > 0);
-            let now = super::clock::now(lua);
-            let cd = state
-                .items
-                .get(&item)
-                .and_then(|v| v.cooldown)
-                .map(|(s, d, e)| (s as f64 / 1000.0, f64::from(d) / 1000.0, e));
-            let (start, duration, enable) = match (spell, cd) {
-                (None, _) => (0.0, 0.0, 0),
-                (Some(_), Some((s, d, e))) if s + d > now || !e => (s, d, i64::from(e)),
-                (Some(_), _) => (0.0, 0.0, 1),
-            };
-            Ok(MultiValue::from_vec(vec![
-                Value::Number(start),
-                Value::Number(duration),
-                Value::Integer(enable),
-            ]))
-        })?,
+        asking_binding(
+            lua,
+            |_, _| true,
+            |lua, _, state, item, _| {
+                let spell = use_spell(state, item).filter(|&s| (s as i32) > 0);
+                let now = super::clock::now(lua);
+                let cd = state
+                    .items
+                    .get(&item)
+                    .and_then(|v| v.cooldown)
+                    .map(|(s, d, e)| (s as f64 / 1000.0, f64::from(d) / 1000.0, e));
+                let (start, duration, enable) = match (spell, cd) {
+                    (None, _) => (0.0, 0.0, 0),
+                    (Some(_), Some((s, d, e))) if s + d > now || !e => (s, d, i64::from(e)),
+                    (Some(_), _) => (0.0, 0.0, 1),
+                };
+                Ok(MultiValue::from_vec(vec![
+                    Value::Number(start),
+                    Value::Number(duration),
+                    Value::Integer(enable),
+                ]))
+            },
+        )?,
     )?;
     // GetItemCount(item[, includeBank[, includeCharges]]) (`0x51c2e0`) → the carried count
-    // ([`get_item_count`]); both flags read through `0x815500`.
+    // ([`get_item_count`]); both flags read through `GetBoolOrDefault` (`0x51c2f1`, `0x51c2fd`).
     g.set(
         "GetItemCount",
-        item_binding(lua, |lua, model, state, item, args| {
-            let flag_at = |i: usize| -> mlua::Result<bool> {
-                super::wrath_surface::wrath_spell_queries::pet_flag(
-                    lua,
-                    args.get(i).cloned().unwrap_or(Value::Nil),
-                )
-            };
-            let n = get_item_count(model, state, item, flag_at(1)?, flag_at(2)?);
+        item_binding(lua, |_, model, state, item, args| {
+            let flag_at = |i: usize| super::binding_abi::bool_or_default(args.get(i), false);
+            let n = get_item_count(model, state, item, flag_at(1), flag_at(2));
             one(Value::Integer(i64::from(n)))
         })?,
     )?;
@@ -364,49 +338,6 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 Some(f) => one(Value::Integer(i64::from(f.bag_family))),
                 None => Ok(MultiValue::new()),
             }
-        })?,
-    )?;
-    // GetItemGem("name"|"itemlink", index) (`0x51c150`) → the gem's name and link; nothing for an
-    // index outside 1..=3, an empty socket or an uncached gem. A non-string item or non-number
-    // index raises the usage. Inferred: the pair as `GetItemInfo` builds it.
-    g.set(
-        "GetItemGem",
-        lua.create_function(|lua, (item, index): (Value, Value)| {
-            const USAGE: &str = "Usage: GetItemGem(\"name\"|\"itemlink\", index)";
-            let text = match &item {
-                Value::String(_) | Value::Integer(_) | Value::Number(_) => lua
-                    .coerce_string(item)?
-                    .map(|s| s.to_string_lossy())
-                    .unwrap_or_default(),
-                _ => return Err(mlua::Error::runtime(USAGE)),
-            };
-            let index = super::binding_abi::number_arg(lua, index, USAGE)?;
-            let Ok(index @ 1..=3) = usize::try_from(index) else {
-                return Ok(MultiValue::new());
-            };
-            let gem = {
-                let model = lua.app_data_ref::<Model>().expect("model app_data");
-                let state = lua.app_data_ref::<SpellUse>().expect("spell use app_data");
-                let gem = if text.contains("item:") {
-                    link_gem(&state, &text, index)
-                } else {
-                    named_gem(&model, &text, index)
-                };
-                // `0x67ca30` without a callback: an uncached gem answers nothing, asking nothing.
-                gem.filter(|g| model.item_templates.contains_key(g))
-            };
-            let Some(gem) = gem.filter(|&g| g != 0) else {
-                return Ok(MultiValue::new());
-            };
-            let info: mlua::Function = lua.globals().get("GetItemInfo")?;
-            let (name, link): (Option<String>, Option<String>) = info.call(gem)?;
-            Ok(match name.zip(link) {
-                Some((n, l)) => MultiValue::from_vec(vec![
-                    Value::String(lua.create_string(&n)?),
-                    Value::String(lua.create_string(&l)?),
-                ]),
-                None => MultiValue::new(),
-            })
         })?,
     )?;
     // IsEquippedItemType("type") (`0x51c740`) → 1 when a worn item (equipment slots only, walk

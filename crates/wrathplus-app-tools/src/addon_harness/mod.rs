@@ -1020,6 +1020,12 @@ fn seat_a_session(script: &mut UiScript) {
     script.set_realm_name("Harness");
     // The bind point: the server sends `SMSG_BINDPOINTUPDATE` at login, before any addon runs.
     script.set_bind_location("Stormwind City");
+    // `UnitFactionGroup("player")` reads the Enter World record (AceDB-2.0's per-realm key).
+    script.set_player_record(wrathplus_ui::script::PlayerRecord {
+        name: "Harness".into(),
+        faction_group: Some(("Alliance".into(), "Alliance".into())),
+        ..Default::default()
+    });
     script.set_unit(
         "player",
         Some(wrathplus_ui::script::UnitState {
@@ -1028,7 +1034,6 @@ fn seat_a_session(script: &mut UiScript) {
             health: 100,
             max_health: 100,
             level: 60,
-            power_type: 0,
             power: 100,
             max_power: 100,
             race: Some("Human".into()),
@@ -1037,12 +1042,8 @@ fn seat_a_session(script: &mut UiScript) {
             class_file: Some("WARRIOR".into()),
             sex: 2,
             is_player: true,
-            // `UnitCreatureType("player")`: the feed's snapshot carries the race's type, and a
-            // Human is a Humanoid.
+            // `UnitCreatureType("player")`: the feed carries the race's type, a Human's Humanoid.
             creature_type_name: Some("Humanoid".into()),
-            // `UnitFactionGroup("player")`: every playable race has a side, and AceDB-2.0
-            // concatenates it into its per-realm key at file scope.
-            faction_group: Some("Alliance".into()),
             // `0x5efe00`'s team digit for Human (race 1), the rank-title key's second `%d`.
             pvp_team: crate::ui_unit::race_pvp_team(1),
             ..Default::default()

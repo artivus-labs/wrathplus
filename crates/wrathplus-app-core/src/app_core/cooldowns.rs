@@ -33,17 +33,17 @@ impl Timer {
 pub struct Record {
     pub spell_id: u32,
     /// The cast item's entry, 0 for a spell: records match on the spell and item pair.
-    pub(crate) item_id: u32,
+    pub item_id: u32,
     pub recovery: Timer,
-    pub(crate) category: u32,
+    pub category: u32,
     /// The category's `SpellCategory` row has flags bit 0x2, so it matches every query
     /// (`0x6e1563`); wand Shoot's 351 is the only one.
-    pub(crate) category_wildcard: bool,
+    pub category_wildcard: bool,
     pub category_recovery: Timer,
     /// The recovery timers hold their durations but have not started.
     pub on_hold: bool,
-    pub(crate) gcd_category: u32,
-    pub(crate) gcd: Timer,
+    pub gcd_category: u32,
+    pub gcd: Timer,
 }
 
 /// One cooldown list, the client's `SpellHistory`: the player's is this resource (`0xcecaec`), the
