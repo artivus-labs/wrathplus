@@ -45,9 +45,9 @@ pub const BANK_BAG_ID_FIRST: i64 = 5;
 /// `KEYRING_CONTAINER` (`MainMenuBarBagButtons.lua:1`).
 pub const KEYRING_CONTAINER: i64 = -2;
 
-/// `BAG_FAMILY_KEYS`: what the server routes into the keyring (`Player::_CanStoreItem`) and the
-/// reference's `HasKey` searches for.
-pub const BAG_FAMILY_KEYS: u32 = 9;
+/// `BAG_FAMILY_MASK_KEYS`: the `BagFamily` bit the server routes into the keyring
+/// (`Player::_CanStoreItem`) and build 12340's `HasKey` searches for (`0x51aea4`, mask `0x100`).
+pub const BAG_FAMILY_KEYS: u32 = 0x100;
 
 /// Keyring slots usable at `level`, the ladder `GetKeyRingSize` (`ContainerFrame.lua:773`) and the
 /// server's `Player::GetMaxKeyringSize` (`Player.h:985`) share: 4 below 40, 8 at 40, 12 at 50,
@@ -411,10 +411,10 @@ pub fn collect_inventory(
     out
 }
 
-/// The reference's `HasKey()` (`0x48ae90`), the gate on the keyring's existence in the UI: the
-/// walker (`0x6223a0` → `0x622420`) with predicate `0x6223d0`, `BagFamily == 9` (`template+0x1d0`),
-/// at mode `0x4f`, so a key in the bank counts. A slot whose template is still in flight reads as
-/// no key until the answer lands.
+/// Build 12340's `HasKey()` (`0x51ae80`), the gate on the keyring's existence in the UI: the
+/// finder `0x754ac0` with predicate `0x753b00`, `BagFamily & 0x100` (`0x7072b0`), at mode `0x4f`,
+/// so a key in the bank counts. A slot whose template is still in flight reads as no key until the
+/// answer lands.
 pub fn has_key(
     store: &ObjectFields,
     objects: &Objects,
@@ -461,6 +461,6 @@ pub fn has_key(
         };
         items
             .template(entry, guid, commands)
-            .is_some_and(|t| t.bag_family == BAG_FAMILY_KEYS)
+            .is_some_and(|t| t.bag_family & BAG_FAMILY_KEYS != 0)
     })
 }

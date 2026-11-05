@@ -89,6 +89,11 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             Ok(super::binding_abi::flag(on))
         })?,
     )?;
+    // GetExtendedItemInfo (`0x8e5250`) is the shared `xor eax, eax; ret` stub: nothing.
+    globals.set(
+        "GetExtendedItemInfo",
+        lua.create_function(|_, _: MultiValue| Ok(()))?,
+    )?;
     // No `Item.dbc` row answers nothing; a row is an icon path, never nil.
     globals.set(
         "GetItemIcon",

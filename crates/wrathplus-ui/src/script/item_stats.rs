@@ -98,8 +98,8 @@ pub struct ItemTemplateView {
     /// `GetItemInfo`'s `itemTexture`, the `Interface\Icons\…` path through `ItemDisplayInfo.dbc`
     /// (`0x48e2dd`); `None` for a display row with no icon.
     pub icon: Option<String>,
-    /// `RandomProperty` (template `+0x1b8`): the item can roll a suffix, so a template tooltip
-    /// prints `<Random enchantment>` (`0x52cc33`).
+    /// `RandomProperty`: the item can roll a suffix, so a template tooltip prints
+    /// `<Random enchantment>` (`0x52cc33`).
     pub random_property: u32,
     /// Socket colour masks (1 meta, 2 red, 4 yellow, 8 blue): `GetItemStats` `EMPTY_SOCKET_*`.
     pub socket_colors: [u32; 3],
@@ -269,10 +269,10 @@ impl super::UiScript {
     }
 }
 
-/// The 1.12 item-quality palette: the ARGB literals the static init `0x5291d0` writes to the BGRA
-/// array `0xc0d3c8`, and the escape strings at `0x854124`. `GetItemQualityColor` (`0x48dfb0`)
-/// answers each channel times 1/255.
-const QUALITY_COLORS: [(u8, u8, u8, &str); 7] = [
+/// The item-quality palette: the BGRA rows at `0xad2d84` and the escape strings `0xad2a84`, eight
+/// live rows, 7 Heirloom sharing Artifact's colour. `0x61a510`/`0x61a530` bound an unsigned
+/// quality at 8: anything else is row 1, Common.
+const QUALITY_COLORS: [(u8, u8, u8, &str); 8] = [
     (0x9d, 0x9d, 0x9d, "|cff9d9d9d"), // 0 Poor
     (0xff, 0xff, 0xff, "|cffffffff"), // 1 Common
     (0x1e, 0xff, 0x00, "|cff1eff00"), // 2 Uncommon
@@ -280,17 +280,22 @@ const QUALITY_COLORS: [(u8, u8, u8, &str); 7] = [
     (0xa3, 0x35, 0xee, "|cffa335ee"), // 4 Epic
     (0xff, 0x80, 0x00, "|cffff8000"), // 5 Legendary
     (0xe6, 0xcc, 0x80, "|cffe6cc80"), // 6 Artifact
+    (0xe6, 0xcc, 0x80, "|cffe6cc80"), // 7 Heirloom
 ];
 
-/// The client's item-link builder `0x52adb0` as the trade-skill link verbs call it:
-/// `|c<rrggbb>|Hitem:<id>:0:0:0|h[<name>]|h|r`. A quality of 7 or more selects index 1, white,
-/// by `0x52ad90`'s unsigned `cmp ecx,7; jb`.
-pub(super) fn item_link(item_id: u32, name: &str, quality: u32) -> String {
-    let hex = QUALITY_COLORS
+fn quality_row(quality: u32) -> (u8, u8, u8, &'static str) {
+    *QUALITY_COLORS
         .get(quality as usize)
         .unwrap_or(&QUALITY_COLORS[1])
-        .3;
-    format!("{hex}|Hitem:{item_id}:0:0:0|h[{name}]|h|r")
+}
+
+/// The client's item-link builder as the trade-skill link verbs call it:
+/// `|c<rrggbb>|Hitem:<id>:0:0:0|h[<name>]|h|r`, its colour bounded at 8 (`0x61e2d1`).
+pub(super) fn item_link(item_id: u32, name: &str, quality: u32) -> String {
+    format!(
+        "{}|Hitem:{item_id}:0:0:0|h[{name}]|h|r",
+        quality_row(quality).3
+    )
 }
 
 /// `InventoryType` → `GetItemInfo`'s `itemEquipLoc`, the reference's 30-pointer table at
@@ -403,18 +408,16 @@ fn parse_item_arg(lua: &Lua, v: &Value) -> mlua::Result<ItemArg> {
 
 pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     item_stat_table::install(lua)?;
-    // GetItemQualityColor(quality) → r, g, b, escapeString (`0x48dfb0`). 7 and up, or a negative
-    // quality, answer Common (`0x52ad70`/`0x52ad90`: an unsigned `cmp ecx,7; jb`), so
-    // `ITEM_QUALITY_COLORS[-1]` is white, the colour of an uncached loot row (`0x4c2435`).
+    // GetItemQualityColor(quality) → r, g, b, escapeString (`0x510e20`): a number, truncated
+    // (`fldcw` 0xc00) to its low 32 bits, compared unsigned, so -1 is Common, the colour of an
+    // uncached loot row; anything else raises the usage error.
     lua.globals().set(
         "GetItemQualityColor",
-        lua.create_function(|lua, quality: i64| {
-            // A 32-bit int (`__ftol`), compared unsigned.
-            let i = match quality as i32 as u32 {
-                q if q >= 7 => 1,
-                q => q as usize,
+        lua.create_function(|lua, quality: Value| {
+            let Some(q) = lua.coerce_number(quality)? else {
+                return Err(mlua::Error::runtime("Usage: GetItemQualityColor(index)"));
             };
-            let (r, g, b, hex) = QUALITY_COLORS[i];
+            let (r, g, b, hex) = quality_row(q.trunc() as i64 as u32);
             Ok(mlua::MultiValue::from_vec(vec![
                 Value::Number(f64::from(r) / 255.0),
                 Value::Number(f64::from(g) / 255.0),
@@ -462,9 +465,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 .expect("model app_data")
                 .unit("player")
                 .map_or(0, |u| u.level);
-            let hex = QUALITY_COLORS
-                .get(v.quality.min(6) as usize)
-                .map_or("|cffffffff", |c| c.3);
+            let hex = quality_row(v.quality).3;
             Ok(MultiValue::from_vec(vec![
                 Value::String(lua.create_string(&v.name)?),
                 Value::String(lua.create_string(format!(

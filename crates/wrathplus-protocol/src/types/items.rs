@@ -106,9 +106,9 @@ pub struct ItemInfo {
     pub area: u32,
     /// `Map.dbc` map the item is bound to; 0 for anywhere.
     pub map: u32,
-    /// The specialised container an item belongs in (1 quiver, 2 ammo pouch, 3 soul bag, 6 herb,
-    /// 7 enchanting, 8 engineering, 9 keyring; 0 none). An enum, not a mask, in 1.12: the
-    /// reference's `HasKey` (`0x48ae90`) tests `== 9`.
+    /// `BagFamily`, the specialised containers an item fits: a mask, which `GetItemFamily`
+    /// (`0x510f20`) answers raw and `HasKey` (`0x51ae80`) tests `& 0x100`, the keys; 9 has no key
+    /// bit.
     pub bag_family: u32,
     /// `TotemCategory.dbc` row this item counts as for a recipe's tool (a Blacksmith Hammer),
     /// 0 for none; 3.3.5 only.

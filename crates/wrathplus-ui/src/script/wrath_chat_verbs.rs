@@ -465,15 +465,17 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         }
         none()
     })?;
-    // IsDressableItem(item) (`0x517530`, the shared item resolver) → 1 for an item with a display
-    // (labelled: read as a cached template with an icon; the pet-summon fallback is not read).
+    // IsDressableItem(item) (`0x517530`, the shared item resolver) → 1 for a cached template with
+    // an InventoryType (`0x5175a3`). Labelled: the fallback for a type-0 item whose first spell
+    // has `Effect[0]` 36, learn spell (`0x5175f2`), then tests the taught spell's row
+    // (`0x51763f`), is not decoded or read.
     set(lua, "IsDressableItem", |lua, args| {
         let model = lua.app_data_ref::<Model>().expect("model app_data");
         let id = super::item_arg::item_id_arg(lua, &model, &arg(&args, 0));
         let dressable = model
             .item_templates
             .get(&id)
-            .is_some_and(|t| t.icon.is_some());
+            .is_some_and(|t| t.inventory_type != 0);
         Ok(MultiValue::from_vec(vec![super::binding_abi::flag(
             dressable,
         )]))
@@ -882,17 +884,26 @@ mod tests {
             ..Default::default()
         });
         s.set_inventory_slots(slots);
-        s.set_item_template(
-            7,
-            ItemTemplateView {
-                name: "Blade".into(),
-                icon: Some("I".into()),
-                ..Default::default()
-            },
-        );
+        // The InventoryType decides, not the icon: 8 has an icon and no type, 9 the reverse.
+        for (id, name, inventory_type, icon) in [
+            (7, "Blade", 13, Some("I")),
+            (8, "Bread", 0, Some("I")),
+            (9, "Robe", 20, None),
+        ] {
+            let (name, icon) = (name.into(), icon.map(Into::into));
+            s.set_item_template(
+                id,
+                ItemTemplateView {
+                    name,
+                    inventory_type,
+                    icon,
+                    ..Default::default()
+                },
+            );
+        }
         s.run("CancelItemTempEnchantment(1) CancelItemTempEnchantment(2) Sound_GameSystem_RestartSoundSystem()").unwrap();
         assert!(s.run("CancelItemTempEnchantment(3)").is_err());
-        assert!(s.eval::<bool>("return IsDressableItem(7) == 1 and IsDressableItem('Blade') == 1 and IsDressableItem(8) == nil").unwrap());
+        assert!(s.eval::<bool>("return IsDressableItem(7) == 1 and IsDressableItem('Blade') == 1 and IsDressableItem(8) == nil and IsDressableItem(9) == 1 and IsDressableItem(10) == nil").unwrap());
         assert_eq!(
             s.take_wrath_chat_verb_requests(),
             vec![R::CancelTempEnchantment { slot: 1 }, R::RestartSoundSystem]
