@@ -298,6 +298,16 @@ pub(super) fn item_link(item_id: u32, name: &str, quality: u32) -> String {
     )
 }
 
+/// `GetItemInfo`'s link (`0x61e290`): the nine-field hyperlink, the item string's enchant, random
+/// property and suffix kept, carrying the player's level.
+pub(super) fn info_link(id: u32, fields: [u32; 3], level: u32, t: &ItemTemplateView) -> String {
+    let ([enchant, random_property, suffix], hex) = (fields, quality_row(t.quality).3);
+    format!(
+        "{hex}|Hitem:{id}:{enchant}:0:0:0:0:{random_property}:{suffix}:{level}|h[{}]|h|r",
+        t.name
+    )
+}
+
 /// `InventoryType` → `GetItemInfo`'s `itemEquipLoc`, the reference's 30-pointer table at
 /// `0x83ddb0` (`0x48e29b`): slots 0 and 29 are the shared `""` (`0x882748`), not nil, and four
 /// tokens (`AMMO`, `THROWN`, `RANGEDRIGHT`, `QUIVER`) have no `GlobalStrings.lua` entry.
@@ -465,13 +475,10 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 .expect("model app_data")
                 .unit("player")
                 .map_or(0, |u| u.level);
-            let hex = quality_row(v.quality).3;
+            let fields = [enchant, random_property, suffix];
             Ok(MultiValue::from_vec(vec![
                 Value::String(lua.create_string(&v.name)?),
-                Value::String(lua.create_string(format!(
-                    "{hex}|Hitem:{item_id}:{enchant}:0:0:0:0:{random_property}:{suffix}:{level}|h[{}]|h|r",
-                    v.name
-                ))?),
+                Value::String(lua.create_string(info_link(item_id, fields, level, &v))?),
                 Value::Integer(i64::from(v.quality)),
                 Value::Integer(i64::from(v.item_level)),
                 Value::Integer(i64::from(v.required_level)),

@@ -61,6 +61,23 @@ pub(super) fn item_id_arg(lua: &Lua, model: &Model, v: &Value) -> u32 {
     }
 }
 
+/// GetItemInfo's argument shape, which GetItemUniqueness shares (`0x516ee9`): a number
+/// truncates (`0x84e030` + `__ftol`, the low 32 bits); a string holding `item:` is its item
+/// string's id (`0x50f630`: 0 unless > 0); another string a name; any other type `usage`.
+pub(super) fn info_item_id(lua: &Lua, model: &Model, v: &Value, usage: &str) -> mlua::Result<u32> {
+    if let Some(n) = lua.coerce_number(v.clone())? {
+        return Ok(n.trunc() as i64 as u32);
+    }
+    let Value::String(s) = v else {
+        return Err(mlua::Error::runtime(usage.to_string()));
+    };
+    let s = s.to_string_lossy();
+    Ok(match s.find("item:") {
+        Some(at) => u32::try_from(super::item_stats::reference_atoi(&s[at + 5..])).unwrap_or(0),
+        None => name_id(model, &s),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use crate::script::{ItemTemplateView, UiScript};

@@ -245,6 +245,7 @@ pub use wrath_currency::{WrathCurrencyEntry, WrathCurrencySnapshot};
 pub use wrath_tutorial::WrathTutorialRequest;
 mod wrath_achievement_progress;
 mod wrath_item_count;
+mod wrath_item_lookups;
 mod wrath_item_services;
 mod wrath_item_spell;
 mod wrath_item_use;
@@ -808,6 +809,7 @@ impl UiScript {
             wrath_item_spell::install(&lua)?;
             wrath_spell_use::install(&lua)?;
             wrath_item_use::install(&lua)?;
+            wrath_item_lookups::install(&lua)?;
             wrath_currency::install(&lua)?;
             wrath_equipment::install(&lua)?;
             wrath_modifiers::install(&lua)?;

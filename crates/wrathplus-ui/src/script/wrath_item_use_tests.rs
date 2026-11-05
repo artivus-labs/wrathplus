@@ -324,6 +324,8 @@ fn current_item_reads_the_casts_items() {
 #[test]
 fn item_gem_reads_links_and_named_items() {
     let mut s = script();
+    // The name leg reads the player's items (`0x51c1e8`).
+    s.model_mut().unit_guids.player = 1;
     s.set_wrath_gem_enchants([(3261, RUBY)].into_iter().collect());
     s.set_wrath_item_gems(vec![(0, 1, [None, Some(RUBY), None])]);
     s.run(

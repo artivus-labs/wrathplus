@@ -6,7 +6,7 @@ use super::Model;
 
 /// `0x7546f0`'s skip, which the `0x80` flag lifts: a copy that is broken (a max durability, 0
 /// left, not wrapped `0x8`) or carries `ITEM_FIELD_FLAGS` `0x10`.
-fn skipped(flags: u32, durability: Option<(u32, u32)>) -> bool {
+pub(super) fn skipped(flags: u32, durability: Option<(u32, u32)>) -> bool {
     let broken = flags & 8 == 0 && durability.is_some_and(|(cur, max)| max != 0 && cur == 0);
     broken || flags & 0x10 != 0
 }

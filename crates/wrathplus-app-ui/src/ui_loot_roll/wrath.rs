@@ -59,7 +59,7 @@ pub(super) fn register(app: &mut App) {
     .init_resource::<feed::Presentation>()
     .add_systems(
         Update,
-        feed::feed
+        (feed::feed, feed::feed_item_limits)
             .in_set(crate::app_core::schedule::UiFeed)
             .run_if(crate::app_core::ui_state::ingame_ui_up),
     )
