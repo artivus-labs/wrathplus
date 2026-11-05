@@ -387,7 +387,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         number(
             lua,
             arg(&args, 0),
-            "Usage: IsQuestLogSpecialItemInRange(index, unit)",
+            "Usage: IsQuestLogSpecialItemInRange(index [,target])",
         )?;
         Ok(MultiValue::from_vec(vec![Value::Nil]))
     })?;

@@ -12,44 +12,14 @@
 
 use mlua::{Lua, Value, Variadic};
 
+#[path = "stdlib_guards.rs"]
+mod guards;
+#[path = "stdlib_strings.rs"]
+mod strings;
 #[path = "stdlib_time.rs"]
 mod time;
 
-/// Put native protected operations behind a sticky host check. Lua 5.1 can catch a hook error, and
-/// `coroutine.resume` reports one as a false result. Once the shared budget trips, these wrappers
-/// raise a fresh Rust callback error after the protected operation returns, so nesting protected
-/// calls only moves the same failure outward and cannot resume useful Lua execution.
-pub(super) fn install_wrath_budget_guards(
-    lua: &Lua,
-    budget: std::sync::Arc<super::InstructionBudget>,
-) -> mlua::Result<()> {
-    let check = lua.create_function(move |_, values: mlua::MultiValue| {
-        use std::sync::atomic::Ordering::Relaxed;
-
-        if budget.exhausted.load(Relaxed) {
-            return Err(super::instruction_budget_error(budget.used.load(Relaxed)));
-        }
-        Ok(values)
-    })?;
-    lua.globals().set("__wrathplus_budget_check", check)?;
-    lua.load(WRATH_BUDGET_GUARDS)
-        .set_name("=[WrathPlus wrath budget guards]")
-        .set_mode(mlua::ChunkMode::Text)
-        .exec()
-}
-
-const WRATH_BUDGET_GUARDS: &str = r#"
-do
-    local check = __wrathplus_budget_check
-    local native_pcall, native_xpcall = pcall, xpcall
-    local native_resume = coroutine.resume
-    __wrathplus_budget_check = nil
-
-    function pcall(...) return check(native_pcall(...)) end
-    function xpcall(...) return check(native_xpcall(...)) end
-    coroutine.resume = function(...) return check(native_resume(...)) end
-end
-"#;
+pub(super) use guards::install_wrath_budget_guards;
 
 /// An mlua error's bare Lua message, as `loadstring` returns it: without the `syntax error: ` or
 /// `runtime error: ` word mlua's `Display` adds and the reference never does.
@@ -184,10 +154,10 @@ pub(super) fn sandbox(lua: &Lua) -> mlua::Result<()> {
 pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     install_error_handler(lua)?;
     time::install_time(lua)?;
-    // Before the Lua layer, whose `debugprofile*` pair keeps its own `GetTime`.
     super::clock::install(lua)?;
     super::zone_text::install(lua)?;
     install_bit(lua)?;
+    strings::install(lua)?;
     lua.load(WRATH_STDLIB)
         .set_name("=[WrathPlus wow stdlib]")
         .set_mode(mlua::ChunkMode::Text)
@@ -221,33 +191,13 @@ function asin(x) return math.deg(math.asin(x)) end
 function acos(x) return math.deg(math.acos(x)) end
 function atan(x) return math.deg(math.atan(x)) end
 function atan2(y, x) return math.deg(math.atan2(y, x)) end
-fastrandom, math.randomseed = math.random, nil -- 12340 has no "randomseed" string at all
+math.randomseed = nil -- 12340 has no "randomseed" string at all
 PI = math.pi
 -- string
 format, gmatch, gsub = string.format, string.gmatch, string.gsub
 strbyte, strchar, strfind, strlen = string.byte, string.char, string.find, string.len
 strlower, strmatch, strrep, strrev = string.lower, string.match, string.rep, string.reverse
 strsub, strupper = string.sub, string.upper
-function strtrim(s, chars)
-    chars = chars or " \t\r\n"
-    local class = "[" .. chars:gsub("[%]%^%-]", "%%%0") .. "]"
-    return (s:gsub("^" .. class .. "+", ""):gsub(class .. "+$", ""))
-end
-function strsplit(sep, s, limit)
-    local out, start, n = {}, 1, 0
-    local class = "[" .. sep:gsub("[%]%^%-]", "%%%0") .. "]"
-    while true do
-        n = n + 1
-        if limit and n >= limit then out[n] = s:sub(start) break end
-        local a, b = s:find(class, start)
-        if not a then out[n] = s:sub(start) break end
-        out[n] = s:sub(start, a - 1)
-        start = b + 1
-    end
-    return unpack(out, 1, n)
-end
-function strjoin(sep, ...) return table.concat({ ... }, sep) end
-function strconcat(...) return table.concat({ ... }) end
 function tostringall(...)
     local n = select("#", ...)
     if n == 0 then return end
@@ -274,16 +224,11 @@ function setglobal(name, value) _G[name] = value end
 function GetLocale() return "enUS" end
 -- debug*: debuginfo, debugload, debugprint, debugdump, debugbreak and debugtimestamp all bind the
 -- shared `return 0` stub `0x8e5250`, answering nothing (`/tmp/azb-app-mig/ghidra/debugfam*.log`);
--- 3.3.5's `_ERRORMESSAGE` calls debuginfo() unguarded. debugprofilestop (`0x817370`) answers the
--- milliseconds since debugprofilestart (`0x817350`) latched, on `GetTime`'s clock here.
+-- 3.3.5's `_ERRORMESSAGE` calls debuginfo() unguarded.
 do
-    local GetTime = GetTime
     local function noop() end
     debuginfo, debugload, debugprint = noop, noop, noop
     debugdump, debugbreak, debugtimestamp = noop, noop, noop
-    local profileStart = 0
-    function debugprofilestart() profileStart = GetTime() end
-    function debugprofilestop() return (GetTime() - profileStart) * 1000 end
 end
 "##;
 
@@ -304,7 +249,6 @@ fn install_bit(lua: &Lua) -> mlua::Result<()> {
     bit.set("bor", binary(|a, b| a | b)?)?;
     bit.set("bxor", binary(|a, b| a ^ b)?)?;
     bit.set("bnot", lua.create_function(|_, a: f64| Ok(!arg(a) as i32))?)?;
-    bit.set("tobit", lua.create_function(|_, a: f64| Ok(arg(a) as i32))?)?;
     bit.set(
         "lshift",
         lua.create_function(|_, (a, n): (f64, f64)| Ok(arg(a).wrapping_shl(arg(n) & 31) as i32))?,
@@ -493,8 +437,14 @@ fn traceback_frame(d: &mlua::Debug) -> String {
     // A tail call has nothing to name it from and takes the `" ?"` arm, known by its `what` or as
     // the `(tail call)` pseudo-frame.
     let tail_call = src.what == "t" || short == "(tail call)";
+    // Named only for a global, local, method or field (`0x817b1f`, `namewhat`'s first byte); an
+    // upvalue call takes the `<file:line>` arm.
+    let named = matches!(
+        names.name_what.and_then(|w| w.bytes().next()),
+        Some(b'f' | b'g' | b'l' | b'm')
+    );
     match names.name.as_deref() {
-        Some(name) if !name.is_empty() && !tail_call => {
+        Some(name) if !name.is_empty() && named && !tail_call => {
             line.push_str(" in function `");
             line.push_str(name);
             line.push('\'');

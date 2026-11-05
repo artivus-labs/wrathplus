@@ -412,7 +412,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     set(lua, "SetGuildBankTabInfo", |lua, args| {
         let Some(t) = index(lua, &arg(&args, 0)) else {
             return Err(mlua::Error::runtime(
-                "Usage: SetGuildBankTabInfo(tab, name, icon)",
+                "Usage: SetGuildBankTabInfo(tab, name, iconIndex)",
             ));
         };
         let name = lua

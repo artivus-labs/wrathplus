@@ -223,29 +223,52 @@ pub(crate) use lifecycle::{
 #[cfg(test)]
 pub(crate) use lifecycle::{finish_ui_load, load_ingame_ui_on_world_entry};
 
-/// `GetFramerate()`'s host half: FPS on `Time<Real>`, smoothed by a one-second pole; how the
-/// reference averages it is untraced.
+/// `GetFramerate()`'s host half: the reference writes each frame's time into a zeroed ring of 30
+/// (`0xcd76b0`, at `0x7831bc`) and answers 1 / their mean, or 1000 while the mean is under 0.001 s
+/// (`0x77f440`), so it reads 1000 until the frames' total passes 0.03 s, and a spike lingers for
+/// 30 frames.
 fn feed_framerate(
     script: Option<NonSendMut<UiScript>>,
     time: Res<Time<bevy::time::Real>>,
-    mut smoothed: Local<f64>,
+    mut ring: Local<([f32; 30], usize)>,
 ) {
     let Some(mut script) = script else {
         return;
     };
-    let dt = time.delta_secs_f64();
-    if dt <= 0.0 {
-        return; // the first frame, or a paused one
-    }
-    let instant = 1.0 / dt;
-    // One-pole IIR with a 1 s time constant, frame-rate independent.
-    let alpha = (dt / 1.0).min(1.0);
-    *smoothed = if *smoothed <= 0.0 {
-        instant
+    let (times, at) = &mut *ring;
+    times[*at] = time.delta_secs();
+    *at = (*at + 1) % times.len();
+    script.set_framerate(f64::from(ring_rate(times)));
+}
+
+/// `0x77f440` over the ring: 1 / the mean of all 30 slots, or 1000 under a 0.001 s mean.
+fn ring_rate(times: &[f32; 30]) -> f32 {
+    let mean = times.iter().sum::<f32>() / 30.0;
+    if mean >= 0.001 {
+        1.0 / mean
     } else {
-        *smoothed + alpha * (instant - *smoothed)
-    };
-    script.set_framerate(*smoothed);
+        1000.0
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn the_framerate_is_the_30_frame_mean_from_a_zeroed_ring() {
+    let mut ring = [0.0f32; 30];
+    assert_eq!(ring_rate(&ring), 1000.0);
+    ring[0] = 1.0 / 60.0;
+    assert_eq!(
+        ring_rate(&ring),
+        1000.0,
+        "one frame in, the mean is under 0.001 s"
+    );
+    ring = [1.0 / 60.0; 30];
+    assert!((ring_rate(&ring) - 60.0).abs() < 0.01);
+    ring[0] = 1.0;
+    assert!(
+        (ring_rate(&ring) - 30.0 / (1.0 + 29.0 / 60.0)).abs() < 0.01,
+        "a spike lingers"
+    );
 }
 
 /// A test font engine: every character `.0` wide, 12 tall per line, greedily wrapped.

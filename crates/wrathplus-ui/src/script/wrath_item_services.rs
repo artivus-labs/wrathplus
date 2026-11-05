@@ -155,7 +155,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         "WithdrawGuildBankMoney",
         lua.create_function(|lua, amount: Value| {
             let amount = lua.coerce_number(amount)?.ok_or_else(|| {
-                mlua::Error::RuntimeError("Usage: WithdrawGuildBankMoney(amount)".into())
+                mlua::Error::RuntimeError("Usage: WithdrawGuildBankMoney(money)".into())
             })?;
             if amount.is_finite() && amount > 0.0 && amount <= u32::MAX as f64 {
                 lua.app_data_mut::<State>().unwrap().requests.push(

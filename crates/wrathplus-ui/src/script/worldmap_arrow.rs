@@ -127,21 +127,18 @@ fn create(lua: &Lua, which: Arrow, parent: Value) -> mlua::Result<()> {
             return Ok(()); // the singleton exists: the parent is not even read (`0x4a7a80`)
         }
     }
+    let model = Value::String(lua.create_string("Model")?);
     let wrapper = create_frame(
         lua,
-        ("Model".to_string(), None, Some(Value::Table(t)), None),
+        mlua::MultiValue::from_vec(vec![model, Value::Nil, Value::Table(t)]),
     )?;
     // Each arrow names its effect child, read next by the stock OnLoads: CWorldMap::Create{,Mini}
     // PlayerArrowFrame (WorldMapFrame.lua:108, Blizzard_BattlefieldMinimap.lua:52-54).
     let mini = ["", "Mini"][usize::from(matches!(which, Arrow::Mini))];
     let name = Value::String(lua.create_string(format!("Player{mini}ArrowEffectFrame"))?);
-    let effect = (
-        "Frame".to_string(),
-        Some(name),
-        Some(Value::Table(wrapper.clone())),
-        None,
-    );
-    create_frame(lua, effect)?;
+    let frame = Value::String(lua.create_string("Frame")?);
+    let effect = vec![frame, name, Value::Table(wrapper.clone())];
+    create_frame(lua, mlua::MultiValue::from_vec(effect))?;
     let id = decode_id(&wrapper)?;
     let scale = {
         let model = lua.app_data_ref::<Model>().expect("model app_data");

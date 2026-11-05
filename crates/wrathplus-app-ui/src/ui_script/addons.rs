@@ -480,7 +480,8 @@ pub fn info_from_toc(name: &str, toc: &Toc) -> wrathplus_ui::script::AddOnInfo {
         enabled: true,       // until the enable state says otherwise
         saved_enabled: true, // re-stamped from `enabled` at registration
         loaded: false,
-        // The version gate's dword: the leading integer, 0 when absent (out of date, not unknown).
+        finished: false,
+        // The version gate's dword: the leading integer, 0 when absent (incompatible).
         interface: toc.interface_version(),
         chain: false, // `info_for` stamps the chain rows; the harness's rows are folder addons
     }
@@ -885,16 +886,16 @@ impl Walk {
             self.failed.insert(addon.name.clone());
             return Err(());
         }
-        // The version gate, `AddOn_CanLoad` check 6: after the enable state, before the dependency
-        // loop, an exact `==` (a missing `## Interface` is 0). Not a failure either: the AddOns
-        // screens show it, and the Load out of date AddOns checkbox loads it anyway.
-        if self.version_check && addon.toc.interface_version() != self.client_interface {
-            info!(
-                "ui_script: {key} is out of date (## Interface: {}, client {}) — not loaded \
-                 (the AddOns screen's 'Load out of date AddOns' loads it anyway)",
-                addon.toc.interface_version(),
-                self.client_interface
-            );
+        // `AddOn_CanLoad`'s interface checks, before the dependency loop (a missing `## Interface`
+        // is 0): below 20000 `INCOMPATIBLE` (`0x5f7f1a`), else an exact `==` (`0x5f7f32`) that
+        // "Load out of date AddOns" lifts. Not a failure either: the AddOns screens show it.
+        let interface = addon.toc.interface_version();
+        if interface < 20000 || (self.version_check && interface != self.client_interface) {
+            let why = match interface {
+                ..20000 => "incompatible",
+                _ => "out of date (the AddOns screen's 'Load out of date AddOns' loads it anyway)",
+            };
+            info!("ui_script: {key} is {why} (## Interface: {interface}) — not loaded");
             self.failed.insert(addon.name.clone());
             return Err(());
         }
@@ -1086,6 +1087,7 @@ mod tests {
 
     /// Build an addon over a temp AddOns root, so the walk can be tested without an install.
     fn dir_addon(root: &Path, name: &str, toc: &str) -> Addon {
+        let toc = &format!("## Interface: 30300\n{toc}"); // a current addon, unless `toc` says
         let folder = root.join(name);
         std::fs::create_dir_all(&folder).unwrap();
         std::fs::write(folder.join(format!("{name}.toc")), toc).unwrap();
@@ -1701,8 +1703,8 @@ mod tests {
         (home, guard)
     }
 
-    /// `AddOn_CanLoad` check 6: exact `==`, a missing `## Interface` is 0 and out of date, and a
-    /// gated addon's dependent is blocked; `checkAddonVersion` off loads the same folder in full.
+    /// `AddOn_CanLoad` check 6: exact `==`, and a gated addon's dependent is blocked;
+    /// `checkAddonVersion` off loads it, but never one below 20000 (a missing `## Interface` is 0).
     #[test]
     fn the_version_gate_holds_the_walk_and_force_load_opens_it() {
         let _l = crate::local_state::test_env::ENV_LOCK
@@ -1718,13 +1720,13 @@ mod tests {
         write_addon(
             &home,
             "Old",
-            "## Interface: 11100\nmain.lua\n",
+            "## Interface: 30200\nmain.lua\n",
             &[("main.lua", "OldRan = true\n")],
         );
         write_addon(
             &home,
             "Silent",
-            "main.lua\n", // no ## Interface: parses as 0, out of date
+            "main.lua\n", // no ## Interface: parses as 0, incompatible
             &[("main.lua", "SilentRan = true\n")],
         );
         write_addon(
@@ -1762,12 +1764,10 @@ mod tests {
         let failures = load_wrath_third_party(&mut open, None, &[], false);
         assert!(failures.is_empty(), "force-load load errors: {failures:?}");
         assert_eq!(
-            open.eval::<bool>(
-                "return OldRan == true and SilentRan == true and NeedsOldRan == true"
-            )
-            .ok(),
+            open.eval::<bool>("return OldRan == true and SilentRan == nil and NeedsOldRan == true")
+                .ok(),
             Some(true),
-            "'Load out of date AddOns' loads the very same folder in full"
+            "'Load out of date AddOns' loads the out-of-date addon, not the incompatible one"
         );
     }
 
@@ -2362,7 +2362,7 @@ mod tests {
     }
 
     /// A LoadOnDemand options package on a dependency the startup walk loaded (`/msbt`'s shape):
-    /// without the walk's `mark_addon_loaded` stamp the gate answers `DEP_NOT_DEMAND_LOADED`.
+    /// without the walk's `mark_addon_loaded` stamp `LoadAddOn` would run the dependency again.
     #[test]
     fn a_load_on_demand_addon_loads_on_top_of_an_already_loaded_dependency() {
         let _l = crate::local_state::test_env::ENV_LOCK
@@ -2387,9 +2387,11 @@ mod tests {
         let _ = load_wrath_third_party(&mut script, None, &[], true);
 
         assert_eq!(
-            script.eval::<bool>("return IsAddOnLoaded('Base') == 1").ok(),
+            script
+                .eval::<bool>("return IsAddOnLoaded('Base') == 1")
+                .ok(),
             Some(true),
-            "a startup-loaded addon reads as loaded, else a dependent answers DEP_NOT_DEMAND_LOADED"
+            "a startup-loaded addon reads as loaded, else a dependent's load runs it again"
         );
         assert_eq!(
             script.eval::<bool>("return OptsRan == nil").ok(),

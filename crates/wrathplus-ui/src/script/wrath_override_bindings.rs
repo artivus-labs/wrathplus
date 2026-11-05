@@ -95,7 +95,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     install_setter(
         lua,
         "SetOverrideBindingClick",
-        "Usage: SetOverrideBindingClick(owner, isPriority, \"KEY\", \"ButtonName\"[, \"mouseButton\"])",
+        "Usage: SetOverrideBindingClick(owner, isPriority, \"KEY\", \"buttonName\"[, \"mouseButton\"])",
         |args| {
             let button = text(&arg(args, 3))?;
             let mouse = text(&arg(args, 4)).unwrap_or_else(|| "LeftButton".into());

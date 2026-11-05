@@ -64,6 +64,42 @@ fn stdlib_aliases_and_helpers() {
     "#,
     )
     .unwrap();
+    // The C string verbs' edges (`0x816960`, `0x816a60`, `0x816b60`, `0x816c40`, `0x816d80`).
+    let misses = misses(
+        &s,
+        r#"
+        is("a|b|c", strsplit(",", "a,b,c", 0)) is("a|b,", strsplit(",", "a,b,", 2))
+        is("abc", strsplit("", "abc")) is("a|b", strsplit("%", "a%b"))
+        is("a, b", strsplit(" ,", "a, b", 1))
+        is("a", strtrim("a%", "%")) is("  x  ", strtrim("  x  ", "")) is("string", type(strtrim(12, "x")))
+        is("a1", strjoin("", "a", 1)) is("", strjoin(",")) is("", strconcat())
+        is("axcx|2", strreplace("abcb", "b", "x")) is("axycb|1", string.replace("abcb", "b", "xy", 1))
+        is("abc|0", strreplace("abc", "", "x"))
+        is("false|attempt to concatenate a nil value", pcall(strjoin, ",", "a", nil, "b"))
+        is("false|attempt to concatenate a nil value", pcall(strjoin, ",", "a", "b", nil))
+        is("false|attempt to concatenate a boolean value", pcall(strconcat, "a", true, nil))
+        is("nil|true", strconcat(nil), strjoin(",", true)) is("false", (pcall(strjoin, "", nil)))
+        is("false|bad argument #1 to 'strjoin' (string expected, got nil)", pcall(strjoin, nil, "a"))
+        is("false|bad argument #2 to 'strsplit' (string expected, got no value)", pcall(strsplit, ","))
+        is("nil|nil", fastrandom, bit.tobit)
+        -- `debugstack` names a global, local, method or field call (`0x817b1f`), not an upvalue's.
+        local function f() local t = debugstack(1, 1, 0) return t end
+        local function g() local t = f() return t end
+        is("true", g():find("^[^\n]* in function <[^\n]*>\n") ~= nil)
+        "#,
+    );
+    assert_eq!(misses, "");
+}
+
+/// Runs `is(want, ...)` lines, each comparing the values' `tostring`s joined by `|`; the misses.
+fn misses(s: &crate::script::UiScript, body: &str) -> String {
+    s.eval(&format!(
+        "local bad = {{}} local function is(want, ...) local t = {{}} \
+         for i = 1, select('#', ...) do t[i] = tostring((select(i, ...))) end \
+         local got = table.concat(t, '|') if got ~= want then bad[#bad + 1] = got end end \
+         {body} return table.concat(bad, '\\n')"
+    ))
+    .unwrap()
 }
 
 // ── Sandbox holes ──
@@ -322,6 +358,22 @@ fn time_is_epoch_seconds_and_date_formats_them() {
     // A leap day, the civil conversion's edge case.
     let leap: String = s.eval(r#"return date("%Y-%m-%d %A", 951782400)"#).unwrap();
     assert_eq!(leap, "2000-02-29 Tuesday");
+
+    // `time(t)` is `os.time` (`0x817650`): hour 12 by default, fields carried over, day, month
+    // and year required; read in UTC as `date` is, so the pair round-trips.
+    let misses = misses(
+        &s,
+        r#"
+        is("1577880000", time{year=2020, month=1, day=1})
+        is("1577836800", time{year=2020, month=1, day=1, hour=0})
+        is("1580515200", time{year=2019, month=13, day=32, hour=0})
+        is("1000000000", time(date("*t", 1000000000))) is("nil", time{year=1960, month=1, day=1})
+        is("nil", time{year=1e300, month=1, day=1}) is("nil", time{year=2038, month=1, day=20})
+        is("false|field 'day' missing in date table", pcall(time, {year=2020}))
+        is("false|bad argument #1 to 'time' (table expected, got number)", pcall(time, 5))
+        "#,
+    );
+    assert_eq!(misses, "");
 }
 
 // ── RunScript ──
@@ -404,10 +456,11 @@ fn a_runscript_error_reaches_the_handler_and_not_the_caller() {
 }
 
 /// Build 12340's debug family: six bind the `return 0` stub `0x8e5250` and answer nothing; the
-/// profile pair answers elapsed milliseconds.
+/// profile pair answers elapsed milliseconds, read live (`0x817370`), as a live `GetTime` is
+/// (`0x6081f0`): both move inside one Lua call, with no frame tick.
 #[test]
 fn the_wrath_debug_stubs_answer_nothing_and_the_profile_pair_counts_up() {
-    let s = script();
+    let mut s = script();
     for name in [
         "debuginfo",
         "debugload",
@@ -425,4 +478,23 @@ fn the_wrath_debug_stubs_answer_nothing_and_the_profile_pair_counts_up() {
     assert!(s
         .eval::<bool>("debugprofilestart() local ms = debugprofilestop() return type(ms) == 'number' and ms >= 0")
         .unwrap());
+    let moves = |s: &crate::script::UiScript, clock: &str| {
+        s.eval::<bool>(&format!(
+            "local a = {clock}() for i = 1, 1e6 do if {clock}() > a then return true end end"
+        ))
+        .unwrap_or(false)
+    };
+    assert!(moves(&s, "debugprofilestop"));
+    assert!(
+        !moves(&s, "GetTime"),
+        "the frame clock, until the host turns it live"
+    );
+    s.set_live_clock(true);
+    assert!(moves(&s, "GetTime"));
+    let before = s.eval::<f64>("return GetTime()").unwrap();
+    s.tick(0.0);
+    assert!(
+        s.eval::<f64>("return GetTime()").unwrap() >= before,
+        "never backwards"
+    );
 }

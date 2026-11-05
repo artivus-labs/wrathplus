@@ -257,8 +257,27 @@ pub(super) fn flags(name: &str) -> u8 {
         .map_or(0, |i| FLAGS[i].1)
 }
 
+/// A CVar value read as a boolean, as `GetCVarBool`'s parser (`0x815400`) reads it: by the first
+/// byte, `0 F N f n` false and `1-9 T Y t y` true; any other value is true only as `on` or
+/// `enabled`, ignoring case.
+pub(super) fn value_is_true(v: &str) -> bool {
+    match v.bytes().next() {
+        Some(b'0' | b'F' | b'N' | b'f' | b'n') => false,
+        Some(b'1'..=b'9' | b'T' | b'Y' | b't' | b'y') => true,
+        _ => v.eq_ignore_ascii_case("on") || v.eq_ignore_ascii_case("enabled"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_value_reads_true_by_its_first_byte_or_as_on_or_enabled() {
+        let read = |v: &[&str]| v.iter().all(|v| super::value_is_true(v));
+        assert!(read(&["true", "yes", "on", "1abc", "ENABLED", "Y"]));
+        let no = ["0.5", "01", "-1", " 1", "off", "no", "", "enabledx"];
+        assert!(no.iter().all(|v| !super::value_is_true(v)));
+    }
+
     #[test]
     fn the_table_is_sorted_and_answers_any_case() {
         assert!(super::FLAGS.windows(2).all(|w| w[0].0 < w[1].0));

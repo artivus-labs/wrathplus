@@ -125,10 +125,9 @@ fn seed_session(world: &World, script: &mut UiScript) {
 }
 
 /// Start the new VM's `GetTime()` where the process already is and re-anchor [`UiClock`] to it,
-/// both off the `Time<Real>` it anchors on. The reference's `GetTime` is `GetTickCount` × 0.001
-/// (`0x515ea0`, via `0x42c010` → `0x42b790`), an OS clock that never restarts; ours lives in the
-/// VM, rebuilt at every login and `ReloadUI`, and a clock back at zero puts every converted
-/// cooldown start in the past, which stock `CooldownFrame_SetTimer` hides (`Cooldown.lua:3`).
+/// both off the `Time<Real>` it anchors on, and read it live between frames. 12340's `GetTime`
+/// (`0x6081f0`) is the OS clock × 0.001, never restarted; ours is rebuilt at every login and
+/// `ReloadUI`, and a clock back at zero hides every cooldown (`CooldownFrame_SetTimer`).
 fn seed_vm_clock(world: &mut World, script: &mut UiScript) {
     let (anchor, elapsed) = world
         .get_resource::<Time<bevy::time::Real>>()
@@ -136,6 +135,7 @@ fn seed_vm_clock(world: &mut World, script: &mut UiScript) {
             (t.last_update(), t.elapsed_secs_f64())
         });
     script.set_now(elapsed);
+    script.set_live_clock(true);
     if let Some(mut clock) = world.get_resource_mut::<UiClock>() {
         *clock = UiClock {
             anchor: anchor.unwrap_or_else(std::time::Instant::now),

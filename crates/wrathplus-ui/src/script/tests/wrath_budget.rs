@@ -50,6 +50,32 @@ fn wrath_budget_sentinel_escapes_nested_pcall_xpcall_and_error_handlers() {
     }
 }
 
+/// The guards keep the stdlib's own argument errors: `luaL_argerror` names the verb its caller
+/// called and `luaL_where(L, 1)` places the message at that caller, not inside a guard.
+#[test]
+fn the_guarded_verbs_raise_their_own_argument_errors_at_the_caller() {
+    let s = wrath();
+    for (call, want) in [
+        ("pcall()", "bad argument #1 to 'pcall' (value expected)"),
+        (
+            "xpcall(print)",
+            "bad argument #2 to 'xpcall' (value expected)",
+        ),
+        (
+            "coroutine.resume(nil)",
+            "bad argument #1 to 'resume' (coroutine expected)",
+        ),
+    ] {
+        let got: String = s
+            .eval(&format!("return select(2, pcall(function() {call} end))"))
+            .unwrap();
+        assert!(
+            got.ends_with(&format!(":1: {want}")) && !got.contains("guards"),
+            "{call}: {got}"
+        );
+    }
+}
+
 #[test]
 fn clearing_a_wrath_budget_keeps_the_global_hook_dormant_and_reusable() {
     let s = wrath();

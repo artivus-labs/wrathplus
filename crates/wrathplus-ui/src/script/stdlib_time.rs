@@ -2,17 +2,61 @@
 
 use mlua::Lua;
 
-/// `time()` and `date([format [, when]])`: 1.12 engine globals (`0x7035a0`, `0x7033a0`), Lua 5.0's
-/// `os.time`/`os.date` hoisted. `time` is wall-clock epoch seconds, as addons persist it across
-/// sessions.
+/// `time([t])` and `date([format [, when]])`: build 12340's engine globals (`0x817650`,
+/// `0x817450`), Lua's `os.time`/`os.date` hoisted. `time()` is wall-clock epoch seconds, as addons
+/// persist it across sessions.
 ///
-/// Deviation: `date` formats UTC where the reference uses local time, because the tree has no
-/// timezone database.
+/// Deviation: both read UTC where the reference uses local time, because the tree has no timezone
+/// database; so `time(date("*t", t))` is `t` again.
 pub(super) fn install_time(lua: &Lua) -> mlua::Result<()> {
     let g = lua.globals();
     g.set(
         "time",
-        lua.create_function(|_, ()| Ok(crate::civil::unix_seconds()))?,
+        lua.create_function(|lua, args: mlua::MultiValue| {
+            let t = match args.front() {
+                None | Some(mlua::Value::Nil) => return Ok(Some(crate::civil::unix_seconds())),
+                Some(mlua::Value::Table(t)) => t,
+                Some(v) => {
+                    return Err(mlua::Error::runtime(format!(
+                        "bad argument #1 to 'time' (table expected, got {})",
+                        super::strings::typename(v)
+                    )))
+                }
+            };
+            // `getfield` in `os.time`'s order, sec, min, hour, day, month, year: an `int` by
+            // `lua_tointeger`'s `fistp` (`0x84e0a4`), else the default, and day, month and year
+            // have none (`0xa445d8`).
+            let field = |key: &str, default: Option<i64>| -> mlua::Result<i64> {
+                match lua.coerce_number(t.get::<mlua::Value>(key)?)? {
+                    Some(n) => Ok(fistp_i32(n).into()),
+                    None => default.ok_or_else(|| {
+                        mlua::Error::runtime(format!("field '{key}' missing in date table"))
+                    }),
+                }
+            };
+            let (sec, min, hour) = (
+                field("sec", Some(0))?,
+                field("min", Some(0))?,
+                field("hour", Some(12))?,
+            );
+            let (day, month, year) = (
+                field("day", None)?,
+                field("month", None)?,
+                field("year", None)?,
+            );
+            // `mktime` (`0x88e39c`) carries out-of-range fields over and fails outside its 32-bit
+            // `time_t` (`0x817880` loads the answer as a dword), so `time` answers nil there. From
+            // `i32` fields none of this `i64` arithmetic can overflow.
+            let months = year * 12 + month - 1;
+            let days = crate::civil::days_from_civil(
+                months.div_euclid(12),
+                months.rem_euclid(12) as u32 + 1,
+                1,
+            ) + day
+                - 1;
+            let secs = days * 86_400 + hour * 3600 + min * 60 + sec;
+            Ok((0..=i64::from(i32::MAX)).contains(&secs).then_some(secs))
+        })?,
     )?;
     g.set(
         "date",
@@ -47,6 +91,17 @@ pub(super) fn install_time(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
     Ok(())
+}
+
+/// x87 `fistp` to a dword under the default rounding: nearest, ties to even, and the integer
+/// indefinite `i32::MIN` for a NaN or a value out of range.
+fn fistp_i32(n: f64) -> i32 {
+    let r = n.round_ties_even();
+    if (f64::from(i32::MIN)..=f64::from(i32::MAX)).contains(&r) {
+        r as i32
+    } else {
+        i32::MIN
+    }
 }
 
 const DAYS: [&str; 7] = [

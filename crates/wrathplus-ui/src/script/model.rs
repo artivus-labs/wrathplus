@@ -1532,7 +1532,7 @@ impl Model {
             binder_pending: false,
             summon_confirm: super::summon::SummonConfirmUiState::default(),
             summon_confirms: 0,
-            framerate: 0.0,
+            framerate: 1000.0,
             modifiers: (false, false, false),
             buttons_down: Vec::new(),
             last_mouse_button: None,

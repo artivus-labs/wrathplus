@@ -2446,7 +2446,7 @@ fn a_channel_send_carries_the_numbered_slots_name() {
             SendChatMessage("past the end", "CHANNEL", nil, 9)
             SendChatMessage("by name", "CHANNEL", nil, "General - Elwynn Forest")
             SendChatMessage("zero", "CHANNEL", nil, "0")
-            SendChatMessage("none", "CHANNEL")
+            assert(not pcall(SendChatMessage, "none", "CHANNEL"))
             SendChatMessage("tell", "WHISPER", nil, "2")
             "#,
         )
@@ -2528,7 +2528,7 @@ fn an_empty_line_sends_nothing_but_afk_and_dnd() {
         SendChatMessage("", "WHISPER", nil, "Bob")
         SendChatMessage("", "CHANNEL", nil, 1)
         SendChatMessage("\0hidden", "YELL")
-        SendChatMessage("", "BOGUS")
+        assert(not pcall(SendChatMessage, "", "BOGUS"))
         "#,
     );
     world
@@ -2537,8 +2537,8 @@ fn an_empty_line_sends_nothing_but_afk_and_dnd() {
     assert_eq!(sent(&rx), vec![], "no empty line reaches the wire");
     assert_eq!(
         world.resource::<super::feed::ChatLog>().pending_lines(),
-        vec!["Unknown chat type \"BOGUS\"."],
-        "no AFK clear; the type check precedes the gate"
+        Vec::<String>::new(),
+        "no AFK clear; the binding's type check raised ahead of the gate"
     );
     assert!(world.resource::<super::away::AfkMirror>().is_afk());
 
