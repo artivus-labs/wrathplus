@@ -6,20 +6,29 @@ use super::binding_abi::flag;
 use super::{Model, SpellSlotView};
 use mlua::{IntoLuaMulti, Lua, MultiValue, Value};
 
-/// Resolved Spell.dbc metadata. The app supplies the full catalog, not just learned spells.
+/// Resolved Spell.dbc metadata, as GetSpellInfo (`0x540a30`) answers it with no talent, level or
+/// haste applied. The app supplies the full catalog, not just learned spells.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SpellInfoView {
     pub spell_id: u32,
     pub name: String,
     pub rank: Option<String>,
     pub texture: Option<String>,
+    /// `ManaCost` over the power type's display divisor (`0x7fde00`, `0x540be9`).
     pub cost: u32,
-    pub funnel: bool,
+    /// `ManaPerSecond` over the same divisor (`0x540c00`); a positive one is GetSpellInfo's fourth
+    /// return in place of the cost.
+    pub cost_per_second: u32,
     pub power_type: i32,
+    /// 0 for a passive (`Attributes & 0x40`, `0x540c4b`).
     pub cast_time_ms: u32,
+    /// GetSpellInfo's pair: (0, 0) for a melee range row (`0x7ff380`), else `0x801650`'s.
     pub min_range: f64,
     pub max_range: f64,
     pub passive: bool,
+    /// The icon is a weapon's (`0x540b5a`): Attack (`Effect[0]` 78, `0x5a84d0`) or a ranged
+    /// auto-repeat (`Attributes & 2` and `AttributesEx2 & 0x20`, `0x5a85e0`).
+    pub weapon_icon: bool,
     /// Optional trade link, the second GetSpellLink return used by SpellBookFrame.lua:372.
     pub trade_skill_link: Option<String>,
     /// `Effect[0]` is 78, ATTACK: `IsAttackSpell` (`0x541420`).
@@ -95,30 +104,54 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     lua.globals().set(
         "GetSpellInfo",
         lua.create_function(|lua, args: MultiValue| {
-            let Some((spell_id, _, slot)) = spell_of(lua, &args, "GetSpellInfo", Some(truncate))?
+            let Some((spell_id, pet, slot)) = spell_of(lua, &args, "GetSpellInfo", Some(truncate))?
             else {
                 return Ok(MultiValue::new());
             };
+            let model = lua.app_data_ref::<Model>().expect("model");
             // No row (an empty slot reads spell 0) answers nothing (`0x540d52`).
-            let Some(row) = row(&lua.app_data_ref::<Model>().expect("model"), spell_id, slot)
-            else {
+            let Some(row) = row(&model, spell_id, slot) else {
                 return Ok(MultiValue::new());
             };
-            let string = |s: Option<&str>| -> mlua::Result<Value> {
-                s.map(|s| lua.create_string(s).map(Value::String))
-                    .unwrap_or(Ok(Value::Nil))
+            // The weapon icon is the book's, which the app resolves per frame; no icon is "".
+            let texture = match row.weapon_icon {
+                true => (model.spellbook.slots.iter())
+                    .find(|s| s.spell_id == spell_id)
+                    .and_then(|s| s.texture.clone())
+                    .or(row.texture),
+                false => row.texture,
             };
-            Ok(MultiValue::from_vec(vec![
-                string(Some(&row.name))?,
-                string(Some(row.rank.as_deref().unwrap_or("")))?,
-                string(row.texture.as_deref())?,
-                Value::Integer(row.cost as i64),
-                Value::Boolean(row.funnel),
-                Value::Integer(row.power_type as i64),
-                Value::Integer(row.cast_time_ms as i64),
+            // A positive per-second cost replaces the cost, and the fifth return says so; the
+            // reference pushes it with `lua_pushboolean` (`0x540c2e`), not 1/nil.
+            let (cost, per_second) = match row.cost_per_second {
+                0 => (row.cost, false),
+                n => (n, true),
+            };
+            let mut out = vec![
+                Value::String(lua.create_string(&row.name)?),
+                Value::String(lua.create_string(row.rank.as_deref().unwrap_or(""))?),
+                Value::String(lua.create_string(texture.as_deref().unwrap_or(""))?),
+                Value::Integer(i64::from(cost)),
+                Value::Boolean(per_second),
+                Value::Integer(i64::from(row.power_type)),
+                Value::Integer(i64::from(row.cast_time_ms)),
                 Value::Number(row.min_range),
                 Value::Number(row.max_range),
-            ]))
+            ];
+            // No player, or no pet for a pet-book spell, stops before the range (`0x540c84`).
+            let unit = match pet {
+                true => model.unit_guids.pet,
+                false => model.unit_guids.player,
+            };
+            if unit == 0 {
+                out.truncate(7);
+            }
+            // Labelled: the cost, per-second cost, cast time and range are the row's. The
+            // reference resolves them for the caster (`0x8012f0`: level scaling, ManaCostPercentage
+            // of base mana or health, the cost spell mods; `0x7ff100`, `0x7ff180` with haste, range
+            // mods and the ranged min of `0x7ff400`), so a percentage-cost spell, most 3.3.5 caster
+            // spells, answers cost 0 here.
+            Ok(MultiValue::from_vec(out))
         })?,
     )?;
     // GetSpellCooldown(spell [, book]) (`0x540e80`) -> start, duration, enable in `GetTime`
@@ -244,18 +277,40 @@ mod tests {
                 trade_skill_link: Some("trade:999".into()),
                 ..Default::default()
             },
+            // Attack: the weapon's icon from the book; a per-second cost replaces the cost.
+            SpellInfoView {
+                spell_id: 6603,
+                name: "Attack".into(),
+                texture: Some("own".into()),
+                cost: 9,
+                cost_per_second: 3,
+                weapon_icon: true,
+                ..Default::default()
+            },
         ]);
         s.set_spellbook(SpellBookState {
-            slots: vec![SpellSlotView {
-                spell_id: 133,
-                name: "Fireball".into(),
-                rank: Some("Rank 1".into()),
-                ..Default::default()
-            }],
+            slots: vec![
+                SpellSlotView {
+                    spell_id: 133,
+                    name: "Fireball".into(),
+                    rank: Some("Rank 1".into()),
+                    ..Default::default()
+                },
+                SpellSlotView {
+                    spell_id: 6603,
+                    texture: Some("sword".into()),
+                    ..Default::default()
+                },
+            ],
             ..Default::default()
         });
+        // No player: GetSpellInfo stops after the cast time (`0x540c84`).
+        assert_eq!(s.arity("GetSpellInfo(133)").unwrap(), 7);
+        s.model_mut().unit_guids.player = 1;
         s.run(r#"
             assert(select('#', GetSpellInfo(133)) == 9)
+            local _, _, i, c, f = GetSpellInfo(6603)
+            assert(i == 'sword' and c == 3 and f == true and select(3, GetSpellInfo(999)) == '')
             local n,r,i,c,f,p,t,m,x = GetSpellInfo(133)
             assert(n == 'Fireball' and r == 'Rank 1' and i == 'Interface\\Icons\\Spell_Fire_FlameBolt')
             assert(c == 30 and f == false and p == 0 and t == 1500 and m == 0 and x == 30)
@@ -269,7 +324,7 @@ mod tests {
                 assert(n == 0)
             end
             assert(GetSpellInfo(999) == 'Passive' and IsPassiveSpell(1, 'spell') == nil)
-            assert(GetSpellInfo(2, 'spell') == nil and GetSpellCooldown(133) == 0)
+            assert(GetSpellInfo(3, 'spell') == nil and GetSpellCooldown(133) == 0)
             assert(GetSpellLink(1, 'spell') == '|cff71d5ff|Hspell:133|h[Fireball]|h|r')
             local link,trade = GetSpellLink(999)
             assert(link == '|cff71d5ff|Hspell:999|h[Passive]|h|r' and trade == 'trade:999')
