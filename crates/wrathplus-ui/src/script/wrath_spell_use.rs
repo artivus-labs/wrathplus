@@ -271,15 +271,17 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
     // FindSpellBookSlotByID(spellID[, isPet]) (`0x53b6c0`) → the book index from `0x53b4e0`,
-    // pushed unadjusted (`0x53b726`), so 0-based; nil when the book lacks it. A spell id that is
-    // not a positive number raises the usage.
+    // pushed unadjusted (`0x53b726`), so 0-based; nil when the book lacks it. The id rounds
+    // (`lua_tointeger`, `0x53b6da`), and one that is not a positive number raises the usage.
     g.set(
         "FindSpellBookSlotByID",
         lua.create_function(|lua, (id, pet): (Value, Value)| {
             const USAGE: &str = "Usage: FindSpellBookSlotByID(spellID[, isPet])";
-            let id = super::binding_abi::number_arg(lua, id, USAGE)?;
+            let usage = || mlua::Error::runtime(USAGE);
+            let id = lua.coerce_number(id)?.ok_or_else(usage)?;
+            let id = super::item_arg::tointeger(id) as i32;
             if id <= 0 {
-                return Err(mlua::Error::runtime(USAGE));
+                return Err(usage());
             }
             let pet = super::wrath_surface::wrath_spell_queries::pet_flag(lua, pet)?;
             let model = lua.app_data_ref::<Model>().expect("model app_data");

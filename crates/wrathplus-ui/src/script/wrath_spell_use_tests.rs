@@ -182,6 +182,9 @@ fn find_slot_by_id_answers_the_raw_index() {
         assert(FindSpellBookSlotByID(17253, true) == 0 and FindSpellBookSlotByID(17253) == nil)
         assert(FindSpellBookSlotByID(99999) == nil)
         assert(not pcall(FindSpellBookSlotByID, 0) and not pcall(FindSpellBookSlotByID, "x"))
+        -- The id rounds half to even (`fistp`): 142.5 is 142, 142.6 is 143.
+        assert(FindSpellBookSlotByID(142.6) == 1 and FindSpellBookSlotByID(142.5) == nil)
+        assert(FindSpellBookSlotByID(0.6) == nil and not pcall(FindSpellBookSlotByID, 0.4))
         "#,
     )
     .unwrap();
