@@ -21,7 +21,7 @@ impl Preset {
     }
     pub(crate) fn about(self) -> &'static str {
         match self {
-            Self::Playerbots => "Computer-controlled companions to group and quest with, five random bots in the world, MultiBot buttons, a stocked auction house and minimap quest markers.",
+            Self::Playerbots => "Computer-controlled companions to group and quest with, 1,000 to 2,000 random bots that level through the world and start again when they reach the top, MultiBot buttons, a stocked auction house and minimap quest markers.",
             Self::Chatter => "Everything in Playerbots, and bots talk in character through a language model you choose. Needs a provider and API key, set under Server modules.",
             Self::Plain => "A plain realm with no bots: just you and anyone you invite.",
         }

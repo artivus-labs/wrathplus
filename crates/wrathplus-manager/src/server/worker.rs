@@ -194,6 +194,11 @@ pub fn run(
             Ok("Server image built. Restart the server to use this build; running services are unchanged.".into())
         }
         Action::Start => {
+            // Saved server settings reach auth/world as environment variables. Written before any
+            // `up`: Compose recreates a service whose environment changed.
+            settings
+                .environment
+                .write(&config, &Settings::env_file(&config))?;
             stage("Checking whether managed server is already healthy");
             let output = capture(
                 command::compose(&config, &settings, command::STATUS),

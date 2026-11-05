@@ -59,13 +59,47 @@ Without a saved override the seller is also switched on. If a player already too
 `Ahbot`, the bot stays disabled and the log says so.
 
 Auth publishes only `127.0.0.1:13724`, world only `127.0.0.1:18085`; realmlist
-advertises the latter. Extracted server data is mounted read-only. The managed qualification population defaults to five online random bots
-(`MANAGED_BOT_COUNT=0..5`, zero disables autologin). The addclass command's pool of ready-made
-bots (`.playerbots bot addclass <class>`, a levelled, geared bot of that class for your party) keeps
-upstream's 50 accounts (`MANAGED_ADDCLASS_POOL`, 0 turns it off). Periodic population inflation
-and random guild creation remain disabled. Upstream may
-create ten characters per bot account; online population is bounded to five. Health requires actual
+advertises the latter. Extracted server data is mounted read-only. Health requires actual
 TCP listeners, not just successful container spawn. Setup/start can take minutes.
+
+### Server settings (environment)
+
+AzerothCore lets an environment variable override any config key, module configs included:
+`AC_` plus the key in upper snake case (`Playerbots.MinRandomBots` is
+`AC_PLAYERBOTS_MIN_RANDOM_BOTS`; `Config.cpp` `IniKeyToEnvVarKey`). An override wins over the
+same key in a saved module `.conf`. The auth, world and bootstrap services take their
+environment from `env_file: ${SERVER_ENV_FILE:-./server-defaults.env}`. The Manager keeps its
+server settings in `manager-server.json` and on every Start writes them to a private (0600)
+`server.env` in its managed state folder, passing only that path; values never go into argv or
+logs. Without the Manager, `server-defaults.env` holds the same defaults. `runtime.sh` rewrites
+only the database, path, console and SOAP keys (and the auction seller); it no longer touches
+the bot population.
+
+Playerbots defaults (the "Playerbots" server types; Plain AzerothCore writes autologin off,
+0 bots and an addclass pool of 0):
+
+| Setting | Default | Upstream |
+| --- | --- | --- |
+| `RandomBotAutologin` | 1 | 1 |
+| `MinRandomBots` / `MaxRandomBots` | 1000 / 2000 | 500 / 500 |
+| `AddClassAccountPoolSize` | 50 | 50 |
+| `RandomBotMinLevel` / `RandomBotMaxLevel` | 1 / 80 | 1 / 80 |
+| `DowngradeMaxLevelBot` | 1 | 0 |
+| `MinRandomBotRandomizeTime` / `MaxRandomBotRandomizeTime` | 7200 / 172800 (2 h / 2 days) | 7200 / 1209600 (14 days) |
+| `EnablePeriodicOnlineOffline` / `PeriodicOnlineOfflineRatio` | 0 / 2.0 | 0 / 2.0 |
+
+Turnover (#33): a random bot's periodic re-randomize keeps its level (new gear and spec) unless
+it is at `RandomBotMaxLevel` and `DowngradeMaxLevelBot` is on; then it restarts at
+`RandomBotMinLevel` and is teleported to a spot for that level, a starting zone. So bots level
+through the world and level-80 bots come back as new low-level bots, at most
+`MaxRandomBotRandomizeTime` after they get there (two days rather than upstream's two weeks).
+`AutoTeleportForLevel` (upstream on) keeps moving bots to their level's zones as they level.
+`RandomBotTeleLowerLevel`/`HigherLevel` have no effect while `EnableNewRpgStrategy` is on
+(upstream default). Rotation (`EnablePeriodicOnlineOffline`) creates `ratio x MaxRandomBots`
+bots and swaps them in and out; offline bots do not level, so it varies faces without changing
+the level spread, and is off by default. Bot accounts (ten characters each) are created on the
+first start after raising the population, which takes a while. Already scheduled re-randomize
+times keep their old deadline. Random-bot guilds use upstream's `RandomBotGuildCount` (20).
 
 Stopping auth/world preserves MySQL and named volumes. No reset/delete action is
 provided. Do not reuse a project name belonging to another installation. Do not
@@ -104,7 +138,7 @@ not silently reset. The successful qualification uses a fresh project.
 Managed-local follow-up: dedicated AZBENCH/Benchone created in the new realm.
 SRP auth, realm endpoint, world authentication and initial world entry passed,
 then passed again after full MySQL/auth/world restart with the same character.
-Five random bots logged in; upstream created ten characters in one RNDBOT account.
+Five random bots (the population then) logged in; upstream created ten characters in one RNDBOT account.
 No normal player account or old character data was used.
 
 A quiesced four-schema dump (auth/world stopped) was restored into a separate,
@@ -147,6 +181,6 @@ Upstream clears session work when no real players are online. Dependency version
 and the uv base tag are not fully locked; record resolved digests for releases.
 
 Still unqualified: attended gameplay, graphical controls/folder-picker interaction,
-load beyond five bots, upgrades, amd64/Windows runtime, publication, migration
+upgrades, amd64/Windows runtime, publication, migration
 and old-realm cutover. No proprietary server/client data is bundled. Ubuntu and
 apt package snapshots are not fully locked; record image digests for releases.

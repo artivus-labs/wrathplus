@@ -6,9 +6,12 @@ x-server: &server
   init: true
   user: "0:0"
   restart: "no"
-  environment:
-    MANAGED_BOT_COUNT: "${MANAGED_BOT_COUNT:-5}"
-    MANAGED_ADDCLASS_POOL: "${MANAGED_ADDCLASS_POOL:-50}"
+  # Server settings as AzerothCore environment overrides (AC_ + the config key in upper snake
+  # case). The Manager writes its saved settings to a private file; without it, the checked-in
+  # defaults (the Manager's Playerbots defaults) apply.
+  env_file:
+    - path: ${SERVER_ENV_FILE:-./server-defaults.env}
+      required: false
   entrypoint: ["/bin/sh", "/recipe/runtime.sh"]
   volumes:
     - instance-secrets:/run/instance-secrets:ro
