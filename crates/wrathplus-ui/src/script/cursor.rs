@@ -522,6 +522,13 @@ pub(super) fn install_wrath(lua: &Lua) -> mlua::Result<()> {
                 Some(CursorPayload::Money(m)) => {
                     vec![text("money")?, Value::Integer(m.copper.into())]
                 }
+                // A companion (`0x8009b0`) is "companion", its index and its list (`0x53b410`).
+                Some(CursorPayload::Spell(s))
+                    if matches!(s.book_type.as_str(), "CRITTER" | "MOUNT") =>
+                {
+                    let index = Value::Integer(s.book_slot.into());
+                    vec![text("companion")?, index, text(&s.book_type)?]
+                }
                 Some(CursorPayload::Spell(s)) => vec![
                     text("spell")?,
                     Value::Integer(s.book_slot.into()),
