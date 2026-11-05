@@ -184,11 +184,7 @@ impl Manager {
                     self.server_state.open_logs();
                 }
             }
-            Message::Profile(value) => {
-                self.profile = value;
-                self.notice =
-                    "Preview profile selected. No configuration or world state was changed.".into();
-            }
+            Message::Profile(value) => self.select_profile(value),
             Message::Assets(value) if !self.choosing && !self.module_state.busy => {
                 self.assets = value;
                 self.preflight = None;

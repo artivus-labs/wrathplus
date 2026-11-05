@@ -33,13 +33,29 @@ fn parse(contents: &str) -> Result<std::collections::BTreeMap<String, String>> {
 
 pub(super) fn configure(command: &mut Command, config: &Config) -> Result<()> {
     let path = config.repo.join(".azerothbench-test.env");
-    let values = match fs::read_to_string(path) {
+    let mut values = match fs::read_to_string(path) {
         Ok(contents) => parse(&contents)?,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Default::default(),
         Err(_) => return Err("Could not read private login defaults".into()),
     };
+    if config.server == crate::server::LOCAL_REALM {
+        local_account(&mut values, crate::server::local_account(config));
+    }
     apply(command, &values, |key| env::var(key).ok());
     Ok(())
+}
+
+/// On the managed realm, the account the Server page's guided setup made (kept privately beside
+/// the Manager's server state) takes the place of the private file's pair. Inherited variables
+/// still win.
+fn local_account(
+    values: &mut std::collections::BTreeMap<String, String>,
+    account: Option<(String, String)>,
+) {
+    if let Some((user, password)) = account {
+        values.insert("AZEROTHBENCH_TEST_USER".into(), user);
+        values.insert("AZEROTHBENCH_TEST_PASSWORD".into(), password);
+    }
 }
 
 fn apply(
@@ -85,6 +101,35 @@ mod tests {
         assert_eq!(vars["WOW_BG"], "0");
         assert!(!vars.contains_key("WOW_PROBE_EXIT_AT"));
         assert_eq!(command.get_args().count(), 0);
+    }
+    #[test]
+    fn the_guided_setups_account_fills_in_the_managed_realms_login() {
+        let mut values =
+            parse("AZEROTHBENCH_TEST_USER=file-user\nAZEROTHBENCH_TEST_PASSWORD=file-pass\n")
+                .unwrap();
+        local_account(&mut values, Some(("PLAYER".into(), "wrathplus".into())));
+        let mut command = Command::new("unused");
+        apply(&mut command, &values, |_| None);
+        let vars: std::collections::BTreeMap<_, _> = command
+            .get_envs()
+            .map(|(k, v)| (k.to_str().unwrap(), v.unwrap().to_str().unwrap()))
+            .collect();
+        assert_eq!(
+            (vars["WOW_USER"], vars["WOW_PASS"]),
+            ("PLAYER", "wrathplus")
+        );
+        assert_eq!(command.get_args().count(), 0);
+        // Inherited variables still win; no saved account leaves the file's pair.
+        let mut command = Command::new("unused");
+        apply(&mut command, &values, |key| {
+            (key == "WOW_USER").then(|| "env-user".into())
+        });
+        assert!(command
+            .get_envs()
+            .any(|(k, v)| k == "WOW_USER" && v == Some(std::ffi::OsStr::new("env-user"))));
+        let mut values = parse("AZEROTHBENCH_TEST_USER=file-user\n").unwrap();
+        local_account(&mut values, None);
+        assert_eq!(values["AZEROTHBENCH_TEST_USER"], "file-user");
     }
     #[test]
     fn explicit_environment_wins_and_missing_defaults_are_optional() {

@@ -3,8 +3,12 @@ mod actions;
 mod presets;
 mod standard;
 use crate::{modules, style, Manager, Message};
+#[cfg(test)]
+pub(crate) use actions::select_modules;
 use iced::widget::{button, checkbox, column, container, row, text, text_input, Column};
 use iced::{Element, Fill};
+#[cfg(test)]
+pub(crate) use presets::current as current_type;
 pub(crate) use presets::Preset;
 pub(crate) use standard::STANDARD;
 

@@ -80,6 +80,7 @@ pub const PLAYERBOTS: Module = Module {
         at_least(setting("Playerbots.MaxRandomBotRandomizeTime", "Re-randomize after at most", "", Kind::Seconds, "172800"), 0.0),
         setting("Playerbots.EnablePeriodicOnlineOffline", "Rotate which bots are online", "Creates more bots than are online (the ratio below) and swaps them in and out over their in-world times. Off: the same bots stay online.", Kind::Switch, "0"),
         at_least(setting("Playerbots.PeriodicOnlineOfflineRatio", "Bots created per online bot", "Only with rotation on.", Kind::Decimal, "2.0"), 1.0),
+        at_least(setting("Playerbots.RandomBotGuildCount", "Random bot guilds", "Random bots form up to this many guilds of their own (up to 15 bots each). 0: random bots stay out of guilds.", Kind::Whole, "20"), 0.0),
     ],
     ordered: &[
         ("Playerbots.MinRandomBotRandomizeTime", "Playerbots.MaxRandomBotRandomizeTime"),
@@ -90,6 +91,7 @@ pub const PLAYERBOTS: Module = Module {
         ("Playerbots.MinRandomBots", "0"),
         ("Playerbots.MaxRandomBots", "0"),
         ("Playerbots.AddClassAccountPoolSize", "0"),
+        ("Playerbots.RandomBotGuildCount", "0"),
     ],
 };
 

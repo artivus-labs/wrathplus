@@ -1,6 +1,8 @@
 //! Server types: a named set of standard modules for the next build, so a new player picks one
-//! instead of choosing modules. Server modules (the Advanced view) still allows any selection.
-use super::standard::STANDARD;
+//! instead of choosing modules. A type manages only the packaged standard modules; a module the
+//! player added themselves stays as it is. Server modules (the Advanced view) still allows any
+//! selection.
+use super::standard::{is_standard, STANDARD};
 use crate::modules::Entry;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -57,11 +59,12 @@ impl Preset {
     }
 }
 
-/// The server type the catalog's selection is exactly, if any.
+/// The server type the catalog's standard selection is exactly, if any. The player's own modules
+/// do not count.
 pub(crate) fn current(entries: &[Entry]) -> Option<Preset> {
     let mut enabled: Vec<&str> = entries
         .iter()
-        .filter(|e| e.enabled)
+        .filter(|e| e.enabled && is_standard(&e.name))
         .map(|e| e.name.as_str())
         .collect();
     enabled.sort_unstable();
@@ -73,7 +76,8 @@ pub(crate) fn current(entries: &[Entry]) -> Option<Preset> {
 }
 
 /// The catalog changes a server type needs: standard modules to add, then which entries to switch
-/// on and off. Modules outside the type (custom ones too) are left out of the build, not removed.
+/// on and off. Standard modules outside the type are left out of the build, not removed; the
+/// player's own modules are not touched.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(crate) struct Change {
     /// Standard module names, in catalog order.
@@ -94,7 +98,7 @@ pub(crate) fn plan(entries: &[Entry], preset: Preset) -> Change {
     }
     change.disable = entries
         .iter()
-        .filter(|e| e.enabled && !wanted.contains(&e.name.as_str()))
+        .filter(|e| e.enabled && is_standard(&e.name) && !wanted.contains(&e.name.as_str()))
         .map(|e| e.name.clone())
         .collect();
     change
@@ -111,7 +115,7 @@ impl crate::Manager {
         let editable = !self.module_state.busy && self.server_state.module_editable();
         let mut list = column![
             text("Server type").size(18),
-            text("Decides what the next build includes. Changing it later needs a rebuild and a restart; characters are kept.").size(13).color(style::MUTED),
+            text("Decides which standard modules the next build includes; modules you added yourself stay as they are. Changing it later needs a rebuild and a restart; characters are kept.").size(13).color(style::MUTED),
         ]
         .spacing(12);
         let selected = match &catalog {
@@ -167,7 +171,7 @@ impl crate::Manager {
             );
         }
         let advanced = if selected.is_none() && matches!(catalog, Some(Ok(_))) {
-            "Your own module selection is in use."
+            "Your own choice of standard modules is in use."
         } else {
             "Want other modules or settings?"
         };
@@ -247,18 +251,50 @@ mod tests {
         let change = plan(&entries, Preset::Chatter);
         assert!(change.add.is_empty());
         assert_eq!(change.enable, ["mod-llm-chatter"]);
-        assert_eq!(change.disable, ["mod-guildhouse", "mod-transmog"]);
-        let after: Vec<_> = entries
+        // mod-transmog is the player's own module: no server type switches it.
+        assert_eq!(change.disable, ["mod-guildhouse"]);
+        let after = apply(&entries, &change);
+        assert_eq!(current(&after), Some(Preset::Chatter));
+        assert_eq!(plan(&after, Preset::Chatter), Change::default());
+        let none: Vec<_> = after
+            .iter()
+            .map(|e| entry(&e.name, e.enabled && !is_standard(&e.name)))
+            .collect();
+        assert_eq!(current(&none), Some(Preset::Plain));
+    }
+
+    fn apply(entries: &[Entry], change: &Change) -> Vec<Entry> {
+        entries
             .iter()
             .map(|e| {
                 let on = (e.enabled || change.enable.contains(&e.name))
                     && !change.disable.contains(&e.name);
                 entry(&e.name, on)
             })
-            .collect();
-        assert_eq!(current(&after), Some(Preset::Chatter));
-        assert_eq!(plan(&after, Preset::Chatter), Change::default());
-        let none: Vec<_> = after.iter().map(|e| entry(&e.name, false)).collect();
-        assert_eq!(current(&none), Some(Preset::Plain));
+            .collect()
+    }
+
+    #[test]
+    fn a_server_type_leaves_the_players_own_modules_as_they_were() {
+        let entries = [
+            entry("mod-playerbots", true),
+            entry("mod-transmog", true),
+            entry("mod-solo-craft", false),
+        ];
+        for preset in Preset::ALL {
+            let change = plan(&entries, preset);
+            for own in ["mod-transmog", "mod-solo-craft"] {
+                assert!(!change.enable.iter().any(|n| n == own), "{own}");
+                assert!(!change.disable.iter().any(|n| n == own), "{own}");
+            }
+            let after = apply(&entries, &change);
+            assert!(after.iter().any(|e| e.name == "mod-transmog" && e.enabled));
+            assert!(after
+                .iter()
+                .any(|e| e.name == "mod-solo-craft" && !e.enabled));
+        }
+        // Plain switches off the standard modules only; the type still reads as Plain.
+        let plain = apply(&entries, &plan(&entries, Preset::Plain));
+        assert_eq!(current(&plain), Some(Preset::Plain));
     }
 }

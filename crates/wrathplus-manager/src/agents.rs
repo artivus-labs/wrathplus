@@ -131,17 +131,11 @@ pub(crate) fn create(config: &Config, name: &str) -> Result<Agent> {
         return Err(format!("An agent already uses the account {account}."));
     }
     let password = secret(14);
-    crate::server::admin_command(config, &format!(".account create {account} {password}"))?;
-    // Wrath content needs the expansion flag on the account. The realm creates accounts
-    // asynchronously, so the flag can briefly find no account yet.
-    let addon = format!(".account set addon {account} 2");
-    let mut attempt = 1;
-    while let Err(e) = crate::server::admin_command(config, &addon) {
-        if attempt >= 20 || !e.contains("not exist") {
-            return Err(e);
-        }
-        attempt += 1;
-        std::thread::sleep(std::time::Duration::from_millis(250));
+    // A realm account of that name is not this agent's: its password is unknown.
+    if let crate::server::Created::Existing(_) =
+        crate::server::create_account(config, &account, &password)?
+    {
+        return Err(format!("The realm already has an account {account}."));
     }
     let dir = home(config, &account);
     write_private(&dir.join("password"), &password)?;
