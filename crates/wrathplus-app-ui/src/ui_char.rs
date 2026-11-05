@@ -6,7 +6,7 @@
 
 use bevy::prelude::*;
 
-use wrathplus_protocol::types::{ItemDamage, ObjectFields, PLAYER_SKILL_SLOTS};
+use wrathplus_protocol::types::{Field, ItemDamage, ObjectFields, PLAYER_SKILL_SLOTS};
 use wrathplus_ui::script::{
     weapon_subclass_skill, BankBagSlots, InvSlotView, InventorySlots, ScriptValue, SkillEntry,
     SkillsState, UiScript, UnitCombatStats, BANK_BAG_SLOT_COUNT, EQUIPMENT_BAG, SKILL_DEFENSE,
@@ -458,6 +458,7 @@ pub(crate) fn unit_combat_stats(store: &ObjectStore) -> UnitCombatStats {
         // The equipment and skill half is `combat_stats`'s; any other unit keeps these defaults.
         has_offhand: false,
         has_wand: false,
+        max_health_modifier: f.get_float(Field::UnitMaxhealthmodifier, 0).unwrap_or(0.0),
         main_weapon_skill: (0, 0),
         offhand_weapon_skill: (0, 0),
         ranged_weapon_skill: (0, 0),

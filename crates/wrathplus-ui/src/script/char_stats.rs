@@ -120,6 +120,8 @@ pub struct UnitCombatStats {
     pub defense_skill: (i32, i32),
     /// Whether a wand is equipped (`HasWandEquipped`).
     pub has_wand: bool,
+    /// `UNIT_FIELD_MAXHEALTHMODIFIER`, which `GetUnitMaxHealthModifier` answers plus 1.0.
+    pub max_health_modifier: f32,
 }
 
 impl Default for UnitCombatStats {
@@ -161,6 +163,7 @@ impl Default for UnitCombatStats {
             ranged_weapon_skill: (0, 0),
             defense_skill: (0, 0),
             has_wand: false,
+            max_health_modifier: 0.0,
         }
     }
 }
@@ -872,6 +875,7 @@ mod tests {
             ranged_weapon_skill: (18, 0),
             defense_skill: (55, 4),
             has_wand: false,
+            max_health_modifier: 0.0,
         }
     }
 

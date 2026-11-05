@@ -5,12 +5,22 @@ use mlua::{Lua, Value};
 use super::super::{binding_abi, Model};
 
 pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
-    // PaperDollFrame.lua:280 uses this as a display multiplier. The server already
-    // folds max-health auras into the descriptor's maximum health; this client has
-    // no separate local health modifier to apply a second time (for any unit).
+    // GetUnitMaxHealthModifier(unit) (`0x612870`): `isstring` or the Usage, then for the active
+    // player or a unit with a pet number `UNIT_FIELD_MAXHEALTHMODIFIER + 1.0` (`0x6128d3`), else 0.
+    // Labelled: the unit is the exact "player" or "pet" snapshot, not `0x60c1f0`'s resolve.
     lua.globals().set(
         "GetUnitMaxHealthModifier",
-        lua.create_function(|_, _unit: Option<String>| Ok(1.0))?,
+        lua.create_function(|lua, unit: Value| {
+            let usage = r#"Usage: GetUnitMaxHealthModifier("unit")"#;
+            let unit = binding_abi::string_arg(lua, unit, usage)?;
+            let model = lua.app_data_ref::<Model>().expect("model app_data");
+            let stats = match unit.as_str() {
+                "player" => model.player_combat_stats.as_ref(),
+                "pet" => model.pet_combat_stats.as_ref(),
+                _ => None,
+            };
+            Ok(stats.map_or(0.0, |s| f64::from(s.max_health_modifier) + 1.0))
+        })?,
     )?;
     // GetAttackPowerForStat(stat, value) (`0x60e560`): both arguments `isnumber` (one Usage,
     // `0xa230e4`) and truncated (`0x88b9c0`); no player answers 0.
@@ -54,7 +64,7 @@ fn attack_power_for_stat(class: Option<u32>, form: u8, stat: i32, value: i32) ->
 
 #[cfg(test)]
 mod tests {
-    use super::super::super::{UiScript, UnitState};
+    use super::super::super::{UiScript, UnitCombatStats, UnitState};
 
     /// `0x6d7070` on 12340's `ChrClasses` field 1: Hunter, Rogue and Shaman are 1, the rest 0.
     #[test]
@@ -95,9 +105,19 @@ mod tests {
     }
 
     #[test]
-    fn wrath_max_health_display_multiplier_is_neutral_for_every_unit() {
-        let s = UiScript::new().unwrap();
-        s.run("for _, unit in ipairs({'player', 'target', 'pet', 'party1', 'unknown'}) do assert(GetUnitMaxHealthModifier(unit) == 1) end assert(GetUnitMaxHealthModifier() == 1)").unwrap();
+    fn max_health_modifier_is_the_field_plus_one_for_the_player_or_pet_only() {
+        let mut s = UiScript::new().unwrap();
+        s.set_player_combat_stats(Some(UnitCombatStats {
+            max_health_modifier: 0.25,
+            ..Default::default()
+        }));
+        s.set_pet_combat_stats(Some(UnitCombatStats::default()));
+        s.run("assert(GetUnitMaxHealthModifier('player') == 1.25 and GetUnitMaxHealthModifier('pet') == 1) assert(GetUnitMaxHealthModifier('target') == 0)").unwrap();
+        let err = s.run("GetUnitMaxHealthModifier()").unwrap_err().to_string();
+        assert!(
+            err.contains(r#"Usage: GetUnitMaxHealthModifier("unit")"#),
+            "{err}"
+        );
     }
 
     #[test]
