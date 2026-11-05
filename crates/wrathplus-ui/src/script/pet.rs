@@ -250,18 +250,13 @@ fn slot_at(model: &Model, i: u32) -> Option<&StoredPetAction> {
         .and_then(|n| model.pet_bar.slots.get(n))
 }
 
-/// The 1-based pet action slot holding the spell named `name` (case-insensitive).
-pub(super) fn slot_index_by_name(model: &Model, name: &str) -> Option<u32> {
+/// The 1-based pet action slot whose action word holds `spell` (`0x5d3410`).
+pub(super) fn slot_index_by_spell(model: &Model, spell: u32) -> Option<u32> {
     model
         .pet_bar
         .slots
         .iter()
-        .position(|s| {
-            s.view
-                .name
-                .as_deref()
-                .is_some_and(|n| n.eq_ignore_ascii_case(name))
-        })
+        .position(|s| s.view.spell_id == Some(spell))
         .map(|i| i as u32 + 1)
 }
 

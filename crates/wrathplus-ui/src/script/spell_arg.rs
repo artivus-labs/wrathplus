@@ -282,6 +282,24 @@ mod tests {
                 "{bad}: {err}"
             );
         }
+        // Enable/DisableSpellAutocast act on a pet-book slot's spell, found on the pet bar.
+        s.set_pet_actions(
+            true,
+            true,
+            true,
+            vec![crate::script::PetActionView {
+                spell_id: Some(2649),
+                autocast_allowed: true,
+                ..Default::default()
+            }],
+        );
+        // They set the state (`0x5d5e10`): a toggle already queued this frame counts.
+        s.run("EnableSpellAutocast(1, 'pet') EnableSpellAutocast('Growl') EnableSpellAutocast(1, 'x')")
+            .unwrap();
+        assert_eq!(s.take_pet_autocast_toggles(), vec![1]);
+        s.run("EnableSpellAutocast('Growl') DisableSpellAutocast('Growl') DisableSpellAutocast(1, 'pet')")
+            .unwrap();
+        assert_eq!(s.take_pet_autocast_toggles(), vec![1, 1]);
         // CastSpell takes no name (`0x54125c` pushes 0): the book type is not optional there.
         for bad in ["'Fireball'", "1"] {
             let err = s.run(&format!("CastSpell({bad})")).expect_err(bad);
