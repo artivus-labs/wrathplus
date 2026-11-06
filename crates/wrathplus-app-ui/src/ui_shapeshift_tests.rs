@@ -213,3 +213,50 @@ fn a_predicted_cancel_with_no_bar_still_fires() {
     fire_owed_form_event(&mut s, &memory, true);
     assert_eq!(s.eval::<i64>("return N").unwrap(), 1);
 }
+
+/// Exercise the catalog-to-VM seam used by `feed_shapeshift_bar`, not a flags setter fixture.
+#[test]
+fn current_form_feed_reads_catalog_flags_and_clears_a_missing_row() {
+    let mut script = UiScript::new().unwrap();
+    script.set_unit(
+        "player",
+        Some(wrathplus_ui::script::UnitState {
+            exists: true,
+            damage_bonus_stat: Some(0),
+            ..Default::default()
+        }),
+    );
+    let mut forms = std::collections::HashMap::from([
+        (
+            1,
+            wrathplus_formats::ShapeshiftForm {
+                flags: 0,
+                ..Default::default()
+            },
+        ),
+        (
+            5,
+            wrathplus_formats::ShapeshiftForm {
+                flags: 0x20,
+                ..Default::default()
+            },
+        ),
+    ]);
+    for (form, expected) in [(1, 0), (5, 40), (31, 0), (5, 40), (0, 0)] {
+        push_current_form(&mut script, form, &forms);
+        assert_eq!(
+            script
+                .eval::<i32>("return GetAttackPowerForStat(2, 40)")
+                .unwrap(),
+            expected
+        );
+    }
+    forms.get_mut(&5).unwrap().flags = 0;
+    push_current_form(&mut script, 5, &forms);
+    assert_eq!(
+        script
+            .eval::<i32>("return GetAttackPowerForStat(2, 40)")
+            .unwrap(),
+        0
+    );
+}

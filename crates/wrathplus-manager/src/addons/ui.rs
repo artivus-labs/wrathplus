@@ -154,14 +154,40 @@ impl Manager {
                 "No addons discovered. Add a local addon folder, an AddOns collection, or a GitHub owner/repo.",
             ));
         }
-        column![tabs,
+        column![
+            tabs,
             text("Installed addon sources").size(22),
-            text("Scans local AddOns, the selected asset install's Interface/AddOns, repository addons and your custom folders. Sources remain read-only; selected addons are linked into the client's local state. Only add code you trust.").size(13).color(style::MUTED),
-            row![text_input("Filter addons…", &self.search).on_input(Message::Search).padding(10), button("Refresh").on_press(Message::RefreshAddons)].spacing(10),
-            row![text_input("Local addon folder, owner/repo or https://github.com/owner/repo", &self.addon_path).on_input(Message::AddonPath).padding(10), button("Browse…").on_press_maybe((self.addon_editable() && !self.choosing).then_some(Message::BrowseAddons)), button(if self.choosing { "Working…" } else { "Add source" }).on_press_maybe(self.addon_editable().then_some(Message::AddAddonPath))].spacing(10),
-            text("GitHub import downloads a source checkout; it does not execute addon code or automatically add addons to the client. Review code you trust before selecting Add to client. Root or immediate-subfolder TOCs are discovered; compatibility is not verified.").size(12).color(style::MUTED),
-            text("Apply while stopped. Windows links require Developer Mode or symlink permission. Existing unmanaged addons are never overwritten. Disable per character in the game's AddOns screen; removing a managed registration preserves source and saved data.").size(12).color(style::MUTED),
+            text("Addons from your client, this repository and your own folders.")
+                .size(13)
+                .color(style::MUTED),
+            row![
+                text_input("Filter addons…", &self.search)
+                    .on_input(Message::Search)
+                    .padding(10),
+                button("Refresh").on_press(Message::RefreshAddons)
+            ]
+            .spacing(10),
+            row![
+                text_input(
+                    "Local addon folder, owner/repo or https://github.com/owner/repo",
+                    &self.addon_path
+                )
+                .on_input(Message::AddonPath)
+                .padding(10),
+                button("Browse…").on_press_maybe(
+                    (self.addon_editable() && !self.choosing).then_some(Message::BrowseAddons)
+                ),
+                button(if self.choosing {
+                    "Working…"
+                } else {
+                    "Add source"
+                })
+                .on_press_maybe(self.addon_editable().then_some(Message::AddAddonPath))
+            ]
+            .spacing(10),
             entries,
-        ].spacing(14).into()
+        ]
+        .spacing(14)
+        .into()
     }
 }

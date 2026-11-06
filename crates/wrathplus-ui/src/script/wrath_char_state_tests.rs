@@ -260,6 +260,21 @@ fn power_regen_adds_the_base_rate_and_the_nudge() {
         s.eval::<(f64, f64)>("return GetPowerRegen()").unwrap(),
         (3.0, 1.0)
     );
+    // `GetManaRegen` (`0x612abf`): the pair for a mana user, zeros for another type.
+    assert_eq!(
+        s.eval::<(f64, f64)>("return GetManaRegen()").unwrap(),
+        (3.0, 1.0)
+    );
+    s.set_wrath_char_state(WrathCharState {
+        has_player: true,
+        power_regen: (-12.499, 0.001),
+        power_type: 1,
+        ..Default::default()
+    });
+    assert_eq!(
+        s.eval::<(f64, f64)>("return GetManaRegen()").unwrap(),
+        (0.0, 0.0)
+    );
 }
 
 #[test]

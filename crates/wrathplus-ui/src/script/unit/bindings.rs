@@ -25,7 +25,7 @@ pub(in crate::script) fn class_pair(
     usage: &'static str,
 ) -> mlua::Result<(Value, Value)> {
     let token = Some(crate::script::binding_abi::string_arg(lua, token, usage)?);
-    // The `"player"` arm reads the record's class byte (`0x5183b9`, `0xc27e81`); the second
+    // The `"player"` arm reads the record's class byte (`0x6b1080`, `0xc79e89`); the second
     // return is the uppercase token.
     let pair = match player_record_arm(lua, &token, |r| r.class.clone()) {
         Some(pair) => pair,
@@ -322,7 +322,7 @@ pub(in crate::script) fn install(lua: &Lua) -> mlua::Result<()> {
     )?;
 
     // UnitIsCivilian(unit): killing the unit would be dishonorable, the predicate `0x612550`. It
-    // shares `is_civilian_kill` with the tooltip's civilian line and `UnitPVPName`, so all agree.
+    // shares `is_civilian_kill` with the tooltip's civilian line, so both agree.
     g.set(
         "UnitIsCivilian",
         lua.create_function(|lua, unit: Value| {
@@ -547,8 +547,8 @@ pub(in crate::script) fn install(lua: &Lua) -> mlua::Result<()> {
                 token,
                 r#"Usage: UnitRace("unit")"#,
             )?);
-            // The `"player"` arm reads the character-select record's race byte (`0x518269`,
-            // `0xc27e80`), never the unit resolver.
+            // The `"player"` arm reads the character-select record's race byte (`0x6b1070` at
+            // `0x60fd94`, `0xc79e88`), never the unit resolver.
             let pair = match player_record_arm(lua, &token, |r| r.race.clone()) {
                 Some(pair) => pair,
                 None => with_unit(lua, &token, None, |u| {

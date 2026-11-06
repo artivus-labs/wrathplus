@@ -11,7 +11,7 @@ fn reaches(target: Option<f32>, attack: Option<f32>) -> RangeTargets {
 
 const FORWARD: u32 = 0x1;
 const BACKWARD: u32 = 0x2;
-/// A unit running forward: the speed `0x7c4c90` answers for it is the run speed, above twice
+/// A unit running forward: the speed `0x987570` answers for it is the run speed, above twice
 /// the walk speed.
 const RUNNING: UnitMotion = UnitMotion {
     flags: FORWARD,

@@ -8,9 +8,9 @@ use crate::spell::targeting::test_support::*;
 use std::collections::HashMap;
 use wrathplus_protocol::types::Field;
 
-/// `SpellCanTargetUnit` resolves a chain as `SpellTargetUnit` does and answers the verdict of
-/// the unit it ends on (`0x6e6d3a` into `0x515970`, then `0x6e6460`): the ally we and our pet
-/// target, in range of the spell or not, and nobody past a unit with no target.
+/// `SpellCanTargetUnit` resolves a chain as `SpellTargetUnit` does and answers the verdict of the
+/// unit it ends on (1.12 `0x6e6d3a` into `0x515970`, then `0x6e6460`; 12340 not located): the ally
+/// we and our pet target, in range of the spell or not, and nobody past a unit with no target.
 #[test]
 fn spell_can_target_unit_follows_a_target_chain() {
     const PET: u64 = 0xF140_0000_0000_0077;

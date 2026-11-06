@@ -152,9 +152,10 @@ impl Manager {
     pub(crate) fn agents_page(&self) -> Element<'_, Message> {
         let agents = &self.agents;
         let realm_up = self.server_state.running();
-        let mut page = column![
+        let mut page =
+            column![
             text("Agents").size(22),
-            text("Each agent gets its own account and its own client with no window, which an AI model plays through the client's control port: Lua, screenshots and game events. Agents make their own characters, and can make alts to group as Playerbots.")
+            text("Each agent has its own account and a windowless client that an AI model plays.")
                 .size(13)
                 .color(style::MUTED),
             row![
@@ -170,7 +171,7 @@ impl Manager {
             ]
             .spacing(10),
         ]
-        .spacing(14);
+            .spacing(14);
         if !realm_up {
             page = page.push(
                 text("Start the server to create agents or run their clients.")

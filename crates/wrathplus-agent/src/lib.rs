@@ -6,7 +6,7 @@
 //! |---|---|
 //! | `GET /status` | client state (login, character select, in world) and, in world, the player |
 //! | `POST /lua[?budget=N]` | run the body in the UI's Lua; values, `print` output or the error |
-//! | `GET /screenshot[?scale=0.5]` | the next rendered frame as PNG |
+//! | `GET /screenshot[?scale=0.5][&format=jpeg[&quality=85]]` | the next rendered frame, PNG or JPEG |
 //! | `GET /events?since=N[&wait_ms=M][&limit=K]` | every UI event since cursor `N`, long-polling |
 //! | `GET /view?token=…` | a read-only page for people: the live frame, the character, events and the agent's Lua |
 //! | `GET /files`, `GET|PUT|DELETE /files/<module>` | the agent's own Lua modules (see `env`) |
@@ -39,7 +39,7 @@ use bevy::render::view::screenshot::{Screenshot, ScreenshotCaptured};
 use crossbeam_channel::Receiver;
 use events::EventLog;
 use serde_json::{json, Value};
-use server::{Job, Port};
+use server::{Format, Job, Port};
 use std::sync::Arc;
 use std::time::Instant;
 use wrathplus_app_core::app_core::state::ClientState;
@@ -258,7 +258,11 @@ fn serve_jobs(
                     "player": player,
                 }));
             }
-            Job::Screenshot { scale, reply } => {
+            Job::Screenshot {
+                scale,
+                format,
+                reply,
+            } => {
                 // A headless client draws into an image, not a window.
                 let shot = match &headless {
                     Some(frame) => Screenshot::image(frame.0.clone()),
@@ -270,7 +274,7 @@ fn serve_jobs(
                         let image = captured.image.clone();
                         let reply = reply.clone();
                         std::thread::spawn(move || {
-                            let _ = reply.send(encode(image, scale));
+                            let _ = reply.send(encode(image, scale, format));
                         });
                     });
             }
@@ -278,8 +282,8 @@ fn serve_jobs(
     }
 }
 
-/// A captured frame as PNG bytes, downscaled by `scale` (0 < scale <= 1).
-fn encode(image: Image, scale: f32) -> Result<Vec<u8>, String> {
+/// A captured frame as PNG or JPEG bytes, downscaled by `scale` (0 < scale <= 1).
+fn encode(image: Image, scale: f32, format: Format) -> Result<Vec<u8>, String> {
     let mut frame = image
         .try_into_dynamic()
         .map_err(|e| format!("frame conversion: {e}"))?;
@@ -288,12 +292,22 @@ fn encode(image: Image, scale: f32) -> Result<Vec<u8>, String> {
         let height = ((frame.height() as f32) * scale).round().max(1.0) as u32;
         frame = frame.resize_exact(width, height, image::imageops::FilterType::Triangle);
     }
-    let mut png = Vec::new();
-    frame
-        .to_rgb8()
-        .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
-        .map_err(|e| format!("png: {e}"))?;
-    Ok(png)
+    let rgb = frame.to_rgb8();
+    let mut bytes = Vec::new();
+    match format {
+        Format::Png => rgb
+            .write_to(
+                &mut std::io::Cursor::new(&mut bytes),
+                image::ImageFormat::Png,
+            )
+            .map_err(|e| format!("png: {e}"))?,
+        Format::Jpeg(quality) => {
+            image::codecs::jpeg::JpegEncoder::new_with_quality(&mut bytes, quality)
+                .encode_image(&rgb)
+                .map_err(|e| format!("jpeg: {e}"))?
+        }
+    }
+    Ok(bytes)
 }
 
 fn script_value(value: &ScriptValue) -> Value {

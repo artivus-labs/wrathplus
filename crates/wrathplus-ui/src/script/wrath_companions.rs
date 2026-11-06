@@ -52,11 +52,13 @@ impl UiScript {
     }
 }
 
-/// `0x53b600`: the type token, case-sensitively as `0x76e780` compares it.
+/// `0x53b600`: the type token, case-insensitively as `_strnicmp` (`0x76e780`) compares it.
 fn companion_type(v: &Value) -> Option<usize> {
     let Value::String(s) = v else { return None };
-    let s = s.to_str().ok()?;
-    COMPANION_TYPES.iter().position(|t| *t == &*s)
+    let s = s.as_bytes();
+    COMPANION_TYPES
+        .iter()
+        .position(|t| t.as_bytes().eq_ignore_ascii_case(&s))
 }
 
 /// The 1-based index argument (`0x84e030`, rounded), as a 0-based list index.
@@ -282,7 +284,8 @@ mod tests {
         s.run(
             r##"
             assert(GetNumCompanions("CRITTER") == 2 and GetNumCompanions("MOUNT") == 1)
-            assert(not pcall(GetNumCompanions, "critter") and not pcall(GetNumCompanions))
+            assert(GetNumCompanions("critter") == 2 and GetNumCompanions("Mount") == 1)
+            assert(GetCompanionInfo("mount", 1) == 1020 and not pcall(GetNumCompanions))
             local id, name, spell, icon, out = GetCompanionInfo("CRITTER", 2)
             assert(id == 1011 and name == "Pet11" and spell == 11 and icon and out == 1)
             assert(select(5, GetCompanionInfo("CRITTER", 1)) == nil)

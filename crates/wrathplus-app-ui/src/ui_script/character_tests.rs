@@ -13,6 +13,7 @@ use super::test_ui::load_ui as load_xml;
 fn player_unit() -> UnitState {
     UnitState {
         exists: true,
+        has_object: true,
         name: Some("WrathPlus".into()),
         health: 100,
         max_health: 100,
@@ -20,7 +21,6 @@ fn player_unit() -> UnitState {
         power_type: 0,
         power: 50,
         max_power: 50,
-        dead: false,
         reaction: 0,
         race: Some("Night Elf".into()),
         race_file: Some("NightElf".into()),

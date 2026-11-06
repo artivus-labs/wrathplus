@@ -645,8 +645,8 @@ impl RemoteMotion {
         let dz = fwd_amt * vp + vertical;
 
         let len = (dx * dx + dy * dy + dz * dz).sqrt();
-        // `GetCurrentSpeed` (`0x7c4c90`), shared with the local controller; its walk arm
-        // (`0x7c4d11`) comes before the run arm (`0x7c4d1d`), so a walking backpedal is a walk.
+        // `GetCurrentSpeed` (`0x987570`), shared with the local controller; its walk arm
+        // (`0x987624`) comes before the run arm (`0x987632`), so a walking backpedal is a walk.
         let base = crate::net::current_speed(&speeds, self.flags);
         let mut pos = self.wow_pos;
         let speed = if len > 1.0e-4 {

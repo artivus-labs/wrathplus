@@ -34,6 +34,7 @@ fn inspect_state() -> InspectHonorData {
 fn player() -> UnitState {
     UnitState {
         exists: true,
+        has_object: true,
         name: Some("WrathPlus".into()),
         sex: 3, // female
         is_player: true,
@@ -41,7 +42,7 @@ fn player() -> UnitState {
         // race walk (`0x5efe00`) that keys every rank title.
         faction_group: Some("Alliance".into()),
         pvp_team: 1,
-        pvp_rank: 9,
+        pvp_medal: 9,
         ..Default::default()
     }
 }
@@ -317,15 +318,11 @@ fn a_missing_rank_global_reads_nil_not_empty() {
 }
 
 /// The title's team digit reads the race (`0x5efe00`), never the live template, so a GM (template
-/// 35, no side) keeps his title, in both the key and `UnitPVPName`'s decoration (`0x5efe60`).
+/// 35, no side) keeps his title in the key.
 #[test]
 fn a_sideless_player_still_has_a_team_digit_because_his_race_has_one() {
     let mut s = seated();
     seat_rank_globals(&s);
-    s.lua()
-        .globals()
-        .set("UNIT_PVP_NAME", "%s %s")
-        .expect("global");
     s.set_unit(
         "player",
         Some(UnitState {
@@ -335,7 +332,7 @@ fn a_sideless_player_still_has_a_team_digit_because_his_race_has_one() {
             // …and the race still names Alliance.
             pvp_team: 1,
             sex: 2,
-            pvp_rank: 18,
+            pvp_medal: 18,
             ..player()
         }),
     );
@@ -344,18 +341,13 @@ fn a_sideless_player_still_has_a_team_digit_because_his_race_has_one() {
         "Grand Marshal",
         "the sideless template must not reach the key"
     );
-    assert_eq!(
-        s.eval::<String>(r#"return UnitPVPName("player")"#).unwrap(),
-        "Grand Marshal WrathPlus",
-        "and the name decoration reads the same digit"
-    );
     // The control: a unit whose race has no side is -1, and -1 misses.
     s.set_unit(
         "player",
         Some(UnitState {
             faction_group: Some("Alliance".into()),
             pvp_team: -1,
-            pvp_rank: 18,
+            pvp_medal: 18,
             ..player()
         }),
     );
@@ -445,7 +437,7 @@ fn get_pvp_rank_info_takes_a_second_argument_three_different_ways() {
             is_player: true,
             faction_group: Some("Horde".into()),
             pvp_team: 0,
-            pvp_rank: 14,
+            pvp_medal: 14,
             ..Default::default()
         }),
     );
@@ -551,9 +543,9 @@ fn get_pvp_rank_info_raises_without_a_numeric_first_argument() {
         .is_ok());
 }
 
-/// `PLAYER_BYTES_3` is public, and the reference's inspect pane calls `UnitPVPRank("target")`.
+/// Build 12340 `0x611c40` pushes zero even for a player carrying a nonzero medal.
 #[test]
-fn unit_pvp_rank_answers_for_a_foreign_unit() {
+fn unit_pvp_rank_is_zero_even_with_a_medal() {
     let mut s = seated();
     s.set_unit(
         "target",
@@ -563,17 +555,13 @@ fn unit_pvp_rank_answers_for_a_foreign_unit() {
             is_player: true,
             faction_group: Some("Horde".into()),
             pvp_team: 0,
-            pvp_rank: 14,
+            pvp_medal: 14,
             ..Default::default()
         }),
     );
-    assert_eq!(
-        s.eval::<i64>(r#"return UnitPVPRank("target")"#).unwrap(),
-        14
-    );
-    assert_eq!(s.eval::<i64>(r#"return UnitPVPRank("player")"#).unwrap(), 9);
-    // A creature reads 0 because it has no player descriptor block to decode a rank from; the
-    // binding does not re-gate on `is_player`.
+    assert_eq!(s.eval::<i64>(r#"return UnitPVPRank("target")"#).unwrap(), 0);
+    assert_eq!(s.eval::<i64>(r#"return UnitPVPRank("player")"#).unwrap(), 0);
+    // Creatures and unresolved units also return the same constant.
     s.set_unit(
         "mouseover",
         Some(UnitState {
@@ -598,111 +586,76 @@ fn unit_pvp_rank_answers_for_a_foreign_unit() {
     assert!(s.eval::<i64>("return UnitPVPRank({})").is_err());
 }
 
-/// `UnitPVPName`'s three legs (`0x609370`); the title fills `UNIT_PVP_NAME` rank first and is
-/// gendered by this unit, unlike the pane's.
+/// `UnitPVPName` (`0x60e9a0` into `0x72a290`): a player's chosen title, by its CharTitles
+/// `MaskID` and gendered with a fallback, around the name; the `PVP_MEDAL<n>` line only under a
+/// title; anyone else, and a player with no title, the plain name. No 1.12 rank or civilian leg.
 #[test]
-fn unit_pvp_name_decorates_a_ranked_player_and_falls_back_three_ways() {
+fn unit_pvp_name_formats_the_chosen_title() {
     let mut s = seated();
     seat_rank_globals(&s);
     seat_name_globals(&s);
-
-    // Leg A: the seated player is a female Alliance rank 9, so the `_FEMALE` twin wins.
+    let title = |mask_id, male: &str, female: &str| crate::script::WrathCharTitle {
+        id: mask_id + 100,
+        male: male.into(),
+        female: female.into(),
+        mask_id,
+    };
+    s.set_wrath_char_titles(std::sync::Arc::new(vec![
+        title(1, "Private %s", "Private (f) %s"),
+        title(2, "%s the Patient", ""),
+    ]));
+    let name = |s: &UiScript, token: &str| {
+        s.eval::<String>(&format!("return UnitPVPName('{token}')"))
+            .unwrap()
+    };
     assert_eq!(
-        s.eval::<String>(r#"return UnitPVPName("player")"#).unwrap(),
-        "Sergeant Major (f) WrathPlus"
+        name(&s, "player"),
+        "WrathPlus",
+        "a medal without a chosen title decorates nothing"
     );
-    s.set_unit("player", Some(UnitState { sex: 2, ..player() }));
-    assert_eq!(
-        s.eval::<String>(r#"return UnitPVPName("player")"#).unwrap(),
-        "Sergeant Major WrathPlus"
-    );
-
-    s.set_unit(
-        "player",
-        Some(UnitState {
-            sex: 2,
-            pvp_rank: 19,
-            ..player()
-        }),
-    );
-    assert_eq!(
-        s.eval::<String>(r#"return UnitPVPName("player")"#).unwrap(),
-        "Leader WrathPlus",
-        "rank 19 names here and is refused by GetPVPRankInfo"
-    );
-
-    // Leg A′: the city-protector medal, on its own line.
-    s.set_unit(
-        "player",
-        Some(UnitState {
-            sex: 2,
-            pvp_medal: 1,
-            ..player()
-        }),
-    );
-    assert_eq!(
-        s.eval::<String>(r#"return UnitPVPName("player")"#).unwrap(),
-        "Sergeant Major WrathPlus\nGuardian of Stormwind"
-    );
-
-    // Leg C: an unranked player is just a name, and so is a plain creature.
-    s.set_unit(
-        "player",
-        Some(UnitState {
-            pvp_rank: 0,
-            ..player()
-        }),
-    );
-    assert_eq!(
-        s.eval::<String>(r#"return UnitPVPName("player")"#).unwrap(),
-        "WrathPlus"
-    );
+    let titled = |chosen_title, sex, pvp_medal| UnitState {
+        chosen_title,
+        sex: if sex == 3 { 2 } else { 3 }, // opposite unit gender must not select own title
+        title_gender: Some(if sex == 3 { 1 } else { 0 }),
+        pvp_medal,
+        ..player()
+    };
+    for (unit, want) in [
+        (titled(1, 3, 0), "Private (f) WrathPlus"),
+        (titled(1, 2, 0), "Private WrathPlus"),
+        (titled(2, 3, 0), "WrathPlus the Patient"),
+        (titled(1, 2, 1), "Private WrathPlus\nGuardian of Stormwind"),
+        (titled(0, 2, 1), "WrathPlus"),
+        (titled(7, 2, 0), "WrathPlus"),
+    ] {
+        s.set_unit("player", Some(unit));
+        assert_eq!(name(&s, "player"), want);
+    }
     s.set_unit(
         "target",
         Some(UnitState {
             exists: true,
-            name: Some("Timber Wolf".into()),
-            level: 5,
+            has_object: true,
+            name: Some("Innkeeper Renee".into()),
+            chosen_title: 1,
+            civilian: true,
             ..Default::default()
         }),
     );
     assert_eq!(
-        s.eval::<String>(r#"return UnitPVPName("target")"#).unwrap(),
-        "Timber Wolf"
+        name(&s, "target"),
+        "Innkeeper Renee",
+        "a creature has no title"
     );
-
-    // Leg B: the civilian prefix, on the tooltip's `0x612550` gate: PvP-flagged, hostile and grey
-    // to the player.
-    s.set_player_req_state(crate::script::PlayerReqState {
-        level: 30,
-        ..Default::default()
-    });
-    let civilian = |reaction: u8, pvp: bool| UnitState {
-        exists: true,
-        name: Some("Innkeeper Renee".into()),
-        level: 5,
-        civilian: true,
-        pvp,
-        reaction,
-        ..Default::default()
+    // A cached snapshot with no held object, an arena opponent's, is nil (`0x60ea13`).
+    let cached = UnitState {
+        has_object: false,
+        ..player()
     };
-    s.set_unit("target", Some(civilian(2, true)));
-    assert_eq!(
-        s.eval::<String>(r#"return UnitPVPName("target")"#).unwrap(),
-        "Civilian Innkeeper Renee"
-    );
-    s.set_unit("target", Some(civilian(5, true)));
-    assert_eq!(
-        s.eval::<String>(r#"return UnitPVPName("target")"#).unwrap(),
-        "Innkeeper Renee",
-        "a FRIENDLY civilian is not a dishonorable kill"
-    );
-    s.set_unit("target", Some(civilian(2, false)));
-    assert_eq!(
-        s.eval::<String>(r#"return UnitPVPName("target")"#).unwrap(),
-        "Innkeeper Renee",
-        "…nor an unflagged one"
-    );
+    s.set_unit("target", Some(cached));
+    assert!(s
+        .eval::<bool>("return UnitPVPName('target') == nil")
+        .unwrap());
 
     assert!(s
         .eval::<bool>(r#"return UnitPVPName("mouseover") == nil"#)
@@ -711,63 +664,42 @@ fn unit_pvp_name_decorates_a_ranked_player_and_falls_back_three_ways() {
         "mouseover",
         Some(UnitState {
             exists: true,
+            has_object: true,
             name: None,
             ..Default::default()
         }),
     );
-    assert!(
-        s.eval::<bool>(r#"return UnitPVPName("mouseover") == nil"#)
-            .unwrap(),
-        "a snapshot whose name has not resolved is nil, not an empty decoration"
+    assert_eq!(name(&s, "mouseover"), "Unknown Being");
+    s.run("UNKNOWNOBJECT = 'Localized unknown'").unwrap();
+    assert_eq!(name(&s, "mouseover"), "Localized unknown");
+    s.run("UNKNOWNOBJECT = ''").unwrap();
+    assert_eq!(name(&s, "mouseover"), "Unknown Being");
+    s.set_unit(
+        "target",
+        Some(UnitState {
+            title_gender: None,
+            sex: 3,
+            pvp_medal: 0,
+            chosen_title: 1,
+            ..player()
+        }),
     );
+    assert_eq!(name(&s, "target"), "Private (f) WrathPlus");
+    s.set_unit("player", Some(titled(1, 2, 255)));
+    assert_eq!(name(&s, "player"), "Private WrathPlus\n");
     assert!(s.eval::<String>("return UnitPVPName()").is_err());
 }
 
-/// No install: the plain name, where the reference would format an empty string.
+/// The first `%s` takes the name, `%%` is a literal `%`, and a second `%s` reads empty.
 #[test]
-fn unit_pvp_name_without_the_globalstrings_answers_the_plain_name() {
-    let s = seated(); // nothing seated on _G
-    assert_eq!(
-        s.eval::<String>(r#"return UnitPVPName("player")"#).unwrap(),
-        "WrathPlus"
-    );
-    // The template alone is not enough: the title has to resolve too.
-    s.lua()
-        .globals()
-        .set("UNIT_PVP_NAME", "%s %s")
-        .expect("global");
-    assert_eq!(
-        s.eval::<String>(r#"return UnitPVPName("player")"#).unwrap(),
-        "WrathPlus"
-    );
-}
-
-/// Two varargs is the engine's limit (`add esp,0x14`), so a third `%s` has nothing to consume.
-#[test]
-fn the_two_string_template_is_substituted_not_hardcoded() {
-    assert_eq!(format_two_strings("%s %s", "Rank", "Name"), "Rank Name");
-    assert_eq!(format_two_strings("%s, %s!", "Rank", "Name"), "Rank, Name!");
-    assert_eq!(format_two_strings("%s%s", "Rank", "Name"), "RankName");
-    assert_eq!(format_two_strings("100%% %s %s", "R", "N"), "100% R N");
-    assert_eq!(
-        format_two_strings("no specifiers", "R", "N"),
-        "no specifiers"
-    );
-    assert_eq!(format_two_strings("%s %s %s", "R", "N"), "R N ");
-    assert_eq!(format_two_strings("%d %s %s", "R", "N"), "%d R N");
-    assert_eq!(format_two_strings("trailing %", "R", "N"), "trailing %");
-
-    let s = seated();
-    seat_rank_globals(&s);
-    seat_name_globals(&s);
-    s.lua()
-        .globals()
-        .set("UNIT_PVP_NAME", "<%s> %s")
-        .expect("global");
-    assert_eq!(
-        s.eval::<String>(r#"return UnitPVPName("player")"#).unwrap(),
-        "<Sergeant Major (f)> WrathPlus"
-    );
+fn the_title_template_is_substituted_not_hardcoded() {
+    assert_eq!(format_name("Private %s", "Name"), "Private Name");
+    assert_eq!(format_name("%s the Patient", "Name"), "Name the Patient");
+    assert_eq!(format_name("100%% %s", "N"), "100% N");
+    assert_eq!(format_name("no specifiers", "N"), "no specifiers");
+    assert_eq!(format_name("%s %s", "N"), "N ");
+    assert_eq!(format_name("%d %s", "N"), "%d N");
+    assert_eq!(format_name("trailing %", "N"), "trailing %");
 }
 
 #[test]

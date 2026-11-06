@@ -1,6 +1,7 @@
 //! Build 12340's character-state readers over a snapshot the app pushes each frame: the active
 //! player's movement and area predicates, the unit speed, pitch, feign-death, trivial and
-//! sanctuary readers, `GetPowerRegen`, the resurrect offerer, and the two death/skill verbs.
+//! sanctuary readers, `GetPowerRegen` and `GetManaRegen`, the resurrect offerer, and the two
+//! death/skill verbs.
 //! Evidence: `azb-live/ghidra/ui/apistate{,2,3}.log` (`ApiState*.java`).
 //!
 //! The player predicates open on the active player object (`0x4d3790` → `0x4d4db0`) and answer 1
@@ -43,6 +44,9 @@ pub struct WrathCharState {
     pub stealthed: bool,
     /// `GetPowerRegen` (`0x612b40`): `(regen, casting regen)` for the active power type.
     pub power_regen: (f64, f64),
+    /// The active power type, `UNIT_FIELD_BYTES_0` byte 3 (`[desc+0x47]`): `GetManaRegen`
+    /// (`0x612a90`) answers [`Self::power_regen`] for mana (0) alone, else `0, 0` (`0x612abf`).
+    pub power_type: u8,
     /// `ResurrectGetOfferer` (`0x515950`): the name-cache name of the offer's caster (`0xc9eab8`),
     /// `None` without an offer or before the name answers.
     pub resurrect_offerer: Option<String>,
@@ -297,17 +301,15 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             Ok(flag(hit))
         })?,
     )?;
-    g.set(
-        "GetPowerRegen",
-        lua.create_function(|lua, _: MultiValue| {
-            let s = lua.app_data_ref::<State>().expect("char state");
-            Ok(if s.player.has_player {
-                s.player.power_regen
-            } else {
-                (0.0, 0.0)
-            })
-        })?,
-    )?;
+    // `GetManaRegen` (`0x612a90`) is `GetPowerRegen`'s pair read for mana, zeros for another type.
+    for (name, mana_only) in [("GetPowerRegen", false), ("GetManaRegen", true)] {
+        let f = lua.create_function(move |lua, _: MultiValue| {
+            let p = &lua.app_data_ref::<State>().expect("char state").player;
+            let live = p.has_player && (!mana_only || p.power_type == 0);
+            Ok(if live { p.power_regen } else { (0.0, 0.0) })
+        })?;
+        g.set(name, f)?;
+    }
     g.set(
         "ResurrectGetOfferer",
         lua.create_function(|lua, _: MultiValue| {

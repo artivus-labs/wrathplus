@@ -1,5 +1,5 @@
-//! The player's cooldowns, the client's `SpellHistory` list (node ops `0x6e12c0`, `0x6e13e0`,
-//! `0x6e1630`, `0x6e1790`; handlers `0x6e9460`, `0x6e95d0`, `0x6e9670`, `0x6e9730`).
+//! The player's cooldowns, the client's `SpellHistory` list (`0xd3f5ac`, getter `0x807980`;
+//! handlers `0x806dd0`, `0x807060`, `0x804010`). Other `0x6e…` addresses here are 1.12's.
 //!
 //! - A record holds three timers: the spell's recovery, its category's recovery and the GCD
 //!   (`startRecoveryCategory`, `startRecoveryTime`); `on_hold` parks the first two until
@@ -281,7 +281,7 @@ mod tests {
         let mid = t0 + Duration::from_millis(100);
         assert!(cds.not_ready(5384, 0, Some(&fd), mid));
 
-        // The fail path (0x6e1a00): GCD cleared (0x6e1630), the record removed (0x6e3050).
+        // The 1.12 fail path (0x6e1a00): GCD cleared (0x6e1630), the record removed (0x6e3050).
         cds.clear_gcd(5384, mid);
         cds.clear_spell(5384);
         assert!(!cds.not_ready(5384, 0, Some(&fd), mid));
@@ -683,7 +683,7 @@ mod tests {
         assert_eq!(read1, read2, "the projected start IS the settled start");
     }
 
-    /// The GCD leg (`0x6e15cc`) ignores the pressed spell's own time: a `{133, 0}` scroll press
+    /// The GCD leg (`0x807bba`) ignores the pressed spell's own time: a `{133, 0}` scroll press
     /// is refused, a `{0, 0}` press is not.
     #[test]
     fn a_running_gcd_locks_presses_by_category_equality_alone() {
@@ -710,7 +710,7 @@ mod tests {
         assert!(!cds.not_ready(133, 0, Some(&fireball()), t0 + Duration::from_millis(1_501)));
     }
 
-    /// The getter's exclusion (`0x6e1439`, `0x6e1442`).
+    /// The getter's exclusion (`0x8079cb`, `0x8079d4`).
     #[test]
     fn attack_and_tradeskill_reads_are_always_cold() {
         let t0 = Instant::now();
@@ -726,7 +726,7 @@ mod tests {
         assert!(!cds.not_ready(6603, 0, Some(&attack), mid));
     }
 
-    /// The wildcard leg (`0x6e1563`): wand Shoot's category 351 sweeps every button.
+    /// The wildcard leg (`0x807b63`): wand Shoot's category 351 sweeps every button.
     #[test]
     fn a_wildcard_category_record_reaches_every_query() {
         let t0 = Instant::now();

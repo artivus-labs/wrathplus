@@ -860,8 +860,8 @@ fn eval(app: &mut App, lua: &str) -> Option<i64> {
         .unwrap()
 }
 
-/// The hover pushes `"mouseover"` with the hovered guid, the pair `0x492890` writes to
-/// `0xb4e2c8`/`0xb4e2cc`: `UnitIsUnit` (`0x516070`) resolves both tokens through `0x515970` and
+/// The hover pushes `"mouseover"` with the hovered guid, the pair 1.12's `0x492890` writes to
+/// `0xb4e2c8`/`0xb4e2cc`: `UnitIsUnit` (`0x60c3d0`) resolves both tokens through `0x60abf0` and
 /// compares guids, so hovering the target answers 1 and hovering anyone else nil.
 #[test]
 fn the_mouseover_token_carries_the_hovered_guid() {

@@ -384,8 +384,9 @@ pub(crate) fn load_ingame_ui_on_world_entry(world: &mut World) {
     }
     // The player too, before the addon walk. The record first: the reference's
     // `UnitName`/`UnitRace`/`UnitClass`/`UnitSex`/`UnitFactionGroup` read only a copy of the
-    // char-enum row made at the Enter World commit (`0x5abd9e`) and never cleared, and each rebuilt
-    // VM is told once. The snapshot stands in for the descriptor until that streams in.
+    // char-enum row made at the Enter World commit (1.12 `0x5abd9e`; 12340 not located) and never
+    // cleared, and each rebuilt VM is told once. The snapshot stands in for the descriptor until
+    // that streams in.
     if let Some(record) = record_from_roster(world) {
         script.set_player_record(record);
     }

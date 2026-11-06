@@ -134,9 +134,9 @@ fn the_selection_calls_run_assist_and_last_enemy_without_ever_deselecting() {
     assert_eq!(run(&mut world, "TargetLastEnemy()"), None);
 }
 
-/// `TargetUnit("partypet1")`, the TARGETPARTYPET1 binding and the pet half of
-/// TARGETPARTYMEMBER1, commits the pet the member's descriptor names (`0x515970` to `0x4e81d0`);
-/// a slot with no member, or one whose pet is not held, is a no-op, never a deselect.
+/// `TargetUnit("partypet1")`, the TARGETPARTYPET1 binding and the pet half of TARGETPARTYMEMBER1,
+/// commits the pet the member's descriptor names (1.12 `0x515970` to `0x4e81d0`; 12340 not
+/// located); a slot with no member, or one whose pet is not held, is a no-op, never a deselect.
 #[test]
 fn target_unit_selects_a_party_pet() {
     use crate::app_core::session::ObjectStore;
@@ -235,10 +235,10 @@ fn target_unit_selects_a_party_pet() {
     assert_eq!(run(&mut world, r#"TargetUnit("partypet1")"#), Some(MEMBER));
 }
 
-/// `TargetUnit` and `AssistUnit` take the tokens the reference's resolver takes (`0x515970`,
-/// from `0x489a08` and `0x489ba9`): a base then a hop off each held unit's target, so
-/// `party1target` names the unit party1 targets and `AssistUnit("party1target")` its target's.
-/// A chain that breaks, and text that is not a hop, is a no-op, never a deselect.
+/// `TargetUnit` and `AssistUnit` take the tokens the reference's resolver takes (1.12 `0x515970`,
+/// from `0x489a08` and `0x489ba9`; 12340 not located): a base then a hop off each held unit's
+/// target, so `party1target` names the unit party1 targets and `AssistUnit("party1target")` its
+/// target's. A chain that breaks, and text that is not a hop, is a no-op, never a deselect.
 #[test]
 fn target_and_assist_unit_follow_a_target_chain() {
     use crate::app_core::session::ObjectStore;

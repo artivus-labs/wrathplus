@@ -125,14 +125,23 @@ impl Manager {
                         .map(|_| Message::ModuleConfig(Input::Save)),
                 ),
             );
-        let dialog = container(column![
-            text(format!("Edit {}", state.name)).size(22),
-            text(&state.module).size(13).color(style::MUTED),
-            text("Saved to a local copy; the original module template stays unchanged. Restart the server to apply.").size(13).color(style::MUTED),
-            container(editor).clip(true).height(Fill),
-            text(&state.notice).size(13).color(style::GOLD),
-            actions.spacing(10),
-        ].spacing(12)).padding(24).width(1000).height(650).style(style::panel);
+        let dialog = container(
+            column![
+                text(format!("Edit {}", state.name)).size(22),
+                text(&state.module).size(13).color(style::MUTED),
+                text("Restart the server to apply.")
+                    .size(13)
+                    .color(style::MUTED),
+                container(editor).clip(true).height(Fill),
+                text(&state.notice).size(13).color(style::GOLD),
+                actions.spacing(10),
+            ]
+            .spacing(12),
+        )
+        .padding(24)
+        .width(1000)
+        .height(650)
+        .style(style::panel);
         let shade =
             mouse_area(
                 container(space())

@@ -3,7 +3,10 @@ use std::collections::HashSet;
 
 use mlua::{Lua, Value};
 
-use super::super::{binding_abi::number_arg, Model, UiScript};
+use super::super::{
+    binding_abi::{bool_or_default, number_arg},
+    Model, UiScript,
+};
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct KnownSpells {
@@ -30,17 +33,6 @@ impl UiScript {
     }
 }
 
-// Native optional flag helper 0x815500: boolean, number, or numeric string; other types keep
-// default zero. This is not ordinary Lua truthiness (0 and "0" both select the player).
-pub(crate) fn pet_flag(lua: &Lua, value: Value) -> mlua::Result<bool> {
-    if let Value::Boolean(b) = value {
-        return Ok(b);
-    }
-    Ok(lua
-        .coerce_number(value)?
-        .is_some_and(|n| n as i64 as i32 != 0))
-}
-
 pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     lua.globals().set(
         "IsSpellKnown",
@@ -52,7 +44,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                     "Usage: IsSpellKnown(spellID[, isPet])",
                 ));
             }
-            let pet = pet_flag(lua, pet)?;
+            // isPet is `0x815500(L, 2, 0)` (`0x53c3e1`): `"0"` false, `"true"` and `"on"` true.
+            let pet = bool_or_default(Some(&pet), false);
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             let state = &model.wrath_known_spells;
             let id = id as u32;
@@ -95,7 +88,15 @@ mod tests {
                 "{args}"
             );
         }
-        for args in ["172,true", "172,1", "172,'1'", "172,-1"] {
+        for args in [
+            "172,true",
+            "172,1",
+            "172,'1'",
+            "172,-1",
+            "172,'true'",
+            "172,'on'",
+            "172,'Y'",
+        ] {
             assert!(
                 script
                     .eval::<bool>(&format!("return IsSpellKnown({args})"))
@@ -103,7 +104,7 @@ mod tests {
                 "{args}"
             );
         }
-        for args in ["172", "133,true", "999"] {
+        for args in ["172", "133,true", "999", "133,'true'", "172,'-1'"] {
             assert!(script
                 .eval::<bool>(&format!("return IsSpellKnown({args}) == false"))
                 .unwrap());

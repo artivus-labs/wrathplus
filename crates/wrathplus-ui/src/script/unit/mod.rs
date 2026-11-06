@@ -24,26 +24,26 @@ pub enum SelectionRequest {
     LastEnemy,
 }
 
-/// The reference's local player record (`0xc27d80`): a copy of the chosen `SMSG_CHAR_ENUM` row,
-/// written once at the Enter World commit (`0x5abd9e`) before FrameXML loads, and never cleared.
-/// `UnitName` (`0x517020`), `UnitRace` (`0x518200`), `UnitClass` (`0x518350`) and `UnitSex`
-/// (`0x517e90`) answer `"player"`, matched whole in any case, from it and never from the
-/// descriptor, so they answer before the player object exists; so does `UnitFactionGroup`
-/// (`0x60d0e5`). `UnitLevel` reads the descriptor: the record's level accessor (`0x5abe00`) has
-/// no caller. Race, class and faction group are held resolved, as this crate has no DBC.
+/// The reference's local player record (name `0xc79d18`, race, class, gender `0xc79e88`..8a): a
+/// copy of the chosen `SMSG_CHAR_ENUM` row, written once at Enter World (1.12 `0x5abd9e`) before
+/// FrameXML loads, and never cleared. `UnitName` (`0x60e740`), `UnitRace` (`0x60fd40`), `UnitClass`
+/// (`0x60fec0`) and `UnitSex` (`0x60f8e0`) answer `"player"`, matched whole in any case, from it
+/// and never from the descriptor, so they answer before the player object exists, as does
+/// `UnitFactionGroup` (`0x60d0e5`). `UnitLevel` reads the descriptor (1.12's record level accessor
+/// `0x5abe00` has no caller). Race, class and faction group are held resolved: no DBC here.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PlayerRecord {
-    /// `+0x08`, the name; empty is the unset record, whose `UnitName("player")` is nil
-    /// (`0x517095`).
+    /// `0xc79d18`, the name; empty is the unset record, whose `UnitName("player")` is nil
+    /// (`0x6b1060` answers null for a zero first byte).
     pub name: String,
-    /// `+0x100` as `UnitRace`'s (localized, file token) pair; `None` is race 0, which has no
-    /// `ChrRaces` row and answers `nil, nil`.
+    /// `0xc79e88` (`0x6b1070`) as `UnitRace`'s (localized, file token) pair; `None` is race 0,
+    /// which has no `ChrRaces` row and answers `nil, nil`.
     pub race: Option<(String, String)>,
-    /// `+0x101` as `UnitClass`'s (localized, uppercase token) pair; `None` answers `nil, nil`.
+    /// `0xc79e89` (`0x6b1080`): `UnitClass`'s (localized, uppercase token); `None` is `nil, nil`.
     pub class: Option<(String, String)>,
-    /// `+0x102` on `UnitSex`'s scale (2 male, 3 female), not the wire's 0/1. The unset 0 answers
-    /// 2, as the reference's all-zero record does: `0x517ef9` indexes `{2,3,1,6}` (`0x808be4`)
-    /// with no bounds check.
+    /// `0xc79e8a` (`0x6b1090`) on `UnitSex`'s scale (2 male, 3 female), not the wire's 0/1. The
+    /// unset 0 answers 2, as the reference's all-zero record does: `0x60f93c` indexes `{2,3,1}`
+    /// (`0x9fe7ec`) with no bounds check.
     pub sex: u8,
     /// `UnitFactionGroup`'s (`InternalName`, `Name0`) for the race; `None` answers `nil, nil`.
     pub faction_group: Option<(String, String)>,
@@ -184,21 +184,22 @@ pub struct UnitState {
     /// `UnitIsPVPFreeForAll`: `PLAYER_FLAGS` bit `0x80`, or the roster status byte's `0x10`;
     /// independent of [`Self::pvp`].
     pub is_pvp_ffa: bool,
-    /// `UnitPVPRank`: the current rank on the internal `0..=18` scale (0 none), from the public
-    /// `PLAYER_BYTES_3` byte 3. The private lifetime highest rides
-    /// [`HonorState`](super::HonorState); [`super::pvp`] converts to the `-4..=14` visual scale.
-    pub pvp_rank: u8,
-    /// The city-protector title, `PLAYER_BYTES_3` byte 2 (0 none): `UnitPVPName` appends the
-    /// `PVP_MEDAL<n>` line for a non-zero one (`0x6093ef`).
+    /// Own title gender: `PLAYER_BYTES_3` byte 0 (`0x72a328`); foreign uses `sex` (`0x72a334`).
+    pub title_gender: Option<u8>,
+    /// Roster record status (`0x513c30`, +8), used by DND only without a held player.
+    pub roster_status: u8,
+    /// `PLAYER_BYTES_3` byte 2: a titled `UnitPVPName` appends `PVP_MEDAL<n>` (`0x72a3ea`).
     pub pvp_medal: u8,
+    /// `PLAYER_CHOSEN_TITLE`, a CharTitles `MaskID` (0 none), `UnitPVPName`'s (`0x72a2ce`).
+    pub chosen_title: u32,
     /// `UnitFactionGroup`'s English `InternalName` but for `"player"`: the live template's group
     /// mask (`0x60d167`) named by `FactionGroup.dbc`; `None` for a template with no side.
     pub faction_group: Option<String>,
     /// `UnitFactionGroup`'s second return, `FactionGroup.dbc`'s localized `Name0`: display text.
     pub faction_group_localized: Option<String>,
     /// The team digit of `PVP_RANK_<rank>_<team>` (`0x5efe00`): 0 Horde, 1 Alliance, -1 no side,
-    /// from the race through `ChrRaces` and `FactionTemplate`, never the live template, so a GM on
-    /// template 35 keeps the rank title; 0 for a unit the reference cannot resolve (`0x51a9af`).
+    /// from the race through `ChrRaces` and `FactionTemplate`, never the live template; 0 for a
+    /// unit the reference cannot resolve (`0x51a9af`).
     pub pvp_team: i8,
     /// `OBJECT_FIELD_GUID`, which `UnitIsUnit` and `UnitInParty` compare; 0 is unresolved, and
     /// two zeros never match.
@@ -260,8 +261,8 @@ pub fn unit_is_grey(player_level: u32, unit_level: u32) -> bool {
 }
 
 /// The civilian gate (`0x612550`), a dishonorable kill: PvP-flagged, a civilian creature, hostile
-/// (`UnitReaction` <= 2) and grey. The tooltip's CIVILIAN line and `UnitPVPName`'s civilian prefix
-/// (`0x609370`) both read it. The terms are the tooltip line's; `0x612550`'s body is not traced.
+/// (`UnitReaction` <= 2) and grey. The tooltip's CIVILIAN line and `UnitIsCivilian` read it. The
+/// terms are the tooltip line's; `0x612550`'s body is not traced.
 pub fn is_civilian_kill(u: &UnitState, player_level: u32) -> bool {
     u.civilian && u.pvp && u.reaction != 0 && u.reaction <= 2 && unit_is_grey(player_level, u.level)
 }
@@ -448,9 +449,8 @@ impl super::UiScript {
         })
     }
 
-    /// Take the `TargetNearest*([reverse])` calls out of the call stream, `true` for reverse.
-    /// They name no unit: the reference runs the TAB cycler (`0x493f60`) straight into
-    /// `SetSelection`.
+    /// Take the `TargetNearest*([reverse])` calls out of the call stream, `true` for reverse. They
+    /// name no unit: the reference runs the TAB cycler (`0x493f60`) straight into `SetSelection`.
     pub fn take_target_nearest_requests(&mut self) -> Vec<(NearestMode, bool)> {
         self.take_calls_where(|c| match c {
             ScriptCall::TargetNearest { mode, reverse } => Some((*mode, *reverse)),

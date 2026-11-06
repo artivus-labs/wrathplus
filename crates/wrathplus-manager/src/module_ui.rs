@@ -37,18 +37,43 @@ impl Manager {
         let state = &self.module_state;
         column![
             text("Server modules").size(22),
-            text("Choose the modules included in your next server image. Changes do not affect a running realm: rebuild, then restart. Database migrations may run on startup; disabling a module does not remove its database tables.").size(13).color(style::MUTED),
+            text("Modules for your next server build: rebuild, then restart the server.")
+                .size(13)
+                .color(style::MUTED),
             text(&state.notice).size(13).color(style::GOLD),
             text("STANDARD MODULES").size(11).color(style::MUTED),
             self.module_cards(true),
             text("CUSTOM MODULES").size(11).color(style::MUTED),
-            text("Any other AzerothCore module: a GitHub repository or a module folder on this computer. Only build code you trust.").size(13).color(style::MUTED),
-            row![text_input("GitHub owner/repository, HTTPS URL or local module folder", &state.source).on_input(|v| Message::Modules(Input::Source(v))).padding(10), button(if state.busy { "Importing…" } else { "Add source" }).on_press_maybe((!state.busy).then_some(Message::Modules(Input::Register))), button("Refresh").on_press_maybe((!state.busy).then_some(Message::Modules(Input::Refresh)))].spacing(10),
+            text("Any other AzerothCore module, from GitHub or a local folder.")
+                .size(13)
+                .color(style::MUTED),
+            row![
+                text_input(
+                    "GitHub owner/repository, HTTPS URL or local module folder",
+                    &state.source
+                )
+                .on_input(|v| Message::Modules(Input::Source(v)))
+                .padding(10),
+                button(if state.busy {
+                    "Importing…"
+                } else {
+                    "Add source"
+                })
+                .on_press_maybe((!state.busy).then_some(Message::Modules(Input::Register))),
+                button("Refresh")
+                    .on_press_maybe((!state.busy).then_some(Message::Modules(Input::Refresh)))
+            ]
+            .spacing(10),
             self.module_cards(false),
-            button(self.server_state.module_build_label()).on_press_maybe(self.server_state.module_build_input(!state.busy).map(Message::Server)),
+            button(self.server_state.module_build_label()).on_press_maybe(
+                self.server_state
+                    .module_build_input(!state.busy)
+                    .map(Message::Server)
+            ),
             self.server_state.build_feedback_view(),
-            text("Builds can take over an hour. Rebuilding does not restart a running server.").size(13).color(style::MUTED),
-        ].spacing(14).into()
+        ]
+        .spacing(14)
+        .into()
     }
 
     /// One card per module: the standard set (added or not), or the custom entries.
@@ -56,12 +81,12 @@ impl Manager {
         let catalog = match modules::Catalog::load(&self.config, self.server_state.module_source())
         {
             Ok(catalog) => catalog,
-            Err(error) => {
-                return text(format!(
-                    "{error}. Choose your core checkout on Server setup first."
-                ))
-                .into()
+            // Said once, under the standard modules.
+            Err(_) if !standard => return Column::new().into(),
+            Err(_) if self.server_state.module_source().as_os_str().is_empty() => {
+                return text("Set the server source folder on the Server page first.").into()
             }
+            Err(error) => return text(error).into(),
         };
         let editable = !self.module_state.busy && self.server_state.module_editable();
         let entries = catalog.entries();

@@ -141,7 +141,7 @@ fn unit_dot_eligible(store: Option<&ObjectStore>, me: Option<u64>) -> bool {
         return false;
     }
     // 2. The owner, `UNIT_FIELD_CHARMEDBY` when non-zero else `UNIT_FIELD_SUMMONEDBY`, equal to
-    //    our guid (`0x468550`) rejects: our own pet, minion or charmed unit is never a blip.
+    //    our guid (`0x4d3790`) rejects: our own pet, minion or charmed unit is never a blip.
     let owner = match f.unit_charmed_by() {
         Some(g) if g != 0 => g,
         _ => f.unit_summoned_by().unwrap_or(0),

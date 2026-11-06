@@ -251,8 +251,8 @@ fn channel_counts_down_not_up() {
     assert_eq!(
         s.eval::<String>("return CastingBarFrameText:GetText()")
             .unwrap(),
-        "Arcane Missiles",
-        "the player's own channel shows its name"
+        "Channeling",
+        "the player's own channel reads CHANNELING without attributesEx 0x20000000 (0x612151)"
     );
     assert_eq!(
         bar_color(&s),

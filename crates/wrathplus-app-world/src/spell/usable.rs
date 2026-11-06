@@ -303,9 +303,9 @@ fn equipped_slots_match(
 ///    reference's count (`0x4e6d20`, mask `0x47`) also takes the keyring and sums spell charges
 ///    for a charged item; ours does neither, so a key reads count 0 and a spent charged copy
 ///    stays lit.
-/// 2. `IsItemOnCooldown 0x6e2fc0` (`4e50d0`) answers `(false, false)`. It asks `0x6e1690` with
-///    the item's first on-use spell and the item entry as the key: an on-hold-record test, so a
-///    running cooldown or the GCD never greys an item.
+/// 2. `IsItemOnCooldown 0x6e2fc0` (`4e50d0`) answers `(false, false)`. It asks `0x6e1690` (1.12;
+///    12340 not located) with the item's first on-use spell and the item entry as the key: an
+///    on-hold-record test, so a running cooldown or the GCD never greys an item.
 /// 3. the item's first on-use spell runs the whole plain-spell walk, [`spell_usable`] (`0x4e5a50`
 ///    hands it back with type 0; `4e51b0`). This is where food greys in combat: its rows carry
 ///    [`ATTR_NOT_IN_COMBAT`], leg 8.
@@ -331,8 +331,8 @@ pub fn item_usable(
     };
     let spell_id = use_spell.spell_id;
     let d = spells.and_then(|s| s.catalog.get(spell_id));
-    // Gate 2: the item entry as `0x6e1690`'s `itemId`, and the item's own category where it has
-    // one (the `spellcategory[5]` override, `6e171b`).
+    // Gate 2: the item entry as 1.12 `0x6e1690`'s `itemId`, and the item's own category where it
+    // has one (the `spellcategory[5]` override, `6e171b`).
     let category = match use_spell.category {
         0 => d.map_or(0, |d| d.category),
         c => c,
@@ -451,7 +451,7 @@ pub fn spell_usable(
         }
     }
     // Leg 11 (`0x6e3fb8`): only a cooldown-on-event spell greys, while its record is on hold
-    // (`0x6e1690`); a running cooldown never greys here.
+    // (1.12 `0x6e1690`); a running cooldown never greys here.
     if d.cooldown_on_event() && ctx.cooldowns.has_on_hold_record(spell_id, 0, d.category) {
         return (false, false);
     }

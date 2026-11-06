@@ -277,9 +277,9 @@ pub(super) fn error_handler(lua: &Lua) -> Option<mlua::Function> {
         .flatten()
 }
 
-/// `seterrorhandler(f)` / `geterrorhandler()`, engine globals in 1.12 (`0x702900`, `0x702950`)
-/// over one registry reference, `[0x8722cc]`. It starts at -1 (`0x7039e0`), so `geterrorhandler()`
-/// answers nil until something is set; in the running client FrameXML sets `_ERRORMESSAGE` first
+/// `seterrorhandler(f)` / `geterrorhandler()`, engine globals (`0x8173c0`, `0x817420`) over one
+/// registry reference, `[0xaf5770]`. It starts at -1 (`0x819c10`), so `geterrorhandler()` answers
+/// nil until something is set; in the running client FrameXML sets `_ERRORMESSAGE` first
 /// (`BasicControls.xml:16`), so every addon finds that. `seterrorhandler` takes a function alone
 /// and raises its `Usage:` on anything else, nil included, so the slot can never be cleared.
 fn install_error_handler(lua: &Lua) -> mlua::Result<()> {

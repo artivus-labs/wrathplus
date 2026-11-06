@@ -308,6 +308,14 @@ fn equipped_item_type_matches_slot_keys_and_class_names() {
     );
     s.run("assert(IsEquippedItemType('off hand') == 1)")
         .unwrap();
+    // `0x7546f0` with flags 1 skips a broken worn copy, unless it is wrapped (`0x8`).
+    for (flags, hit) in [(0, false), (0x8, true)] {
+        if let Some(shield) = s.model_mut().inventory_slots[17].as_mut() {
+            (shield.flags, shield.durability) = (flags, Some((0, 50)));
+        }
+        let got = s.eval::<bool>("return IsEquippedItemType('INVTYPE_SHIELD') == 1");
+        assert_eq!(got.unwrap(), hit, "flags {flags:#x}");
+    }
 }
 
 /// The casting item entries the app pushes.

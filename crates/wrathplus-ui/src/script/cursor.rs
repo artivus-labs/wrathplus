@@ -446,7 +446,7 @@ impl super::UiScript {
     }
 
     /// Push the guids of the units for which the armed word's unit checks all pass.
-    /// `SpellCanTargetUnit` resolves its token to a guid, as `0x515970` does, and asks this set,
+    /// `SpellCanTargetUnit` resolves its token to a guid, as `0x60abf0` does, and asks this set,
     /// so a chain such as `"party1target"` reads the unit it ends on.
     pub fn set_spell_targetable_units(&mut self, guids: impl IntoIterator<Item = u64>) {
         self.model_mut().spell_targetable_units = guids.into_iter().collect();

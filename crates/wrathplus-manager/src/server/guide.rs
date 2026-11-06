@@ -246,7 +246,9 @@ impl Manager {
         }
         let mut card = column![
             text("Set up your own server").size(20),
-            text("A private realm on this computer, with bots to play alongside. Follow the steps in order; each one says what it needs.").size(13).color(style::MUTED),
+            text("A private realm on this computer, with bots to play alongside.")
+                .size(13)
+                .color(style::MUTED),
             list,
         ]
         .spacing(14);

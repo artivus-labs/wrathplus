@@ -801,7 +801,7 @@ fn pvp_icon_follows_the_three_branch_law() {
     };
     // The player icon's side is the Enter World record's (`0x60d0f4`), never the snapshot's.
     s.set_player_record(wrathplus_ui::script::PlayerRecord {
-        name: "Benilla".into(),
+        name: "Wrathling".into(),
         faction_group: Some(("Alliance".into(), "Alliance".into())),
         ..Default::default()
     });

@@ -103,10 +103,6 @@ fn conversions(f: &ObjectFields, tables: &WrathGameTables) -> WrathStatConversio
         health_from_spirit,
         mana_from_spirit,
         rating_bonus,
-        // Native CR_ARMOR_PENETRATION is 24 (Lua 25).
-        armor_penetration: rating_bonus[24],
-        // Caps and defense skill remain unavailable rather than inferred from ratings.
-        ..Default::default()
     }
 }
 
@@ -127,14 +123,14 @@ fn snapshot(f: &ObjectFields) -> WrathPaperDollStats {
                 .unwrap_or(0.0)
         }),
         spell_damage: std::array::from_fn(|i| {
-            // Positive and negative school bonuses are signed descriptor values.
+            // `GetSpellBonusDamage` (`0x60e310`): the signed sum, unclamped.
             let pos = f
                 .get_at(Field::PlayerModDamageDonePos, i as u16)
                 .unwrap_or(0) as i32;
             let neg = f
                 .get_at(Field::PlayerModDamageDoneNeg, i as u16)
                 .unwrap_or(0) as i32;
-            pos.saturating_add(neg).max(0)
+            pos.wrapping_add(neg)
         }),
         spell_healing: word(Field::PlayerModHealingDonePos),
         spell_penetration: (word(Field::PlayerModTargetResistance) as i32).saturating_neg(),
@@ -142,11 +138,6 @@ fn snapshot(f: &ObjectFields) -> WrathPaperDollStats {
         expertise: [
             word(Field::PlayerExpertise),
             word(Field::PlayerOffhandExpertise),
-        ],
-        // Mana is power slot zero; descriptor rates are mana/second, not mana/5.
-        mana_regen: [
-            float(Field::UnitPowerRegenFlatModifier),
-            float(Field::UnitPowerRegenInterruptedFlatModifier),
         ],
         pet_spell_power: word(Field::PlayerPetSpellPower) as i32,
         // No fabricated rating/primary-stat ratios while GameTables are unavailable.
@@ -187,17 +178,12 @@ mod tests {
             (Field::PlayerDodgePercentage, 0, 4.25f32.to_bits()),
             (Field::PlayerModDamageDonePos, 2, 100),
             (Field::PlayerModDamageDoneNeg, 2, (-20i32) as u32),
+            (Field::PlayerModDamageDoneNeg, 3, (-30i32) as u32),
             (Field::PlayerModTargetResistance, 0, (-35i32) as u32),
             (Field::PlayerExpertise, 0, 12),
             (Field::PlayerOffhandExpertise, 0, 9),
             (Field::PlayerShieldBlock, 0, 234),
             (Field::PlayerModHealingDonePos, 0, 345),
-            (Field::UnitPowerRegenFlatModifier, 0, 2.5f32.to_bits()),
-            (
-                Field::UnitPowerRegenInterruptedFlatModifier,
-                0,
-                1.25f32.to_bits(),
-            ),
         ];
         let pairs: Vec<_> = data
             .iter()
@@ -208,12 +194,11 @@ mod tests {
         assert_eq!(stats.spell_crit[6], 12.5);
         assert_eq!(stats.melee_crit, 8.25);
         assert_eq!(stats.dodge, 4.25);
-        assert_eq!(stats.spell_damage[2], 80);
+        assert_eq!(stats.spell_damage[2..4], [80, -30], "signed, unclamped");
         assert_eq!(stats.spell_penetration, 35);
         assert_eq!(stats.expertise, [12, 9]);
         assert_eq!(stats.shield_block, 234);
         assert_eq!(stats.spell_healing, 345);
-        assert_eq!(stats.mana_regen, [2.5, 1.25]);
         assert_eq!(stats.conversions, Default::default());
     }
     #[test]

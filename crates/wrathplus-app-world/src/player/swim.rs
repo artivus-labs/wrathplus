@@ -297,8 +297,8 @@ pub(super) fn drive_step(
     let v = fwd_axis * swim_fwd + basis.1 * swim_side + Vec3::Y * vertical;
     let dir3 = v.normalize_or_zero();
     let rest_line = rest_line(player, surface_y);
-    // The directional speed (`0x7c4c90`'s swim arm): backward takes `min(swimBack, swim)`,
-    // forward and strafe the swim speed.
+    // The directional speed (`0x987570`'s swim arm, `0x9875f0`): backward takes
+    // `min(swimBack, swim)`, forward and strafe the swim speed.
     let (swim_speed, swim_back_speed) = match speeds {
         Some(s) if !move_speed.env_override => (s.swim, s.swim_back),
         _ => (SWIM_SPEED, SWIM_BACK_SPEED),

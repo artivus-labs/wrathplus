@@ -162,7 +162,7 @@ pub const SERVICE_RANGE_SQ: f32 = 30.864;
 /// the melee reach.
 const ATTACK_RANGE_SQ: f32 = 109.2025;
 /// Melee interact reach `max(reachA + reachB + 1.333, 5.0)` (`0x80b058`, `0x80a1e8`): 5.0 is a
-/// floor, so large creatures reach farther. Gates skin (`0x6e3480`) and loot (`CanLootNow
+/// floor, so large creatures reach farther. Gates skin (`0x7ff480`) and loot (`CanLootNow
 /// 0x5ec110`), center to center, boundary-inclusive.
 pub(super) const MELEE_OFFSET: f32 = 1.333_33;
 pub(super) const MELEE_FLOOR: f32 = 5.0;

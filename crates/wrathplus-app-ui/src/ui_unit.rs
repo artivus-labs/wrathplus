@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use bevy::prelude::*;
 
 use wrathplus_formats::ChrClasses;
-use wrathplus_protocol::types::ObjectType;
+use wrathplus_protocol::types::{Field, ObjectType};
 use wrathplus_ui::script::{ScriptValue, UiScript, UnitState, WornDisplay};
 
 use crate::app_core::schedule::UiInput;
@@ -557,9 +557,9 @@ pub(crate) fn race_faction_group(race: u8) -> Option<&'static str> {
 /// A unit's PvP team digit, `0x5efe00`'s `0` Horde, `1` Alliance, `-1` no side, from the race and
 /// never the live template: `ChrRaces.dbc` field 2 to `FactionTemplate.dbc` field 3's group mask,
 /// `& 4` Horde, else `& 2` Alliance, so a template-35 GM keeps his rank title. Read by
-/// `GetPVPRankInfo` (`0x51a9af`, `0x51a9c8`), `UnitPVPName` (`0x5efe60`) and the scoreboard
-/// (`0x4aa200`). A frozen copy of the shipped rows, with build 12340's Blood Elf (Horde) and
-/// Draenei (Alliance); race 9 (Goblin) answers Alliance.
+/// `GetPVPRankInfo` (`0x51a9af`, `0x51a9c8`) and the scoreboard (`0x4aa200`). A frozen copy of the
+/// shipped rows, with build 12340's Blood Elf (Horde) and Draenei (Alliance); race 9 (Goblin)
+/// answers Alliance.
 pub fn race_pvp_team(race: u8) -> i8 {
     match race {
         // Group mask 3, Player|Alliance: `& 4` clear, `& 2` set.
@@ -748,7 +748,7 @@ pub(crate) fn snapshot(
         // `UnitIsConnected` (`0x517d50`) answers 1 for any unit the object manager holds
         // (`0x517daf`); only an unheld member reads the roster record's online bit.
         is_connected: true,
-        // What the token resolver `0x515970` yields, and `UnitIsUnit` (`0x516070`) compares.
+        // What the token resolver `0x60abf0` yields, and `UnitIsUnit` (`0x60c3d0`) compares.
         guid,
         name,
         // The UI getters: `UNIT_DYNFLAG_DEAD` (feign death) zeroes `UnitHealth` (`0x5174d0`) and
@@ -811,15 +811,11 @@ pub(crate) fn snapshot(
             .unwrap_or(0),
         // `UnitAffectingCombat` (`0x517e10`): bit 19, the one combat bit for every token.
         in_combat: store.0.unit_flags() & crate::app_core::state::UNIT_FLAG_IN_COMBAT != 0,
-        // Direct replicated state, with the descriptor dialect selecting the packed field.
         is_pvp_ffa: store.0.unit_is_ffa_pvp(),
-        // The honor rank, `PLAYER_BYTES_3` byte 3 (0..=18), public for every player in view.
-        pvp_rank: store.0.player_pvp_rank().unwrap_or(0),
         // The team digit of `PVP_RANK_<rank>_<team>`, from the race ([`race_pvp_team`]).
         pvp_team: store.0.unit_race().map_or(-1, race_pvp_team),
-        // No city-protector medal: 12340's `PLAYER_BYTES_3` byte 2 is the PvP title.
-        pvp_medal: 0,
-        // `is_player` and the creature-record fields come from [`enrich_unit`].
+        pvp_medal: store.0.player_pvp_medal().unwrap_or(0),
+        chosen_title: store.0.get(Field::PlayerChosenTitle).unwrap_or(0),
         ..Default::default()
     }
 }
@@ -836,7 +832,9 @@ pub(crate) fn enrich_unit(
 ) {
     if wrathplus_protocol::guid::is_player(guid) {
         state.is_player = true;
-        // No faction line for players: their factions have no reputation slot.
+        if self_store.and_then(|s| s.0.get_field_guid(Field::ObjectGuid, 0)) == Some(guid) {
+            state.title_gender = store.0.get(Field::PlayerBytes3).map(|b| b as u8);
+        }
         return;
     }
     let Some(entry) = wrathplus_protocol::guid::entry(guid) else {
@@ -1076,23 +1074,19 @@ pub(crate) fn fire_transitions(
     // `UNIT_FLAGS` (id 40), the per-field watch bridge: `0x51bbb0` registers one watch per named
     // unit field, and on any change of the dword the notifier `0x465570` fires `0x51bd50` →
     // `0x515e50`, once per token naming the unit, `arg1` the token. The stock pet bar reads it.
-    if edges.moved_field(cur.guid, wrathplus_protocol::types::Field::UnitFlags, 0) {
+    if edges.moved_field(cur.guid, Field::UnitFlags, 0) {
         script.fire_event("UNIT_FLAGS", vec![tok()]);
     }
     // `PLAYER_FLAGS_CHANGED` (id 407, `0x5eea35` into `0x515e50`): no bit test after the XOR diff
     // (`0x5ee9b8`) and above the local-GUID gate (`0x5eea93`), so any bit of any player fires it,
     // once per token naming it (none, nothing: `0x515e63`). The sole 1.12 consumer is the target
     // frame's leader icon (`TargetFrame.lua:88-95`); 1.12 has no AFK/DND unit-frame badge.
-    if edges.moved_field(cur.guid, wrathplus_protocol::types::Field::PlayerFlags, 0) {
+    if edges.moved_field(cur.guid, Field::PlayerFlags, 0) {
         script.fire_event("PLAYER_FLAGS_CHANGED", vec![tok()]);
     }
     // `UNIT_DYNAMIC_FLAGS` (id 137), the bridge's third arm: the watch is one dword, so any bit
     // fires it. No stock file registers it; addons do, to repaint the tapped state.
-    if edges.moved_field(
-        cur.guid,
-        wrathplus_protocol::types::Field::UnitDynamicFlags,
-        0,
-    ) {
+    if edges.moved_field(cur.guid, Field::UnitDynamicFlags, 0) {
         script.fire_event("UNIT_DYNAMIC_FLAGS", vec![tok()]);
     }
     fire_wrath_power_transitions(script, token, prev, cur);
@@ -1214,6 +1208,7 @@ fn feed_units(
             .map(str::to_string);
         let mut s = snapshot(store, guid.0, name, 0, chr, types);
         s.is_player = true;
+        s.title_gender = store.0.get(Field::PlayerBytes3).map(|b| b as u8);
         s.raid_target = group.raid_target_index(guid.0);
         s.faction_group = faction_group(store, factions.as_deref());
         s.faction_group_localized = faction_group_localized(store, factions.as_deref());
@@ -1607,11 +1602,9 @@ mod tests {
     use super::*;
 
     /// Derive the watcher key from the field's native descriptor position.
-    fn native_test_edges(guid: u64, field: wrathplus_protocol::types::Field) -> FieldEdges {
-        use wrathplus_protocol::types::ObjectType;
+    fn native_test_edges(guid: u64, field: Field) -> FieldEdges {
         let span = field.span().expect("native watched field");
-        let (resolved, offset) =
-            wrathplus_protocol::types::Field::at(ObjectType::Player, span.index).unwrap();
+        let (resolved, offset) = Field::at(ObjectType::Player, span.index).unwrap();
         assert_eq!(resolved, field);
         FieldEdges::semantic_of(&[(guid, resolved, offset)])
     }
@@ -1638,11 +1631,15 @@ mod tests {
         let store = ObjectStore(ObjectFields::from_pairs(&[]));
         let state = snapshot(&store, 1, None, 0, None, Default::default());
         assert!(!state.pvp && !state.is_pvp_ffa);
+        let t = Field::PlayerChosenTitle.index();
+        let b = Field::PlayerBytes3.index();
+        let store = ObjectStore(ObjectFields::from_pairs(&[(t, 7), (b, 2 << 16)]));
+        let state = snapshot(&store, 1, None, 0, None, Default::default());
+        assert_eq!((state.chosen_title, state.pvp_medal), (7, 2));
     }
 
     #[test]
     fn wrath_power_snapshot_and_events_keep_inactive_and_runic_values() {
-        use wrathplus_protocol::types::Field;
         use wrathplus_protocol::types::ObjectFields;
         let power = Field::UnitPower.span().unwrap();
         let maximum = Field::UnitMaxPower.span().unwrap();
@@ -1733,7 +1730,7 @@ mod tests {
         assert_eq!(resolve(&mut app), None, "a nearer GameObject names nobody");
     }
 
-    /// `partypetN` and `raidpetN` through the one resolver (`0x515970`): the pet the member's
+    /// `partypetN` and `raidpetN` through the one resolver (`0x60abf0`): the pet the member's
     /// descriptor names while it is held, else the roster record's, and a pet the object manager
     /// does not hold names no unit.
     mod group_pet_tokens {
@@ -3937,3 +3934,7 @@ mod tests {
         assert_eq!(eval(&mut app, "return SEEN"), 2);
     }
 }
+
+#[cfg(test)]
+#[path = "ui_unit/title_tests.rs"]
+mod title_tests;
