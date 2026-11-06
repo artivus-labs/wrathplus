@@ -343,7 +343,7 @@ mod tests {
             Some("Fist Weapon")
         );
 
-        // Class 6, projectile: the cast-fail `0x31` NEED_EXOTIC_AMMO arm's lookup (`0x6e1e5e`,
+        // Class 6, projectile: the cast-fail `0x31` NEED_EXOTIC_AMMO arm's lookup (1.12 `0x6e1e5e`,
         // mask `1 << arg`). Three of the five shipped rows are `(OBSOLETE)` in the data itself.
         assert_eq!(
             cat.requirement_display_name(6, 1 << 2).as_deref(),
@@ -357,7 +357,8 @@ mod tests {
             cat.requirement_display_name(6, 1 << 4).as_deref(),
             Some("Thrown(OBSOLETE)")
         );
-        // Past the shipped rows: the arm declines (`0x6e1e6a`, to the shared default `0x6e21d8`).
+        // Past the shipped rows: the arm declines (1.12 `0x6e1e6a`, to the shared default
+        // `0x6e21d8`).
         assert_eq!(cat.requirement_display_name(6, 1 << 5), None);
         assert_eq!(cat.requirement_display_name(6, 1 << 31), None);
 

@@ -203,24 +203,23 @@ fn player_field_bytes_splits_into_combo_points_toggles_and_honor_rank() {
     assert_eq!(ObjectFields::default().player_action_bar_toggles(), None);
 }
 
-/// The nonzero drunk byte catches a wrong shift; the current rank (field 195) and the highest
-/// rank (field 1222) are separate fields.
+/// The nonzero drunk byte catches a wrong shift; medal and lifetime rank are independent.
 #[test]
-fn player_bytes_3_byte_2_is_the_current_pvp_rank_not_the_highest() {
-    // byte 0 = 0x01 gender, byte 1 = 0xA0 drunk, byte 2 = 0x0B = internal rank 11 (visual 7).
+fn player_bytes_3_byte_2_is_the_medal_not_the_highest_rank() {
+    // byte 0 = 0x01 gender, byte 1 = 0xA0 drunk, byte 2 = 0x0B medal.
     let f = ObjectFields::from_pairs(&[(155, 0x00_0B_A0_01)]);
-    assert_eq!(f.player_pvp_rank(), Some(11));
+    assert_eq!(f.player_pvp_medal(), Some(11));
     assert_eq!(f.player_drunk_byte(), Some(0xA0), "the neighbouring byte");
     assert_eq!(
         f.player_honor_rank(),
         None,
         "the HIGHEST rank is a different field: absent means absent"
     );
-    // A demoted player keeps the higher lifetime rank.
+    // Changing the medal leaves the lifetime rank untouched.
     let demoted = ObjectFields::from_pairs(&[(155, 0x00_03_00_00), (1197, 0x0B_00_00_00)]);
-    assert_eq!(demoted.player_pvp_rank(), Some(3));
+    assert_eq!(demoted.player_pvp_medal(), Some(3));
     assert_eq!(demoted.player_honor_rank(), Some(11));
-    assert_eq!(ObjectFields::default().player_pvp_rank(), None);
+    assert_eq!(ObjectFields::default().player_pvp_medal(), None);
 }
 
 #[test]

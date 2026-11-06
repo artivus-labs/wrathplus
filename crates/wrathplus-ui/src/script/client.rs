@@ -207,10 +207,11 @@ impl super::UiScript {
         }
     }
 
-    /// Seed the local player record (the reference's `0xc27d80`, [`super::PlayerRecord`]) from the
-    /// char-enum row at Enter World, before any addon file runs, as `UnitName("player")` at file
-    /// scope is common. A record with no name is refused: nothing empties the reference's record
-    /// once it holds a character, so the last one stands.
+    /// Seed the local player record (the reference's name `0xc79d18` and race, class and gender
+    /// bytes `0xc79e88`-`0xc79e8a`, [`super::PlayerRecord`]) from the char-enum row at Enter World,
+    /// before any addon file runs, as `UnitName("player")` at file scope is common. A record with
+    /// no name is refused: nothing empties the reference's record once it holds a character, so the
+    /// last one stands.
     pub fn set_player_record(&mut self, record: super::PlayerRecord) {
         if record.name.is_empty() {
             return;

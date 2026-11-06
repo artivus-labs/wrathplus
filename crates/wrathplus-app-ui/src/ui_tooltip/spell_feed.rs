@@ -57,10 +57,10 @@ pub(crate) struct ViewCtx<'a, 'w, 's> {
     /// Whom the level terms and the cost read: the player or its pet. The form and the reaches
     /// are that same unit's.
     pub(super) caster: ViewCaster<'a>,
-    /// The caster as `0x6e3480` reads it: its `UNIT_FIELD_COMBATREACH` (1.5 is the descriptor
+    /// The caster as `0x7ff480` reads it: its `UNIT_FIELD_COMBATREACH` (1.5 is the descriptor
     /// default) and its motion.
     pub(super) range_caster: wrathplus_formats::RangeUnit,
-    /// The caster's auto-attack target, which `0x6e3480` looks up itself (`[caster+0xc48]`) for
+    /// The caster's auto-attack target, which `0x7ff480` looks up itself (`[caster+0xc48]`) for
     /// its melee arm alone, reading its reach and motion; with none, the caster's reach counts
     /// twice and there is no moving bonus.
     pub(super) attack_target: Option<wrathplus_formats::RangeUnit>,

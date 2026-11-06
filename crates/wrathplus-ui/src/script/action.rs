@@ -53,7 +53,7 @@ pub struct ActionState {
     /// `IsEquippedAction`: an item action currently worn.
     pub equipped: bool,
     /// `(start_ms, duration_ms, enabled)`, the start absolute on the `GetTime` clock, so a running
-    /// cooldown re-pushes the same triple and a re-arm a new one (`0x6e13e0` returns the start).
+    /// cooldown re-pushes the same triple and a re-arm a new one (`0x807980` returns the start).
     pub cooldown: Option<(i64, u32, bool)>,
 }
 

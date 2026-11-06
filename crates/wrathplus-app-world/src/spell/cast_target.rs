@@ -221,7 +221,7 @@ pub(crate) struct RangeInputs {
 }
 
 impl RangeInputs {
-    /// The one range compare: the squared 3D distance against `GetMinMaxRange 0x6e3480`'s bounds,
+    /// The one range compare: the squared 3D distance against `GetMinMaxRange 0x7ff480`'s bounds,
     /// "Out of range." (0x59) past max², "Target too close" (0x76) inside a nonzero min². The
     /// pre-send gate (`IsTargetInRange 0x6e47b0`) and the targeting cursor's unit leg (`0x6e6460`,
     /// `6e677c`–`6e6802`) both ask it. No row or no position passes; the server judges.

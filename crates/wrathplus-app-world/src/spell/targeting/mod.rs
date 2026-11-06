@@ -142,7 +142,7 @@ impl BindChecks<'_, '_> {
         self.refusal(spell_id, range)
     }
 
-    /// The same compare against a corpse. `GetMinMaxRange 0x6e3480` pads a corpse's bounds as a
+    /// The same compare against a corpse. `GetMinMaxRange 0x7ff480` pads a corpse's bounds as a
     /// unit's (`6e35fe`), but with no unit to read the second reach from it reads the caster's
     /// again (`6e3605`–`6e361e`). On the ranged arm, which the corpse spells use, no unit means no
     /// moving bonus; a melee row would fall back to the auto-attack target (`0x6e3580`).

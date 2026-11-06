@@ -95,11 +95,18 @@ pub struct UnitCombatStats {
     pub ranged_attack_power: i32,
     pub ranged_attack_power_pos: i32,
     pub ranged_attack_power_neg: i32,
+    /// `UNIT_FIELD_ATTACK_POWER_MULTIPLIER` / `_RANGED_`, the percent bonus minus 1.0.
+    pub attack_power_multiplier: f32,
+    pub ranged_attack_power_multiplier: f32,
     /// Ranged attack speed in ms (`UNIT_FIELD_RANGEDATTACKTIME`).
     pub ranged_attack_time_ms: u32,
     /// Ranged damage range (`UNIT_FIELD_MINRANGEDDAMAGE`/`MAXRANGEDDAMAGE`).
     pub ranged_min_damage: f32,
     pub ranged_max_damage: f32,
+    /// `UnitRangedDamage`'s bonuses: the `MOD_DAMAGE_DONE` split of the ranged weapon's school.
+    pub ranged_bonus_pos: i32,
+    pub ranged_bonus_neg: i32,
+    pub ranged_damage_percent: f32,
     /// The main hand's skill line (picked by [`weapon_subclass_skill`]) as `(value + perm, temp)`,
     /// the split the reference's skill reader `0x5ea460` makes for all four skill pairs.
     pub main_weapon_skill: (i32, i32),
@@ -113,10 +120,8 @@ pub struct UnitCombatStats {
     pub defense_skill: (i32, i32),
     /// Whether a wand is equipped (`HasWandEquipped`).
     pub has_wand: bool,
-    /// Avoidance chances, already percents on the wire (`PLAYER_DODGE_PERCENTAGE` and siblings).
-    pub dodge_percent: f32,
-    pub parry_percent: f32,
-    pub block_percent: f32,
+    /// `UNIT_FIELD_MAXHEALTHMODIFIER`, which `GetUnitMaxHealthModifier` answers plus 1.0.
+    pub max_health_modifier: f32,
 }
 
 impl Default for UnitCombatStats {
@@ -145,17 +150,20 @@ impl Default for UnitCombatStats {
             ranged_attack_power: 0,
             ranged_attack_power_pos: 0,
             ranged_attack_power_neg: 0,
+            attack_power_multiplier: 0.0,
+            ranged_attack_power_multiplier: 0.0,
             ranged_attack_time_ms: 0,
             ranged_min_damage: 0.0,
             ranged_max_damage: 0.0,
+            ranged_bonus_pos: 0,
+            ranged_bonus_neg: 0,
+            ranged_damage_percent: 1.0,
             main_weapon_skill: (0, 0),
             offhand_weapon_skill: (0, 0),
             ranged_weapon_skill: (0, 0),
             defense_skill: (0, 0),
             has_wand: false,
-            dodge_percent: 0.0,
-            parry_percent: 0.0,
-            block_percent: 0.0,
+            max_health_modifier: 0.0,
         }
     }
 }
@@ -377,18 +385,11 @@ fn with_unit_stats<T>(
     f(pushed.unwrap_or(&absent))
 }
 
-/// The clamp `UnitDefense` (`0x519298`) and each hand of `UnitAttackBothHands` (`0x5188a7`) apply:
-/// a modifier below `-base` becomes `-base`, so the total never reads negative.
-fn skill_clamped((base, modifier): (i32, i32)) -> (i64, i64) {
-    let base = i64::from(base);
-    let modifier = i64::from(modifier);
-    (base, if modifier + base < 0 { -base } else { modifier })
-}
-
-/// A non-player's `UnitDefense` and `UnitAttackBothHands` answer: `CGUnit_C`'s vtable bodies
-/// (`0x613680`, `0x6136b0`) return level * 5 with a 0 modifier; a creature has no skill block.
-fn cgunit_skill(model: &Model, token: &str) -> i64 {
-    model.unit(token).map_or(0, |u| i64::from(u.level)) * 5
+/// One attack-power value as `0x610b60` pushes it: times `multiplier + 1.0` (`0x9e1130`), stored
+/// as a float, then `fistp` under the default control word, to nearest with ties to even.
+fn scaled_ap(value: i32, multiplier: f32) -> i64 {
+    let scaled = ((f64::from(multiplier) + 1.0) * f64::from(value)) as f32;
+    scaled.round_ties_even() as i64
 }
 
 /// `token`'s inventory slot, unit-keyed as in the reference so the inspect doll reuses these
@@ -616,129 +617,54 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // UnitAttackPower(unit) → (base, posBuff, negBuff): `UNIT_FIELD_ATTACK_POWER` and the signed
-    // halves of `_MODS` (vmangos `StatSystem.cpp:335-336`).
-    g.set(
-        "UnitAttackPower",
-        lua.create_function(|lua, token: Option<String>| {
-            Ok(with_unit_stats(lua, &token, |s| {
-                (
-                    i64::from(s.attack_power),
-                    i64::from(s.attack_power_pos),
-                    i64::from(s.attack_power_neg),
-                )
-            }))
-        })?,
-    )?;
-
-    // UnitRangedAttackPower(unit) → (base, posBuff, negBuff), from the ranged fields.
-    g.set(
-        "UnitRangedAttackPower",
-        lua.create_function(|lua, token: Option<String>| {
-            Ok(with_unit_stats(lua, &token, |s| {
-                (
-                    i64::from(s.ranged_attack_power),
-                    i64::from(s.ranged_attack_power_pos),
-                    i64::from(s.ranged_attack_power_neg),
-                )
-            }))
-        })?,
-    )?;
-
-    // UnitAttackBothHands(unit) → (mainBase, mainMod, offBase, offMod): `0x518810` calls
-    // `[vtbl+0xb0]` for hand 0 then hand 1. Stock reads only the first pair
-    // (`PaperDollFrame.lua:398-399`). A pet's `CGUnit_C` body (`0x6136b0`) ignores the hand, so
-    // both pairs are `(level * 5, 0)`.
-    g.set(
-        "UnitAttackBothHands",
-        lua.create_function(|lua, token: Option<String>| {
-            let model = lua.app_data_ref::<Model>().expect("model app_data");
-            Ok(match token.as_deref() {
-                Some("player") => model
-                    .player_combat_stats
-                    .as_ref()
-                    .map_or((0, 0, 0, 0), |s| {
-                        let (mb, mm) = skill_clamped(s.main_weapon_skill);
-                        let (ob, om) = skill_clamped(s.offhand_weapon_skill);
-                        (mb, mm, ob, om)
-                    }),
-                Some("pet") => {
-                    let base = cgunit_skill(&model, "pet");
-                    (base, 0, base, 0)
-                }
-                _ => (0, 0, 0, 0),
-            })
-        })?,
-    )?;
-
-    // UnitRangedAttack(unit) → (base, modifier), the ranged weapon's skill pair.
-    g.set(
-        "UnitRangedAttack",
-        lua.create_function(|lua, token: Option<String>| {
-            Ok(with_unit_stats(lua, &token, |s| {
-                (
-                    i64::from(s.ranged_weapon_skill.0),
-                    i64::from(s.ranged_weapon_skill.1),
-                )
-            }))
-        })?,
-    )?;
-
-    // UnitDefense(unit) → (base, modifier); stock splits the modifier's sign itself
-    // (`PaperDollFrame.lua:259-271`). The gate is SELF or `UNIT_FIELD_SUMMONEDBY` = us, then
-    // `[vtbl+0xac]`: `CGPlayer_C` `0x5eda20` reads the Defense skill (`0x6de040`), `CGUnit_C`
-    // `0x613680` answers level * 5 and 0. Any other token gets the gate's zeros.
-    g.set(
-        "UnitDefense",
-        lua.create_function(|lua, token: Option<String>| {
-            let model = lua.app_data_ref::<Model>().expect("model app_data");
-            Ok(match token.as_deref() {
-                Some("player") => model
-                    .player_combat_stats
-                    .as_ref()
-                    .map_or((0, 0), |s| skill_clamped(s.defense_skill)),
-                Some("pet") => (cgunit_skill(&model, "pet"), 0),
-                _ => (0, 0),
-            })
-        })?,
-    )?;
-
-    // GetDodgeChance(), GetParryChance(), GetBlockChance() → one number each, no unit argument
-    // (`0x516f00`, `0x516fc0`, `0x516f60`); 0 before the field streams.
-    for (name, pick) in [
-        ("GetDodgeChance", 0usize),
-        ("GetParryChance", 1),
-        ("GetBlockChance", 2),
-    ] {
+    // UnitAttackPower(unit) / UnitRangedAttackPower(unit) → (base, posBuff, negBuff): AP and the
+    // signed halves of `_MODS`, each scaled by the multiplier (`0x610b60`, `0x610ca0`).
+    for (name, ranged) in [("UnitAttackPower", false), ("UnitRangedAttackPower", true)] {
         g.set(
             name,
-            lua.create_function(move |lua, ()| {
-                let model = lua.app_data_ref::<Model>().expect("model app_data");
-                Ok(model
-                    .player_combat_stats
-                    .as_ref()
-                    .map_or(0.0, |s| match pick {
-                        0 => f64::from(s.dodge_percent),
-                        1 => f64::from(s.parry_percent),
-                        _ => f64::from(s.block_percent),
-                    }))
+            lua.create_function(move |lua, token: Option<String>| {
+                Ok(with_unit_stats(lua, &token, |s| {
+                    let (m, ap) = if ranged {
+                        let ap = s.ranged_attack_power;
+                        let mods = (s.ranged_attack_power_pos, s.ranged_attack_power_neg);
+                        (s.ranged_attack_power_multiplier, (ap, mods.0, mods.1))
+                    } else {
+                        let ap = (s.attack_power, s.attack_power_pos, s.attack_power_neg);
+                        (s.attack_power_multiplier, ap)
+                    };
+                    (scaled_ap(ap.0, m), scaled_ap(ap.1, m), scaled_ap(ap.2, m))
+                }))
             })?,
         )?;
     }
 
-    // UnitRangedDamage(unit) → (speed, minDamage, maxDamage, physicalBonusPos, physicalBonusNeg,
-    // percent), with `UnitDamage`'s school-0 mods.
+    super::char_skill::install(lua)?;
+
+    // UnitRangedDamage(unit) → (speed, minDamage, maxDamage, posBonus, negBonus, percent), the
+    // bonuses the ranged weapon's school's (`0x610611`): a wand's is its element's.
     g.set(
         "UnitRangedDamage",
-        lua.create_function(|lua, token: Option<String>| {
-            Ok(with_unit_stats(lua, &token, |s| {
+        lua.create_function(|lua, token: Value| {
+            let token = binding_abi::string_arg(lua, token, r#"Usage: UnitRangedDamage("unit")"#)?;
+            let model = lua.app_data_ref::<Model>().expect("model app_data");
+            let stats = match token.as_str() {
+                "player" => model.player_combat_stats.as_ref(),
+                "pet" => model.pet_combat_stats.as_ref(),
+                _ => None,
+            };
+            // `0x610598`: unresolved is six zeros; a resolved creature keeps percent 1.
+            Ok(stats.map_or((0.0, 0.0, 0.0, 0, 0, 0.0), |s| {
                 (
                     f64::from(s.ranged_attack_time_ms) / 1000.0,
                     f64::from(s.ranged_min_damage),
                     f64::from(s.ranged_max_damage),
-                    i64::from(s.physical_bonus_pos),
-                    i64::from(s.physical_bonus_neg),
-                    f64::from(s.damage_percent),
+                    i64::from(s.ranged_bonus_pos),
+                    i64::from(s.ranged_bonus_neg),
+                    if token == "pet" {
+                        1.0
+                    } else {
+                        f64::from(s.ranged_damage_percent)
+                    },
                 )
             }))
         })?,
@@ -948,17 +874,20 @@ mod tests {
             ranged_attack_power: 52,
             ranged_attack_power_pos: 0,
             ranged_attack_power_neg: -3,
+            attack_power_multiplier: 0.0,
+            ranged_attack_power_multiplier: 0.0,
             ranged_attack_time_ms: 2800,
             ranged_min_damage: 31.0,
             ranged_max_damage: 47.0,
+            ranged_bonus_pos: 9,
+            ranged_bonus_neg: -1,
+            ranged_damage_percent: 1.25,
             main_weapon_skill: (25, 2),
             offhand_weapon_skill: (20, 0),
             ranged_weapon_skill: (18, 0),
             defense_skill: (55, 4),
             has_wand: false,
-            dodge_percent: 0.0,
-            parry_percent: 0.0,
-            block_percent: 0.0,
+            max_health_modifier: 0.0,
         }
     }
 
@@ -975,6 +904,35 @@ mod tests {
             attack_power_neg: -4,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn ranged_damage_missing_is_zero_but_resolved_creature_has_unit_multiplier() {
+        let mut s = UiScript::new().unwrap();
+        for token in ["player", "pet", "target", "bogus"] {
+            assert_eq!(
+                s.eval::<(f64, f64, f64, i32, i32, f64)>(&format!(
+                    "return UnitRangedDamage('{token}')"
+                ))
+                .unwrap(),
+                (0.0, 0.0, 0.0, 0, 0, 0.0)
+            );
+        }
+        s.set_player_combat_stats(Some(UnitCombatStats {
+            ranged_damage_percent: 1.5,
+            ..Default::default()
+        }));
+        s.set_pet_combat_stats(Some(UnitCombatStats::default()));
+        s.run("local speed,_,_,_,_,pct = UnitRangedDamage('player') assert(speed == 0 and pct == 1.5) local a,b,c,d,e,f = UnitRangedDamage('pet') assert(a == 0 and b == 0 and c == 0 and d == 0 and e == 0 and f == 1)").unwrap();
+        for args in ["", "nil", "true", "{}"] {
+            let err = s
+                .run(&format!("UnitRangedDamage({args})"))
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains(r#"Usage: UnitRangedDamage("unit")"#), "{err}");
+        }
+        s.run("local a,b,c,d,e,f = UnitRangedDamage(123) assert(a == 0 and f == 0)")
+            .unwrap();
     }
 
     #[test]
@@ -1202,8 +1160,30 @@ mod tests {
         assert_eq!(
             s.eval::<(f64, f64, f64, i64, i64, f64)>(r#"return UnitRangedDamage("player")"#)
                 .unwrap(),
-            (2.8, 31.0, 47.0, 25, -3, f64::from(1.1f32))
+            (2.8, 31.0, 47.0, 9, -1, 1.25)
         );
+        // Each value times the multiplier plus one, rounded to nearest, ties to even.
+        s.set_player_combat_stats(Some(UnitCombatStats {
+            attack_power_multiplier: 0.1,
+            ranged_attack_power_multiplier: 0.5,
+            ..stats()
+        }));
+        let both =
+            "local a,b,c=UnitAttackPower('player') return a,b,c,UnitRangedAttackPower('player')";
+        let got = s.eval::<(i64, i64, i64, i64, i64, i64)>(both).unwrap();
+        assert_eq!(got, (86, 33, -11, 78, 0, -4));
+        // Each skill rating adds round(bonus - 0.5), ties to even: CR 0 1.5 is 1, CR 1 2.0 is 2,
+        // CR 20 3.0 is 2, CR 21 1.0 is 0, CR 22 2.6 is 2.
+        let mut paper = crate::script::WrathPaperDollStats::default();
+        for (cr, bonus) in [(0, 1.5), (1, 2.0), (20, 3.0), (21, 1.0), (22, 2.6)] {
+            paper.conversions.rating_bonus[cr] = bonus;
+        }
+        s.set_wrath_paperdoll_stats(paper);
+        let skills =
+            "local a,b,c,d=UnitAttackBothHands('player') local e,f=UnitRangedAttack('player') \
+            return {a,b,c,d,e,f,UnitDefense('player')}";
+        let got = s.eval::<Vec<i64>>(skills).unwrap();
+        assert_eq!(got, [25, 5, 20, 1, 18, 3, 55, 6]);
         assert_eq!(
             s.eval::<(i64, i64, i64)>(r#"return UnitAttackPower("target")"#)
                 .unwrap(),

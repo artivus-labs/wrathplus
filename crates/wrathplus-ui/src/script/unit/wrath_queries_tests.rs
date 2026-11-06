@@ -43,6 +43,20 @@ fn the_flag_readers_read_their_descriptor_bits() {
         )
         .unwrap());
     assert!(s.run("UnitIsAFK()").is_err());
+    // An attackable AFK player reads nil (`0x60cccd`); DND has no such gate.
+    let enemy = UnitState {
+        exists: true,
+        has_object: true,
+        is_player: true,
+        can_attack: true,
+        player_flags: 0x2 | 0x4,
+        guid: 2,
+        ..Default::default()
+    };
+    s.set_unit("target", Some(enemy));
+    assert!(s
+        .eval::<bool>("return UnitIsAFK('target') == nil and UnitIsDND('target') == 1")
+        .unwrap());
     s.set_party(PartyState {
         raid: vec![RaidMemberInfo {
             guid: 2,
@@ -201,4 +215,34 @@ fn pvp_inactive_takes_a_token_or_a_raid_members_name() {
         s.run("PlayerIsPVPInactive()").is_err(),
         "the usage gate stays"
     );
+}
+
+/// `0x60cdda`: absent held player uses record status bit 7, never bit 6 or online.
+#[test]
+fn dnd_uses_record_only_without_a_held_player() {
+    let mut s = UiScript::new().unwrap();
+    for (has_object, is_player, flags, status, want) in [
+        (false, true, 0, 0x80, true),
+        (false, true, 0, 0x40, false),
+        (false, true, 4, 0, false),
+        (true, true, 0, 0x80, false),
+        (true, true, 4, 0, true),
+        (true, false, 4, 0, false),
+    ] {
+        s.set_unit(
+            "party1",
+            Some(UnitState {
+                exists: true,
+                has_object,
+                is_player,
+                player_flags: flags,
+                roster_status: status,
+                ..Default::default()
+            }),
+        );
+        assert_eq!(
+            s.eval::<bool>("return UnitIsDND('party1') == 1").unwrap(),
+            want
+        );
+    }
 }

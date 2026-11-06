@@ -50,8 +50,11 @@ pub(crate) fn outdoors(interior: Option<Option<u32>>, area_flags: Option<u32>) -
     }
 }
 
-/// `0x51a1d0`: the area's row (`0xbd0810`, the subzone), else the zone's (`0xbd080c`), has the
-/// flyable flag without the no-fly flag; then, with a player, `0x7261b0`'s Northrend gate.
+/// `0x51a1d0`: the leaf area's row has the flyable flag without the no-fly flag; then, with a
+/// player, `0x7261b0`'s Northrend gate. The exe reads the subzone slot's row (`0xbd0810`) and only
+/// when that slot names no row the zone slot's (`0xbd080c`); its caller (`0x78f1dd`) puts the leaf
+/// in the subzone slot, or a leaf with no parent in the zone slot with subzone 0, so both are the
+/// leaf's row.
 pub(crate) fn flyable(area_flags: Option<u32>, player: Option<(u32, bool)>) -> bool {
     let area =
         area_flags.is_some_and(|f| f & AREA_FLAG_FLYABLE != 0 && f & AREA_FLAG_NO_FLY_ZONE == 0);
@@ -163,6 +166,7 @@ impl CharSources<'_, '_> {
                 modifier(Field::UnitPowerRegenFlatModifier),
                 modifier(Field::UnitPowerRegenInterruptedFlatModifier),
             ),
+            power_type: power,
             ..Default::default()
         }
     }

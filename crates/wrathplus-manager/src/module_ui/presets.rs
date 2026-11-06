@@ -115,7 +115,9 @@ impl crate::Manager {
         let editable = !self.module_state.busy && self.server_state.module_editable();
         let mut list = column![
             text("Server type").size(18),
-            text("Decides which standard modules the next build includes; modules you added yourself stay as they are. Changing it later needs a rebuild and a restart; characters are kept.").size(13).color(style::MUTED),
+            text("Picks the standard modules for the next build. Modules you added stay.")
+                .size(13)
+                .color(style::MUTED),
         ]
         .spacing(12);
         let selected = match &catalog {

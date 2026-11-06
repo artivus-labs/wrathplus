@@ -354,7 +354,7 @@ fn goal_distance_sq(toward: Toward, stop: f32, delta: Vec3, speed: f32, swimming
 }
 
 /// The arrive distance (`0x610add`-`0x610b07`): the stop distance scaled by the mover's current
-/// speed over 7 (`0x7c4c90`, 0 at rest), never below 1×.
+/// speed over 7 (`0x987570`, 0 at rest), never below 1×.
 fn arrive_distance(toward: Toward, stop: f32, speed: f32) -> f32 {
     if toward.unscaled() {
         stop

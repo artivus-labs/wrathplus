@@ -59,7 +59,9 @@ pub(super) fn register(app: &mut App) {
     .init_resource::<feed::Presentation>()
     .add_systems(
         Update,
+        // Both write the script from the roll templates: the rows first, then the limits.
         (feed::feed, feed::feed_item_limits)
+            .chain()
             .in_set(crate::app_core::schedule::UiFeed)
             .run_if(crate::app_core::ui_state::ingame_ui_up),
     )

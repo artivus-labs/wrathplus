@@ -378,9 +378,14 @@ mod tests {
     }
 
     #[test]
-    fn wrath_alarm_time_has_a_numeric_default_and_is_writable() {
+    fn stock_cvars_boot_at_their_12340_defaults() {
         let s = UiScript::new().unwrap();
         s.run("assert(tonumber(GetCVar('timeMgrAlarmTime')) == 0) SetCVar('timeMgrAlarmTime', '420') assert(tonumber(GetCVar('timeMgrAlarmTime')) == 420)").unwrap();
+        // Stock CVars the Calendar, Auction, Talent and voice panels read, at 12340's defaults.
+        let defaults = s
+            .eval::<String>("local t = {} for _, n in ipairs({'auctionDisplayOnCharacter', 'calendarShowBattlegrounds', 'calendarShowDarkmoon', 'calendarShowLockouts', 'calendarShowResets', 'calendarShowWeeklyHolidays', 'PushToTalkButton', 'talentFrameShown'}) do t[#t + 1] = GetCVarDefault(n) or 'nil' end return table.concat(t, ' ')")
+            .unwrap();
+        assert_eq!(defaults, "0 0 1 1 0 1 ` 0");
     }
 
     #[test]

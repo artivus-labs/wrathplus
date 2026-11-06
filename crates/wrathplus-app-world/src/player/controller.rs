@@ -182,7 +182,7 @@ pub(super) fn control(
                 .ok()
                 .and_then(|(_, _, _, _, _, store, ..)| store)
                 .is_some_and(|s| s.0.unit_mount_display_id() > 0),
-            // `GetCurrentSpeed` (`0x7c4c90`) on the mover's speeds and last frame's word.
+            // `GetCurrentSpeed` (`0x987570`) on the mover's speeds and last frame's word.
             speed: body
                 .single()
                 .ok()
@@ -507,7 +507,7 @@ pub(super) fn control(
                 ..Default::default()
             },
         };
-        // `GetCurrentSpeed` (`0x7c4c90`), shared with the remote extrapolator: the walk arm comes
+        // `GetCurrentSpeed` (`0x987570`), shared with the remote extrapolator: the walk arm comes
         // before the backward min, so walking backwards is walk speed. It takes this frame's gait
         // intent, since the wire word is built after the mover.
         let speed = crate::net::current_speed(
@@ -713,7 +713,7 @@ pub(super) fn control(
                 wire_jump,
                 knock_launch,
                 water_floor,
-                // The air nudge speed is `min(walk, run)`, live (`0x7c4c90(1)`, `0x7c4d19`), with
+                // The air nudge speed is `min(walk, run)`, live (`0x987570(1)`, `0x98762c`), with
                 // the default walk speed until the server sends speeds.
                 mover_speeds.map_or(super::AIR_NUDGE_SPEED, |s| s.walk.min(s.run)),
             )

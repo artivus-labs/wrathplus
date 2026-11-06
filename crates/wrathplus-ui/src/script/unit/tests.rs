@@ -458,7 +458,7 @@ fn a_dead_unit_reports_dead_and_zero_health() {
     );
 }
 
-/// `UnitName` (`0x517020`) is nil only for a zero guid or an empty `"player"` record, else a
+/// `UnitName` (`0x60e740`) is nil only for a zero guid or an empty `"player"` record, else a
 /// string: the name, or `UNKNOWNOBJECT` while it is in flight (`0x609324`). `PetStable.lua:129`
 /// concatenates it on `UNIT_PET`, before a called pet's name arrives.
 #[test]
@@ -975,7 +975,7 @@ fn unit_is_plus_mob_reads_the_flag_bit_and_not_the_rank() {
     );
 }
 
-/// The resolver (`0x515970`) compares every literal with `_strnicmp`, folding ASCII case.
+/// The resolver (`0x60abf0`) compares every literal with `_strnicmp`, folding ASCII case.
 #[test]
 fn a_unit_token_resolves_whatever_its_case() {
     let mut s = UiScript::new().unwrap();
@@ -1792,30 +1792,30 @@ fn the_equals_one_idiom_branches_correctly_on_a_live_and_a_dead_token() {
     );
 }
 
-/// `UnitOnTaxi` (`0x517a40`), registered with the taxi module's ride flag, has the family's shape
-/// and raises `Usage:` from its gate (`0x517a48`).
+/// `UnitOnTaxi` (`0x60f350`) answers the number 1 or nil from any held unit's flag and raises
+/// `Usage:` from its gate; `SetPortraitTexture` (`0x6113e0`) answers a Lua boolean.
 #[test]
 fn unit_on_taxi_is_one_or_nil_and_raises_the_reference_usage() {
+    use mlua::Value::{Boolean, Integer, Nil};
     let mut s = UiScript::new().unwrap();
     s.set_unit("player", Some(player()));
-
-    assert!(s
-        .eval::<bool>(r#"return UnitOnTaxi("player") == nil"#)
-        .unwrap());
+    let ask = |s: &UiScript, call: &str| s.eval::<mlua::Value>(&format!("return {call}")).unwrap();
+    assert_eq!(ask(&s, "UnitOnTaxi('player')"), Nil);
     s.set_on_taxi(true);
-    assert_eq!(
-        s.eval::<String>(r#"return type(UnitOnTaxi("player"))"#)
-            .unwrap(),
-        "number"
-    );
-    assert_eq!(s.eval::<i64>(r#"return UnitOnTaxi("player")"#).unwrap(), 1);
-    assert!(!s
-        .eval::<bool>(r#"return UnitOnTaxi("player") == true"#)
-        .unwrap());
-    // Only the player's ride is tracked: any other token is nil.
-    assert!(s
-        .eval::<bool>(r#"return UnitOnTaxi("target") == nil"#)
-        .unwrap());
+    assert_eq!(ask(&s, "UnitOnTaxi('player')"), Integer(1));
+    assert_eq!(ask(&s, "UnitOnTaxi('target')"), Nil);
+    let flying = UnitState {
+        exists: true,
+        has_object: true,
+        flags: 0x0010_0000,
+        ..Default::default()
+    };
+    s.set_unit("target", Some(flying));
+    assert_eq!(ask(&s, "UnitOnTaxi('target')"), Integer(1));
+    let portrait =
+        |t: &str| format!("SetPortraitTexture(CreateFrame('Frame'):CreateTexture(), '{t}')");
+    assert_eq!(ask(&s, &portrait("target")), Boolean(true));
+    assert_eq!(ask(&s, &portrait("focus")), Boolean(false));
 
     let err = s.eval::<mlua::Value>("return UnitOnTaxi()").unwrap_err();
     assert!(
@@ -1824,7 +1824,7 @@ fn unit_on_taxi_is_one_or_nil_and_raises_the_reference_usage() {
     );
 }
 
-/// The reference's `"player"` arm reads the record (`0x51708c` reads `0xc27d88`), never the
+/// The reference's `"player"` arm reads the record (`0x6b1060` reads `0xc79d18`), never the
 /// snapshot, so a nameless player push cannot blank the name.
 #[test]
 fn the_player_record_outlives_every_snapshot() {
@@ -1934,9 +1934,9 @@ fn the_player_record_outlives_every_snapshot() {
     );
 }
 
-/// An all-zero record, which a bare VM here can reach: `UnitName` nil (`0x517095`), `UnitRace` and
-/// `UnitClass` `nil, nil` as race and class 0 have no row, and `UnitSex` 2, as `0x517ef9` indexes
-/// its table (`0x808be4`) unchecked.
+/// An all-zero record, which a bare VM here can reach: `UnitName` nil (`0x6b1060`), `UnitRace` and
+/// `UnitClass` `nil, nil` as race and class 0 have no row, and `UnitSex` 2, as `0x60f93c` indexes
+/// its table (`0x9fe7ec`) unchecked.
 #[test]
 fn an_unseeded_player_record_answers_the_references_four_ways() {
     let s = UiScript::new().unwrap();

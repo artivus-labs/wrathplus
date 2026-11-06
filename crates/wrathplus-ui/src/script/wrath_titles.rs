@@ -41,6 +41,19 @@ impl super::UiScript {
     }
 }
 
+/// The CharTitles row whose `MaskID` is `mask` (`0x719900`), 0 matching none.
+pub(crate) fn by_mask(model: &Model, mask: u32) -> Option<&WrathCharTitle> {
+    (mask != 0)
+        .then(|| {
+            model
+                .wrath_titles
+                .catalog
+                .iter()
+                .find(|t| t.mask_id == mask)
+        })
+        .flatten()
+}
+
 /// `0x51b4e0`'s cleanup: a `%` and the characters after it up to a space are dropped, the space
 /// kept ("%s the Patient" → " the Patient").
 fn strip_placeholder(name: &str) -> String {

@@ -202,7 +202,7 @@ fn feed_spellbook(
                 .is_some_and(|d| d.shapeshift_form == Some(u32::from(form_byte)));
         }
     }
-    // Each slot's cooldown (`GetCooldownInfo` `0x6e13e0`: id, category and GCD alike) on the
+    // Each slot's cooldown (`GetCooldownInfo` `0x807980`: id, category and GCD alike) on the
     // `GetTime` clock, frame-stable per arm, so a running cooldown never churns the diff.
     let (anchor, ui_now) = (clock.anchor, clock.ui_now);
     for slot in &mut fresh.slots {

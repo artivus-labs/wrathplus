@@ -129,7 +129,7 @@ impl Manager {
                     text("Set up your client").size(18),
                     self.client_launch_row(),
                     text("1 · Your game installation").size(16),
-                    text("You’ll need your own World of Warcraft 3.3.5a installation. Retail and current Classic installations won’t work.").size(13),
+                    text("Needs your own World of Warcraft 3.3.5a install.").size(13),
                     text("2 · Select your game files").size(16),
                     row![
                         text_input("3.3.5a Data folder", &self.assets)
@@ -152,7 +152,7 @@ impl Manager {
                     self.prerequisite_list(),
 
                     text("4 · Build your client").size(16),
-                    text("Already have a client? Save your settings and launch it. Otherwise, build one below. The first build may take a while.").size(13),
+                    text("Already have a client? Launch it. Otherwise build one below.").size(13),
                     build,
                     self.build_feedback(),
                 ]
@@ -198,7 +198,7 @@ impl Manager {
             ));
         }
         column![
-            text("Each profile keeps its own server modules (the server type) and server settings; the client, addons and characters are shared. Switching applies to the next server build and start.")
+            text("Each profile has its own server modules and settings.")
                 .size(12)
                 .color(style::MUTED),
             list,

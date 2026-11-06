@@ -11,7 +11,7 @@ pub enum CastOutcome {
     Ok,
     Failed {
         reason: u8,
-        /// The `%s` of the client's message (`0x6e1d8e`): a `SpellFocusObject.dbc` id for
+        /// The `%s` of the client's message (1.12 `0x6e1d8e`): a `SpellFocusObject.dbc` id for
         /// `REQUIRES_SPELL_FOCUS` (0x5e), an `AreaTable.dbc` id for `REQUIRES_AREA` (0x5d), an
         /// `EquippedItemClass` for 0x19-0x1b, a permanent-cooldown flag for `NOT_READY` (0x3c).
         arg: Option<u32>,

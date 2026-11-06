@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { recentLines } from "../src/dashboard.ts";
 import { claudeEnv, loadEnv, parseEnv } from "../src/env.ts";
-import { accountFor, exitReason, findAgent, needsRestart } from "../src/manager.ts";
+import { accountFor, exitReason, findAgent, needsRestart, stuckReason } from "../src/manager.ts";
 
 test("agents/.env: KEY=value lines, comments and quotes; the shell wins", () => {
   expect(parseEnv("# keys\nTYPESAFE_API_KEY=abc\nexport A='q r'\nB=\"x\"\nnot a line\n=nokey\n")).toEqual({
@@ -65,4 +65,12 @@ test("a client the agent started is restarted after a disconnect or an exit, not
   expect(needsRestart({ state: "CharSelect" }, true, false)).toBe(false);
   expect(needsRestart({ state: "InWorld", in_world: true }, true, false)).toBe(false);
   expect(needsRestart(null, true, true)).toBe(true);
+});
+
+test("a client that never gets past loading says where it stopped", () => {
+  expect(stuckReason({ state: "Login", ui_ready: true })).toBe(
+    " It is still at the login screen: is the realm running (Manager, Server: Start)?",
+  );
+  expect(stuckReason({ state: "Loading" })).toBe(" It stopped at Loading.");
+  expect(stuckReason(null)).toBe(" Its control port never answered.");
 });

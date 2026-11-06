@@ -1,7 +1,7 @@
 //! The item seam, `0x495d60`, and its two confirm popups. The bag click (`PickupContainerItem
 //! 0x4f9b30`) and the paper-doll click (`0x4c7300`) both call it when `IsTargeting` and
 //! `TargetingWantsItem 0x6e6330` hold, and pick nothing up; the VM half of that reroute is in
-//! `wrathplus_ui`'s cursor seam.
+//! `wrathplus_ui`'s cursor seam. Addresses not marked build 12340's are 1.12's.
 
 use bevy::prelude::*;
 
@@ -60,7 +60,7 @@ pub(crate) struct NewEnchant {
 pub(crate) enum ItemBind {
     /// `BindTarget 0x6e5b40`: bind the item and send.
     Bind,
-    /// `0x6e1a00(spell, 0x0a)`, no packet.
+    /// `0x6e1a00(spell, 0x0a)` (1.12; 12340 not located), no packet.
     Refuse(u8),
     /// Park the guid and fire `BIND_ENCHANT` (event 402, no args); its Yes, `BindEnchant
     /// 0x48d2e0`, re-runs the gate confirmed.

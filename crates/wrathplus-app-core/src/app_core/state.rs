@@ -23,7 +23,7 @@ pub struct Spells {
     /// Form id to its `SpellShapeshiftForm.dbc` row: `BonusActionBar` pages the bar
     /// (`GetBonusBarOffset 0x4e7620`), `flags1` holds the stance and cancel bits.
     pub forms: HashMap<u32, wrathplus_formats::ShapeshiftForm>,
-    /// `SpellRange.dbc`, the `GetMinMaxRange 0x6e3480` inputs; empty on a failed load.
+    /// `SpellRange.dbc`, the `GetMinMaxRange 0x7ff480` inputs; empty on a failed load.
     pub ranges: wrathplus_formats::SpellRangeCatalog,
     /// `SpellCastTimes.dbc`, read through `CastingTimeIndex` (`GetCastTime 0x6e3340`).
     pub cast_times: wrathplus_formats::SpellCastTimeCatalog,

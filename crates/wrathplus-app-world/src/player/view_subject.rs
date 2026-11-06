@@ -26,7 +26,7 @@ pub(crate) struct ViewSubject {
 #[derive(Clone, Copy)]
 pub(crate) struct RemoteView {
     /// For readers of the followed unit's state: the reference's camera shake reads the followed
-    /// unit (`[cam+0x88]`/`[cam+0x8c]`), never the active player (`0x468550`).
+    /// unit (`[cam+0x88]`/`[cam+0x8c]`), never the active player (`0x4d3790`).
     pub(crate) entity: Entity,
     /// The subject's feet in world space, which the rig orbits.
     pub(crate) feet: Vec3,
