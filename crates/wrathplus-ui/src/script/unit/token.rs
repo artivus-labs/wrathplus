@@ -209,7 +209,7 @@ impl Model {
     }
 
     /// `vehicle` (`0x60ac85`): the player's vehicle while seated on it (`0x4f6250`, link state 3).
-    fn vehicle_guid(&self) -> u64 {
+    pub(crate) fn vehicle_guid(&self) -> u64 {
         let me = self.unit_guids.player;
         self.wrath_vehicles
             .units

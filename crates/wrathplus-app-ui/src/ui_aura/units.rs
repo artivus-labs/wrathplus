@@ -99,7 +99,7 @@ pub(super) struct Inputs<'g, 'a, H, V, N> {
     /// `UnitBuff`'s unit gate on a live unit, by guid.
     pub(super) buffs_visible: V,
     pub(super) native_visible: N,
-    pub(super) catalog: Option<&'a SpellCatalog>,
+    pub(super) ctx: &'g super::native::ListCtx<'a>,
     /// The spell catalog was replaced, so every list is rebuilt.
     pub(super) catalog_moved: bool,
     pub(super) packets: Option<&'g crate::net::wrath_auras::PacketAuras>,
@@ -166,14 +166,14 @@ impl UnitAuras {
             held,
             buffs_visible,
             native_visible,
-            catalog,
+            ctx,
             catalog_moved,
             packets,
             clocks,
         } = inputs;
         self.frame += 1;
-        if catalog_moved || catalog.is_some() != self.catalog_present {
-            self.catalog_present = catalog.is_some();
+        if catalog_moved || ctx.catalog.is_some() != self.catalog_present {
+            self.catalog_present = ctx.catalog.is_some();
             self.by_guid.clear();
         }
         if player_moved || self.player_version == 0 {
@@ -217,7 +217,7 @@ impl UnitAuras {
                                         flags,
                                         level: 0,
                                         stacks: 1,
-                                        caster_guid: None,
+                                        caster_guid: Some(0),
                                         max_duration_ms: None,
                                         remaining_ms: None,
                                     },
@@ -229,7 +229,7 @@ impl UnitAuras {
                             guid,
                             &stamps,
                             native_visible(guid, store, &stamps),
-                            catalog,
+                            ctx,
                             clocks,
                         );
                         continue;
@@ -240,11 +240,11 @@ impl UnitAuras {
                         guid,
                         auras,
                         native_visible(guid, store, auras),
-                        catalog,
+                        ctx,
                         clocks,
                     );
                 } else {
-                    self.refresh(guid, store, record_ok, group, &buffs_visible, catalog);
+                    self.refresh(guid, store, record_ok, group, &buffs_visible, ctx.catalog);
                 }
             }
         }
@@ -290,7 +290,7 @@ impl UnitAuras {
         guid: u64,
         auras: &[crate::net::wrath_auras::StampedAura],
         all_visible: bool,
-        catalog: Option<&SpellCatalog>,
+        ctx: &super::native::ListCtx,
         clocks: (f64, f64),
     ) {
         if let Some(e) = self.by_guid.get_mut(&guid) {
@@ -306,7 +306,7 @@ impl UnitAuras {
                 inputs: Vec::new(),
                 native: Some(auras.to_vec()),
                 native_all_visible: all_visible,
-                list: super::native::list(catalog, auras, all_visible, clocks.0, clocks.1),
+                list: super::native::list(ctx, guid, auras, all_visible, clocks.0, clocks.1),
                 version: self.versions,
                 frame: self.frame,
             },
@@ -398,8 +398,7 @@ mod tests {
     use wrathplus_ui::script::UiScript;
 
     use crate::app_core::group::GroupState;
-    use crate::app_core::session::ObjectStore;
-    use crate::app_core::session::SelfPlayer;
+    use crate::app_core::session::{ObjectStore, SelfPlayer};
     use crate::app_core::state::ClientState;
     use crate::net::{Guid, GuidIndex, NetCommands, Reputations};
 
@@ -419,15 +418,15 @@ mod tests {
             },
             received_at: 0.0,
         };
-        let snapshot = [aura];
-        cache.refresh_native(7, &snapshot, true, None, (0.0, 0.0));
+        let (snapshot, bare) = ([aura], super::super::native::bare(None));
+        cache.refresh_native(7, &snapshot, true, &bare, (0.0, 0.0));
         assert_eq!(cache.list(7).unwrap().len(), 1);
         let version = cache.versions;
-        cache.refresh_native(7, &snapshot, true, None, (1.0, 1.0));
+        cache.refresh_native(7, &snapshot, true, &bare, (1.0, 1.0));
         assert_eq!(cache.versions, version);
-        cache.refresh_native(7, &snapshot, false, None, (1.0, 1.0));
+        cache.refresh_native(7, &snapshot, false, &bare, (1.0, 1.0));
         assert!(cache.list(7).unwrap().is_empty());
-        cache.refresh_native(7, &snapshot, true, None, (2.0, 2.0));
+        cache.refresh_native(7, &snapshot, true, &bare, (2.0, 2.0));
         assert_eq!(cache.list(7).unwrap().len(), 1);
     }
 
@@ -484,7 +483,7 @@ mod tests {
                                 flags,
                             )
                         },
-                        catalog,
+                        ctx: &super::super::native::bare(catalog),
                         catalog_moved: moved,
                         packets: Some(&packets),
                         clocks: (0.0, 0.0),

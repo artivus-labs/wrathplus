@@ -16,14 +16,10 @@ use wrathplus_formats::SpellCatalog;
 use wrathplus_protocol::types::{UnitAuraSlot, AURA_FLAG_CANCELABLE, UNIT_AURA_POSITIVE_SLOTS};
 use wrathplus_ui::script::{AuraState, ScriptValue, TrackingState, UiScript};
 
-use crate::app_core::schedule::UiInput;
-use crate::app_core::schedule::UnitFeed;
-use crate::app_core::session::ObjectStore;
-use crate::app_core::session::SelfPlayer;
+use crate::app_core::schedule::{UiInput, UnitFeed};
+use crate::app_core::session::{ObjectStore, SelfPlayer};
 use crate::app_core::state::aura_trace_period as trace_period;
-use crate::app_core::state::ClientState;
-use crate::app_core::state::Selection;
-use crate::app_core::state::Spells;
+use crate::app_core::state::{ClientState, PlayerActions, Selection, Spells};
 use crate::net::{ClientCommand, Guid, GuidIndex, NetCommands};
 
 pub(crate) use crate::app_core::state::{AuraDurations, DurationStamp};
@@ -113,6 +109,8 @@ struct AuraFeedMemory {
     vm: crate::app_core::vm_memo::VmMemo<AuraFeedMemo>,
     /// When [`trace_timers`] last printed: host state, outliving any one VM.
     traced_at: f64,
+    /// The player's dispel types (`0xbe8e38`), host state as the book is ([`native::ListCtx`]).
+    dispels: Vec<u32>,
 }
 
 /// The per-VM `UNIT_AURA` edge keys.
@@ -199,9 +197,9 @@ fn unit_aura_state(
         expiration_time: 0.0,
         helpful: slot < UNIT_AURA_POSITIVE_SLOTS,
         cancelable: flags & AURA_FLAG_CANCELABLE != 0,
-        // `untilCancelled` is the player cache record's alone (`0xbc6040` `+0xc`).
-        until_cancelled: false,
         channeled: display.is_some_and(|d| d.attributes_ex & SPELL_ATTR_EX_IS_CHANNELED != 0),
+        // `untilCancelled` is the player cache record's alone (`0xbc6040` `+0xc`).
+        ..Default::default()
     }
 }
 
@@ -364,6 +362,7 @@ fn feed_auras(
     units: AuraUnits,
     stores: Query<&ObjectStore>,
     spells: Option<Res<Spells>>,
+    actions: Option<Res<PlayerActions>>,
     index: Res<GuidIndex>,
     // The `UnitBuff` gate's inputs, the same reaction the selection ring and nameplates use, with
     // the group roster, forced reactions and owner lookup.
@@ -372,7 +371,7 @@ fn feed_auras(
     durations: Res<AuraDurations>,
     mut cache: ResMut<PlayerAuraCache>,
     time: Res<Time<Real>>,
-    mut mem: ResMut<AuraFeedMemory>,
+    mem: ResMut<AuraFeedMemory>,
 ) {
     let Some(mut script) = script else {
         return;
@@ -400,6 +399,11 @@ fn feed_auras(
 
     // No stamp is pruned for an empty slot: the packet arrives before its slot fills.
 
+    let catalog_moved = spells.as_ref().is_some_and(|s| s.is_changed());
+    let mem = mem.into_inner();
+    native::dispel_types(&mut mem.dispels, catalog, actions.as_ref(), catalog_moved);
+    let held = |guid: u64| index.0.get(&guid).and_then(|&e| stores.get(e).ok());
+    let ctx = native::ListCtx::new(catalog, &held, actions.as_deref(), &mem.dispels);
     let script_now = script.now();
 
     let mut list: Vec<AuraState> = cache
@@ -434,6 +438,7 @@ fn feed_auras(
                 ),
                 channeled: display
                     .is_some_and(|d| d.attributes_ex & SPELL_ATTR_EX_IS_CHANNELED != 0),
+                ..Default::default()
             }
         })
         .collect();
@@ -454,7 +459,7 @@ fn feed_auras(
             units.names.as_deref(),
             &units.commands,
         );
-        list = native::list(catalog, auras, visible, bevy_now, script_now);
+        list = native::list(&ctx, self_guid.0, auras, visible, bevy_now, script_now);
     }
 
     // Before the memory update, so a tracking change joins the edge key.
@@ -521,13 +526,11 @@ fn feed_auras(
         }
     }
 
-    let held = |guid: u64| index.0.get(&guid).and_then(|&e| stores.get(e).ok());
     let pet_guid = units.pet.guid();
     // `UnitBuff`'s unit gate: the native packet and roster lists apply their own whole-unit gate,
     // and no native snapshot establishes type 295 here, so every live unit's list is shown.
     let buffs_visible = |_guid: u64, _unit: &ObjectStore| true;
     let target_guid = units.selection.guid.unwrap_or(0);
-    let catalog_moved = spells.as_ref().is_some_and(|s| s.is_changed());
     let unit_changed = memo.units.feed(
         &mut script,
         units::Inputs {
@@ -545,7 +548,7 @@ fn feed_auras(
                 .map_or(0, |(_, guid)| guid),
             npc: units.interact.as_deref().and_then(|i| i.1).unwrap_or(0),
             focus: units.focus.as_deref().map_or(0, |f| f.guid),
-            held,
+            held: &held,
             buffs_visible,
             native_visible:
                 |guid,
@@ -563,7 +566,7 @@ fn feed_auras(
                         &units.commands,
                     )
                 },
-            catalog,
+            ctx: &ctx,
             catalog_moved,
             packets: units.packets.as_deref(),
             clocks: (bevy_now, script_now),
