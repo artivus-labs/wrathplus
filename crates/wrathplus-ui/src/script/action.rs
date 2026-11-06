@@ -7,7 +7,7 @@
 
 use mlua::{Lua, MultiValue, Value};
 
-use super::binding_abi::flag;
+use super::binding_abi::{flag, ftol_arg};
 use super::Model;
 
 /// The kind byte, bits 24-31 of the packed slot word (vmangos `Player.h:133`). Must match
@@ -365,8 +365,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     g.set(
         "GetActionCooldown",
         lua.create_function(|lua, action: Value| {
-            let action =
-                super::binding_abi::ftol_arg(lua, action, "Usage: GetActionCooldown(slot)")? as u32;
+            let action = ftol_arg(lua, action, "Usage: GetActionCooldown(slot)")? as u32;
             let now = crate::script::clock::now(lua);
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             let state = model.action_states.get(&action);
