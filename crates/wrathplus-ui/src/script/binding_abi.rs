@@ -30,6 +30,32 @@ pub(crate) fn number_arg(lua: &Lua, v: Value, usage: &'static str) -> mlua::Resu
     }
 }
 
+/// `0x5e7c00`'s number leg, an inventory verb's 0-based slot: [`ftol`] less one, wrapping; any
+/// other argument 0, the head (the slot-name leg, `0xad4350`, is not read).
+pub(crate) fn inventory_slot0(lua: &Lua, v: Value) -> mlua::Result<i32> {
+    Ok(lua.coerce_number(v)?.map_or(0, |n| ftol(n).wrapping_sub(1)))
+}
+
+/// Build 12340's `__ftol2_sse` (`0x88b9c0`): with SSE2 present (`0x414e28`'s CPUID test) a
+/// `cvttsd2si`, so the value truncates toward zero and NaN or anything outside `i32` is `i32::MIN`.
+pub(crate) fn ftol(n: f64) -> i32 {
+    let t = n.trunc();
+    if t >= f64::from(i32::MIN) && t <= f64::from(i32::MAX) {
+        t as i32
+    } else {
+        i32::MIN
+    }
+}
+
+/// [`number_arg`] as build 12340's verbs read it: `isnumber` (`0x84df20`), `lua_tonumber`
+/// (`0x84e030`) and [`ftol`], raising the binding's `Usage:` on failure.
+pub(crate) fn ftol_arg(lua: &Lua, v: Value, usage: &'static str) -> mlua::Result<i32> {
+    match lua.coerce_number(v)? {
+        Some(n) => Ok(ftol(n)),
+        None => Err(mlua::Error::RuntimeError(usage.into())),
+    }
+}
+
 /// Shape D: an `is-number`-gated flag whose failure keeps its zero instead of raising. The value
 /// must be strictly `> 0.0` (`0x53303f`), so 0, a negative and NaN are false and `0.5` or `"1"`
 /// true; `SetInventoryItem`'s `nameOnly` is one.
@@ -335,6 +361,17 @@ mod tests {
         assert_eq!(number_arg(&lua, Value::Number(2.9), "u").unwrap(), 2);
         assert_eq!(number_arg(&lua, Value::Number(-2.9), "u").unwrap(), -2);
         assert_eq!(number_arg(&lua, Value::Number(-0.5), "u").unwrap(), 0);
+        // `0x88b9c0`'s `cvttsd2si`: out of range or NaN is the integer indefinite.
+        let two31 = 2f64.powi(31);
+        for (n, want) in [
+            (-2.9, -2),
+            (two31, i32::MIN),
+            (-two31, i32::MIN),
+            (f64::NAN, i32::MIN),
+            (2f64.powi(32) + 5.0, i32::MIN),
+        ] {
+            assert_eq!(ftol(n), want, "{n}");
+        }
     }
 
     #[test]

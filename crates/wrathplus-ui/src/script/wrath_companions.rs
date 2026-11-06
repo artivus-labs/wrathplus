@@ -186,7 +186,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     g.set(
         "PickupCompanion",
         lua.create_function(|lua, (ty, index): (Value, Value)| {
-            let (_, c) = entry(lua, &ty, &index, "PickupCompanion(type, index)")?;
+            let (kind, c) = entry(lua, &ty, &index, "PickupCompanion(type, index)")?;
             let Some(c) = c else { return Ok(()) };
             let mut model = lua.app_data_mut::<Model>().expect("model");
             let held = match &model.cursor {
@@ -196,9 +196,10 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             };
             model.cursor = None;
             if held.is_none() {
+                // `GetCursorInfo` names a companion by its list and 1-based index (`0x8009b0`).
                 model.cursor = Some(CursorPayload::Spell(CursorSpell {
-                    book_slot: 0,
-                    book_type: "spell".into(),
+                    book_slot: index_arg(&index).map_or(0, |i| i as u32 + 1),
+                    book_type: COMPANION_TYPES[kind].into(),
                     spell_id: c.spell_id,
                     texture: c.icon,
                     passive: false,
@@ -335,6 +336,14 @@ mod tests {
             s.cursor_payload(),
             Some(CursorPayload::Spell(CursorSpell { spell_id: 10, .. }))
         ));
+        let info = s
+            .eval::<(String, i64, String)>("return GetCursorInfo()")
+            .unwrap();
+        assert_eq!(
+            info,
+            ("companion".into(), 1, "CRITTER".into()),
+            "`0x515200` mode 3"
+        );
         s.run(r#"PickupCompanion("CRITTER", 1)"#).unwrap();
         assert!(s.cursor_payload().is_none());
         let _ = s.take_script_calls();

@@ -66,23 +66,15 @@ fn one_fitting_bag_item() -> ContainerState {
     slots.insert(
         1,
         ContainerSlot {
-            duration_ms: None,
-            petition: None,
-            already_bound: false,
             bar_placeable: true,
-            durability: None,
             texture: Some("Interface\\Icons\\INV_Helmet_02".into()),
             count: 1,
             quality: Some(3),
             item_id: 2000,
             link: Some("|cff0070dd|Hitem:2000:0:0:0|h[Another Helm]|h|r".into()),
-            locked: false,
             equip_slots: vec![1], // fits HeadSlot only
             cooldown: None,
-            readable: false,
-            creator: None,
-            flags: 0,
-            enchants: Vec::new(),
+            ..Default::default()
         },
     );
     ContainerState {
@@ -247,23 +239,15 @@ fn place_a_bag_onto_a_bag_slot_queues_the_equip_move() {
     slots.insert(
         3,
         ContainerSlot {
-            duration_ms: None,
-            petition: None,
-            already_bound: false,
             bar_placeable: true,
-            durability: None,
             texture: Some("Interface\\Icons\\INV_Misc_Bag_08".into()),
             count: 1,
             quality: Some(1),
             item_id: 4496,
             link: Some("|cffffffff|Hitem:4496:0:0:0|h[Small Brown Pouch]|h|r".into()),
-            locked: false,
             equip_slots: vec![20, 21, 22, 23], // INVTYPE_BAG → any bag slot
             cooldown: None,
-            readable: false,
-            creator: None,
-            flags: 0,
-            enchants: Vec::new(),
+            ..Default::default()
         },
     );
     s.set_container(
@@ -401,14 +385,23 @@ fn is_inventory_item_locked_reads_held_or_fed() {
 }
 
 #[test]
-fn equip_cursor_item_routes_through_pickup() {
+fn equip_cursor_item_swaps_and_holds_the_displaced_item() {
     let mut s = UiScript::new().unwrap();
     s.set_inventory_slots(doll_slots());
     s.set_container(0, Some(one_fitting_bag_item()));
+    // An empty cursor equips nothing and picks nothing up (`0x51a452`).
+    s.run("EquipCursorItem(1)").unwrap();
+    assert!(s.cursor_payload().is_none());
     s.run("PickupContainerItem(0, 1)").unwrap();
+    // The predicates push the number 1 or nil (`0x515125`, `0x5ea880`).
+    let held = "return CursorHasItem(), CursorCanGoInSlot(1), CursorCanGoInSlot(2)";
+    assert_eq!(
+        s.eval::<(i64, i64, Option<i64>)>(held).unwrap(),
+        (1, 1, None)
+    );
 
-    assert!(s.eval::<bool>("return EquipCursorItem(1)").unwrap());
-    assert!(s.cursor_item().is_none());
+    assert_eq!(s.arity("EquipCursorItem(1)").unwrap(), 0);
+    assert_eq!(s.cursor_item().unwrap().item_id, 1234);
     assert_eq!(
         s.take_container_moves(),
         vec![ContainerMove {
@@ -490,3 +483,6 @@ fn the_armed_item_half_takes_the_use_bindings_too() {
 
 #[path = "doll_repair_tests.rs"]
 mod repair;
+
+#[path = "doll_equip_tests.rs"]
+mod equip;

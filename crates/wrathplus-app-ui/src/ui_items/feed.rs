@@ -671,10 +671,8 @@ fn resolve_slot(
                     .item_durability()
                     .zip(fields.item_max_durability())
                     .filter(|&(_, max)| max > 0),
-                // Letter text on the instance, which the hover magnifier keys off; a template
-                // `PageText` book does not set it.
-                // (12340 items carry no `ITEM_FIELD_ITEM_TEXT_ID`.)
-                false,
+                // `readable`'s instance half, `ITEM_FIELD_FLAGS & 0x200` (`0x5d7bd7`).
+                fields.item_flags().unwrap_or(0) & 0x200 != 0,
                 // The creator's name for "<Made by %s>" and "Written by %s", `None` until the
                 // name query answers.
                 fields
@@ -754,7 +752,9 @@ fn resolve_slot(
             t.quality,
         )),
         locked: false,
-        readable,
+        readable: t.page_text != 0 || readable,
+        lootable: t.flags & 0x4 != 0,
+        inventory_type: t.inventory_type,
         creator,
         flags,
         already_bound,

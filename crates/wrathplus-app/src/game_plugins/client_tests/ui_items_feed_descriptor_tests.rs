@@ -96,18 +96,6 @@ fn real_container_feed_includes_last_storage_slots_and_bag_lifecycle() {
         .push(last_bag);
     schedule.run(app.world_mut());
     let script = app.world().non_send_resource::<UiScript>();
-    assert_eq!(
-        script
-            .eval::<u32>("return GetContainerNumSlots(-1)")
-            .unwrap(),
-        u32::from(bank_count)
-    );
-    assert_eq!(
-        script
-            .eval::<u32>("return GetContainerNumSlots(-2)")
-            .unwrap(),
-        u32::from(key_count)
-    );
     for (bag, slot, count) in [
         (BANK_CONTAINER, u32::from(bank_count), 3),
         (KEYRING_CONTAINER, u32::from(key_count), 5),

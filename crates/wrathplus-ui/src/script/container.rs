@@ -1,10 +1,11 @@
-//! The 1.12 bag verbs, all bare globals. The app pushes each bag's resolved snapshot and drains
-//! the intents the verbs queue; the engine holds no item knowledge. Bag ids are the 1.12 client's
-//! (0 the backpack, 1-4 the worn bags, -1 the bank's own slots, 5-10 the bank bags, -2 the
-//! keyring); slots are 1-based.
+//! The bag verbs, all bare globals. The app pushes each bag's resolved snapshot and drains the
+//! intents the verbs queue; the engine holds no item knowledge. Bag ids are build 12340's
+//! resolver's (`0x5d7380`: 0 the backpack, 1-4 the worn bags, -1 the bank's own slots, 5-11 the
+//! bank bags, -2 the keyring); slots are 1-based.
 
 use mlua::{Lua, Table, Value};
 
+use super::binding_abi::ftol_arg;
 use super::cursor::{self, CursorItem, CursorPayload};
 use super::Model;
 
@@ -43,9 +44,15 @@ pub struct ContainerSlot {
     pub durability: Option<(u32, u32)>,
     /// The use cooldown, `(start_ms on the GetTime clock, duration_ms, enabled)`; `None` if cold.
     pub cooldown: Option<(i64, u32, bool)>,
-    /// The instance carries `ITEM_FIELD_ITEM_TEXT_ID` (a mail copy): `GetContainerItemInfo`'s
-    /// `readable`, which shows the Inspect cursor (`ContainerFrame.lua:638`).
+    /// `GetContainerItemInfo`'s `readable` (`0x5d7bc3`-`0x5d7be6`): the template's `PageText`
+    /// (`CGItem` vfunc `0xdc`, `[rec+0x180]`) or `ITEM_FIELD_FLAGS & 0x200` (a mail copy); it
+    /// shows the Inspect cursor (`ContainerFrame.lua:306`, `:787-788`).
     pub readable: bool,
+    /// `GetContainerItemInfo`'s `lootable` (`0x5d7c04`): the template's `Flags & 0x4`, read
+    /// through the item's flag accessor (`0x707390`, `[rec+0x18]`).
+    pub lootable: bool,
+    /// The template's `InventoryType`: 0 (a Hearthstone, food) answers quality -1 (`0x5d7ba7`).
+    pub inventory_type: u32,
     /// The `ITEM_FIELD_CREATOR` name for the "Written by" or "<Made by>" line, once resolved.
     pub creator: Option<String>,
     /// `ITEM_FIELD_FLAGS`; the tooltip reads UNLOCKED `0x4` and WRAPPED `0x8`.
@@ -467,26 +474,26 @@ fn trade_into_first_free(model: &mut Model, bag: i64, slot: u32) {
     }
 }
 
+/// A bank bag (5..11) with the banker away: the resolver's `0x5d6f20` answers no container.
+pub(super) fn bank_bag_closed(model: &Model, bag: i64) -> bool {
+    (5..=11).contains(&bag) && model.bank.is_none()
+}
+
 /// Register the container verbs as bare globals, as build 12340 has them; `C_Container` is a later
 /// client's namespace, and an addon that finds it assumes that client.
 pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
-    // ContainerIDToInventoryID(containerID) (`0x4f94e0`): `id - 1`, then +20 below 4 else +60, so
-    // the keyring -2 → 17, the backpack 0 → 19, bags 1-4 → 20-23 and bank bags 5-10 → 64-69, with
-    // no special case and no range check.
+    // ContainerIDToInventoryID(containerID) (`0x5d6f60`): `id - 1`, then +20 below 4 else +64, so
+    // bags 1-4 are 20-23 and the bank bags 5-11 68-74; any other id raises (`0x5d6fd6`).
     lua.globals().set(
         "ContainerIDToInventoryID",
         lua.create_function(|lua, id: Value| {
-            let id = super::binding_abi::number_arg(
-                lua,
-                id,
-                "Usage: ContainerIDToInventoryID(containerID)",
-            )?;
-            // The reference's steps and signed compare (`0x4f9524 jl`), wrapping at the `i32` edge.
-            Ok(i64::from(
-                lua.app_data_ref::<Model>()
-                    .expect("model")
-                    .container_inventory_slot(id),
-            ))
+            let id = ftol_arg(lua, id, "Usage: ContainerIDToInventoryID(containerID)")?;
+            if !(1..=11).contains(&id) {
+                let invalid = "ContainerIDToInventoryID(): invalid container ID";
+                return Err(mlua::Error::runtime(invalid));
+            }
+            let model = lua.app_data_ref::<Model>().expect("model");
+            Ok(i64::from(model.container_inventory_slot(id)))
         })?,
     )?;
 
@@ -526,20 +533,43 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
+    // GetContainerNumSlots(index) (`0x5d74a0`): the backpack, vault and keyring are the constants
+    // 16, 28 and 32 (and -4, the token band, 32); a bag 1..11 its container's count, a bank bag
+    // only with the banker (`0x5d6f20`); anything else 0. Labelled: the bag verbs' active-player
+    // gate (`0x5d74cc`, `0x4d3790` -> `0x4d4db0`) is not read, so with no player the constants
+    // still answer.
     lua.globals().set(
         "GetContainerNumSlots",
-        lua.create_function(|lua, bag: i64| {
+        lua.create_function(|lua, bag: Value| {
+            let bag = i64::from(ftol_arg(lua, bag, "Usage: GetContainerNumSlots(index)")?);
             let model = lua.app_data_ref::<Model>().expect("model app_data");
-            Ok(model.containers.get(&bag).map_or(0, |c| c.num_slots))
+            Ok(match bag {
+                0 => 16,
+                -1 => 28,
+                -2 | -4 => 32,
+                1..=11 if !bank_bag_closed(&model, bag) => {
+                    model.containers.get(&bag).map_or(0, |c| c.num_slots)
+                }
+                _ => 0,
+            })
         })?,
     )?;
 
+    // GetBagName(index) (`0x5d8c70`): the backpack is `BACKPACK_TOOLTIP` (`0x819d40`); a bag 1..11
+    // its item's name, a bank bag only with the banker; anything else, the vault and the keyring
+    // included, one nil.
     lua.globals().set(
         "GetBagName",
-        lua.create_function(|lua, bag: i64| {
+        lua.create_function(|lua, bag: Value| {
+            let bag = i64::from(ftol_arg(lua, bag, "Usage: GetBagName(index)")?);
+            if bag == 0 {
+                return lua.globals().get::<Value>("BACKPACK_TOOLTIP");
+            }
             let name = {
                 let model = lua.app_data_ref::<Model>().expect("model app_data");
-                model.containers.get(&bag).and_then(|c| c.name.clone())
+                let open = (1..=11).contains(&bag) && !bank_bag_closed(&model, bag);
+                let c = model.containers.get(&bag).filter(|_| open);
+                c.and_then(|c| c.name.clone())
             };
             match name {
                 Some(n) => Ok(Value::String(lua.create_string(&n)?)),
@@ -548,14 +578,29 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // GetContainerItemCooldown(bag, slot) (`0x4f99b0`) → start, duration, enable on the `GetTime`
-    // clock, as `GetActionCooldown`; enable 0 is a held cooldown. An expired one reads cold, so a
-    // re-feed cannot replay the finish flash.
+    // GetContainerItemCooldown(index, slot) (`0x5d7d90`) → start, duration, enable on the
+    // `GetTime` clock, as `GetActionCooldown`; enable 0 is a held cooldown. An empty or unknown
+    // slot is (0, 0, 0), an item with none running (0, 0, 1); an expired one reads cold, so a
+    // re-feed cannot replay the finish flash. Labelled: an item whose charges are spent, (0, 0, 0)
+    // natively, reads its cooldown here.
     lua.globals().set(
         "GetContainerItemCooldown",
-        lua.create_function(|lua, (bag, slot): (i64, u32)| {
+        lua.create_function(|lua, (bag, slot): (Value, Value)| {
+            const USAGE: &str = "Usage: GetContainerItemCooldown(index, slot)";
+            let bag = i64::from(ftol_arg(lua, bag, USAGE)?);
+            let slot = ftol_arg(lua, slot, USAGE)?;
             let now = crate::script::clock::now(lua);
             let model = lua.app_data_ref::<Model>().expect("model app_data");
+            let held = |s: &u32| {
+                let c = model
+                    .containers
+                    .get(&bag)
+                    .filter(|_| !bank_bag_closed(&model, bag));
+                c.is_some_and(|c| c.slots.contains_key(s))
+            };
+            let Some(slot) = u32::try_from(slot).ok().filter(held) else {
+                return Ok((0.0, 0.0, 0));
+            };
             Ok(match model.container_cooldowns.get(&(bag, slot)) {
                 Some(&(start, duration, enabled)) if start + duration > now || !enabled => {
                     (start, duration, i32::from(enabled))
@@ -583,8 +628,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // GetContainerItemInfo(bag, slot) (`0x4f9670`) → texture, itemCount, locked, quality,
-    // readable, the five `ContainerFrame.lua:241` reads; no values for an empty or unknown slot.
+    // GetContainerItemInfo(bag, slot) (`0x5d7a90`) → texture, itemCount, locked, quality,
+    // readable, lootable, link; no values for an empty or unknown slot.
     lua.globals().set(
         "GetContainerItemInfo",
         lua.create_function(|lua, (bag, slot): (i64, u32)| {
@@ -612,9 +657,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             let Some(s) = info else {
                 return Ok(mlua::MultiValue::new());
             };
-            // `0x5d7a90`: texture, count, locked, quality, readable, lootable, link; the flags are
-            // 1 or nil. An uncached template's quality is -1. Lootable reads `ITEM_FIELD_FLAGS`
-            // bit 2 as the binding does (labelled: the bit's meaning for every item is unread).
+            // The flags are 1 or nil; an uncached template, or one with `InventoryType` 0, answers
+            // quality -1 (`0x5d7ba5`-`0x5d7bb1`).
             let text = |v: &Option<String>| -> mlua::Result<Value> {
                 Ok(match v {
                     Some(p) => Value::String(lua.create_string(p.as_str())?),
@@ -627,9 +671,13 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 // A held item's source slot reads locked, derived from the cursor so the app's
                 // re-push cannot wipe it.
                 super::binding_abi::flag(s.locked || held_here),
-                Value::Integer(s.quality.map_or(-1, i64::from)),
+                Value::Integer(
+                    s.quality
+                        .filter(|_| s.inventory_type != 0)
+                        .map_or(-1, i64::from),
+                ),
                 super::binding_abi::flag(s.readable),
-                super::binding_abi::flag(s.flags & 4 != 0),
+                super::binding_abi::flag(s.lootable),
                 text(&s.link)?,
             ]))
         })?,

@@ -320,15 +320,15 @@ fn merchant_show_hide_plays_open_and_close_kits() {
     assert!(s.errors().is_empty(), "script errors: {:?}", s.errors());
     assert_eq!(
         s.take_sounds(),
-        vec![SoundRequest::KitName("igCharacterInfoOpen".into())],
-        "opening the vendor window plays igCharacterInfoOpen"
+        super::test_ui::kits("igBackPackOpen igCharacterInfoOpen"),
+        "the backpack (16 slots, `0x5d7507`) opens first"
     );
 
     s.fire_event("MERCHANT_CLOSED", vec![]);
     assert!(s.errors().is_empty(), "script errors: {:?}", s.errors());
     assert_eq!(
         s.take_sounds(),
-        vec![SoundRequest::KitName("igCharacterInfoClose".into())],
+        super::test_ui::kits("igBackPackClose igCharacterInfoClose"),
         "closing the vendor window plays igCharacterInfoClose"
     );
 }
@@ -541,10 +541,9 @@ fn merchant_switch_plays_close_then_open_and_queues_the_consumable_close() {
     assert!(s.errors().is_empty(), "script errors: {:?}", s.errors());
     assert_eq!(
         s.take_sounds(),
-        vec![
-            SoundRequest::KitName("igCharacterInfoClose".into()),
-            SoundRequest::KitName("igCharacterInfoOpen".into()),
-        ],
+        super::test_ui::kits(
+            "igBackPackClose igCharacterInfoClose igBackPackOpen igCharacterInfoOpen"
+        ),
         "switching vendors plays the close then the open kit"
     );
     assert!(

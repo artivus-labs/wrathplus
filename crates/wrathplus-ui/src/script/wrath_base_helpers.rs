@@ -2,17 +2,6 @@
 
 use mlua::{Lua, MultiValue, Value};
 
-/// `__ftol2` (`0x88b9c0`): truncate toward zero to 64 bits and keep the low 32, as the callers
-/// store the result in an `int`; a value past 64 bits is the x87 indefinite integer, whose low
-/// 32 bits are 0.
-fn ftol(n: f64) -> i32 {
-    if n.is_finite() && n.abs() < 9.223_372_036_854_775e18 {
-        n.trunc() as i64 as i32
-    } else {
-        0
-    }
-}
-
 /// `luaL_checknumber` as the base library's `0x84fab0` does it: a number or numeric string, else
 /// the standard argument error.
 fn check_number(lua: &Lua, args: &MultiValue, i: usize) -> mlua::Result<f64> {
@@ -50,8 +39,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     )?;
 
     // `difftime(t2[, t1])` (`0x8178a0`): `t2 - t1` in seconds as a number, `t1` defaulting to 0,
-    // each truncated to a 32-bit time first; the CRT's `__difftime32` answers 0 when either is
-    // negative.
+    // each truncated to a 32-bit time through `__ftol2_sse` (`0x8178b8`, `0x8178c7`), so one
+    // outside an int is `INT_MIN`; the CRT's `__difftime32` answers 0 when either is negative.
     lua.globals().set(
         "difftime",
         lua.create_function(|lua, args: MultiValue| {
@@ -60,7 +49,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 Some(_) => check_number(lua, &args, 1)?,
             };
             let t2 = check_number(lua, &args, 0)?;
-            let (t1, t2) = (ftol(t1), ftol(t2));
+            let (t1, t2) = (super::binding_abi::ftol(t1), super::binding_abi::ftol(t2));
             Ok(if t1 < 0 || t2 < 0 {
                 0.0
             } else {
@@ -95,7 +84,7 @@ mod tests {
             "assert(difftime(100, 40) == 60 and difftime(40, 100) == -60) \
              assert(difftime(100) == 100 and difftime(100, nil) == 100) \
              assert(difftime(10.9, 0.5) == 10 and difftime('7', '2') == 5) \
-             assert(difftime(-5, 1) == 0 and difftime(5, -1) == 0) \
+             assert(difftime(-5, 1) == 0 and difftime(5, -1) == 0 and difftime(2^32 + 5) == 0) \
              assert(type(difftime(1, 1)) == 'number')",
         )
         .unwrap();

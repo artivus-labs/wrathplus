@@ -185,7 +185,7 @@ pub(crate) fn reagent_casts(model: &Model, r: &super::SpellInfoView) -> u32 {
     }
     r.reagents
         .iter()
-        .filter(|&&(id, n)| id != 0 && id != 0xffff_fffe && n > 0)
+        .filter(|&&(id, n)| id != 0 && id != 0xffff_fffe && (n as i32) > 0)
         .map(|&(id, n)| super::wrath_item_use::item_count(model, id, false) / n)
         .min()
         .unwrap_or(0)

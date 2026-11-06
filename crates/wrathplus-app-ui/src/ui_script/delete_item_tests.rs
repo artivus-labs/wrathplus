@@ -14,23 +14,13 @@ fn one_item_backpack(item_id: u32, name: &str, quality: u32) -> ContainerState {
     slots.insert(
         1,
         ContainerSlot {
-            duration_ms: None,
-            petition: None,
-            already_bound: false,
             bar_placeable: true,
-            durability: None,
             texture: Some("Interface\\Icons\\INV_Misc_Food_16".into()),
             count: 5,
             quality: Some(quality),
             item_id,
             link: Some(format!("|cffffffff|Hitem:{item_id}|h[{name}]|h|r")),
-            locked: false,
-            equip_slots: Vec::new(),
-            cooldown: None,
-            readable: false,
-            creator: None,
-            flags: 0,
-            enchants: Vec::new(),
+            ..Default::default()
         },
     );
     ContainerState {

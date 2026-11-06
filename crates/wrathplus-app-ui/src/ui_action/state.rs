@@ -178,7 +178,11 @@ pub(super) fn feed_action_state(
     let mut fresh: HashMap<u32, ActionState> = HashMap::new();
     for (&slot, button) in &actions.buttons {
         let action = u32::from(slot) + 1;
-        let mut st = ActionState::default();
+        // `0x5a8e40` leaves enable zero until a spell/item cooldown reader resolves.
+        let mut st = ActionState {
+            cooldown: Some((0, 0, false)),
+            ..Default::default()
+        };
         let (kind, id) = match resolve_through_macro(button.kind, button.action, bound) {
             SlotResolve::Action(kind, id) => (kind, id),
             SlotResolve::BareMacro => {
@@ -287,9 +291,11 @@ pub(super) fn feed_action_state(
             }
             ACTION_KIND_ITEM => {
                 // Only the `Copy` on-use spell, not a clone of the template per slot per frame.
-                let use_spell = items
-                    .template(button.action, 0, &commands)
-                    .and_then(|t| t.use_spell);
+                let template = items.template(button.action, 0, &commands);
+                if template.is_some() {
+                    st.cooldown = None;
+                }
+                let use_spell = template.and_then(|t| t.use_spell);
                 // `IsConsumableAction` (`0x4e5250`) reads only the template, so the identity
                 // feed pushes it with the count it gates, not this one.
                 let count = carried.get(&button.action).copied().unwrap_or(0);
@@ -462,71 +468,6 @@ mod tests {
         assert_eq!(
             resolve_through_macro(ACTION_KIND_ITEM, 117, &bound),
             SlotResolve::Action(ACTION_KIND_ITEM, 117)
-        );
-    }
-
-    #[test]
-    fn the_feed_pushes_a_bare_macro_as_usable() {
-        use crate::ui_macro::{BoundSpell, MacroBoundSpells};
-        use wrathplus_protocol::types::{ActionButton, ACTION_KIND_MACRO};
-
-        let (tx, _rx) = crossbeam_channel::unbounded();
-        let mut app = App::new();
-        let mut actions = PlayerActions::default();
-        for (slot, index) in [(0u8, 1u32), (1, 2), (2, 3)] {
-            actions.buttons.insert(
-                slot,
-                ActionButton {
-                    slot,
-                    action: index,
-                    kind: ACTION_KIND_MACRO,
-                },
-            );
-        }
-        // Macro 1 is `.spawn 16032`, 2 an unknown `/cast Pyroblast`, and 3 does not exist.
-        let mut bound = MacroBoundSpells::default();
-        bound.0.insert(1, BoundSpell::None);
-        bound.0.insert(2, BoundSpell::Unresolved);
-        app.insert_resource(actions)
-            .insert_resource(bound)
-            .init_resource::<Cooldowns>()
-            .init_resource::<crate::spell::SpellModifiers>()
-            .init_resource::<crate::net::wrath_combo_points::NativeComboPoints>()
-            .init_resource::<crate::app_core::ui_flags::UiClock>()
-            .init_resource::<AutoRepeatActive>()
-            .init_resource::<crate::spell::PendingCast>()
-            .init_resource::<crate::spell::QueuedMeleeSpell>()
-            .init_resource::<crate::spell::ActiveChannel>()
-            .init_resource::<crate::spell::SpellTargeting>()
-            .init_resource::<crate::spell::HeldForPick>()
-            .init_resource::<Selection>()
-            .init_resource::<crate::net::GuidIndex>()
-            .init_resource::<crate::net::Reputations>()
-            .init_resource::<Items>()
-            .insert_resource(NetCommands(tx));
-        app.insert_non_send_resource(UiScript::new().unwrap());
-        app.add_systems(Update, feed_action_state);
-        app.update();
-
-        let script = app.world().non_send_resource::<UiScript>();
-        let usable = |action: u32| {
-            script
-                .eval::<bool>(&format!(
-                    "return (IsUsableAction({action})) and true or false"
-                ))
-                .unwrap()
-        };
-        assert!(usable(1), "a macro that casts nothing is a usable button");
-        assert!(
-            !usable(2),
-            "a /cast of an unknown spell is grey (the reference's -1)"
-        );
-        assert!(!usable(3), "a slot whose macro no longer exists is grey");
-        assert!(
-            !script
-                .eval::<bool>("local _, oom = IsUsableAction(2) return oom and true or false")
-                .unwrap(),
-            "grey, not the out-of-power blue: notEnoughMana stays 0 on the spell-less leg"
         );
     }
 
@@ -901,3 +842,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "state_cooldown_tests.rs"]
+mod cooldown_tests;

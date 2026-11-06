@@ -61,3 +61,39 @@ pub fn first_short_reagent(
         .find(|&(id, n)| count_of(&store.0, objects, id, InventoryScope::CARRIED) < n)
         .map(|(id, _)| id)
 }
+
+/// `IsConsumableAction`'s spell leg (`0x5a9360`): any reagent slot with an id and a count above 0.
+pub fn has_reagents(d: &wrathplus_formats::SpellDisplay) -> bool {
+    d.reagents.iter().any(|&(id, n)| id != 0 && (n as i32) > 0)
+}
+
+/// A reagent spell's `GetActionCount` (`0x7ffa30`): the casts the carried reagents cover, the least
+/// `carried / count` over the slots with an id (not -2) and a count above 0; 0 for none.
+pub fn reagent_casts(d: &wrathplus_formats::SpellDisplay, carried: impl Fn(u32) -> u32) -> u32 {
+    d.reagents
+        .iter()
+        .filter(|&&(id, n)| id != 0 && id != (-2i32) as u32 && (n as i32) > 0)
+        .map(|&(id, n)| carried(id) / n)
+        .min()
+        .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Portal: Stormwind's two Runes of Portals; Arcane Intellect carries none.
+    #[test]
+    fn reagent_casts_is_the_scarcest_reagent_over_its_count() {
+        let mut d = wrathplus_formats::SpellDisplay::default();
+        assert!(!has_reagents(&d));
+        assert_eq!(reagent_casts(&d, |_| 9), 0, "no reagent row is no count");
+        d.reagents[0] = (17032, 2);
+        d.reagents[3] = (17020, 1);
+        assert!(has_reagents(&d));
+        let carried = |id| if id == 17032 { 5 } else { 4 };
+        assert_eq!(reagent_casts(&d, carried), 2, "five runes cover two casts");
+        d.reagents[3] = (17020, 0);
+        assert_eq!(reagent_casts(&d, carried), 2, "a zero count is no reagent");
+    }
+}

@@ -78,23 +78,14 @@ fn backpack_with_fitting_helm() -> wrathplus_ui::script::ContainerState {
     slots.insert(
         1,
         wrathplus_ui::script::ContainerSlot {
-            duration_ms: None,
-            petition: None,
-            already_bound: false,
             bar_placeable: true,
-            durability: None,
             texture: Some("Interface\\Icons\\INV_Helmet_02".into()),
             count: 1,
             quality: Some(3),
             item_id: 2000,
             link: Some("|cff0070dd|Hitem:2000:0:0:0|h[Another Helm]|h|r".into()),
-            locked: false,
             equip_slots: vec![1],
-            cooldown: None,
-            readable: false,
-            creator: None,
-            flags: 0,
-            enchants: Vec::new(),
+            ..Default::default()
         },
     );
     wrathplus_ui::script::ContainerState {

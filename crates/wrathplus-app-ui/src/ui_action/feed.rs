@@ -27,6 +27,7 @@ use super::{
     cast_fail, show_messages, CastErrors, MessageSink, MountErrors, PetTameFailures, PlayerActions,
     Shown, Spells, UiError, UiErrorKeys, UiErrorTexts,
 };
+use crate::spell::reagents::{has_reagents, reagent_casts};
 
 /// An item action's icon when its template has not answered or its display id has no
 /// `ItemDisplayInfo` row: the reference's literal `0x847fe4`, from the resolver's `0x5d8927`.
@@ -260,8 +261,9 @@ pub(super) fn feed_actions(
         for (slot, button) in &actions.buttons {
             let (texture, count, consumable) = match button.kind {
                 ACTION_KIND_SPELL => {
+                    let def = spells.as_ref().and_then(|sp| sp.catalog.get(button.action));
                     let icon = spells.as_ref().and_then(|sp| {
-                        let d = sp.catalog.get(button.action)?;
+                        let d = def?;
                         spell_action_icon(
                             button.action,
                             d,
@@ -273,7 +275,14 @@ pub(super) fn feed_actions(
                             &commands,
                         )
                     });
-                    (icon, 0, false)
+                    // A reagent spell counts its casts (`0x5a9360`, `0x7ffa30`).
+                    let consumable = def.is_some_and(has_reagents);
+                    let casts = def.zip(store).filter(|_| consumable).map_or(0, |(d, s)| {
+                        reagent_casts(d, |id| {
+                            count_of(&s.0, &objects, id, InventoryScope::CARRIED)
+                        })
+                    });
+                    (icon, casts, consumable)
                 }
                 ACTION_KIND_ITEM => {
                     // Never nil: the reference's resolver `0x5d88b0` returns the question mark,
@@ -362,34 +371,40 @@ pub(super) fn feed_actions(
                 // Live icons: a weapon face follows the equipped weapon and form (Attack's
                 // `0x4e6870`), and a toggle's `ActiveIconID` follows its own aura (`0x4e6bbd`).
                 ACTION_KIND_SPELL => {
-                    let d = spells
-                        .as_ref()
-                        .and_then(|s| s.catalog.get(slot.action))
-                        .filter(|d| substitutes_weapon_icon(d) || d.active_icon_id != 0);
-                    match (d, spells.as_ref()) {
-                        (Some(d), Some(sp)) => {
-                            let fresh = spell_action_icon(
-                                slot.action,
-                                d,
-                                sp,
-                                Some(store),
-                                &objects,
-                                &items,
-                                icons.as_deref(),
-                                &commands,
-                            );
-                            let changed = fresh != slot.texture;
-                            if changed {
-                                debug!(
-                                    "ui_action: live icon swap slot {action} ({}) -> {fresh:?}",
-                                    slot.action
+                    let def = spells.as_ref().and_then(|s| s.catalog.get(slot.action));
+                    // A reagent spell's casts follow its reagents' counts (`0x5aa5c0`).
+                    let casts = def.filter(|_| slot.consumable).map_or(0, |d| {
+                        reagent_casts(d, |id| {
+                            count_of(&store.0, &objects, id, InventoryScope::CARRIED)
+                        })
+                    });
+                    let recounted = std::mem::replace(&mut slot.count, casts) != casts;
+                    let d = def.filter(|d| substitutes_weapon_icon(d) || d.active_icon_id != 0);
+                    recounted
+                        | match (d, spells.as_ref()) {
+                            (Some(d), Some(sp)) => {
+                                let fresh = spell_action_icon(
+                                    slot.action,
+                                    d,
+                                    sp,
+                                    Some(store),
+                                    &objects,
+                                    &items,
+                                    icons.as_deref(),
+                                    &commands,
                                 );
-                                slot.texture = fresh;
+                                let changed = fresh != slot.texture;
+                                if changed {
+                                    debug!(
+                                        "ui_action: live icon swap slot {action} ({}) -> {fresh:?}",
+                                        slot.action
+                                    );
+                                    slot.texture = fresh;
+                                }
+                                changed
                             }
-                            changed
+                            _ => false,
                         }
-                        _ => false,
-                    }
                 }
                 _ => false,
             };

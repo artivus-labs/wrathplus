@@ -4,12 +4,15 @@
 use std::collections::HashMap;
 
 use bevy::prelude::*;
-use wrathplus_formats::{ItemDisplay, ItemDisplayCatalog};
-use wrathplus_protocol::types::{ActionButton, ItemSpellEntry, ACTION_KIND_ITEM};
+use wrathplus_formats::{ItemDisplay, ItemDisplayCatalog, SpellCatalog, SpellDisplay};
+use wrathplus_protocol::types::{ActionButton, Field, ItemSpellEntry, ACTION_KIND_ITEM};
+use wrathplus_protocol::ObjectFields;
 use wrathplus_ui::script::UiScript;
 
 use super::feed::{feed_actions, MISSING_ITEM_ICON};
 use super::{CastErrors, MountErrors, PetTameFailures, PlayerActions, UiErrorKeys, UiErrorTexts};
+use crate::app_core::session::{ObjectStore, SelfPlayer};
+use crate::app_core::state::Spells;
 use crate::entities::ItemDisplays;
 use crate::items::{test_template, Items};
 use crate::net::{ClientCommand, NetCommands};
@@ -117,8 +120,8 @@ fn a_landed_item_template_redisplays_the_action_slot() {
     );
 }
 
-/// `IsConsumableAction 0x4e5250` reads only the item template, so it rides the icon's push: the
-/// `ACTIONBAR_SLOT_CHANGED` repaint reads both.
+/// `IsConsumableAction` (`0x5a9360`) reads the item template or the spell's reagents, so it rides
+/// the icon's push: the `ACTIONBAR_SLOT_CHANGED` repaint reads both.
 #[test]
 fn a_landed_item_template_also_lands_the_consumable_gate() {
     let (mut app, _rx) = app_with_food_on_the_bar();
@@ -157,6 +160,44 @@ fn a_landed_item_template_also_lands_the_consumable_gate() {
         Some(1),
         "…and the gate lands with it, on the same push, so the repaint that follows paints a count"
     );
+
+    // A reagent spell (`0x5a9360`, `0x7ffa30`): Portal: Stormwind's one Rune of Portals a cast,
+    // the count following the carried stack with no bar edit (`0x5aa5c0`).
+    let (rune, portal) = (17_032, 10_059);
+    let mut d = SpellDisplay::default();
+    d.reagents[0] = (rune, 1);
+    let rune_stack = |n| {
+        ObjectFields::from_pairs(&[
+            (Field::ObjectEntry.index(), rune),
+            (Field::ItemStackCount.index(), n),
+        ])
+    };
+    let world = app.world_mut();
+    world.insert_resource(Spells {
+        catalog: SpellCatalog::from_displays(HashMap::from([(portal, d)])),
+        ..Spells::empty_for_tests()
+    });
+    let mut actions = world.resource_mut::<PlayerActions>();
+    let button = ActionButton {
+        slot: 0,
+        action: portal,
+        kind: wrathplus_protocol::types::ACTION_KIND_SPELL,
+    };
+    actions.buttons.insert(0, button);
+    actions.dirty = true;
+    let item = crate::items::test_spawn_item(world, 0xA1, rune_stack(3), false);
+    let pack = ObjectFields::from_pairs(&[(Field::PlayerPackSlot1.index(), 0xA1)]);
+    world.spawn((SelfPlayer, ObjectStore(pack)));
+    let portal_count = |app: &mut App| {
+        let s = app.world_mut().non_send_resource::<UiScript>();
+        s.eval::<(Option<i64>, u32)>("return IsConsumableAction(1), GetActionCount(1)")
+            .unwrap()
+    };
+    app.update();
+    assert_eq!(portal_count(&mut app), (Some(1), 3), "three runes");
+    app.world_mut().get_mut::<ObjectStore>(item).unwrap().0 = rune_stack(2);
+    app.update();
+    assert_eq!(portal_count(&mut app), (Some(1), 2), "a spent rune");
 }
 
 /// `IsConsumableAction 0x4e5250`'s two clauses; the item class is neither.
@@ -260,31 +301,18 @@ fn a_macro_slot_shows_the_macros_own_icon_and_follows_an_edit() {
 
     const SLOT: u8 = 0;
     const ACTION: u32 = 1;
-    let (tx, _rx) = crossbeam_channel::unbounded();
-    let mut app = App::new();
-    let mut actions = PlayerActions::default();
-    actions.buttons.insert(
-        SLOT,
-        ActionButton {
-            slot: SLOT,
-            action: 1, // macro index 1
-            kind: ACTION_KIND_MACRO,
-        },
-    );
-    actions.dirty = true;
-    app.insert_resource(actions)
-        .init_resource::<Items>()
-        .init_resource::<crate::net::GuidIndex>()
-        .init_resource::<CastErrors>()
-        .init_resource::<MountErrors>()
-        .init_resource::<PetTameFailures>()
-        .init_resource::<UiErrorKeys>()
-        .init_resource::<UiErrorTexts>()
-        // The cast-failure combat-log line rides the same drain.
-        .init_resource::<crate::app_core::chat::ChatLog>()
-        .init_resource::<crate::sound::MessageSounds>()
-        .insert_resource(NetCommands(tx));
-    let mut script = UiScript::new().unwrap();
+    let (mut app, _rx) = app_with_food_on_the_bar();
+    let button = ActionButton {
+        slot: SLOT,
+        action: 1, // macro index 1
+        kind: ACTION_KIND_MACRO,
+    };
+    let world = app.world_mut();
+    world
+        .resource_mut::<PlayerActions>()
+        .buttons
+        .insert(SLOT, button);
+    let mut script = world.non_send_resource_mut::<UiScript>();
     script.set_macro_spell_icons(vec!["Ability_Ambush".into(), "Spell_Fire_FlameBolt".into()]);
     script.set_macros(MacroState {
         account: vec![MacroView {
@@ -296,8 +324,6 @@ fn a_macro_slot_shows_the_macros_own_icon_and_follows_an_edit() {
         }],
         character: Vec::new(),
     });
-    app.insert_non_send_resource(script);
-    app.add_systems(Update, feed_actions);
 
     app.update();
     let icon = |app: &mut App| {
@@ -440,48 +466,27 @@ fn pre_resolved_lines_land_on_the_errors_frame_in_the_arms_colour() {
 #[test]
 fn a_refused_cast_writes_no_chat_line() {
     use crate::app_core::errors::CastFail;
-    use crate::app_core::state::Spells;
-    use wrathplus_formats::{SpellCatalog, SpellDisplay};
 
     const GROWL: u32 = 2649;
 
-    let (tx, _rx) = crossbeam_channel::unbounded();
-    let mut app = App::new();
+    let (mut app, _rx) = app_with_food_on_the_bar();
     let mut errors = CastErrors::default();
     // ROOTED has a string, so the entry does not drop for want of one.
-    errors.0.push(CastFail::local(
-        GROWL,
-        crate::spell::cast_fail_keys::reason::ROOTED,
-    ));
-
-    app.insert_resource(PlayerActions::default())
-        .insert_resource(errors)
-        .insert_resource(Spells {
-            catalog: SpellCatalog::from_displays(HashMap::from([(
-                GROWL,
-                SpellDisplay {
-                    name: "Growl".into(),
-                    ..Default::default()
-                },
-            )])),
-            ..Spells::empty_for_tests()
-        })
-        .init_resource::<Items>()
-        .init_resource::<crate::net::GuidIndex>()
-        .init_resource::<MountErrors>()
-        .init_resource::<PetTameFailures>()
-        .init_resource::<UiErrorKeys>()
-        .init_resource::<UiErrorTexts>()
-        .init_resource::<crate::app_core::chat::ChatLog>()
-        .init_resource::<crate::sound::MessageSounds>()
-        .insert_resource(NetCommands(tx));
-    let script = UiScript::new().unwrap();
+    let rooted = crate::spell::cast_fail_keys::reason::ROOTED;
+    errors.0.push(CastFail::local(GROWL, rooted));
+    let growl = SpellDisplay {
+        name: "Growl".into(),
+        ..Default::default()
+    };
+    app.insert_resource(errors).insert_resource(Spells {
+        catalog: SpellCatalog::from_displays(HashMap::from([(GROWL, growl)])),
+        ..Spells::empty_for_tests()
+    });
     // Only what the log line needs; the red line's text has its own tests.
+    let script = app.world_mut().non_send_resource_mut::<UiScript>();
     script
         .run(r#"SPELL_FAILED_ROOTED = "You are unable to move";"#)
         .unwrap();
-    app.insert_non_send_resource(script);
-    app.add_systems(Update, feed_actions);
     app.update();
 
     assert_eq!(
