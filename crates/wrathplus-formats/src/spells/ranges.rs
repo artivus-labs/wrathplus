@@ -1,5 +1,7 @@
 //! `SpellRange.dbc`, by `rangeIndex` ([`crate::spells::SpellDisplay::range_index`]), and
-//! `GetMinMaxRange` (`0x6e3480`): a spell's cast range in yards.
+//! `GetMinMaxRange` (`0x7ff480`): a spell's cast range in yards. `0x7ff480` and
+//! `GetCurrentSpeed`'s `0x987570` are build 12340's; every other address and object offset here
+//! is 1.12's.
 
 use std::collections::HashMap;
 
@@ -44,9 +46,9 @@ pub const MOVING_RANGE_BONUS: f32 = f32::from_bits(0x402a_aaab);
 pub struct UnitMotion {
     /// The movement flags word, `[[unit+0x118]+0x40]` (`0x6e364f`-`0x6e3655`, `0x6e3661`).
     pub flags: u32,
-    /// The current speed, `0x7c4c90` on `[unit+0x9a8]` (`0x5fc35c`-`0x5fc365`): 0 with no
-    /// direction bit, else the unit's spline speed, or the swim, walk, run or run-back speed the
-    /// flags pick.
+    /// The current speed, `GetCurrentSpeed` (`0x987570`; 1.12 on `[unit+0x9a8]`,
+    /// `0x5fc35c`-`0x5fc365`): 0 with no direction bit, else the unit's spline speed, or the swim,
+    /// walk, run or run-back speed the flags pick.
     pub speed: f32,
     /// The walk speed, `[unit+0xa30]` (`0x5fc354`).
     pub walk_speed: f32,
@@ -69,7 +71,7 @@ impl UnitMotion {
     }
 }
 
-/// A unit as `GetMinMaxRange` (`0x6e3480`) reads it: its combat reach, whether it is a player, and
+/// A unit as `GetMinMaxRange` (`0x7ff480`) reads it: its combat reach, whether it is a player, and
 /// its motion.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RangeUnit {
@@ -93,7 +95,7 @@ impl RangeUnit {
     }
 }
 
-/// The units `GetMinMaxRange` (`0x6e3480`) reads besides the caster, `None` where that unit is
+/// The units `GetMinMaxRange` (`0x7ff480`) reads besides the caster, `None` where that unit is
 /// absent. The two are different inputs: only the first is an argument of the call.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct RangeTargets {
@@ -107,7 +109,7 @@ pub struct RangeTargets {
     pub attack_target: Option<RangeUnit>,
 }
 
-/// `GetMinMaxRange` (`0x6e3480`): a spell's `{min, max}` cast range, summed in `f64` because the
+/// `GetMinMaxRange` (`0x7ff480`): a spell's `{min, max}` cast range, summed in `f64` because the
 /// client keeps the reach sums on the x87 stack and stores `f32` only at the end. On-next-swing
 /// spells (`Attributes & 0x404`, `0x6e34fb`) short-circuit to `(0, 100)`. The melee arm sums the
 /// reach of the unit target, else the auto-attack target, else the caster's own, with the

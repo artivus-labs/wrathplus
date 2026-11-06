@@ -292,7 +292,7 @@ fn a_walking_remote_backpedals_at_walk_speed_not_run_back() {
 
 #[test]
 fn remote_motion_swim_backpedal_takes_min_of_the_swim_pair() {
-    // `0x7c4c90`'s backward arms: `min(back, forward)` for both pairs.
+    // `0x987570`'s backward arms: `min(back, forward)` for both pairs.
     let mut s = speeds();
     s.swim_back = 2.5;
     let (pos, _o, _vz, speed) =

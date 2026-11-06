@@ -291,7 +291,7 @@ impl ObjectFields {
         self.get(Field::UnitBytes2).unwrap_or(0) & 0x0002_0000 != 0
     }
     /// `UNIT_FIELD_COMBATREACH` (`+0x1f0`): melee reach, summed as `rA + rB + 1.333`, floor 5.0,
-    /// by the attack range gate (`0x6e3480`); 1.5, the vanilla default, before it streams.
+    /// by the attack range gate (`0x7ff480`); 1.5, the vanilla default, before it streams.
     pub fn unit_combat_reach(&self) -> f32 {
         self.get_float(Field::UnitCombatreach, 0).unwrap_or(1.5)
     }

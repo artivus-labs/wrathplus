@@ -4,7 +4,7 @@
 //! cache change only, `0x4e5c00`), the state pair (`0x4b3250`), combat enter and leave
 //! (`0x6256ff`, `0x625778`), and autorepeat start and stop (`0x6e5952`, `0x6ea170`). Usability is
 //! `IsSpellUsableNow 0x6e3d60` ([`crate::spell::usable`]), auto-repeat the `0xceac30` key, and
-//! range the squared distance against `GetMinMaxRange 0x6e3480`.
+//! range the squared distance against `GetMinMaxRange 0x7ff480`.
 
 use crate::inventory::carried_counts;
 use std::collections::HashMap;

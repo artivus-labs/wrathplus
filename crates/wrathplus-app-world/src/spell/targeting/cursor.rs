@@ -14,7 +14,7 @@ use crate::target::{CursorKind, PickOcclusion, WorldCursor};
 
 use super::{SpellTargeting, TargetingWants};
 
-/// What `GetMinMaxRange 0x6e3480` reads for the cursor's two range verdicts: the ground point
+/// What `GetMinMaxRange 0x7ff480` reads for the cursor's two range verdicts: the ground point
 /// (`CheckGroundPointInRange 0x6e6810`, a null target at `0x6e6879`) and the GameObject leg of
 /// `0x6e6460` (the object as target at `0x6e679b`). Neither passes a unit, which the function
 /// tests for at `0x6e34e1`-`0x6e34f9`: the ranged arm pads nothing and takes no moving bonus,
@@ -116,7 +116,7 @@ pub fn ground_cast_radius(
 /// its ray (`0x4812c8`) and the world cursor stays grey.
 ///
 /// The object arm is `0x6e6460`'s GameObject leg: `word & 0x4800`, the lock predicate `0x5f8260`,
-/// then the same min/max range test through `GetMinMaxRange 0x6e3480`, its range modifier included.
+/// then the same min/max range test through `GetMinMaxRange 0x7ff480`, its range modifier included.
 /// Its unit leg is
 /// [`SpellTargeting::can_target_unit`] and its corpse leg [`SpellTargeting::can_target_corpse`],
 /// over a corpse the pick admitted under a word in `0x8600`. The world-item leg is not built.

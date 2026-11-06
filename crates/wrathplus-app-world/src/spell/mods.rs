@@ -40,7 +40,7 @@ const CELLS: usize = BITS * OPS;
 pub const OP_COST: u8 = 14;
 /// `SPELLMOD_CASTING_TIME`, applied by `GetCastTime 0x6e3340` at `0x6e33b7`.
 pub const OP_CAST_TIME: u8 = 10;
-/// `GetMinMaxRange 0x6e3480` applies op 5 to its maximum at `0x6e3744`.
+/// `GetMinMaxRange 0x7ff480` applies op 5 to its maximum (`push 5` at `0x7ff737`).
 pub const OP_RANGE: u8 = 5;
 /// `GetCurrentCastRadius 0x6e6350` applies op 6 before the reticle's 20-yard cap.
 pub const OP_RADIUS: u8 = 6;

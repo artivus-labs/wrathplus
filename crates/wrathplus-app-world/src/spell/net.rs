@@ -683,13 +683,13 @@ fn cast_result(
     // arm clears the guard: both clears are the reference's one `0x6e741a call 0x6e4940(0x1c)`.
     let in_flight = pending.committed(Instant::now()) == Some(spell_id);
     if !success {
-        // `HandleCastFailed 0x6e1a00` clears the GCD armed at send (`0x6e1d83 → 0x6e1630`), and the
-        // bit-25 revert below drops a parked record; the spell's own recovery starts at SPELL_GO,
-        // which a failed cast never reaches. A failing cached auto-repeat spell not DONT_REPORT
-        // runs the full local cancel (`0x6e1cd9`–`0x6e1cea` → `0x6ea080`, the
-        // `SMSG_CANCEL_AUTO_REPEAT` routine). A deselect arrives as this failure (vmangos
-        // `HandleSetSelectionOpcode` → `Spell::cancel` → `SendCastResult(INTERRUPTED)`); target
-        // death arrives as [`cancel_auto_repeat`].
+        // `HandleCastFailed` (12340 `0x808200`, 1.12 `0x6e1a00`) clears the GCD armed at send (1.12
+        // `0x6e1d83 → 0x6e1630`), and the bit-25 revert below drops a parked record; the spell's
+        // own recovery starts at SPELL_GO, which a failed cast never reaches. A failing cached
+        // auto-repeat spell not DONT_REPORT runs the full local cancel (1.12 `0x6e1cd9`–`0x6e1cea`
+        // → `0x6ea080`, the `SMSG_CANCEL_AUTO_REPEAT` routine). A deselect arrives as this failure
+        // (vmangos `HandleSetSelectionOpcode` → `Spell::cancel` → `SendCastResult(INTERRUPTED)`);
+        // target death arrives as [`cancel_auto_repeat`].
         let now = Instant::now();
         // DONT_REPORT skips the GCD clear and the display (12340 `0x808200`'s `!= 0x1b` gates);
         // the in-flight clear below still runs, as AzerothCore sends it for real aborts.
