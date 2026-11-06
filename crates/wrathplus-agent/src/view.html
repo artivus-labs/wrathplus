@@ -54,11 +54,10 @@
   <h1>WrathPlus · agent view</h1>
   <span id="state" class="badge">connecting</span>
   <span class="spacer"></span>
-  <label>Frame size
+  <label>Resolution
     <select id="scale">
-      <option value="0.35">small</option>
-      <option value="0.5" selected>medium</option>
-      <option value="1">full</option>
+      <option value="1" selected>full</option>
+      <option value="0.5">half (lighter on the client)</option>
     </select>
   </label>
 </header>
@@ -94,7 +93,8 @@ async function frameLoop() {
   for (;;) {
     const started = performance.now();
     try {
-      const response = await get("/screenshot?scale=" + $("scale").value);
+      // JPEG: several times smaller and quicker to encode than PNG, so frames keep up.
+      const response = await get("/screenshot?format=jpeg&quality=90&scale=" + $("scale").value);
       if (response.ok) {
         const url = URL.createObjectURL(await response.blob());
         $("frame").src = url;
@@ -105,7 +105,8 @@ async function frameLoop() {
         $("fps").textContent = (frames.length / 3).toFixed(1) + " fps";
       }
     } catch (_) { await sleep(1000); }
-    await sleep(Math.max(0, 150 - (performance.now() - started)));
+    // Back to back, at most 30 a second: the client answers one frame per request.
+    await sleep(Math.max(0, 33 - (performance.now() - started)));
   }
 }
 

@@ -31,8 +31,37 @@ pub(crate) enum Job {
     },
     Screenshot {
         scale: f32,
+        format: Format,
         reply: Sender<Result<Vec<u8>, String>>,
     },
+}
+
+/// How `/screenshot` encodes a frame: PNG (lossless, the default), or JPEG at a quality of 1-100,
+/// several times smaller and quicker to encode, for a live view.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum Format {
+    Png,
+    Jpeg(u8),
+}
+
+impl Format {
+    /// `format=jpeg` with an optional `quality` (default 85), else PNG.
+    fn parse(format: Option<&str>, quality: Option<&str>) -> Self {
+        match format {
+            Some("jpeg" | "jpg") => {
+                let quality = quality.and_then(|q| q.parse::<u8>().ok()).unwrap_or(85);
+                Format::Jpeg(quality.clamp(1, 100))
+            }
+            _ => Format::Png,
+        }
+    }
+
+    fn content_type(self) -> &'static str {
+        match self {
+            Format::Png => "image/png",
+            Format::Jpeg(_) => "image/jpeg",
+        }
+    }
 }
 
 pub(crate) struct Port {
@@ -162,14 +191,19 @@ fn route(shared: &Port, request: &mut HttpRequest) -> Reply {
                 .and_then(|s| s.parse::<f32>().ok())
                 .filter(|s| *s > 0.0 && *s <= 1.0)
                 .unwrap_or(1.0);
+            let format = Format::parse(param("format").as_deref(), param("quality").as_deref());
             let (reply, answer) = crossbeam_channel::bounded(1);
-            if shared.jobs.send(Job::Screenshot { scale, reply }).is_err() {
+            let job = Job::Screenshot {
+                scale,
+                format,
+                reply,
+            };
+            if shared.jobs.send(job).is_err() {
                 return json_response(503, &json!({"error": "game loop stopped"}));
             }
             match answer.recv_timeout(GAME_TIMEOUT) {
-                Ok(Ok(png)) => {
-                    Response::from_data(png).with_header(header("Content-Type", "image/png"))
-                }
+                Ok(Ok(bytes)) => Response::from_data(bytes)
+                    .with_header(header("Content-Type", format.content_type())),
                 Ok(Err(e)) => json_response(500, &json!({"error": e})),
                 Err(_) => json_response(504, &json!({"error": "no frame in time"})),
             }
@@ -280,6 +314,18 @@ fn json_response(status: u16, value: &Value) -> Reply {
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn screenshots_are_png_unless_jpeg_is_asked_for() {
+        assert_eq!(Format::parse(None, None), Format::Png);
+        assert_eq!(Format::parse(Some("png"), Some("50")), Format::Png);
+        assert_eq!(Format::parse(Some("jpeg"), None), Format::Jpeg(85));
+        assert_eq!(Format::parse(Some("jpg"), Some("90")), Format::Jpeg(90));
+        assert_eq!(Format::parse(Some("jpeg"), Some("0")), Format::Jpeg(1));
+        assert_eq!(Format::parse(Some("jpeg"), Some("250")), Format::Jpeg(100));
+        assert_eq!(Format::parse(Some("jpeg"), Some("high")), Format::Jpeg(85));
+        assert_eq!(Format::Jpeg(90).content_type(), "image/jpeg");
+    }
 
     /// A raw HTTP/1.1 exchange, so the tests need no client crate.
     fn call(address: std::net::SocketAddr, request: &str) -> (u16, String) {
