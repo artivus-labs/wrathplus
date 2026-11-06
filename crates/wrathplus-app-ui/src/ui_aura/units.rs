@@ -401,4 +401,6 @@ impl UnitAuras {
 #[cfg(test)]
 mod tests {
     include!("units_tests.rs");
+    include!("units_roster_tests.rs");
+    include!("units_token_tests.rs");
 }
