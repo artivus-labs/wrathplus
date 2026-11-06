@@ -341,8 +341,9 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
     // IsEquippedItemType("type") (`0x51c740`) → 1 when a worn item (equipment slots only, walk
-    // flag 1) has the slot an `INVTYPE_*` key or its text names, else whose class or subclass
-    // name is `type`. Inferred: both compares ignore case. A missing or empty type raises.
+    // flag 1, so `0x7546f0` skips a broken or `0x10` copy) has the slot an `INVTYPE_*` key or its
+    // text names, else whose class or subclass name is `type`. Inferred: both compares ignore
+    // case. A missing or empty type raises.
     g.set(
         "IsEquippedItemType",
         lua.create_function(|lua, kind: Value| {
@@ -357,6 +358,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             let hit = model.inventory_slots[1..=19]
                 .iter()
                 .flatten()
+                .filter(|s| !super::wrath_item_count::skipped(s.flags, s.durability))
                 .filter_map(|s| model.item_templates.get(&s.item_id))
                 .any(|t| match slot_type {
                     Some(it) => t.inventory_type == it,
