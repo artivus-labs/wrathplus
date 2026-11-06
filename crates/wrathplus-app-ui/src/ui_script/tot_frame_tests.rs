@@ -61,7 +61,7 @@ fn load_tot() -> UiScript {
     s.run(r#"SHOW_TARGET_OF_TARGET = "0" SHOW_TARGET_OF_TARGET_STATE = "5""#)
         .unwrap();
     s.set_unit("player", Some(unit("Tri", 0x100, 100)));
-    s.set_unit("target", Some(unit("Kobold Miner", 0x200, 80)));
+    crate::test_guids::push_target(&mut s, 0x100, Some(unit("Kobold Miner", 0x200, 80)));
     s.set_unit("targettarget", Some(unit("Tri", 0x100, 100)));
     s.fire_event("PLAYER_TARGET_CHANGED", vec![]);
     s
@@ -168,18 +168,18 @@ fn the_four_unit_gates_each_take_the_frame_down() {
     assert!(!shown(&mut s), "nothing to show");
     s.set_unit("targettarget", Some(unit("Tri", 0x100, 100)));
 
-    s.set_unit("target", None);
+    crate::test_guids::push_target(&mut s, 0x100, None);
     s.run("TargetofTarget_Update(TargetFrameToT)").unwrap();
     assert!(!shown(&mut s), "no target, no target's target");
-    s.set_unit("target", Some(unit("Kobold Miner", 0x200, 80)));
+    crate::test_guids::push_target(&mut s, 0x100, Some(unit("Kobold Miner", 0x200, 80)));
 
     // The target is the player (same guid).
-    s.set_unit("target", Some(unit("Tri", 0x100, 100)));
+    crate::test_guids::push_target(&mut s, 0x100, Some(unit("Tri", 0x100, 100)));
     s.run("TargetofTarget_Update(TargetFrameToT)").unwrap();
     assert!(!shown(&mut s), "self-target: nothing to add");
-    s.set_unit("target", Some(unit("Kobold Miner", 0x200, 80)));
+    crate::test_guids::push_target(&mut s, 0x100, Some(unit("Kobold Miner", 0x200, 80)));
 
-    s.set_unit("target", Some(unit("Kobold Miner", 0x200, 0)));
+    crate::test_guids::push_target(&mut s, 0x100, Some(unit("Kobold Miner", 0x200, 0)));
     s.run("TargetofTarget_Update(TargetFrameToT)").unwrap();
     assert!(!shown(&mut s), "a corpse is fighting nobody");
 

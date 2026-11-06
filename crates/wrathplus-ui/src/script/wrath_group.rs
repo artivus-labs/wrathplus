@@ -3,6 +3,8 @@
 use super::super::Model;
 use mlua::{Function, Lua, MultiValue, Value};
 
+use super::super::binding_abi::flag;
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Member {
     pub guid: u64,
@@ -59,37 +61,43 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 index,
                 "Usage: GetRaidRosterInfo(index)",
             )?;
-            let member = {
+            // 12340 answers 14 values on every path (`mov eax,0xe`, `0x5739c7`, `0x5739dc`); a miss
+            // (out of range, an empty slot, a name-cache miss) pads with nil (`0x5739e6`).
+            let (row, member, master) = {
                 let model = lua.app_data_ref::<Model>().expect("model");
-                usize::try_from(n.wrapping_sub(1))
+                let row = usize::try_from(n.wrapping_sub(1))
                     .ok()
                     .and_then(|i| model.party.raid.get(i))
-                    .and_then(|r| model.wrath_group.members.iter().find(|m| m.guid == r.guid))
-                    .cloned()
-            };
-            // Return 10: main-tank/main-assist assignment; 11: master looter.
-            let assignment = member.as_ref().and_then(|m| {
-                if m.flags & 2 != 0 {
-                    Some("MAINTANK")
-                } else if m.flags & 4 != 0 {
-                    Some("MAINASSIST")
-                } else {
-                    None
-                }
-            });
-            values.push_back(match assignment {
-                Some(a) => Value::String(lua.create_string(a)?),
-                None => Value::Nil,
-            });
-            let master = {
-                let model = lua.app_data_ref::<Model>().expect("model");
+                    .filter(|r| !r.name.is_empty())
+                    .map(|r| r.guid);
+                let member = row
+                    .and_then(|g| model.wrath_group.members.iter().find(|m| m.guid == g))
+                    .cloned();
+                // Return 11, isML: the master-loot method (`[0xacc6c8] == 2`) and the row is the
+                // master looter (`[0xbd1970]`).
                 let guid = model.party.master_looter_guid;
-                usize::try_from(n.wrapping_sub(1))
-                    .ok()
-                    .and_then(|i| model.party.raid.get(i))
-                    .is_some_and(|r| guid != 0 && r.guid == guid)
+                let master = model.party.loot_method == "master"
+                    && row.is_some_and(|r| guid != 0 && r == guid);
+                (row, member, master)
             };
-            values.push_back(Value::Boolean(master));
+            if row.is_none() {
+                values.extend(std::iter::repeat_n(Value::Nil, 5));
+                return Ok(values);
+            }
+            // Return 10: `[rec+0x328]` bit 2 MAINTANK, else bit 4 MAINASSIST.
+            let flags = member.as_ref().map_or(0, |m| m.flags);
+            let roles = member.as_ref().map_or(0, |m| m.roles);
+            let assignment = match flags {
+                f if f & 2 != 0 => Value::String(lua.create_string("MAINTANK")?),
+                f if f & 4 != 0 => Value::String(lua.create_string("MAINASSIST")?),
+                _ => Value::Nil,
+            };
+            values.push_back(assignment);
+            values.push_back(flag(master));
+            // Returns 12-14: `[rec+0x32c]` bits 2, 4 and 8, the tank, healer and damage roles.
+            for bit in [2, 4, 8] {
+                values.push_back(flag(roles & bit != 0));
+            }
             Ok(values)
         })?,
     )?;
@@ -98,7 +106,6 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         // UnitGroupRolesAssigned(unit) → isTank, isHealer, isDamage: build 12340's three booleans
         // (PartyMemberFrame.lua:223, PlayerFrame.lua:250), from the member's role bits 2, 4, 8.
         lua.create_function(|lua, token: Option<String>| {
-            super::super::unit::check_unit_token(lua, &token)?;
             let model = lua.app_data_ref::<Model>().expect("model");
             let guid = token.as_ref().and_then(|t| model.unit(t)).map(|u| u.guid);
             let bits = guid
@@ -158,8 +165,9 @@ mod tests {
             ..Default::default()
         });
         s.set_difficulties(2, 4);
-        assert!(s.eval::<bool>("local a,b,c,d,e,f,g,h,i,j,k=GetRaidRosterInfo(1); return a=='Ally' and j=='MAINTANK' and k==false and select('#', UnitGroupRolesAssigned('raid1'))==3 and UnitGroupRolesAssigned('raid1')==true and select(2, UnitGroupRolesAssigned('raid1'))==false and GetDungeonDifficulty()==2 and GetRaidDifficulty()==4").unwrap());
-        assert_eq!(s.arity("GetRaidRosterInfo(1)").unwrap(), 11);
+        assert!(s.eval::<bool>("local a,b,c,d,e,f,g,h,i,j,k,l,m,n=GetRaidRosterInfo(1); return a=='Ally' and j=='MAINTANK' and k==nil and l==1 and m==nil and n==nil and select('#', UnitGroupRolesAssigned('raid1'))==3 and UnitGroupRolesAssigned('raid1')==true and select(2, UnitGroupRolesAssigned('raid1'))==false and GetDungeonDifficulty()==2 and GetRaidDifficulty()==4").unwrap());
+        // Fourteen values (`0x5739c7`): isML 1 or nil, then the tank, healer and damage bits.
+        assert_eq!(s.arity("GetRaidRosterInfo(1)").unwrap(), 14);
         s.set_wrath_group(Default::default());
         assert!(s
             .eval::<bool>(

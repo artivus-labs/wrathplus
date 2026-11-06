@@ -19,21 +19,21 @@ pub struct PartyMemberInfo {
     pub guid: u64,
 }
 
-/// One raid roster row, `GetRaidRosterInfo`'s nine returns in push order (`0x4bb560`). The
+/// One raid roster row, `GetRaidRosterInfo`'s first nine returns in push order (`0x573690`). The
 /// binding, not the row, applies the subgroup's +1 and the offline zone.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RaidMemberInfo {
-    /// Return 1, from the name cache (`0x4bb5ee`). Empty means not cached, which the reference
-    /// answers with the miss tuple, as for an empty slot (`0x4bb5f8 je 0x4bb7b9`).
+    /// Return 1, from the name cache (`0x573722`). Empty means not cached, which the reference
+    /// answers with the miss tuple, as for an empty slot (`0x57372b je 0x5739e6`).
     pub name: String,
-    /// The identity `UnitInRaid` matches a token against; `0` never matches, as the reference's
-    /// membership test rejects a zero guid (`0x4baee0`).
+    /// The identity `UnitInRaid`'s row walk (`0x608130`) matches a token's guid against; `0`
+    /// never matches.
     pub guid: u64,
-    /// Return 2, exposed as stored (`0x4bb607 fild [edi+0xc]`): 0 member, 1 assistant, 2 leader,
+    /// Return 2, exposed as stored (`0x57374b fild [edi+0xc]`): 0 member, 1 assistant, 2 leader,
     /// the convention addons read (`ChatLog.lua:351-353`).
     pub rank: u32,
     /// Return 3, stored 0-based as the wire's `GroupMemberEntry::flags` bits 0-2 carry it; the
-    /// binding exposes it 1-based (`0x4bb61a inc eax`).
+    /// binding exposes it 1-based (`0x57375a add ecx,0x1`).
     pub subgroup: u32,
     /// Return 4, `0` until an object or a stats packet carries it, as in the reference's third arm.
     pub level: u32,
@@ -61,13 +61,13 @@ pub struct PartyState {
     pub members: Vec<PartyMemberInfo>,
     /// `GetPartyLeaderIndex`: `0` the player, `1..=4` that `members` slot.
     pub leader_index: u32,
-    /// The cached group-leader guid (the reference's `[0xbc75f8]:[0xbc75fc]`), `0` when
+    /// The cached group-leader guid (the reference's `[0xbd1968]:[0xbd196c]`), `0` when
     /// ungrouped, fed from the wire rather than derived from [`Self::leader_index`].
-    /// `UnitIsPartyLeader` (`0x516210`) compares a resolved token's guid with it and, unlike
-    /// `IsPartyLeader` (`0x4e9130`), has no zero guard, so an unresolvable token answers `1` while
+    /// `UnitIsPartyLeader` (`0x60c770`) compares a resolved token's guid with it and, unlike
+    /// `IsPartyLeader` (`0x52ccd0`), has no zero guard, so an unresolvable token answers `1` while
     /// solo.
     pub leader_guid: u64,
-    /// The player's own guid (`0x468550`, `[0xb41414]+0xc0`), `0` out of world. With
+    /// The player's own guid (`0x4d3790`, the object manager's `+0xc0`), `0` out of world. With
     /// [`Self::leader_guid`] it is the ready-check timeout's leader gate, a bare guid compare, so a
     /// solo player never matches.
     pub own_guid: u64,
@@ -117,13 +117,13 @@ pub enum PartyRequest {
     UninviteGuid { guid: u64, reason: String },
     /// `PromoteToPartyLeader(unit)`, by unit token.
     PromoteUnit(String),
-    /// `SetLootMethod(method[, masterName][, threshold])`; the app resolves the master looter's
-    /// name to a roster member.
+    /// `SetLootMethod(method[, masterName])`, validated in the VM; the app resolves the master
+    /// looter's name to a roster member.
     LootMethod {
         method: String,
         master_name: Option<String>,
-        /// The reference reads it for every method (`0x4e92a0`, presence-checked by `0x6f34d0`),
-        /// the master looter's name only for `"master"`.
+        /// The current threshold, which 12340 sends with every method (`0x52de1d`); the binding
+        /// takes no threshold argument.
         threshold: Option<u32>,
     },
     /// `SetLootThreshold(n)`.
@@ -227,21 +227,11 @@ impl super::UiScript {
     }
 }
 
-/// Whether the player leads the group. `IsRaidLeader` (`0x4bb8c0`) and `IsPartyLeader`
-/// (`0x4e9130`) both compare the cached leader guid (`[0xbc75f8]`, `[0xbc75fc]`) with the player's
-/// own (`0x468550`) and read no raid flag, so `IsRaidLeader()` is true for a party leader.
-fn leads_the_group(model: &Model) -> bool {
-    // Stand-in for that compare: `leader_index` is `0` when we lead but also when ungrouped, where
-    // the reference's zero leader guid matches nobody, hence the empty-roster guard. In a raid both
-    // cover only our subgroup: a leader elsewhere also reads `0`, and a leader alone in theirs has
-    // no `members`, so there it can differ from the guid compare.
-    !model.party.members.is_empty() && model.party.leader_index == 0
-}
-
-/// `GetRaidRosterInfo`'s values for one row, or the miss tuple for `None`. Nine on every path
-/// (`0x4bb560`, every return `mov eax,9`): out of range, an empty slot and a name-cache miss all
-/// reach `0x4bb7b9`, which pushes `nil, 0, 1, 1` and five `nil`s. Takes the row by value because
-/// every arm re-enters Lua, and a callback drops its `app_data` borrow before that.
+/// `GetRaidRosterInfo`'s first nine values for one row, or the miss tuple's for `None`; build
+/// 12340's `0x573690` answers fourteen on every path (`mov eax,0xe`), `wrath_group.rs` adding the
+/// last five. Out of range, an empty slot and a name-cache miss all reach `0x5739e6`, which pushes
+/// `nil, 0, 1, 1` and ten `nil`s. Takes the row by value because every arm re-enters Lua, and a
+/// callback drops its `app_data` borrow before that.
 fn raid_roster_info(lua: &Lua, row: Option<RaidMemberInfo>) -> mlua::Result<MultiValue> {
     let Some(m) = row else {
         return Ok(MultiValue::from_vec(vec![
@@ -308,53 +298,26 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // GetRaidRosterInfo(index) → name, rank, subgroup, level, class, fileName, zone, online and an
-    // unnamed ninth, 1-based. Its only raise is a non-number argument (`0x4bb582 call 0x6f34d0`,
-    // `0x4bb591 call 0x6f4940`, usage string `0x8474a0`).
+    // GetRaidRosterInfo(index) (`0x573690`), 1-based: name, rank, subgroup, level, class,
+    // fileName, zone, online and isDead here; `wrath_group.rs` adds the last five. Its only raise
+    // is a non-number argument (`lua_isnumber` at `0x5736a0`, the Usage at `0x5736ac`).
     g.set(
         "GetRaidRosterInfo",
         lua.create_function(|lua, index: Value| {
             let index = number_arg(lua, index, "Usage: GetRaidRosterInfo(index)")?;
             let row = {
                 let model = lua.app_data_ref::<Model>().expect("model app_data");
-                // One unsigned compare after the decrement (`0x4bb5bb dec eax`, `0x4bb5be jae`)
+                // One unsigned compare after the decrement (`0x5736e6 sub eax,0x1`, `0x5736f2 jae`)
                 // catches an index of 0 or below and one past the count; `dec` wraps, and
                 // `wrapping_sub` keeps that true of `i32::MIN`.
                 usize::try_from(index.wrapping_sub(1))
                     .ok()
                     .and_then(|i| model.party.raid.get(i))
-                    // A name-cache miss shares that same arm (`0x4bb5f8 je 0x4bb7b9`).
+                    // A name-cache miss shares that same arm (`0x57372b je 0x5739e6`).
                     .filter(|m| !m.name.is_empty())
                     .cloned()
             };
             raid_roster_info(lua, row)
-        })?,
-    )?;
-
-    // IsRaidLeader() → 1 or nil, true for a party leader too (`leads_the_group`).
-    g.set(
-        "IsRaidLeader",
-        lua.create_function(|lua, ()| {
-            let model = lua.app_data_ref::<Model>().expect("model app_data");
-            Ok(if leads_the_group(&model) {
-                Value::Integer(1)
-            } else {
-                Value::Nil
-            })
-        })?,
-    )?;
-
-    // GetPartyMember(id) → 1 for a filled 1-based slot, else nil.
-    g.set(
-        "GetPartyMember",
-        lua.create_function(|lua, id: i64| {
-            let model = lua.app_data_ref::<Model>().expect("model app_data");
-            let n = model.party.members.len() as i64;
-            Ok(if id >= 1 && id <= n {
-                Value::Integer(1)
-            } else {
-                Value::Nil
-            })
         })?,
     )?;
 
@@ -364,19 +327,6 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         lua.create_function(|lua, ()| {
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             Ok(i64::from(model.party.leader_index))
-        })?,
-    )?;
-
-    // IsPartyLeader() → 1 when grouped and leading, else nil; the same predicate as IsRaidLeader.
-    g.set(
-        "IsPartyLeader",
-        lua.create_function(|lua, ()| {
-            let model = lua.app_data_ref::<Model>().expect("model app_data");
-            Ok(if leads_the_group(&model) {
-                Value::Integer(1)
-            } else {
-                Value::Nil
-            })
         })?,
     )?;
 
@@ -478,21 +428,6 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             Ok(())
         })?,
     )?;
-    // SetLootMethod("method" [,master] [,threshold]), the reference's usage string (`0x84c42c`).
-    g.set(
-        "SetLootMethod",
-        lua.create_function(
-            |lua, (method, master_name, threshold): (String, Option<String>, Option<u32>)| {
-                let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-                model.party_requests.push(PartyRequest::LootMethod {
-                    method,
-                    master_name,
-                    threshold,
-                });
-                Ok(())
-            },
-        )?,
-    )?;
     g.set(
         "SetLootThreshold",
         lua.create_function(|lua, n: u32| {
@@ -515,27 +450,10 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // IsRaidOfficer() → always nil: its reference body (`0x4bb910`) is untraced. So the RaidFrame
-    // enables its add-member button for the leader only, where the reference also enables it for
-    // an assistant.
-    g.set(
-        "IsRaidOfficer",
-        lua.create_function(|_, ()| Ok(Value::Nil))?,
-    )?;
-
     // ── The raid-management verbs ────────────────────────────────────────────
-    // Each only marshals its arguments into a client call or a send (`ConvertToRaid 0x4bbc90`,
-    // `SetRaidSubgroup 0x4bb990`, `SwapRaidSubgroup 0x4bbb00`, `PromoteToAssistant 0x4bbd20`,
-    // `UninviteFromRaid 0x48a580`,
+    // Each only marshals its arguments into a client call or a send (`SetRaidSubgroup 0x4bb990`,
+    // `SwapRaidSubgroup 0x4bbb00`, `PromoteToAssistant 0x4bbd20`, `UninviteFromRaid 0x48a580`,
     // `SetRaidRosterSelection 0x4bb820`), so the verbs here queue a request.
-    g.set(
-        "ConvertToRaid",
-        lua.create_function(|lua, ()| {
-            let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-            model.party_requests.push(PartyRequest::ConvertToRaid);
-            Ok(())
-        })?,
-    )?;
     // SetRaidSubgroup(index, group) / SwapRaidSubgroup(index, other), the drag's two drops: a
     // non-number raises the usage error rather than queueing a zero.
     g.set(
@@ -772,7 +690,10 @@ mod tests {
         assert_eq!(s.eval::<i64>("return GetPartyMember(1)").unwrap(), 1);
         assert_eq!(s.eval::<i64>("return GetPartyMember(2)").unwrap(), 1);
         assert!(s.eval::<bool>("return GetPartyMember(3) == nil").unwrap());
-        assert!(s.eval::<bool>("return GetPartyMember(0) == nil").unwrap());
+        assert!(
+            s.run("GetPartyMember(0)").is_err(),
+            "0x52c215: out of 1-4 raises"
+        );
         assert_eq!(s.eval::<i64>("return GetPartyLeaderIndex()").unwrap(), 1);
         assert!(s.eval::<bool>("return IsPartyLeader() == nil").unwrap());
         let (method, master) = s
@@ -787,7 +708,7 @@ mod tests {
     fn is_party_leader_reports_when_the_player_leads() {
         let mut s = UiScript::new().unwrap();
         let mut party = two_member_party();
-        party.leader_index = 0; // the player leads
+        (party.leader_index, party.leader_guid) = (0, party.own_guid); // the player leads
         s.set_party(party);
         assert_eq!(s.eval::<i64>("return IsPartyLeader()").unwrap(), 1);
     }
@@ -872,24 +793,24 @@ mod tests {
         }
     }
 
-    /// Build 12340 answers eleven on every path (role and master looter after the nine).
+    /// Build 12340 answers fourteen on every path (`mov eax,0xe`, `0x5739c7`, `0x5739dc`).
     #[test]
-    fn get_raid_roster_info_returns_eleven_values_on_every_path() {
+    fn get_raid_roster_info_returns_fourteen_values_on_every_path() {
         let mut s = UiScript::new().unwrap();
         s.set_party(ten_player_raid());
 
         for index in ["1", "10", "0", "-1", "41", "9999"] {
             assert_eq!(
                 s.arity(&format!("GetRaidRosterInfo({index})")).unwrap(),
-                11,
-                "index {index} must still be an eleven-value answer"
+                14,
+                "index {index} must still be a fourteen-value answer"
             );
         }
         let s = UiScript::new().unwrap();
-        assert_eq!(s.arity("GetRaidRosterInfo(1)").unwrap(), 11);
+        assert_eq!(s.arity("GetRaidRosterInfo(1)").unwrap(), 14);
     }
 
-    /// `0x4bb7b9` pushes `nil, 0, 1, 1` and five nils.
+    /// `0x5739e6` pushes `nil, 0, 1, 1` and ten nils.
     #[test]
     fn get_raid_roster_info_misses_with_the_fixed_tuple() {
         let mut s = UiScript::new().unwrap();
@@ -906,7 +827,7 @@ mod tests {
         );
         assert!(e && f && g && h && i, "the last five are nil");
 
-        // An in-range member with no cached name takes the same arm (`0x4bb5f8 je 0x4bb7b9`).
+        // An in-range member with no cached name takes the same arm (`0x57372b je 0x5739e6`).
         let mut party = ten_player_raid();
         party.raid[1].name = String::new();
         s.set_party(party);
@@ -935,7 +856,7 @@ mod tests {
             .unwrap();
         assert_eq!(name, "Me");
         assert_eq!(rank, 2, "as stored, no adjustment");
-        assert_eq!(subgroup, 1, "stored 0 → exposed 1 (`0x4bb61a inc eax`)");
+        assert_eq!(subgroup, 1, "stored 0 → exposed 1 (`0x57375a add ecx,0x1`)");
         assert_eq!(level, 60);
         assert_eq!((class.as_str(), file.as_str()), ("Warrior", "WARRIOR"));
         assert_eq!(zone, "Molten Core");
@@ -949,7 +870,7 @@ mod tests {
         );
     }
 
-    /// Return 8 goes nil on the same arm (`0x4bb705`).
+    /// Return 8 goes nil on the same arm (`0x573858`).
     #[test]
     fn get_raid_roster_info_puts_player_offline_in_the_zone_slot() {
         let mut s = UiScript::new().unwrap();
@@ -966,7 +887,7 @@ mod tests {
         assert_eq!(online, None);
     }
 
-    /// The raise at `0x4bb591` goes through `0x6f4940`, which never returns.
+    /// The raise at `0x5736b2` goes through `luaL_error` (`0x84f280`), which does not return.
     #[test]
     fn get_raid_roster_info_raises_only_on_a_non_number() {
         let s = UiScript::new().unwrap();
@@ -976,51 +897,46 @@ mod tests {
             "got {err}"
         );
         // A numeric string coerces (`lua_isnumber`) and does not raise.
-        assert_eq!(s.arity(r#"GetRaidRosterInfo("3")"#).unwrap(), 11);
+        assert_eq!(s.arity(r#"GetRaidRosterInfo("3")"#).unwrap(), 14);
     }
 
-    /// The 1 is the constant double at `0x51637e`.
+    /// 12340 pushes the 0-based roster row (`0x608130`, `fild` at `0x60ca65`): 0 is a hit.
     #[test]
-    fn unit_in_raid_answers_one_not_an_index() {
+    fn unit_in_raid_answers_the_zero_based_row() {
         let mut s = UiScript::new().unwrap();
         s.set_party(ten_player_raid());
         s.set_unit("player", Some(unit(true, 0x100)));
         s.set_unit("target", Some(unit(true, 0x105))); // roster row 6
         s.set_unit("mouseover", Some(unit(true, 0xDEAD)));
+        s.set_unit_guids(&crate::script::UnitGuids {
+            player: 0x100,
+            target: 0x105,
+            mouseover: 0xDEAD,
+            held: std::collections::HashMap::from([(0xDEAD, 0)]),
+            ..Default::default()
+        });
 
-        assert_eq!(s.eval::<i64>(r#"return UnitInRaid("player")"#).unwrap(), 1);
-        assert_eq!(
-            s.eval::<i64>(r#"return UnitInRaid("target")"#).unwrap(),
-            1,
-            "row 6 still answers 1 — this is not an index"
-        );
+        assert_eq!(s.eval::<i64>(r#"return UnitInRaid("player")"#).unwrap(), 0);
+        assert_eq!(s.eval::<i64>(r#"return UnitInRaid("target")"#).unwrap(), 5);
         assert!(s
             .eval::<bool>(r#"return UnitInRaid("mouseover") == nil"#)
             .unwrap());
-        // Nil for a missing, wrong-typed or unmatched token: `0x6f3690` gives NULL, `0x515970` maps
-        // it to guid 0, and `0x4baee0` rejects guid 0.
+        // Nil for a missing, wrong-typed, unmatched or unparsed token: the resolver (`0x60abf0`)
+        // never raises, and a number is a token like any other.
         for call in ["UnitInRaid()", "UnitInRaid(nil)", r#"UnitInRaid("party3")"#] {
-            assert!(
-                s.eval::<bool>(&format!("return {call} == nil")).unwrap(),
-                "{call} must answer nil"
-            );
+            assert!(s.eval::<bool>(&format!("return {call} == nil")).unwrap());
         }
-        // A token matching none of the nine prefixes raises `Unknown unit name: %s`, and a number
-        // is coerced to a string first.
         for call in ["UnitInRaid(7)", r#"UnitInRaid("nosuchtoken")"#] {
-            assert!(
-                s.run(call).is_err(),
-                "{call} must raise — the token resolves to no prefix at all"
-            );
+            assert!(s.eval::<bool>(&format!("return {call} == nil")).unwrap());
         }
     }
 
-    /// `0x4bb8c0` reads the same leader guid as `0x4e9130`, and no raid flag.
+    /// `0x573a60` reads the same leader guid as `0x52ccd0`, and no raid flag.
     #[test]
     fn is_raid_leader_is_true_for_a_party_leader() {
         let mut s = UiScript::new().unwrap();
         let mut party = two_member_party();
-        party.leader_index = 0; // we lead a party, with no raid roster
+        (party.leader_index, party.leader_guid) = (0, party.own_guid); // we lead, no raid roster
         s.set_party(party);
         assert!(
             s.eval::<i64>("return GetNumRaidMembers()").unwrap() == 0,
@@ -1033,9 +949,11 @@ mod tests {
         assert!(s.eval::<bool>("return IsRaidLeader() == nil").unwrap());
         assert!(s.eval::<bool>("return IsPartyLeader() == nil").unwrap());
 
-        // Ungrouped: the cached leader guid is 0 and matches nobody.
+        // Neither guid known: `0x573a60` has no zero test and answers 1, where `0x52ccd0` tests
+        // the leader guid (`0x52cce3`).
         let s = UiScript::new().unwrap();
-        assert!(s.eval::<bool>("return IsRaidLeader() == nil").unwrap());
+        assert_eq!(s.eval::<i64>("return IsRaidLeader()").unwrap(), 1);
+        assert!(s.eval::<bool>("return IsPartyLeader() == nil").unwrap());
     }
 
     #[test]
@@ -1063,6 +981,9 @@ mod tests {
         s.run(r#"InviteToParty("target")"#).unwrap();
         s.run(r#"UninviteFromParty("party2")"#).unwrap();
         s.run(r#"PromoteToPartyLeader("party2")"#).unwrap();
+        let mut party = two_member_party();
+        party.leader_guid = party.own_guid;
+        s.set_party(party);
         s.run(r#"SetLootMethod("master", "Bob")"#).unwrap();
         s.run(r#"SetLootThreshold(3)"#).unwrap();
 
@@ -1079,7 +1000,7 @@ mod tests {
                 PartyRequest::LootMethod {
                     method: "master".into(),
                     master_name: Some("Bob".into()),
-                    threshold: None,
+                    threshold: Some(2),
                 },
                 PartyRequest::LootThreshold(3),
             ]
@@ -1087,28 +1008,40 @@ mod tests {
         assert!(s.take_party_requests().is_empty());
     }
 
+    /// `0x52dc20`'s order: not grouped (`0x50`) and not leading (`0x54`) are system lines and
+    /// queue nothing; then the `Usage:` gate and the whole-string method ("Invalid loot method");
+    /// `master` needs a non-empty name (`0xfc`, a UI error) of us or a member (`0x51`). The send
+    /// carries the current threshold; a third argument is `exactMatch`, never a threshold.
     #[test]
-    fn set_loot_method_without_a_master_name_queues_none() {
+    fn set_loot_method_checks_the_group_the_leader_and_the_master_in_order() {
         let mut s = UiScript::new().unwrap();
         s.run(r#"SetLootMethod("freeforall")"#).unwrap();
+        s.set_party(two_member_party());
+        s.run(r#"SetLootMethod("freeforall")"#).unwrap();
+        assert!(s.take_party_requests().is_empty(), "solo, then not leading");
+        let mut party = two_member_party();
+        (party.leader_guid, party.loot_threshold) = (party.own_guid, 3);
+        s.set_party(party);
+        assert!(s
+            .run("SetLootMethod()")
+            .unwrap_err()
+            .to_string()
+            .contains("Usage"));
+        let bad = s.run(r#"SetLootMethod("free")"#).unwrap_err().to_string();
+        assert!(bad.contains("Invalid loot method"), "{bad}");
+        s.run(r#"SetLootMethod("master", "") SetLootMethod("master", "Zed")"#)
+            .unwrap();
+        assert_eq!(s.take_ui_errors(), ["ERR_SPECIFY_MASTER_LOOTER"]);
+        s.run(r#"SetLootMethod("GROUP", nil, 4) SetLootMethod("master", "bob")"#)
+            .unwrap();
+        let req = |method: &str, master_name: Option<&str>| PartyRequest::LootMethod {
+            method: method.into(),
+            master_name: master_name.map(Into::into),
+            threshold: Some(3),
+        };
         assert_eq!(
             s.take_party_requests(),
-            vec![PartyRequest::LootMethod {
-                method: "freeforall".into(),
-                master_name: None,
-                threshold: None,
-            }]
-        );
-
-        // The third argument is read for every method.
-        s.run(r#"SetLootMethod("group", nil, 4)"#).unwrap();
-        assert_eq!(
-            s.take_party_requests(),
-            vec![PartyRequest::LootMethod {
-                method: "group".into(),
-                master_name: None,
-                threshold: Some(4),
-            }]
+            [req("group", None), req("master", Some("bob"))]
         );
     }
 
@@ -1132,10 +1065,18 @@ mod tests {
         );
     }
 
-    /// Nil until `0x4bb910`'s body is traced; "rank >= 1" would be a guess.
+    /// `0x573b00`: our raid row (`0x549670`) with a rank above 0 (`0x573b16`).
     #[test]
-    fn is_raid_officer_is_still_nil_and_that_is_a_missing_carve_not_a_missing_feature() {
-        let s = UiScript::new().unwrap();
+    fn is_raid_officer_reads_our_raid_rows_rank() {
+        let mut s = UiScript::new().unwrap();
+        assert!(s.eval::<bool>("return IsRaidOfficer() == nil").unwrap());
+        let mut raid = ten_player_raid();
+        raid.own_guid = raid.raid[1].guid;
+        raid.raid[1].rank = 1;
+        s.set_party(raid.clone());
+        assert_eq!(s.eval::<i64>("return IsRaidOfficer()").unwrap(), 1);
+        raid.raid[1].rank = 0;
+        s.set_party(raid);
         assert!(s.eval::<bool>("return IsRaidOfficer() == nil").unwrap());
     }
 
@@ -1149,12 +1090,28 @@ mod tests {
         }
     }
 
+    /// Pushes `u` as the target beside the guid table the app feeds with it, `g` with `u`'s guid
+    /// in the target global (`[0xbd07b0]`).
+    fn set_target(s: &mut UiScript, g: &crate::script::UnitGuids, u: crate::script::UnitState) {
+        let target = u.guid;
+        s.set_unit("target", Some(u));
+        s.set_unit_guids(&crate::script::UnitGuids {
+            target,
+            ..g.clone()
+        });
+    }
+
     #[test]
     fn unit_is_unit_compares_guids_and_tokens() {
         let mut s = UiScript::new().unwrap();
-        s.set_unit("player", Some(unit(true, 0x10)));
-        s.set_unit("target", Some(unit(true, 0x10)));
-        s.set_unit("party1", Some(unit(true, 0x20)));
+        let (player, target, party) = (0x10, 0x10, [0x20, 0, 0, 0]);
+        let g = crate::script::UnitGuids {
+            player,
+            target,
+            party,
+            ..Default::default()
+        };
+        s.set_unit_guids(&g);
         assert_eq!(
             s.eval::<i64>(r#"return UnitIsUnit("target", "player")"#)
                 .unwrap(),
@@ -1169,8 +1126,7 @@ mod tests {
             .eval::<bool>(r#"return UnitIsUnit("party1", "player") == nil"#)
             .unwrap());
         // Zero guids never match across tokens.
-        s.set_unit("target", Some(unit(true, 0)));
-        s.set_unit("mouseover", Some(unit(true, 0)));
+        s.set_unit_guids(&crate::script::UnitGuids { target: 0, ..g });
         assert!(s
             .eval::<bool>(r#"return UnitIsUnit("target", "mouseover") == nil"#)
             .unwrap());
@@ -1179,44 +1135,61 @@ mod tests {
             .unwrap());
     }
 
-    /// A member's own guid, or a unit whose owner is a member: the party's for
-    /// `UnitPlayerOrPetInParty`, the raid roster's for `UnitPlayerOrPetInRaid`.
+    /// A member's own guid, or a member's pet: the party's for `UnitPlayerOrPetInParty`, the raid
+    /// roster's for `UnitPlayerOrPetInRaid`.
     #[test]
     fn unit_player_or_pet_in_party_reads_the_owner() {
         let mut s = UiScript::new().unwrap();
         s.set_party(two_member_party());
-        s.set_unit("player", Some(unit(true, 0x10)));
-        let mut alices_pet = unit(true, 0xC0FFEE);
-        alices_pet.owner = 0xA11CE;
-        s.set_unit("target", Some(alices_pet));
+        let (player, pet, party) = (0x10, 0x11, [0xA11CE, 0xB0B, 0, 0]);
+        let party_pets = [0xC0FFEE, 0, 0, 0];
+        let g = crate::script::UnitGuids {
+            player,
+            pet,
+            party,
+            party_pets,
+            ..Default::default()
+        };
+        set_target(&mut s, &g, unit(true, 0xC0FFEE));
         assert_eq!(
             s.eval::<i64>(r#"return UnitPlayerOrPetInParty("target")"#)
                 .unwrap(),
             1,
-            "Alice's pet is in the party by its owner"
+            "Alice's pet is party1's (`0x52c8c0`)"
         );
+        // The slots hold the other members only: we and our pet are not in them.
+        let us = "return UnitPlayerOrPetInParty('player') == nil \
+                  and UnitPlayerOrPetInParty('pet') == nil";
+        assert!(s.eval::<bool>(us).unwrap());
+        let raid = "return UnitPlayerOrPetInRaid('target') == nil \
+                    and UnitPlayerOrPetInRaid({}) == nil";
         assert!(
-            s.eval::<bool>(r#"return UnitPlayerOrPetInRaid("target") == nil"#)
-                .unwrap(),
+            s.eval::<bool>(raid).unwrap(),
             "no raid: the raid twin says nil"
         );
-        let mut strangers_pet = unit(true, 0xC0FFEE);
+        let mut strangers_pet = unit(true, 0xBEEF);
         strangers_pet.owner = 0xDEAD;
-        s.set_unit("target", Some(strangers_pet));
+        set_target(&mut s, &g, strangers_pet);
         assert!(s
             .eval::<bool>(r#"return UnitPlayerOrPetInParty("target") == nil"#)
             .unwrap());
         // A member's own guid still answers, as UnitInParty does.
-        s.set_unit("target", Some(unit(true, 0xB0B)));
+        set_target(&mut s, &g, unit(true, 0xB0B));
         assert_eq!(
             s.eval::<i64>(r#"return UnitPlayerOrPetInParty("target")"#)
                 .unwrap(),
             1
         );
+        // A raid row's pet (`0x573200`): raidpet1 is row 1's.
         s.set_party(ten_player_raid());
+        let raid = crate::script::UnitGuids {
+            raid: ten_player_raid().raid.iter().map(|m| m.guid).collect(),
+            raid_pets: vec![0xC0FFEE],
+            ..g.clone()
+        };
         let mut raiders_pet = unit(true, 0xC0FFEE);
         raiders_pet.owner = ten_player_raid().raid[0].guid;
-        s.set_unit("target", Some(raiders_pet));
+        set_target(&mut s, &raid, raiders_pet);
         assert_eq!(
             s.eval::<i64>(r#"return UnitPlayerOrPetInRaid("target")"#)
                 .unwrap(),
@@ -1234,18 +1207,27 @@ mod tests {
         s.set_party(two_member_party());
         s.set_unit("player", Some(unit(true, 0x10)));
         s.set_unit("party1", Some(unit(true, 0xA11CE)));
-        s.set_unit("target", Some(unit(true, 0xA11CE)));
+        let g = crate::script::UnitGuids {
+            player: 0x10,
+            party: [0xA11CE, 0, 0, 0],
+            ..Default::default()
+        };
+        set_target(&mut s, &g, unit(true, 0xA11CE));
         assert_eq!(s.eval::<i64>(r#"return UnitInParty("target")"#).unwrap(), 1);
         assert_eq!(s.eval::<i64>(r#"return UnitInParty("party1")"#).unwrap(), 1);
-        s.set_unit("target", Some(unit(true, 0xDEAD)));
+        set_target(&mut s, &g, unit(true, 0xDEAD));
         assert!(s
             .eval::<bool>(r#"return UnitInParty("target") == nil"#)
             .unwrap());
-        // Ungrouped: everything is nil, the player included.
-        s.set_party(crate::script::PartyState::default());
+        // A raid-only member is in no party slot (`0x52c680`).
+        s.set_party(ten_player_raid());
+        set_target(&mut s, &g, unit(true, ten_player_raid().raid[5].guid));
         assert!(s
-            .eval::<bool>(r#"return UnitInParty("player") == nil"#)
+            .eval::<bool>(r#"return UnitInParty("target") == nil"#)
             .unwrap());
+        // Ungrouped, we are still in our own party: 1 for our guid (`0x52c69c`).
+        s.set_party(crate::script::PartyState::default());
+        assert_eq!(s.eval::<i64>(r#"return UnitInParty("player")"#).unwrap(), 1);
     }
 
     #[test]
@@ -1277,6 +1259,10 @@ mod tests {
     #[test]
     fn the_raid_verbs_queue_what_they_name() {
         let mut s = UiScript::new().unwrap();
+        let mut party = two_member_party();
+        party.leader_guid = party.own_guid;
+        s.set_party(party);
+        s.model_mut().player_req.level = 10;
         s.run(
             r#"
             ConvertToRaid()
@@ -1313,6 +1299,10 @@ mod tests {
             ]
         );
         assert!(s.take_party_requests().is_empty(), "the drain empties");
+        // `0x574a59`: below level 10 ConvertToRaid sends nothing.
+        s.model_mut().player_req.level = 9;
+        s.run("ConvertToRaid()").unwrap();
+        assert!(s.take_party_requests().is_empty());
     }
 
     /// The reference's No button passes no argument, Yes passes `1`.

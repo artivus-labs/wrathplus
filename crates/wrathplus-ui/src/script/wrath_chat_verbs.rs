@@ -134,7 +134,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         none()
     })?;
     // UninviteUnit(unitOrName [, reason]) (`0x51a7a0`): a unit token or a member's name resolves
-    // to a guid (`0x60abf0`, ported as `wrath_unit_popup::guid_of`), and one that does sends
+    // to a guid (`0x60abf0`, ported as `Model::resolve_token`), and one that does sends
     // `CMSG_GROUP_UNINVITE_GUID` with the reason cut to 64 characters (`0x7e1830(.., 0x40, ..)`).
     set(lua, "UninviteUnit", |lua, args| {
         if !has_player(lua) {

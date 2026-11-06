@@ -37,16 +37,6 @@ impl super::UiScript {
     }
 }
 
-/// A unit token's guid, `None` when it names no unit.
-fn guid_of(model: &Model, token: &str) -> Option<u64> {
-    model
-        .unit_guids
-        .resolve(token)
-        .ok()
-        .flatten()
-        .filter(|&g| g != 0)
-}
-
 fn string_only(args: &MultiValue, i: usize) -> Option<String> {
     match args.get(i) {
         Some(Value::String(s)) => Some(s.to_string_lossy()),
@@ -71,7 +61,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 return Err(mlua::Error::runtime(r#"Usage: UnitInRange("unit")"#));
             };
             let model = lua.app_data_ref::<Model>().expect("model app_data");
-            let hit = guid_of(&model, &token).is_some_and(|guid| {
+            let hit = model.unit_guid(&token).is_some_and(|guid| {
                 // Rosters zero absent slots; the guid is non-zero.
                 let member = model.party.members.iter().any(|m| m.guid == guid)
                     || model.party.raid.iter().any(|m| m.guid == guid);
@@ -90,7 +80,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         lua.create_function(|lua, args: MultiValue| {
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             let hit = string_only(&args, 0)
-                .and_then(|t| guid_of(&model, &t))
+                .and_then(|t| model.unit_guid(&t))
                 .is_some_and(|g| model.raid_vehicle_units.contains(&g));
             Ok(hit)
         })?,

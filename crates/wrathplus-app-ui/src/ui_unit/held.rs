@@ -1,7 +1,7 @@
 //! The snapshot of a held unit that a token names other than the player, and the per-guid feed of
 //! the units a `target` chain ends on.
 //!
-//! The reference resolves a token to a guid (`0x515970`) and reads that guid's object, so a unit it
+//! The reference resolves a token to a guid (`0x60abf0`) and reads that guid's object, so a unit it
 //! holds answers a `Unit*` getter however the token spelled it. The app pushes a snapshot
 //! for each base token by name ([`UiScript::set_unit`]); a chain such as `party1target` names a
 //! unit no base does, so the VM resolves it to a guid and reads that guid's snapshot, which
@@ -35,6 +35,8 @@ pub(crate) struct HeldUnits<'a> {
     pub(crate) self_store: Option<&'a ObjectStore>,
     pub(crate) classes: Option<&'a ChrClasses>,
     pub(crate) types: CreatureTypeSources<'a>,
+    /// `CreatureFamily.dbc`, the family word's table; absent without game data.
+    pub(crate) families: Option<&'a wrathplus_formats::CreatureFamilies>,
     /// `CanAttack`'s creature metadata and controller lookup.
     pub(crate) relations: crate::target::RelationContext<'a>,
 }
@@ -75,7 +77,21 @@ impl HeldUnits<'_> {
             self.factions,
             self.self_store,
         );
+        // The template's type flags (`UnitLevel`'s boss bit) and family word; no player has one.
+        let rec = wrathplus_protocol::guid::entry(guid).and_then(|e| self.names.creature_record(e));
+        if let Some(rec) = rec.filter(|_| !s.is_player) {
+            s.creature_type_flags = rec.type_flags;
+            let word = self.families.and_then(|f| f.name(rec.pet_family));
+            s.creature_family = word.map(Into::into);
+        }
         s
+    }
+}
+
+impl super::SnapshotTables<'_> {
+    /// `CreatureFamily.dbc`, which [`HeldUnits::state`] names a template's family with.
+    pub(crate) fn families(&self) -> Option<&wrathplus_formats::CreatureFamilies> {
+        self.families.as_deref().map(|t| &t.families)
     }
 }
 
@@ -91,7 +107,7 @@ pub(super) struct ChainMemo {
 
 /// Push the snapshot of each held unit a `target` chain can end on, by guid, so `UnitName`,
 /// `UnitHealth` and the other getters answer for `party1target`, `raid3target` and `pettarget`
-/// (`0x515970` resolves the token, then each getter reads the guid's object, `0x468460`). The
+/// (`0x60abf0` resolves the token, then each getter reads the guid's object, `0x4d4db0`). The
 /// guids are the resolver's own inputs ([`UiScript::chain_end_guids`]), which the aura feed pushes
 /// each frame, so this runs after it. A guid the object manager does not hold, or holds as
 /// anything but a unit, gets no snapshot. The reference still answers such a guid: `UnitExists`
@@ -159,6 +175,7 @@ pub(super) fn feed_chain_units(
         self_store: self_q.iter().next(),
         classes: tables.classes(),
         types: tables.types(&names),
+        families: tables.families(),
         relations: crate::target::RelationContext::new(Some(&names), &lookup),
     };
     let built: HashMap<u64, UnitState> = ends
@@ -425,10 +442,10 @@ pub(crate) mod tests {
                 "UnitExists({token})"
             );
         }
-        // The plain tokens read their own push and nothing else: this world pushes none, so
-        // `raid2` answers nil though a chain ends on it, and a token pushed by name wins.
-        assert_eq!(name(&app, "raid2"), None);
-        assert_eq!(name(&app, "target"), None);
+        // A plain token with no push of its own reads the guid it resolves to (`0x60abf0`), so
+        // `raid2` and `target` answer as the chains' ends they are; a token pushed by name wins.
+        assert_eq!(name(&app, "raid2").as_deref(), Some("Alia"));
+        assert_eq!(name(&app, "target").as_deref(), Some("Mob"));
         app.world_mut()
             .non_send_resource_mut::<UiScript>()
             .set_unit(

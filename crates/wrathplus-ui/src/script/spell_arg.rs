@@ -17,7 +17,6 @@
 use mlua::{IntoLuaMulti, Lua, MultiValue, Value};
 
 use super::spellbook::{rank_number, SpellSlotView};
-use super::unit::{parse_unit_token_in, UnitTokenParse};
 use super::Model;
 
 /// `lua_isstring`: a string, or a number Lua converts to one.
@@ -76,7 +75,9 @@ pub(super) fn spell_arg_typed(
         false => None,
     };
     let (found, arg_type) = match rank {
-        Some(rank) if !is_unit_token(model, &rank) => (lookup(model, &name, &rank), 3),
+        // `0x60abf0` answering true, whether or not the token names anyone (`0x60b00c`): a group
+        // member's name is a unit too (`0x60a630`), so it is no rank.
+        Some(rank) if !model.resolve_token(&rank).ok => (lookup(model, &name, &rank), 3),
         _ => (named(model, &name), 2),
     };
     // `0x53b4e0`: the last slot of the chosen book holding the spell.
@@ -86,26 +87,6 @@ pub(super) fn spell_arg_typed(
             .rposition(|s| s.spell_id == spell_id)?;
         Some((at as u32 + 1, book(pet), arg_type))
     }))
-}
-
-/// `0x60abf0` answering true: arg 2 parses as a unit token, whether or not it names anyone
-/// (`0x60b00c` stores a sentinel guid and still answers 1). Two tokens the shared parse lacks are
-/// read here: `none`, the whole text (`0x60afaa`), and `commentator` followed only by digits
-/// (`0x60ae91`, `0x76f190`; no commentator is named here, so more text falls to the name arm at
-/// `0x60afdb`). Labelled: the name arm (`0x60a630`: the player's, the group's and their pets'
-/// names, as `wrath_char_state`'s `token_for_name` reads them) is not wired here, so such a name
-/// reads as a rank.
-fn is_unit_token(model: &Model, s: &str) -> bool {
-    let commentator = s
-        .get(..11)
-        .is_some_and(|h| h.eq_ignore_ascii_case("commentator"))
-        && s[11..].bytes().all(|b| b.is_ascii_digit());
-    s.eq_ignore_ascii_case("none")
-        || commentator
-        || matches!(
-            parse_unit_token_in(s, model.unit_guids.wrath),
-            UnitTokenParse::Unit { .. }
-        )
 }
 
 fn book_slots(model: &Model, pet: bool) -> &[SpellSlotView] {
@@ -213,6 +194,17 @@ mod tests {
             token: Some("PET".into()),
             slots: vec![slot(2649, "Growl", Some("Rank 1"), false)],
         });
+        let me = crate::script::UnitState {
+            exists: true,
+            guid: 1,
+            name: Some("Me".into()),
+            ..Default::default()
+        };
+        s.set_unit("player", Some(me));
+        s.set_unit_guids(&crate::script::UnitGuids {
+            player: 1,
+            ..Default::default()
+        });
         let texture = |args: &str| {
             s.eval::<Option<String>>(&format!("return GetSpellTexture({args})"))
                 .unwrap()
@@ -244,6 +236,8 @@ mod tests {
             ("'Fireball', 'target'", "icon143"),
             ("'Fireball', 'NONE'", "icon143"),
             ("'Fireball', 'commentator12'", "icon143"),
+            // The player's name is a unit through the name arm (`0x60a630`).
+            ("'Fireball', 'ME'", "icon143"),
             ("'Fireball', 'RANK 1'", "icon133"),
         ] {
             assert_eq!(texture(args).as_deref(), Some(want), "{args}");

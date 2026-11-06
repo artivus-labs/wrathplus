@@ -146,25 +146,9 @@ fn player_guid(m: &Model) -> u64 {
     m.unit_guids.player
 }
 
-/// A unit token's GUID, else a party or raid member's by name (`0x60abf0`).
+/// A unit token's GUID, or a party or raid member's by name (`0x60abf0`); 0 for nobody.
 pub(in crate::script) fn guid_of(m: &Model, name: &str) -> u64 {
-    if let Some(u) = m.unit(name).filter(|u| u.exists) {
-        return u.guid;
-    }
-    let by_name = |n: &str| n.eq_ignore_ascii_case(name);
-    m.party
-        .members
-        .iter()
-        .find(|p| by_name(&p.name))
-        .map(|p| p.guid)
-        .or_else(|| {
-            m.party
-                .raid
-                .iter()
-                .find(|p| by_name(&p.name))
-                .map(|p| p.guid)
-        })
-        .unwrap_or(0)
+    m.unit_guid(name).unwrap_or(0)
 }
 
 fn in_group(m: &Model, guid: u64) -> bool {

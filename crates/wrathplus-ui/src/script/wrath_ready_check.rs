@@ -110,10 +110,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         lua.create_function(|lua, unit: String| {
             let model = lua.app_data_ref::<Model>().expect("model");
             let guid = model
-                .unit_guids
-                .resolve(&unit)
-                .ok()
-                .flatten()
+                .unit_guid(&unit)
                 .or_else(|| model.unit(&unit).map(|u| u.guid))
                 .or_else(|| {
                     if unit == "player" {
@@ -135,13 +132,21 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             Ok(guid.and_then(|g| model.wrath_ready_check.statuses.get(&g).copied()))
         })?,
     )?;
+    // DoReadyCheck (`0x5740b0` → `0x5732b0`): silent unless we lead, or in a raid lead or assist
+    // (`0x572740`); a deadline (`[0xbeb61c]`) still ahead of the client clock (`0x86ae20`) is
+    // ERR_READY_CHECK_IN_PROGRESS (`0x1f4`, a UI error); else `MSG_RAID_READY_CHECK` (`0x322`).
     lua.globals().set(
         "DoReadyCheck",
         lua.create_function(|lua, ()| {
-            lua.app_data_mut::<Model>()
-                .expect("model")
-                .party_requests
-                .push(PartyRequest::ReadyCheckStart);
+            let mut m = lua.app_data_mut::<Model>().expect("model");
+            if !super::wrath_surface::wrath_group_verbs::may_ready_check(&m) {
+                return Ok(());
+            }
+            if m.wrath_ready_check.ends_at.is_some_and(|end| end > m.now) {
+                m.ui_errors.push("ERR_READY_CHECK_IN_PROGRESS");
+                return Ok(());
+            }
+            m.party_requests.push(PartyRequest::ReadyCheckStart);
             Ok(())
         })?,
     )?;
@@ -164,6 +169,7 @@ mod tests {
                 RaidMemberInfo {
                     guid: 7,
                     name: "Assistant".into(),
+                    rank: 1,
                     ..Default::default()
                 },
                 RaidMemberInfo {
@@ -181,6 +187,9 @@ mod tests {
         s.run("assert(GetReadyCheckStatus('raid2')=='notready'); assert(events[2][1]=='READY_CHECK_CONFIRM' and events[2][2]=='raid2')").unwrap();
         s.wrath_ready_check_start(99);
         s.run("assert(events[3][1]=='READY_CHECK_FINISHED' and events[3][2]==true); assert(events[4][2]=='raid2'); assert(GetReadyCheckStatus('player')=='waiting')").unwrap();
+        // A check before its deadline (`[0xbeb61c]`) refuses another (`0x57331f`).
+        s.run("DoReadyCheck()").unwrap();
+        assert_eq!(s.take_ui_errors(), ["ERR_READY_CHECK_IN_PROGRESS"]);
         s.wrath_ready_check_finish();
         s.run(
             "assert(events[5][1]=='READY_CHECK_FINISHED'); DoReadyCheck(); CheckReadyCheckTime()",

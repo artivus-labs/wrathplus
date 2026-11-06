@@ -72,9 +72,9 @@ pub(crate) fn coerced_number(lua: &Lua, v: Option<Value>) -> f64 {
         .unwrap_or(0.0)
 }
 
-/// `is-number-or-string` (`0x6f3510`) then `0x6f3690`, raising the binding's `Usage:` on failure:
-/// a number is stringified (`UnitAffectingCombat(5)` passes here, then the unit resolver raises
-/// `Unknown unit name` for `"5"`, `0x515c14`), and nil, a boolean, a table or a function raises.
+/// `lua_isstring` (`0x84df60`) then `lua_tolstring`, raising the binding's `Usage:` on failure: a
+/// number is stringified (`UnitAffectingCombat(5)` passes here, and the unit resolver reads `"5"`
+/// as naming nobody, `0x60abf0`), and nil, a boolean, a table or a function raises.
 pub(crate) fn string_arg(lua: &Lua, v: Value, usage: &'static str) -> mlua::Result<String> {
     match lua.coerce_string(v)? {
         // Lossy: a Lua string is bytes, so invalid UTF-8 costs a glyph, never the call.

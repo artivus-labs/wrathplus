@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::script::{
     PartyMemberInfo, PartyState, QuestGreetingInfo, QuestState, RaidMemberInfo, ScriptCall,
-    SocialState, UiScript, UnitState, UnitVehicleView, WrathCharState, WrathVehicles,
+    SocialState, UiScript, UnitGuids, UnitState, UnitVehicleView, WrathCharState, WrathVehicles,
 };
 
 use super::NearestMode;
@@ -27,6 +27,11 @@ fn vehicle_control_seat_is_a_boolean_and_using_controls_a_flag() {
     let mut s = vm();
     s.set_unit("player", Some(unit(1, "Me")));
     s.set_unit("target", Some(unit(2, "Other")));
+    s.set_unit_guids(&UnitGuids {
+        player: 1,
+        target: 2,
+        ..Default::default()
+    });
     let seated = |flags| UnitVehicleView {
         seat: Some((flags, 0)),
         ..Default::default()
@@ -139,6 +144,13 @@ fn ignore_list_by_name_or_unit() {
     s.set_unit("focus", Some(unit(6, "Friend")));
     // Listed by guid, its name not yet resolved into the names list.
     s.set_unit("mouseover", Some(unit(7, "Unnamed")));
+    s.set_unit_guids(&UnitGuids {
+        target: 5,
+        focus: 6,
+        mouseover: 7,
+        held: HashMap::from([(7, 0)]),
+        ..Default::default()
+    });
     assert!(s
         .eval::<bool>(
             "return IsIgnored('spammer') == 1 and IsIgnored('target') == 1 \

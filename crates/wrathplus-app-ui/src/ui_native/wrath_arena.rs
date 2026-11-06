@@ -140,6 +140,7 @@ fn feed_arena(
         self_store: inputs.me.iter().next(),
         classes: inputs.tables.classes(),
         types: inputs.tables.types(&inputs.names),
+        families: inputs.tables.families(),
         relations: crate::target::RelationContext::new(Some(&inputs.names), &lookup),
     };
 

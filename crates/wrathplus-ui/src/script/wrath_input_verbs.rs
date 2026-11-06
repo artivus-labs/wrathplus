@@ -118,7 +118,7 @@ fn interact_unit(lua: &Lua, args: MultiValue) -> mlua::Result<Value> {
     };
     let guid = {
         let model = lua.app_data_ref::<Model>().expect("model app_data");
-        model.unit_guids.guid_of(&token).ok().flatten()
+        model.unit_guid(&token)
     };
     let Some(guid) = guid.filter(|&g| g != 0) else {
         return Ok(Value::Nil);

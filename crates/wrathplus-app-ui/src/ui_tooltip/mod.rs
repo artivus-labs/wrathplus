@@ -196,8 +196,8 @@ fn drive_mouseover_tooltip(
             self_store,
             relations.context(),
         );
-        // The hovered guid, the pair `0x492890` writes to `0xb4e2c8`/`0xb4e2cc` and the token
-        // resolver `0x515970` reads for `"mouseover"`, so `UnitIsUnit` can match it.
+        // The hovered guid, which the token resolver (`0x60abf0`) reads for `"mouseover"`, so
+        // `UnitIsUnit` can match it.
         let mut s = snapshot(store, guid, name, reaction, chr, types);
         enrich_unit(
             &mut s,

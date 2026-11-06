@@ -466,7 +466,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     set(lua, "UnitIsControlling", |lua, args| {
         let token = text(lua, &arg(&args, 0))?.unwrap_or_default();
         let model = lua.app_data_ref::<Model>().expect("model app_data");
-        let guid = model.unit_guids.guid_of(&token).ok().flatten();
+        let guid = model.unit_guid(&token);
         one(flag(guid.is_some_and(|g| {
             model.wrath_popup.state.controlling.contains(&g)
         })))

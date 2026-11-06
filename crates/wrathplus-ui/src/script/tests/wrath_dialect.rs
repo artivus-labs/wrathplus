@@ -55,53 +55,36 @@ fn observed_unit(exists: bool, guid: u64) -> UnitState {
     }
 }
 
+/// `0x60c3d0` compares the resolver's guids, held or not (`0x60c1c0`): neither 0 nor the
+/// sentinel a recognised token naming nobody leaves.
 #[test]
-fn wrath_unit_is_unit_compares_only_existing_observed_identities() {
+fn wrath_unit_is_unit_compares_the_resolved_guids() {
     let mut s = UiScript::new().unwrap();
-    s.set_unit("player", Some(observed_unit(true, 0x10)));
-    s.set_unit("target", Some(observed_unit(true, 0x10)));
-    s.set_unit("party1", Some(observed_unit(true, 0x20)));
-
+    let g = UnitGuids {
+        player: 0x10,
+        target: 0x10,
+        party: [0x20, 0, 0, 0],
+        ..Default::default()
+    };
+    s.set_unit_guids(&g);
     assert_eq!(
         s.eval::<String>(r#"return type(UnitIsUnit("player", "target"))"#)
             .unwrap(),
-        "number",
-        "the admitted existing binding returns numeric 1; exact build-12340 return type is not yet independently qualified"
-    );
-    assert_eq!(
-        s.eval::<i64>(r#"return UnitIsUnit("player", "target")"#)
-            .unwrap(),
-        1
+        "number"
     );
     assert!(s
         .eval::<bool>(r#"return UnitIsUnit("player", "party1") == nil"#)
         .unwrap());
-
-    s.set_unit("target", None);
+    s.set_unit_guids(&UnitGuids { target: 0, ..g });
     assert!(s
-        .eval::<bool>(r#"return UnitIsUnit("player", "target") == nil"#)
+        .eval::<bool>(r#"return UnitIsUnit("target", "party2") == nil"#)
         .unwrap());
-    s.set_unit("target", Some(observed_unit(false, 0x10)));
-    assert!(s
-        .eval::<bool>(r#"return UnitIsUnit("player", "target") == nil"#)
-        .unwrap());
-    s.set_unit("player", Some(observed_unit(true, 0)));
-    assert_eq!(
-        s.eval::<i64>(r#"return UnitIsUnit("player", "player")"#)
-            .unwrap(),
-        1,
-        "the existing resolver recognizes the same existing token even before its GUID arrives"
-    );
     assert_eq!(
         s.eval::<i64>(r#"return UnitIsUnit("player", "PLAYER")"#)
             .unwrap(),
         1,
-        "same-token identity follows the resolver's case-insensitive semantics"
+        "equal text answers before the resolver, case-insensitively"
     );
-    s.set_unit("target", Some(observed_unit(true, 0)));
-    assert!(s
-        .eval::<bool>(r#"return UnitIsUnit("player", "target") == nil"#)
-        .unwrap());
 }
 
 #[test]
@@ -112,10 +95,10 @@ fn wrath_unit_is_unit_uses_the_existing_target_chain_resolver() {
     let mut s = UiScript::new().unwrap();
     s.set_unit_guids(&UnitGuids {
         target: TARGET,
+        party: [TARGET_TARGET, 0, 0, 0],
         held: HashMap::from([(TARGET, TARGET_TARGET)]),
         ..Default::default()
     });
-    s.set_unit("party1", Some(observed_unit(true, TARGET_TARGET)));
     s.set_unit_by_guid(TARGET_TARGET, Some(observed_unit(true, TARGET_TARGET)));
 
     assert_eq!(

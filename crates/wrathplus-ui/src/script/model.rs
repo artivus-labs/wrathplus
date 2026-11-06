@@ -9,7 +9,7 @@ use super::{
     macros, mail, merchant, party, petition, pvp, quest, quest_log, reputation, session,
     simplehtml, skills, slider, social, spellbook, stable, taxi, trade, tradeskill, trainer,
     weapon_enchant, ActionSlot, AuraState, FontObject, ItemTemplateView, MusicRequest,
-    PlayerReqState, RegionData, ScriptValue, SoundRequest, UnitState, UnitTokenParse,
+    PlayerReqState, RegionData, ScriptValue, SoundRequest, UnitState,
 };
 
 // ── The Rust-side model ──
@@ -240,8 +240,8 @@ pub(crate) struct Model {
     /// The screen-root rect (`[bottom, left, top, right]`), the anchor base for top-level frames.
     pub(crate) screen: Rect,
 
-    /// Each unit token's state as pushed this frame, keyed lowercased because 1.12's resolver
-    /// (`0x515970`) matches with `SStrCmpI`: read it only through `unit`, where the fold lives.
+    /// Each unit token's state as pushed this frame, keyed lowercased because 12340's base compares
+    /// fold ASCII case (`0x76e780`): read it only through `unit`, where the fold lives.
     pub(crate) units_by_lower: HashMap<String, UnitState>,
     /// The snapshot of each unit a `target` chain can end on, by guid, which the app pushes for
     /// [`super::UnitGuids::chain_ends`]: a token with a hop that no push names reads its
@@ -257,7 +257,7 @@ pub(crate) struct Model {
     /// Every other unit's auras by guid, ascending aura slot: one list per unit, whatever token
     /// names it.
     pub(crate) unit_auras: HashMap<u64, Vec<AuraState>>,
-    /// The unit-token resolver's inputs (`0x515970`), which the aura bindings resolve through.
+    /// The unit-token resolver's inputs (`0x60abf0`), which the aura bindings resolve through.
     pub(crate) unit_guids: super::UnitGuids,
     /// Spell ids the cancel verbs queued (`CancelPlayerBuff`, `CancelTrackingBuff`, …), one
     /// `CMSG_CANCEL_AURA` each.
@@ -1080,14 +1080,14 @@ impl Model {
     }
 
     /// The state of the unit `token` names, as the `Unit*` getters read it: the snapshot the app
-    /// pushed under the token, else, for a token with a `target` hop, the chain's end.
+    /// pushed under the token, else the resolved unit's.
     pub(crate) fn unit(&self, token: &str) -> Option<&UnitState> {
         self.pushed_unit(token).or_else(|| self.chained_unit(token))
     }
 
-    /// The snapshot pushed under `token` itself, folded as 1.12's resolver `0x515970` folds
-    /// (`_strnicmp`: `A`..`Z` only, never a byte of 0x80 or more), so `to_ascii_lowercase`, never
-    /// `to_lowercase`.
+    /// The snapshot pushed under `token` itself, folded as 12340's base compares fold (`0x76e780`,
+    /// the CRT's `_strnicmp` at `0x41b215`: `A`..`Z` only, never a byte of 0x80 or more), so
+    /// `to_ascii_lowercase`, never `to_lowercase`.
     pub(crate) fn pushed_unit(&self, token: &str) -> Option<&UnitState> {
         let folded = token
             .bytes()
@@ -1099,18 +1099,11 @@ impl Model {
         self.units_by_lower.get(if wrath_npc { "npc" } else { key })
     }
 
-    /// The unit a token with a `target` hop and no push of its own names: the resolver's guid
-    /// (`0x515970`, which the getters call before their own object lookup, `0x468460`), then that
-    /// guid's snapshot. A token without a hop is the app's to push, base by base, and reads
-    /// nothing here.
+    /// The unit any token with no push of its own names (a chain, a `pet` suffix, a member's
+    /// name): the resolver's guid (`0x60abf0`, which the getters call before their own object
+    /// lookup, `0x4d4db0`), then that guid's snapshot.
     fn chained_unit(&self, token: &str) -> Option<&UnitState> {
-        match super::unit::parse_unit_token_in(token, self.unit_guids.wrath) {
-            UnitTokenParse::Unit { base, hops } if hops > 0 => {
-                let guid = self.unit_guids.resolve_unit(base, hops)?;
-                self.units_by_guid.get(&guid)
-            }
-            _ => None,
-        }
+        self.unit_by_guid(self.unit_guid(token)?)
     }
 
     pub(crate) fn new() -> Model {
