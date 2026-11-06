@@ -1240,7 +1240,7 @@ fn pet_go_cooldown(
         == Some(me)
 }
 
-/// `SMSG_SPELL_COOLDOWN` (`0x6e9460`): server-pushed cooldowns (school lockouts, the pet's list),
+/// `SMSG_SPELL_COOLDOWN` (`0x806dd0`): server-pushed cooldowns (school lockouts, the pet's list),
 /// into the store [`addressed_store`] picked.
 fn spell_cooldowns(
     caster: u64,
@@ -1259,7 +1259,7 @@ fn spell_cooldowns(
     }
 }
 
-/// `SMSG_ITEM_COOLDOWN` (`0x6e95d0`): the fixed 30 s use cooldown, keyed on the item instance's
+/// `SMSG_ITEM_COOLDOWN` (`0x807060`): the fixed 30 s use cooldown, keyed on the item instance's
 /// template entry, as the reference resolves it.
 fn item_cooldown(
     item_guid: u64,
@@ -1279,14 +1279,14 @@ fn item_cooldown(
     }
 }
 
-/// `SMSG_COOLDOWN_EVENT` (`0x6e9670` → `0x6e3050(force=0)`): start an on-hold cooldown's parked
+/// `SMSG_COOLDOWN_EVENT` (`0x804010`; 1.12 `0x6e3050(force=0)`): start an on-hold cooldown's parked
 /// timers now (Stealth ends, Feign Death drops).
 fn cooldown_event(spell_id: u32, caster: u64, cooldowns: &mut Cooldowns) {
     debug!("net: cooldown event — spell {spell_id} on {caster:#x}");
     cooldowns.cooldown_event(spell_id, Instant::now());
 }
 
-/// `SMSG_CLEAR_COOLDOWN` (`0x6e9670` → `0x6e3050(force=1)`): remove the spell's record outright.
+/// `SMSG_CLEAR_COOLDOWN` (`0x804010`; 1.12 `0x6e3050(force=1)`): drop the spell's record outright.
 fn clear_cooldown(spell_id: u32, caster: u64, cooldowns: &mut Cooldowns) {
     debug!("net: clear cooldown — spell {spell_id} on {caster:#x}");
     cooldowns.clear_spell(spell_id);
