@@ -204,4 +204,3 @@ use super::*;
         assert_eq!(query(&mut app), (false, None));
         assert_eq!(seen(&mut app), ["party1"]);
     }
-
