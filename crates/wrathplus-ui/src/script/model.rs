@@ -604,6 +604,8 @@ pub(crate) struct Model {
     pub(crate) container_moves: Vec<container::ContainerMove>,
     /// `(bag, slot)` clicks made in repair mode.
     pub(crate) container_repairs: Vec<(i64, u32)>,
+    /// `UseContainerItem`'s guild-vault deposits, `(0-based tab, bag, slot)` (`0x5a56b0`).
+    pub(crate) guild_bank_deposits: Vec<(u8, i64, u32)>,
     /// Targeting wants an item (`0x6e6330`): a bag or paper-doll click becomes a pick.
     pub(crate) item_pick_armed: bool,
     /// Picked `(bag, slot)`s; a paper-doll click is `EQUIPMENT_BAG` and its 1-based inventory slot.
@@ -1360,6 +1362,7 @@ impl Model {
             world_pick: cursor::WorldPick::default(),
             container_moves: Vec::new(),
             container_repairs: Vec::new(),
+            guild_bank_deposits: Vec::new(),
             item_pick_armed: false,
             item_picks: Vec::new(),
             enchant_confirms: Vec::new(),

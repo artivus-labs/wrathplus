@@ -177,6 +177,12 @@ impl super::UiScript {
         })
     }
 
+    /// Drain `UseContainerItem`'s guild-vault deposits as `(0-based tab, bag, slot)`, each into the
+    /// tab's first free slot (`0x5a50c0` with slot `0xff`).
+    pub fn take_guild_bank_deposits(&mut self) -> Vec<(u8, i64, u32)> {
+        std::mem::take(&mut self.model_mut().guild_bank_deposits)
+    }
+
     /// Drain the pick/place/swap moves queued by `PickupContainerItem` since the last call.
     pub fn take_container_moves(&mut self) -> Vec<ContainerMove> {
         std::mem::take(&mut self.model_mut().container_moves)
@@ -327,22 +333,7 @@ fn pickup_container_item(model: &mut super::Model, bag: i64, slot: u32) {
     }
     match model.cursor.take() {
         None => {
-            let picked = model
-                .containers
-                .get(&bag)
-                .and_then(|c| c.slots.get(&slot))
-                .filter(|s| s.item_id != 0 && !s.locked)
-                .map(|s| CursorItem {
-                    bag,
-                    slot,
-                    item_id: s.item_id,
-                    texture: s.texture.clone(),
-                    link: s.link.clone(),
-                    quality: s.quality,
-                    count: None,
-                    bar_placeable: s.bar_placeable,
-                    equip_slots: s.equip_slots.clone(),
-                });
+            let picked = unlocked_bag_item(model, bag, slot).filter(|i| i.item_id != 0);
             if let Some(item) = picked {
                 model.cursor = Some(CursorPayload::Item(item));
                 cursor::queue_cursor_update(model);
@@ -445,30 +436,97 @@ fn queue_move(
     });
 }
 
-/// `UseContainerItem` with the trade window open: the bag item goes into our first free traded
-/// slot (1 to 6, never the enchant slot), queued as `ClickTradeButton` would queue it. Build
-/// 12340's arm of `0x5d8650` (inferred from its shape: a per-item check `0x59d0b0`, a free-slot
-/// search `0x59a2b0`, the lock and the set `0x59a280`). An empty, locked or soulbound item stays
-/// put (AzerothCore's `HandleSetTradeItemOpcode` cancels the whole trade on an untradeable one),
-/// as does any item when the six are full.
+/// The unlocked item at `(bag, slot)` as a cursor item, the whole stack; `None` for an empty or
+/// locked slot. A slot whose template is in flight still holds an item object.
+fn unlocked_bag_item(model: &Model, bag: i64, slot: u32) -> Option<CursorItem> {
+    let s = model.containers.get(&bag)?.slots.get(&slot)?;
+    if s.locked {
+        return None;
+    }
+    Some(CursorItem {
+        bag,
+        slot,
+        item_id: s.item_id,
+        texture: s.texture.clone(),
+        link: s.link.clone(),
+        quality: s.quality,
+        count: None,
+        bar_placeable: s.bar_placeable,
+        equip_slots: s.equip_slots.clone(),
+    })
+}
+
+/// `0x5d8650`'s window ladder, past an armed item-targeting spell (which binds the item first,
+/// `0x7fd620`/`0x5210d0`, as stock `ContainerFrameItemButton_OnClick` relies on) and repair. The
+/// bank and a vendor are App's arms (withdraw, deposit, sale, in that order); then the Send Mail
+/// tab (`0xbeb1b9`, `0x56fff0`), the Auctions tab (`0xc0f3f5`, `0x59a280`), a trade (`0x5877b0`)
+/// and the guild vault (`0x5a56b0`); else the use. Labelled: the client-side refusals inside the
+/// mail, auction and vault arms (bound, conjured, damaged; no free mail slot) are the server's;
+/// with `[0xbfa5d8]` set, the trade stages an item with an enchant, temporary or prismatic enchant
+/// or open-lock effect (`0x707c60`: 0x35, 0x36, 0x9c, 0x21) as its enchant item (`0x586c00`),
+/// where this offers it as a slot.
+fn use_bag_item(model: &mut Model, item: CursorItem) {
+    let (bag, slot) = (item.bag, item.slot);
+    if model.item_pick_armed {
+        model.item_picks.push((bag, slot));
+        return;
+    }
+    let bank_flag = bag == -1 || (5..=11).contains(&bag);
+    if model.repair_mode {
+        // `0x616260() == 0x11`: the item in the slot is repaired.
+        if item.item_id != 0 {
+            model.container_repairs.push((bag, slot));
+        }
+    } else if bank_flag || model.bank.is_some() || model.merchant.is_some() {
+        let call = super::ScriptCall::UseContainerItem { bag, slot };
+        model.script_calls.push(call);
+    } else if model.wrath_mail_family.send_showing
+        && (model.wrath_mail.is_some() || model.mail.is_some())
+    {
+        // The first free send slot (`0x56d390` over 12), locked, `MAIL_SEND_INFO_UPDATE`.
+        if let Some(free) = model.mail_send_items.iter().position(Option::is_none) {
+            model.mail_send_items[free] = Some(item);
+            cursor::queue_lock_changed(model, bag, slot);
+            let update = ("MAIL_SEND_INFO_UPDATE".to_string(), Vec::new());
+            model.pending_events.push(update);
+        }
+    } else if model.auctions_tab_showing && model.auction.is_some() {
+        // The staged item unlocks and the new one takes the sell slot; App fires
+        // `NEW_AUCTION_UPDATE` on the change.
+        if let Some(old) = model.auction_sell_item.replace(item) {
+            cursor::queue_lock_changed(model, old.bag, old.slot);
+        }
+        cursor::queue_lock_changed(model, bag, slot);
+    } else if model.trade.is_some() {
+        trade_into_first_free(model, bag, slot);
+    } else if model.wrath_friends.bank != super::WrathGuildBankView::default() {
+        // 12340 tests the vault's banker (`0xc1dc10`). A closed vault is the default view, and an
+        // open one always carries its tab logs, so any other view is an open vault.
+        let tab = model.wrath_friends.current_tab;
+        model.guild_bank_deposits.push((tab, bag, slot));
+    } else {
+        let call = super::ScriptCall::UseContainerItem { bag, slot };
+        model.script_calls.push(call);
+    }
+}
+
+/// `UseContainerItem` with the trade window open (`0x5877b0`): an unbound item goes into our first
+/// free traded slot (1 to 6), a bound one (`0x708520`: `ITEM_FIELD_FLAGS & 1` or a binding
+/// enchant) into the seventh, "will not be traded" slot, queued as `ClickTradeButton` would
+/// queue it; with no room it stays put. Labelled: a quest-bound item's refusal (error `0x2c`) is
+/// the server's.
 fn trade_into_first_free(model: &mut Model, bag: i64, slot: u32) {
-    const SOULBOUND: u32 = 0x1;
-    const BOP_TRADEABLE: u32 = 0x100;
-    let tradeable = model
-        .containers
-        .get(&bag)
-        .and_then(|c| c.slots.get(&slot))
-        .is_some_and(|s| {
-            s.item_id != 0
-                && !s.locked
-                && (s.flags & SOULBOUND == 0 || s.flags & BOP_TRADEABLE != 0)
-        });
+    let Some(s) = model.containers.get(&bag).and_then(|c| c.slots.get(&slot)) else {
+        return;
+    };
+    let bound = s.flags & 0x1 != 0 || s.already_bound;
+    let ids = if bound { 7..=7 } else { 1..=6 };
     let queued: Vec<u32> = model.trade_set_items.iter().map(|&(id, _, _)| id).collect();
     let free = model.trade.as_ref().and_then(|t| {
-        (1..super::trade::TRADE_SLOTS as u32)
+        ids.clone()
             .find(|id| t.player.slots[*id as usize - 1].is_none() && !queued.contains(id))
     });
-    if let (true, Some(id)) = (tradeable, free) {
+    if let (true, Some(id)) = (s.item_id != 0, free) {
         model.trade_set_items.push((id, bag, slot));
         cursor::queue_lock_changed(model, bag, slot);
     }
@@ -683,44 +741,33 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
+    // UseContainerItem(index, slot[, target]) (`0x5d8650`): both numbers through `0x88b9c0`
+    // (`0x5d73ca`, `0x5d73e2`), then the target token (`0x60abf0` with flag 1: an absent or empty
+    // one is the selection, `0x60b029`; one the resolver rejects ends the call, `0x5d86e0`), the
+    // cursor clear, and a present, unlocked item. The first open window then takes it.
+    // Labelled: a resolved token is not carried into the use, which casts at the selection (the
+    // cast tail has no unit-bound context, as `CastSpellByID`'s unit leg).
     lua.globals().set(
         "UseContainerItem",
-        lua.create_function(|lua, (bag, slot, _rest): (i64, u32, mlua::MultiValue)| {
+        lua.create_function(|lua, args: mlua::MultiValue| {
+            const USAGE: &str = "Usage: UseContainerItem(index, slot[, target])";
+            let arg = |i: usize| args.get(i).cloned().unwrap_or(Value::Nil);
+            let bag = i64::from(ftol_arg(lua, arg(0), USAGE)?);
+            let slot = ftol_arg(lua, arg(1), USAGE)?;
+            let Some(slot) = u32::try_from(slot).ok().filter(|s| *s >= 1) else {
+                return Ok(());
+            };
+            let token = super::unit::token::token_text(lua, &arg(2)).filter(|t| !t.is_empty());
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-            // Build 12340 (`0x5d8650`): a locked item does nothing, then a targeting spell that
-            // wants an item binds it (`0x7fd620`, `0x5210d0`) before any use, repair or sale, as
-            // stock `ContainerFrameItemButton_OnClick` relies on (`ContainerFrame.lua:698-700`).
-            if model.item_pick_armed {
-                if model
-                    .containers
-                    .get(&bag)
-                    .and_then(|c| c.slots.get(&slot))
-                    .is_some_and(|s| s.item_id != 0 && !s.locked)
-                {
-                    model.item_picks.push((bag, slot));
-                }
+            if token.is_some_and(|t| !model.resolve_token(&t).ok) {
                 return Ok(());
             }
-            // Every right-click clears the cursor before it reads the slot (`0x4fa198`): a held
-            // payload goes back, never placed, and an armed gift wrap is cancelled.
             cursor::clear_cursor(&mut model);
-            if model.repair_mode {
-                // Then the item in the slot is repaired (`0x4fa1a6`, `0x4fa1da`).
-                let occupied = model
-                    .containers
-                    .get(&bag)
-                    .and_then(|c| c.slots.get(&slot))
-                    .is_some_and(|s| s.item_id != 0);
-                if occupied {
-                    model.container_repairs.push((bag, slot));
-                }
-            } else if model.trade.is_some() {
-                trade_into_first_free(&mut model, bag, slot);
-            } else {
-                model
-                    .script_calls
-                    .push(super::ScriptCall::UseContainerItem { bag, slot });
-            }
+            // A present, unlocked item (`0x5d8706`, `0x5d870c`).
+            let Some(item) = unlocked_bag_item(&model, bag, slot) else {
+                return Ok(());
+            };
+            use_bag_item(&mut model, item);
             Ok(())
         })?,
     )?;

@@ -44,7 +44,7 @@ pub enum WrathMailRequest {
 pub(crate) struct Family {
     requests: Vec<WrathMailRequest>,
     /// `SetSendMailShowing` (`0xbeb1b9`).
-    send_showing: bool,
+    pub(crate) send_showing: bool,
     /// The pending send-item lock `RespondMailLockSendItem` answers (`0xbeb1b8`).
     send_locked: bool,
     /// `GetLatestThreeSenders`' names (`0xbeaff8`, three rows).

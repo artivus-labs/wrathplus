@@ -340,6 +340,11 @@ pub(crate) fn feed_guild_bank(
             let _ = commands.0.send(command);
         }
     }
+    for (tab, bag, slot) in script.take_guild_bank_deposits() {
+        if let Some(command) = crate::ui_items::guild_bank_deposit(open.banker, tab, bag, slot) {
+            let _ = commands.0.send(command);
+        }
+    }
     let level = self_q
         .iter()
         .next()

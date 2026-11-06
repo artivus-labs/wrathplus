@@ -440,35 +440,7 @@ fn clear_cursor_drops_the_held_item() {
     assert!(s.take_container_moves().is_empty());
 }
 
-/// With the trade window open a right-click offers the bag item in our first free traded slot,
-/// skipping one queued this frame; a soulbound item stays put, and closed, the click uses.
-#[test]
-fn right_click_with_a_trade_open_offers_the_item_in_the_first_free_slot() {
-    let mut s = UiScript::new().unwrap();
-    let mut bag = backpack();
-    let item = |item_id, flags| ContainerSlot {
-        item_id,
-        count: 1,
-        flags,
-        ..Default::default()
-    };
-    bag.slots.insert(5, item(2589, 0));
-    bag.slots.insert(6, item(6948, 0x1));
-    s.set_container(0, Some(bag));
-    s.set_trade(Some(crate::script::TradeState::default()));
-    s.run("UseContainerItem(0, 1)").unwrap();
-    s.run("UseContainerItem(0, 5)").unwrap();
-    s.run("UseContainerItem(0, 6)").unwrap();
-    assert_eq!(s.take_trade_set_items(), vec![(1, 0, 1), (2, 0, 5)]);
-    assert!(
-        s.take_container_uses().is_empty(),
-        "nothing is used while trading"
-    );
-
-    s.set_trade(None);
-    s.run("UseContainerItem(0, 1)").unwrap();
-    assert_eq!(s.take_container_uses(), vec![(0, 1)]);
-}
-
 #[path = "container_repair_tests.rs"]
 mod repair;
+#[path = "container_use_tests.rs"]
+mod use_item;
