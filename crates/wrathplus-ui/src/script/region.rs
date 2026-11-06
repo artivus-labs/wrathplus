@@ -129,9 +129,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     lua.globals().set(
         "SetPortraitTexture",
         lua.create_function(|lua, (region, unit): (Table, Value)| {
-            // A non-string unit raises this exact error (`0x519fb4`, `0x8513b8`), which stock
-            // `Blizzard_InspectUI.lua:49` hits on a re-open; a token that resolves to nothing only
-            // blanks the portrait.
+            // A non-string unit raises this exact error (`0x6115d4`, `0xa2361c`), which stock
+            // `Blizzard_InspectUI.lua:49` hits on a re-open; a token naming nothing blanks it.
             let unit = crate::script::binding_abi::string_arg(
                 lua,
                 unit,
@@ -140,14 +139,16 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             let rh = region_handle_of(lua, &region)?;
             let mut model = lua.app_data_mut::<Model>().expect("model");
             let data = model.region_data.entry(rh).or_default();
-            // Lowercased: the reference resolves the token case-insensitively (`0x519ef0` →
-            // `0x515970`), stock `MerchantFrame.lua:68` passes `"NPC"`, and the app's bakes are
-            // keyed lowercase.
+            // Lowercased: the resolver folds case, stock `MerchantFrame.lua:68` passes `"NPC"`,
+            // and the app's bakes are keyed lowercase.
             data.portrait_unit = Some(unit.to_ascii_lowercase());
             data.texture = None;
             data.fill = None;
             data.circular = true;
-            Ok(())
+            // True when a held unit, a not-held player's cached record (`0x67d770`, `0x611563`)
+            // or another GUID's group record (`0x513cb0`, `0x61159a`) drew it (`0x6115e5`); false
+            // after the default icon (`0x6115ba`). Labelled: the held corpse leg (`0x61148d`).
+            Ok(model.unit(&unit).is_some_and(|u| u.exists))
         })?,
     )?;
 
@@ -617,8 +618,7 @@ pub(super) fn region_set_point(lua: &Lua, this: &Table, args: &MultiValue) -> ml
 /// (`0x768420`, `0x768410`).
 pub(super) fn measured_wh(lua: &Lua, this: &Table) -> mlua::Result<(f32, f32)> {
     let rh = region_handle_of(lua, this)?;
-    // Measures this tick when a host font engine is installed; a no-op for a Texture or a
-    // current measure.
+    // Measures this tick under a host font engine; a no-op for a Texture or a current measure.
     super::measure::ensure_measured(lua, rh);
     let model = lua.app_data_ref::<Model>().expect("model");
     Ok(virtual_span(&model, rh))

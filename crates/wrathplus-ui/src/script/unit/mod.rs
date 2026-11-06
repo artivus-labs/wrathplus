@@ -178,21 +178,22 @@ pub struct UnitState {
     /// `UnitIsPVPFreeForAll`: `PLAYER_FLAGS` bit `0x80`, or the roster status byte's `0x10`;
     /// independent of [`Self::pvp`].
     pub is_pvp_ffa: bool,
-    /// `UnitPVPRank`: the current rank on the internal `0..=18` scale (0 none), from the public
-    /// `PLAYER_BYTES_3` byte 3. The private lifetime highest rides
-    /// [`HonorState`](super::HonorState); [`super::pvp`] converts to the `-4..=14` visual scale.
-    pub pvp_rank: u8,
-    /// The city-protector title, `PLAYER_BYTES_3` byte 2 (0 none): `UnitPVPName` appends the
-    /// `PVP_MEDAL<n>` line for a non-zero one (`0x6093ef`).
+    /// Own title gender: `PLAYER_BYTES_3` byte 0 (`0x72a328`); foreign uses `sex` (`0x72a334`).
+    pub title_gender: Option<u8>,
+    /// Roster record status (`0x513c30`, +8), used by DND only without a held player.
+    pub roster_status: u8,
+    /// `PLAYER_BYTES_3` byte 2: a titled `UnitPVPName` appends `PVP_MEDAL<n>` (`0x72a3ea`).
     pub pvp_medal: u8,
+    /// `PLAYER_CHOSEN_TITLE`, a CharTitles `MaskID` (0 none), `UnitPVPName`'s (`0x72a2ce`).
+    pub chosen_title: u32,
     /// `UnitFactionGroup`'s English `InternalName` but for `"player"`: the live template's group
     /// mask (`0x60d167`) named by `FactionGroup.dbc`; `None` for a template with no side.
     pub faction_group: Option<String>,
     /// `UnitFactionGroup`'s second return, `FactionGroup.dbc`'s localized `Name0`: display text.
     pub faction_group_localized: Option<String>,
     /// The team digit of `PVP_RANK_<rank>_<team>` (`0x5efe00`): 0 Horde, 1 Alliance, -1 no side,
-    /// from the race through `ChrRaces` and `FactionTemplate`, never the live template, so a GM on
-    /// template 35 keeps the rank title; 0 for a unit the reference cannot resolve (`0x51a9af`).
+    /// from the race through `ChrRaces` and `FactionTemplate`, never the live template; 0 for a
+    /// unit the reference cannot resolve (`0x51a9af`).
     pub pvp_team: i8,
     /// `OBJECT_FIELD_GUID`, which `UnitIsUnit` and `UnitInParty` compare; 0 is unresolved, and
     /// two zeros never match.
@@ -246,8 +247,8 @@ pub fn unit_is_grey(player_level: u32, unit_level: u32) -> bool {
 }
 
 /// The civilian gate (`0x612550`), a dishonorable kill: PvP-flagged, a civilian creature, hostile
-/// (`UnitReaction` <= 2) and grey. The tooltip's CIVILIAN line and `UnitPVPName`'s civilian prefix
-/// (`0x609370`) both read it. The terms are the tooltip line's; `0x612550`'s body is not traced.
+/// (`UnitReaction` <= 2) and grey. The tooltip's CIVILIAN line and `UnitIsCivilian` read it. The
+/// terms are the tooltip line's; `0x612550`'s body is not traced.
 pub fn is_civilian_kill(u: &UnitState, player_level: u32) -> bool {
     u.civilian && u.pvp && u.reaction != 0 && u.reaction <= 2 && unit_is_grey(player_level, u.level)
 }
@@ -434,9 +435,8 @@ impl super::UiScript {
         })
     }
 
-    /// Take the `TargetNearest*([reverse])` calls out of the call stream, `true` for reverse.
-    /// They name no unit: the reference runs the TAB cycler (`0x493f60`) straight into
-    /// `SetSelection`.
+    /// Take the `TargetNearest*([reverse])` calls out of the call stream, `true` for reverse. They
+    /// name no unit: the reference runs the TAB cycler (`0x493f60`) straight into `SetSelection`.
     pub fn take_target_nearest_requests(&mut self) -> Vec<(NearestMode, bool)> {
         self.take_calls_where(|c| match c {
             ScriptCall::TargetNearest { mode, reverse } => Some((*mode, *reverse)),

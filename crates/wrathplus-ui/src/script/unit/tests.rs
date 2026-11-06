@@ -1792,30 +1792,30 @@ fn the_equals_one_idiom_branches_correctly_on_a_live_and_a_dead_token() {
     );
 }
 
-/// `UnitOnTaxi` (`0x517a40`), registered with the taxi module's ride flag, has the family's shape
-/// and raises `Usage:` from its gate (`0x517a48`).
+/// `UnitOnTaxi` (`0x60f350`) answers the number 1 or nil from any held unit's flag and raises
+/// `Usage:` from its gate; `SetPortraitTexture` (`0x6113e0`) answers a Lua boolean.
 #[test]
 fn unit_on_taxi_is_one_or_nil_and_raises_the_reference_usage() {
+    use mlua::Value::{Boolean, Integer, Nil};
     let mut s = UiScript::new().unwrap();
     s.set_unit("player", Some(player()));
-
-    assert!(s
-        .eval::<bool>(r#"return UnitOnTaxi("player") == nil"#)
-        .unwrap());
+    let ask = |s: &UiScript, call: &str| s.eval::<mlua::Value>(&format!("return {call}")).unwrap();
+    assert_eq!(ask(&s, "UnitOnTaxi('player')"), Nil);
     s.set_on_taxi(true);
-    assert_eq!(
-        s.eval::<String>(r#"return type(UnitOnTaxi("player"))"#)
-            .unwrap(),
-        "number"
-    );
-    assert_eq!(s.eval::<i64>(r#"return UnitOnTaxi("player")"#).unwrap(), 1);
-    assert!(!s
-        .eval::<bool>(r#"return UnitOnTaxi("player") == true"#)
-        .unwrap());
-    // Only the player's ride is tracked: any other token is nil.
-    assert!(s
-        .eval::<bool>(r#"return UnitOnTaxi("target") == nil"#)
-        .unwrap());
+    assert_eq!(ask(&s, "UnitOnTaxi('player')"), Integer(1));
+    assert_eq!(ask(&s, "UnitOnTaxi('target')"), Nil);
+    let flying = UnitState {
+        exists: true,
+        has_object: true,
+        flags: 0x0010_0000,
+        ..Default::default()
+    };
+    s.set_unit("target", Some(flying));
+    assert_eq!(ask(&s, "UnitOnTaxi('target')"), Integer(1));
+    let portrait =
+        |t: &str| format!("SetPortraitTexture(CreateFrame('Frame'):CreateTexture(), '{t}')");
+    assert_eq!(ask(&s, &portrait("target")), Boolean(true));
+    assert_eq!(ask(&s, &portrait("focus")), Boolean(false));
 
     let err = s.eval::<mlua::Value>("return UnitOnTaxi()").unwrap_err();
     assert!(

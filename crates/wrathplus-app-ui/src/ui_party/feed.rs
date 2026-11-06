@@ -480,6 +480,10 @@ pub(super) fn feed_party(
                 let name = names.peek(*guid).map(str::to_string);
                 let mut s = crate::ui_unit::snapshot(store, *guid, name, 0, chr, types);
                 s.is_player = true;
+                s.title_gender = store
+                    .0
+                    .get(wrathplus_protocol::types::Field::PlayerBytes3)
+                    .map(|b| b as u8);
                 s.raid_target = group.raid_target_index(*guid);
                 s.faction_group = own_group.clone();
                 // A same-faction friendly player, as in `member_unit_state`.
@@ -837,9 +841,10 @@ fn member_unit_state(
             // moves alone, so the roster byte is not read. A held member never gets here, its 1 is
             // `snapshot`'s (`0x517daf`); a member with no record has no bit to read.
             is_connected: stats.is_some_and(PartyMemberStatsInfo::is_online),
+            roster_status: stats.and_then(|s| s.status).unwrap_or(0),
             // Dead and ghost from the record, as the reference's `UnitIsDead` (`0x517b5d`,
             // `+0x08 & 4`) and `UnitIsGhost` (`0x517c32`, `& 8`) read it: fresher than the roster
-            // byte, which only `SMSG_GROUP_LIST` moves. 1.12 has no AFK or DND predicate to feed.
+            // byte, which only `SMSG_GROUP_LIST` moves.
             dead: stats.is_some_and(|s| s.status.unwrap_or(0) & member_status::DEAD != 0),
             ghost: stats.is_some_and(|s| s.status.unwrap_or(0) & member_status::GHOST != 0),
             ..Default::default()
@@ -855,6 +860,7 @@ fn member_unit_state(
             s.power = u32::from(native.cur_power.unwrap_or(0)) / scale;
             s.max_power = u32::from(native.max_power.unwrap_or(0)) / scale;
             let status = native.status.unwrap_or(0);
+            s.roster_status = status as u8;
             s.is_connected = status & 1 != 0;
             s.dead = status & 4 != 0;
             s.ghost = status & 8 != 0;
@@ -1604,66 +1610,14 @@ pub fn synthetic_raid(
 }
 
 #[cfg(test)]
+mod record_status_tests;
+#[cfg(test)]
 mod roster_update_tests;
 
 #[cfg(test)]
 mod tests {
     use super::super::pets::tests::{app, app_with, flag, frame, member, party, stream, ME};
     use super::*;
-
-    #[test]
-    fn an_out_of_range_member_reads_the_record_and_divides_its_rage() {
-        let m = GroupMemberEntry {
-            name: "Brisca".into(),
-            guid: 0x1234,
-            status: member_status::ONLINE,
-            flags: 0,
-        };
-        let record = PartyMemberStatsInfo {
-            status: Some(member_status::ONLINE),
-            cur_hp: Some(2400),
-            max_hp: Some(3000),
-            level: Some(41),
-            power_type: Some(1), // POWER_RAGE
-            cur_power: Some(570),
-            max_power: Some(1000),
-            ..PartyMemberStatsInfo::default()
-        };
-        let s = member_unit_state(
-            &m,
-            Some(&record),
-            None,
-            &GroupState::default(),
-            None,
-            None,
-            Default::default(),
-        );
-        assert_eq!(
-            (s.health, s.max_health),
-            (2400, 3000),
-            "the bars keep their numbers"
-        );
-        assert_eq!(s.level, 41);
-        assert_eq!(
-            (s.power_type, s.power, s.max_power),
-            (1, 57, 100),
-            "rage reads 57/100, not 570/1000 — `UnitMana`'s record leg divides too (0x517744)"
-        );
-        assert!(s.exists && s.is_player && s.is_connected);
-
-        // No record at all (a real roster always seats one): an existing player with empty bars.
-        let bare = member_unit_state(
-            &m,
-            None,
-            None,
-            &GroupState::default(),
-            None,
-            None,
-            Default::default(),
-        );
-        assert_eq!((bare.health, bare.max_health, bare.power), (0, 0, 0));
-        assert!(bare.exists);
-    }
 
     /// vmangos re-sends a member's status on join, login and the AFK, DND, PvP, FFA and ghost
     /// toggles, never on a death, so the roster byte can say alive while the record says dead.

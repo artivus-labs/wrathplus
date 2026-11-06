@@ -109,7 +109,6 @@ impl ObjectFields {
             .map(|v| (v >> (16 * j)) & 0xffff)
             .filter(|&v| v != 0)
     }
-
     /// `PLAYER_FIELD_INV_SLOT_HEAD + 2i`: our equipment (0-18) and equipped-bag (19-22) guids.
     pub fn player_inv_slot(&self, i: u8) -> Option<u64> {
         self.get_field_guid(Field::PlayerInvSlotHead, 2 * u16::from(i))
@@ -216,7 +215,6 @@ impl ObjectFields {
             timer,
         })
     }
-
     /// Native quest capacity, without truncating Wrath's final five slots.
     pub fn player_quest_log_slots(&self) -> u8 {
         25
@@ -420,17 +418,15 @@ impl ObjectFields {
         self.get(Field::PlayerFieldBytes)
             .map(|b| ((b >> 16) & 0xff) as u8)
     }
-    /// `PLAYER_FIELD_BYTES` byte 3 (private): the highest honor rank held, 0 never ranked, which
-    /// `RequiredHonorRank` checks (`0x5ea930`); only ever raised (`HonorMgr.cpp:894-895`), so it
-    /// outlives a demotion, unlike [`Self::player_pvp_rank`].
+    /// `PLAYER_FIELD_BYTES` byte 3 (private): the highest honor rank held, 0 never ranked,
+    /// checked by `RequiredHonorRank` (`0x5ea930`).
     pub fn player_honor_rank(&self) -> Option<u8> {
         self.get(Field::PlayerFieldBytes)
             .map(|b| ((b >> 24) & 0xff) as u8)
     }
-    /// `PLAYER_BYTES_3` byte 3 (public, `UpdateFields_1_12_1.h:125`): the current internal rank
-    /// (`HonorMgr.cpp:900`), 0 unranked, 1-4 negative, 5 up positive, indexing `PVP_RANK_*`;
-    /// the drawn rank is `rank > 4 ? rank - 4 : -rank` (`HonorMgr.cpp:991`).
-    pub fn player_pvp_rank(&self) -> Option<u8> {
+    /// `PLAYER_BYTES_3` byte 2 (public; the player block's `+0x1e` at `0x72a3ea`): the
+    /// `PVP_MEDAL<n>` index a titled `UnitPVPName` appends.
+    pub fn player_pvp_medal(&self) -> Option<u8> {
         self.get(Field::PlayerBytes3).map(|b| (b >> 16) as u8)
     }
     /// `PLAYER_FIELD_KILLS` (private, field 1225): today's honorable kills in the low half and
@@ -527,13 +523,11 @@ impl ObjectFields {
     pub fn gameobject_level(&self) -> u32 {
         self.get(Field::GameobjectLevel).unwrap_or(0)
     }
-
     /// `OBJECT_FIELD_TYPE & TYPEMASK_CONTAINER`: a bag, whose mask carries the item bit too; the
     /// reference's test at `0x4c879d` (`GetInventoryItemCount`) and `0x4c7dbb` (`PutItemInBag`).
     pub fn is_container(&self) -> bool {
         self.get(Field::ObjectType).unwrap_or(0) & 0x4 != 0
     }
-
     /// The object's class from `OBJECT_FIELD_TYPE`, for updates with no `TypeId`; the player bit
     /// `0x10` is the reference's own is-player test (`CanAttack`, `CanInteract`).
     pub fn object_type(&self) -> Option<ObjectType> {
