@@ -1,20 +1,16 @@
 //! `UnitIsUnit`'s token-or-name resolution.
 
-use crate::script::{UiScript, UnitState};
+use crate::script::UiScript;
 
 /// 12340's `UnitIsUnit` (`0x60c3d0`): equal strings answer 1 before any lookup, a shared guid
 /// through two tokens or a group member's name answers 1, and anything unresolved answers nil.
 #[test]
 fn unit_is_unit_takes_tokens_and_member_names_and_never_raises() {
     let mut s = UiScript::new().unwrap();
-    s.set_unit(
-        "target",
-        Some(UnitState {
-            exists: true,
-            guid: 42,
-            ..Default::default()
-        }),
-    );
+    s.set_unit_guids(&crate::script::UnitGuids {
+        target: 42,
+        ..Default::default()
+    });
     s.set_party(crate::script::PartyState {
         members: vec![crate::script::PartyMemberInfo {
             name: "Alice".into(),
@@ -42,6 +38,7 @@ fn unit_is_unit_takes_tokens_and_member_names_and_never_raises() {
     // "player" with no pushed snapshot: the guid table alone answers.
     s.set_unit_guids(&crate::script::UnitGuids {
         player: 42,
+        target: 42,
         ..Default::default()
     });
     assert_eq!(

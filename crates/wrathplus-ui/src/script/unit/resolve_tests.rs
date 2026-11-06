@@ -1,4 +1,7 @@
+use super::super::token::{Resolved, NOBODY, NONE};
 use super::*;
+use crate::script::party::PartyMemberInfo;
+use crate::script::{Model, UnitState};
 
 const ME: u64 = 0x10;
 const PET: u64 = 0xF140_0000_0000_0077;
@@ -33,8 +36,26 @@ fn guids() -> UnitGuids {
     }
 }
 
+/// A model over `g`, party1 named "Bob", the player "Me", the pet a pushed "Rex".
+fn model(g: UnitGuids) -> Model {
+    let mut m = Model::new();
+    m.unit_guids = g;
+    m.player_record.name = "Me".into();
+    m.party.members = vec![PartyMemberInfo {
+        name: "Bob".into(),
+        guid: P1,
+    }];
+    let rex = UnitState {
+        name: Some("Rex".into()),
+        guid: PET,
+        ..Default::default()
+    };
+    m.units_by_lower.insert("pet".into(), rex);
+    m
+}
+
 fn at(token: &str) -> Option<u64> {
-    guids().resolve(token).expect("recognised")
+    model(guids()).unit_guid(token)
 }
 
 #[test]
@@ -62,6 +83,27 @@ fn the_compares_fold_ascii_case() {
     assert_eq!(at("TargetTarget"), Some(P1));
 }
 
+/// The name compare `0x76ea40` folds ASCII, `0xe0`-`0xfe`, œ and Cyrillic (Ё/ё apart from Е), and
+/// reads every character past U+FFFF as U+FFFD; nothing else.
+#[test]
+fn the_name_compare_folds_as_sstrcmpi() {
+    use super::super::token::sstr_eq_i;
+    for (a, b, same) in [
+        ("Bob", "bOB", true),
+        ("Bob", "Bobby", false),
+        ("Ärger", "äRGER", true),
+        ("÷", "×", true),
+        ("ÿ", "Ÿ", false),
+        ("Œuvre", "œuvre", true),
+        ("Ёлка", "ёЛКА", true),
+        ("Ёлка", "Елка", false),
+        ("Ωμέγα", "ωμέγα", false),
+        ("\u{1d538}", "\u{1d539}", true),
+    ] {
+        assert_eq!(sstr_eq_i(a.as_bytes(), b.as_bytes()), same, "{a} {b}");
+    }
+}
+
 #[test]
 fn target_is_a_loop_on_every_base_but_npc() {
     assert_eq!(at("targettarget"), Some(P1));
@@ -73,10 +115,9 @@ fn target_is_a_loop_on_every_base_but_npc() {
     assert_eq!(at("raid2target"), Some(ME));
     assert_eq!(at("raid2targettarget"), Some(MOB));
     assert_eq!(at("mouseovertarget"), Some(P1));
-    // A hop to nobody ends the chain (`0x515a2e`), as does a hop off a unit not held.
+    // A hop to nobody, or off a unit not held, names nobody (`0x60ab10`).
     assert_eq!(at("pettarget"), None);
     assert_eq!(at("party2target"), None);
-    assert!(guids().resolve("npctarget").is_err());
 }
 
 /// The parse reads the text alone: the base by the resolver's compares, a numbered base's
@@ -121,10 +162,10 @@ fn a_token_parses_to_a_base_and_its_hops() {
     );
 }
 
-/// Text after the base, or after any hop, that is not `target` names nobody; a token none of
-/// the nine compares match is the raise, `npc` being an exact compare with no chain.
+/// Text after the base, or after any hop, that is not `target` names nobody; a token no base
+/// matches is `Unknown`, `npc` being an exact compare with no chain.
 #[test]
-fn a_token_that_is_not_base_then_hops_parses_to_nobody_or_the_raise() {
+fn a_token_that_is_not_base_then_hops_parses_to_nobody_or_unknown() {
     for token in [
         "",
         "party1foo",
@@ -144,46 +185,87 @@ fn a_token_that_is_not_base_then_hops_parses_to_nobody_or_the_raise() {
     }
 }
 
+/// `0x60abf0`'s three answers: false with guid 0 when nothing parses (`0x60b021`, never a raise),
+/// true with the sentinel when a parse ends on 0 (`0x60b00c`), else the guid. A base on 0 with text
+/// left is a name (`0x60ad51`), a target hop off a unit not held loops on 0 (`0x60ab10`), and a
+/// `pet` hop off a unit that is not ours or a member's fails (`0x60ab76`).
 #[test]
-fn a_recognised_token_naming_nobody_is_quiet() {
-    for t in [
-        "",
-        "party",
-        "party0",
-        "party5",
-        "partyX",
-        "raid0",
-        "raid4",
-        "raidpet3",
-        "playerfoo",
-        "targetfoo",
-        "partypet5",
+fn the_resolver_answers_a_guid_the_sentinel_or_false() {
+    let fail = Resolved { ok: false, guid: 0 };
+    let ok = |guid| Resolved { ok: true, guid };
+    let m = model(guids());
+    for (t, want) in [
+        ("", fail),
+        ("bogus", fail),
+        ("5", fail),
+        ("npc1", fail),
+        ("npctarget", fail),
+        ("tar", fail),
+        ("playerfoo", fail),
+        ("targetfoo", fail),
+        ("partyX", fail),
+        ("player-", fail),
+        ("party", ok(NOBODY)),
+        ("party0", ok(NOBODY)),
+        ("party5", ok(NOBODY)),
+        ("raid4", ok(NOBODY)),
+        ("raidpet3", ok(NOBODY)),
+        ("partypet5", ok(NOBODY)),
+        ("focus", ok(NOBODY)),
+        ("vehicle", ok(NOBODY)),
+        ("boss1", ok(NOBODY)),
+        ("commentator1", ok(NOBODY)),
+        ("party3target", fail),
+        ("party2target", ok(NOBODY)),
+        ("none", ok(NONE)),
+        ("NONE", ok(NONE)),
+        ("nonetarget", fail),
+        ("playerpet", ok(PET)),
+        ("PlayerPetTarget", ok(NOBODY)),
+        ("party1pet", ok(P1_PET)),
+        ("party1-pet-target", ok(MOB)),
+        ("party1-target", ok(ME)),
+        ("party2pet", ok(NOBODY)),
+        ("raid2pet", ok(P1_PET)),
+        ("targetpet", fail),
+        ("raid3targetpet", fail),
+        ("bob", ok(P1)),
+        ("BOB-target", ok(ME)),
+        ("bob-pet", ok(P1_PET)),
+        ("Bob-target-pet", ok(PET)),
+        ("me", ok(ME)),
+        ("rex", ok(PET)),
+        ("rex-target", ok(NOBODY)),
+        ("Bobtarget", fail),
+        ("Bob-Realm", fail),
     ] {
-        assert_eq!(guids().resolve(t), Ok(None), "{t}");
+        assert_eq!(m.resolve_token(t), want, "{t}");
     }
-    let solo = UnitGuids {
+    let solo = model(UnitGuids {
         player: 0,
         pet: PET,
         ..guids()
-    };
-    assert_eq!(solo.resolve("pet"), Ok(None), "no player object, no pet");
+    });
+    assert_eq!(solo.resolve_token("pet"), ok(NOBODY), "no player, no pet");
     let gone = UnitGuids {
         held: HashMap::new(),
         ..guids()
     };
-    assert_eq!(gone.resolve("mouseover"), Ok(None), "a mouseover not held");
+    let far = model(UnitGuids {
+        mouseover: FAR,
+        ..gone.clone()
+    });
+    assert_eq!(model(gone).unit_guid("mouseover"), None, "not held");
     assert_eq!(
-        gone.resolve("target"),
-        Ok(Some(MOB)),
-        "the target global is not gated"
+        far.unit_guid("mouseover"),
+        Some(FAR),
+        "a member (`0x512a30`)"
     );
-}
-
-#[test]
-fn an_unrecognised_token_is_the_raise() {
-    for t in ["bogus", "focus", "none", "5", "npc1", "tar"] {
-        assert_eq!(guids().resolve(t), Err(()), "{t}");
-    }
+    assert_eq!(
+        far.unit_guid("target"),
+        Some(MOB),
+        "the target is not gated"
+    );
 }
 
 #[test]
@@ -253,9 +335,10 @@ fn arena_slots_resolve_count_and_fan_out_after_the_raid() {
         arena_pets: [0, A2_PET, 0, 0, 0],
         ..Default::default()
     };
-    assert_eq!(g.resolve("arena1"), Ok(Some(A1)));
-    assert_eq!(g.resolve("arenapet2"), Ok(Some(A2_PET)));
-    assert_eq!(g.resolve("arena2"), Ok(None));
+    let m = model(g.clone());
+    assert_eq!(m.unit_guid("arena1"), Some(A1));
+    assert_eq!(m.unit_guid("arenapet2"), Some(A2_PET));
+    assert_eq!(m.unit_guid("arena2"), None);
     assert_eq!(
         g.arena_count(),
         2,

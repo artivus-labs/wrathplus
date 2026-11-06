@@ -18,12 +18,13 @@ fn assignment(lua: &Lua, value: Value) -> mlua::Result<u8> {
     }
 }
 fn guid(m: &Model, token: &str, raid: bool, exact: bool) -> Option<u64> {
-    let resolved = m
-        .unit_guids
-        .resolve(token)
-        .ok()
+    // A token alone: names are `0x520190`'s below, not `0x60abf0`'s name leg.
+    let resolved = crate::script::unit::token_recognised(token, true)
+        .then(|| {
+            m.unit_guid(token)
+                .or_else(|| Some(m.pushed_unit(token)?.guid))
+        })
         .flatten()
-        .or_else(|| m.unit(token).map(|u| u.guid))
         .filter(|g| *g != 0);
     if let Some(g) = resolved {
         let own = m.unit_guids.player != 0 && g == m.unit_guids.player

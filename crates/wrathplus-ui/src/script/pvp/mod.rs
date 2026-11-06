@@ -19,7 +19,7 @@
 use mlua::{Lua, MultiValue, Value};
 
 use super::binding_abi::{number_arg, string_arg};
-use super::unit::{check_unit_token, is_civilian_kill};
+use super::unit::is_civilian_kill;
 use super::Model;
 
 /// The local player's honor snapshot, decoded by the app from its own private descriptor. Build
@@ -151,7 +151,7 @@ fn team_of(u: &super::UnitState) -> i64 {
 /// (`0x51a98c`/`0x51a9af`/`0x51a9c8`): a number is the digit itself, truncated; a string is that
 /// unit's [`team_of`], or 0 if it names nothing or a non-player; anything else is the local
 /// player's, or 0 with no player. That 0 is the team register's initial value, so a miss names
-/// off the Horde list, as in the reference. An unknown token raises, as `0x515970` does.
+/// off the Horde list, as in the reference. A token naming nobody answers 0 (`0x60abf0`).
 fn team_arg(lua: &Lua, v: Value) -> mlua::Result<i64> {
     // `lua_isnumber` before `lua_isstring`, which is what puts a numeric string on the number arm.
     if let Some(n) = lua.coerce_number(v.clone())? {
@@ -163,7 +163,6 @@ fn team_arg(lua: &Lua, v: Value) -> mlua::Result<i64> {
         return Ok(model.unit("player").map_or(0, team_of));
     };
     let token = Some(token.to_str()?.to_owned());
-    check_unit_token(lua, &token)?;
     let model = lua.app_data_ref::<Model>().expect("model app_data");
     Ok(token
         .as_ref()
@@ -348,7 +347,6 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         "UnitPVPRank",
         lua.create_function(|lua, token: Value| {
             let token = Some(string_arg(lua, token, "Usage: UnitPVPRank(\"unit\")")?);
-            check_unit_token(lua, &token)?;
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             Ok(token
                 .as_ref()
@@ -375,7 +373,6 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         "UnitPVPName",
         lua.create_function(|lua, token: Value| {
             let token = Some(string_arg(lua, token, "Usage: UnitPVPName(\"unit\")")?);
-            check_unit_token(lua, &token)?;
             let (unit, player_level) = {
                 let model = lua.app_data_ref::<Model>().expect("model app_data");
                 (

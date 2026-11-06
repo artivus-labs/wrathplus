@@ -31,7 +31,7 @@
 
 use mlua::{Lua, MultiValue, Value};
 
-use super::{check_unit_token, with_unit, Model};
+use super::{with_unit, Model};
 use crate::script::binding_abi::flag;
 
 /// Summon Friend, the spell `0xbe7d88` holds.
@@ -341,7 +341,6 @@ pub(crate) fn install(lua: &Lua) -> mlua::Result<()> {
     g.set(
         "UnitIsRaidOfficer",
         lua.create_function(|lua, token: Option<String>| {
-            check_unit_token(lua, &token)?;
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             let guid = token.as_ref().and_then(|t| model.unit(t)).map(|u| u.guid);
             Ok(flag(guid.is_some_and(|g| {
@@ -352,7 +351,6 @@ pub(crate) fn install(lua: &Lua) -> mlua::Result<()> {
     g.set(
         "UnitInBattleground",
         lua.create_function(|lua, token: Option<String>| {
-            check_unit_token(lua, &token)?;
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             let guid = token.as_ref().and_then(|t| model.unit(t)).map(|u| u.guid);
             let slot = guid.and_then(|g| model.party.raid.iter().position(|m| m.guid == g));
@@ -376,14 +374,12 @@ pub(crate) fn install(lua: &Lua) -> mlua::Result<()> {
         lua.create_function(|lua, token: Value| {
             let token = unit_arg(lua, token, "Usage: PlayerIsPVPInactive(\"unit\")")?;
             let model = lua.app_data_ref::<Model>().expect("model app_data");
-            // A token through the guid table, else a group member's name (`0x60abf0`): the stock
-            // battle maps pass a teammate's name. Nobody answers false, never a raise.
+            // A token or a group member's name (`0x60abf0`): the stock battle maps pass a
+            // teammate's name. Nobody answers false.
             let guid = token
                 .as_deref()
-                .map_or(0, |t| match model.unit_guids.guid_of(t) {
-                    Ok(g) => g.unwrap_or(0),
-                    Err(_) => crate::script::wrath_unit_popup::guid_of(&model, t),
-                });
+                .and_then(|t| model.unit_guid(t))
+                .unwrap_or(0);
             let auras = match guid {
                 0 => None,
                 g if g == model.unit_guids.player => Some(model.player_auras.as_slice()),

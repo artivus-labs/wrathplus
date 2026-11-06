@@ -8,6 +8,7 @@ use crate::app_core::state::PlayerActions;
 use crate::app_core::state::Spells;
 use crate::items::Items;
 use crate::net::{NetCommands, Objects};
+use wrathplus_protocol::ObjectFields;
 
 /// The view alone, for the cell tests; the feed keeps what it read beside it.
 pub(super) fn spell_tooltip_view(
@@ -796,8 +797,6 @@ const BOAR: u64 = 0xF130_0000_4600_0002;
 /// The world-hover driver over a bare VM holding `"player"` (us) and `"target"` (the wolf), each
 /// with its guid, as the unit feed pushes them; returns the app, the wolf and the boar.
 fn mouseover_app() -> (App, Entity, Entity) {
-    use wrathplus_protocol::ObjectFields;
-
     let mut app = App::new();
     let (tx, _rx) = crossbeam_channel::unbounded();
     app.insert_resource(NetCommands(tx))
@@ -836,8 +835,9 @@ fn mouseover_app() -> (App, Entity, Entity) {
     (app, wolf, boar)
 }
 
-/// Set this frame's pick and run the driver.
+/// Set this frame's pick and run the driver, with the guid table the aura feed seats from it.
 fn hover(app: &mut App, pick: Hovered, object: HoveredObject) {
+    crate::test_guids::seat_hover(app, ME, WOLF, pick.mouseover(&object));
     *app.world_mut().resource_mut::<Hovered>() = pick;
     *app.world_mut().resource_mut::<HoveredObject>() = object;
     app.update();
@@ -895,8 +895,6 @@ fn the_mouseover_token_carries_the_hovered_guid() {
 /// itself is built for a player from its race and class, whatever type the snapshot carries.
 #[test]
 fn the_mouseover_token_names_the_hovered_units_creature_type() {
-    use wrathplus_protocol::ObjectFields;
-
     const NIGHT_ELF: u32 = 4;
     const CAT_FORM: u32 = 1;
     const DRUID: u64 = 0x99;
@@ -946,8 +944,6 @@ fn the_mouseover_token_names_the_hovered_units_creature_type() {
 /// GameObject each clear it, in the frame the hover leaves the unit.
 #[test]
 fn the_mouseover_token_clears_when_no_unit_is_hovered() {
-    use wrathplus_protocol::ObjectFields;
-
     let (mut app, wolf, _) = mouseover_app();
     let corpse = app
         .world_mut()
@@ -1089,7 +1085,6 @@ fn the_feed_pushes_the_spells_the_vm_holds_before_a_hover() {
 /// player's book on the player, and rebuilds only the pet views when the pet's level moves.
 #[test]
 fn the_feed_builds_the_pet_views_against_the_pet_and_rebuilds_them_on_its_level() {
-    use wrathplus_protocol::ObjectFields;
     use wrathplus_ui::script::{PetActionView, PetBookState, SpellBookState, SpellSlotView};
     const ME: u64 = 0x10;
     const IMP: u64 = 0xF140_0000_0000_0077;

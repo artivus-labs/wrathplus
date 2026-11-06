@@ -303,10 +303,11 @@ fn token_for_name(model: &Model, arg: &str) -> Option<String> {
 /// The token `0x60abf0` resolves an argument to: a unit token as given, else a group member's
 /// name ([`token_for_name`]). It never raises.
 pub(crate) fn resolve_unit_arg(lua: &Lua, arg: &str) -> Option<String> {
-    if super::unit::check_unit_token(lua, &Some(arg.to_string())).is_ok() {
+    let model = lua.app_data_ref::<Model>().expect("model app_data");
+    if model.resolve_token(arg).ok {
         return Some(arg.to_string());
     }
-    token_for_name(&lua.app_data_ref::<Model>().expect("model app_data"), arg)
+    token_for_name(&model, arg)
 }
 
 /// The held unit an argument names through `0x60abf0`, mapped by `f`; `None` for no unit.

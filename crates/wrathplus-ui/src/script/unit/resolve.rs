@@ -1,7 +1,8 @@
-//! The unit-token resolver `0x515970`, token to guid, over the state it reads, which the app pushes
-//! as [`UnitGuids`]: a base (`player`, `pet`, `target`, `partyN`, `partypetN`, `raidN`,
-//! `raidpetN`, `mouseover`, `npc`, and Wrath's `focus`, `arenaN`, `arenapetN`), then any number of `target` hops, each off the current unit's
-//! `UNIT_FIELD_TARGET`. Every compare folds ASCII case (`SStrCmpI 0x64a4c0`, first at `0x5159b4`).
+//! What the unit-token resolver reads, which the app pushes as [`UnitGuids`], and a text-only
+//! parse of a token's base and `target` hops ([`parse_unit_token`]) for the app's own selection
+//! verbs. The VM resolves through build 12340's `0x60abf0` ([`super::token`]), which also takes
+//! `pet` suffixes, `none`, `vehicle` and member names. Every compare folds ASCII case
+//! (`_strnicmp` through `0x76e780`).
 
 use std::collections::HashMap;
 
@@ -9,24 +10,25 @@ use std::collections::HashMap;
 /// reach, whether it is held and whom it targets. A zero guid is nobody.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct UnitGuids {
-    /// The local player's guid; 0 without the player object, when `player` and `pet` answer nil
-    /// (`0x5159c9`, `0x515a58`).
+    /// The local player's guid; 0 without the player object, when `player` and `pet` name nobody
+    /// (`0x60ac4f`, `0x60acbf`).
     pub player: u64,
-    /// The pet: `UNIT_FIELD_CHARM`, else `UNIT_FIELD_SUMMON` (`0x515a64`).
+    /// The pet: `UNIT_FIELD_CHARM`, else `UNIT_FIELD_SUMMON` (`0x60acc3`).
     pub pet: u64,
-    /// The target global `[0xb4e2d8]`.
+    /// The target global `[0xbd07b0]`.
     pub target: u64,
-    /// The mouseover global `[0xb4e2c8]`, read only while it is a held unit (`0x515bd2`).
+    /// The mouseover global `[0xbd07a0]`, read only while it is a held unit or ours or a member's
+    /// (`0x60aefa`, `0x60af0b`).
     pub mouseover: u64,
-    /// The interaction NPC `[0xb4e2d0]`.
+    /// The interaction NPC `[0xbd07a8]`.
     pub npc: u64,
-    /// `partyN`'s guid, index N-1 (`0x4e81a0`).
+    /// `partyN`'s guid, index N-1 (`0x52bc50`, the slots at `0xbd1948`).
     pub party: [u64; 4],
-    /// `partypetN`'s guid, index N-1 (`0x4e81d0`).
+    /// `partypetN`'s guid, index N-1 (`0x52c6e0`).
     pub party_pets: [u64; 4],
-    /// `raidN`'s guid, one per roster row; a row past the end is nobody (`0x491940`).
+    /// `raidN`'s guid, one per roster row; a row past the end is nobody (`0x512a80`).
     pub raid: Vec<u64>,
-    /// `raidpetN`'s guid, row for row with [`Self::raid`] (`0x491960`).
+    /// `raidpetN`'s guid, row for row with [`Self::raid`] (`0x518ce0`).
     pub raid_pets: Vec<u64>,
     /// Wrath's focus unit; 0 for none.
     pub focus: u64,
@@ -34,12 +36,12 @@ pub struct UnitGuids {
     pub arena: [u64; 5],
     /// `arenapetN`'s stored pet, slot N-1 (`0xbe9ef8`), the arena feed's too.
     pub arena_pets: [u64; 5],
-    /// Whether the resolver reads Wrath's tokens (`focus`, `vehicle`, `bossN`, `arenaN`,
-    /// `arenapetN`). The VM sets it from its dialect; the app's pushes leave it alone.
+    /// Whether [`parse_unit_token_in`]'s text parse takes Wrath's bases. The VM sets it; the
+    /// app's pushes leave it alone.
     pub wrath: bool,
     /// Each held unit a token can reach, to its `UNIT_FIELD_TARGET` (0 for none): the object
-    /// manager's lookup with the unit typemask (`0x468460`, `ecx = 8`) and the descriptor read a
-    /// `target` hop makes (`0x515a0f`-`0x515a25`). A guid missing here is not held.
+    /// manager's lookup with the unit typemask (`0x4d4db0`, 8) and the descriptor read a `target`
+    /// hop makes (`0x60ab16`-`0x60ab24`). A guid missing here is not held.
     pub held: HashMap<u64, u64>,
 }
 
@@ -159,7 +161,7 @@ pub enum UnitBase {
     Pet,
     Target,
     Mouseover,
-    /// The interaction NPC; an exact compare, so it takes no `target` hop (`0x515bec`).
+    /// The interaction NPC; an exact compare, so it takes no `target` hop (`0x60af53`).
     Npc,
     Party(u32),
     PartyPet(u32),
@@ -191,21 +193,21 @@ const WRATH_PREFIXES: [(&str, WrathBase); 5] = [
     ("arena", WrathBase::Arena),
 ];
 
-/// What `0x515970` makes of a token's text, before it reads any state.
+/// A token's text as [`parse_unit_token`] reads it, before any state.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UnitTokenParse {
-    /// None of the nine compares match: the reference raises `Unknown unit name` (`0x515c14`).
+    /// No base matches; 12340 then tries the text as a name (`0x60a630`).
     Unknown,
-    /// Recognised, and names nobody whatever the state: the empty token (`0x51599d`), or text
-    /// after the base, and after each hop, that is not `target` (`0x515c2d`).
+    /// Recognised, and names nobody whatever the state: the empty token, or text after the base,
+    /// and after each hop, that is not `target`.
     Nobody,
     /// A base and the `target` hops after it, each off the current unit's `UNIT_FIELD_TARGET`
-    /// (`0x515a1c`-`0x515a25`); the loop has no depth limit.
+    /// (`0x60ab16`); the loop has no depth limit.
     Unit { base: UnitBase, hops: usize },
 }
 
 /// `_strnicmp(s, lit, strlen(lit)) == 0`: ASCII fold only, bytes of 0x80 and up exact.
-fn has_prefix(s: &[u8], lit: &str) -> bool {
+pub(super) fn has_prefix(s: &[u8], lit: &str) -> bool {
     s.len() >= lit.len() && s[..lit.len()].eq_ignore_ascii_case(lit.as_bytes())
 }
 
@@ -217,8 +219,8 @@ fn base_of(token: &[u8]) -> Option<(Base, usize)> {
         .map(|&(p, b)| (b, p.len()))
 }
 
-/// Whether the resolver recognises the token, not whether it names a unit: `"party5"` solo is
-/// recognised and answers nil, and only a token none of its nine compares match raises.
+/// Whether the token's text starts with a base, not whether it names a unit: `"party5"` solo is
+/// recognised. The app's verbs that take a token or a name route on it.
 pub(crate) fn token_recognised(token: &str, wrath: bool) -> bool {
     token.eq_ignore_ascii_case("npc")
         || (wrath && token.eq_ignore_ascii_case("questnpc"))
@@ -233,10 +235,10 @@ fn wrath_base_of(token: &[u8]) -> Option<(WrathBase, usize)> {
         .map(|&(p, b)| (b, p.len()))
 }
 
-/// The inline base-10 parse after `party`, `partypet`, `raid` and `raidpet`, then `dec` to a
-/// 0-based index (`0x515ab1`-`0x515acc`): digits accumulate with 32-bit wrap, and a missing
-/// number leaves 0, whose index `0xffffffff` every bound rejects.
-fn index_of(s: &[u8]) -> (u32, usize) {
+/// The base-10 parse after a numbered base (`0x76f190`), then `-1` to a 0-based index: digits
+/// accumulate with 32-bit wrap, and a missing number leaves 0, whose index `0xffffffff` every
+/// bound rejects.
+pub(super) fn index_of(s: &[u8]) -> (u32, usize) {
     let digits = s.iter().take_while(|b| b.is_ascii_digit()).count();
     let n = s[..digits].iter().fold(0u32, |acc, &b| {
         acc.wrapping_mul(10).wrapping_add(u32::from(b - b'0'))
@@ -244,10 +246,10 @@ fn index_of(s: &[u8]) -> (u32, usize) {
     (n.wrapping_sub(1), digits)
 }
 
-/// Read `token`'s text as `0x515970` does, before any state: the base by the compares in their
-/// order, a numbered base's row, then `target` hops to the end of the text. `"party1target"` is
-/// party1 and one hop, `"targettarget"` the target and one, and `"npctarget"` is none of the nine
-/// compares, as `npc` is one full-string compare.
+/// Read `token`'s text before any state, the `target`-only subset of `0x60abf0`'s grammar: the
+/// base by the compares, a numbered base's row, then `target` hops to the end of the text.
+/// `"party1target"` is party1 and one hop, `"targettarget"` the target and one, and `"npctarget"`
+/// matches no base, as `npc` is one full-string compare.
 pub fn parse_unit_token(token: &str) -> UnitTokenParse {
     parse_unit_token_in(token, false)
 }
@@ -327,51 +329,6 @@ fn target_hops(base: UnitBase, mut rest: &[u8]) -> UnitTokenParse {
 }
 
 impl UnitGuids {
-    /// The guid `token` names, or `None` for nobody; `Err` for a token none of the nine compares
-    /// match, where the reference raises `Unknown unit name: %s` (`0x515c14`). An empty token is
-    /// nobody (`0x51599d`).
-    pub(crate) fn resolve(&self, token: &str) -> Result<Option<u64>, ()> {
-        match parse_unit_token_in(token, self.wrath) {
-            UnitTokenParse::Unknown => Err(()),
-            UnitTokenParse::Nobody => Ok(None),
-            UnitTokenParse::Unit { base, hops } => Ok(self.resolve_unit(base, hops)),
-        }
-    }
-
-    /// The guid a parsed token names: its base's guid, then each `target` hop. `None` is nobody.
-    pub(crate) fn resolve_unit(&self, base: UnitBase, hops: usize) -> Option<u64> {
-        // The indexed bases: the table's row for the parsed number.
-        let at = |table: &[u64], row: u32| {
-            usize::try_from(row)
-                .ok()
-                .and_then(|row| table.get(row))
-                .copied()
-                .unwrap_or(0)
-        };
-        let guid = match base {
-            UnitBase::Player => self.player,
-            UnitBase::Pet if self.player == 0 => return None,
-            UnitBase::Pet => self.pet,
-            UnitBase::Target => self.target,
-            UnitBase::Npc => self.npc,
-            // Deviation: `0x4e81d0` has no bound and reads past its four-entry table, which is
-            // stale memory, not a mechanism; past it, nobody.
-            UnitBase::PartyPet(row) => at(&self.party_pets, row),
-            // Capped at 4 (`0x4e81b0`).
-            UnitBase::Party(row) => at(&self.party, row),
-            // Capped at the roster count (`0x491940`, `0x491960`).
-            UnitBase::RaidPet(row) => at(&self.raid_pets, row),
-            UnitBase::Raid(row) => at(&self.raid, row),
-            UnitBase::Mouseover if !self.held.contains_key(&self.mouseover) => return None,
-            UnitBase::Mouseover => self.mouseover,
-            UnitBase::Focus => self.focus,
-            UnitBase::Arena(row) => at(&self.arena, row),
-            UnitBase::ArenaPet(row) => at(&self.arena_pets, row),
-            UnitBase::Vehicle | UnitBase::Boss(_) => 0,
-        };
-        self.follow(guid, hops)
-    }
-
     /// The guids a `target` hop can end on: each held unit's target, when it names one. `held`
     /// holds the bases' units and each unit a hop reaches from them, so a token with a hop names
     /// one of these or nobody, and a per-guid feed over them covers the chains a script can spell.
@@ -406,24 +363,6 @@ impl UnitGuids {
             arena_pets: self.arena_pets,
             ..next.clone()
         }
-    }
-
-    /// [`Self::resolve`] with the raise as the Lua error it is.
-    pub(crate) fn guid_of(&self, token: &str) -> mlua::Result<Option<u64>> {
-        self.resolve(token)
-            .map_err(|()| mlua::Error::runtime(format!("Unknown unit name: {token}")))
-    }
-
-    /// The `target` loop (`0x5159d3`-`0x515a2c`): nobody stays nobody, and each hop goes to the held
-    /// unit's `UNIT_FIELD_TARGET`; a hop off a unit not held is a quiet nobody (`0x515a16`).
-    fn follow(&self, mut guid: u64, hops: usize) -> Option<u64> {
-        for _ in 0..hops {
-            if guid == 0 {
-                return None;
-            }
-            guid = *self.held.get(&guid)?;
-        }
-        Some(guid).filter(|&g| g != 0)
     }
 }
 

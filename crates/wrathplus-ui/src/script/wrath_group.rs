@@ -98,7 +98,6 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         // UnitGroupRolesAssigned(unit) → isTank, isHealer, isDamage: build 12340's three booleans
         // (PartyMemberFrame.lua:223, PlayerFrame.lua:250), from the member's role bits 2, 4, 8.
         lua.create_function(|lua, token: Option<String>| {
-            super::super::unit::check_unit_token(lua, &token)?;
             let model = lua.app_data_ref::<Model>().expect("model");
             let guid = token.as_ref().and_then(|t| model.unit(t)).map(|u| u.guid);
             let bits = guid

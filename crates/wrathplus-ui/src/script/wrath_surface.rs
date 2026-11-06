@@ -314,36 +314,39 @@ fn install_truthful_readers(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // `0x60c2a0`: the number 1 or nil, never a boolean (`/tmp/azb-app-mig/ghidra/unitexists.log`).
-    // A token is observable only when the engine supplied an existing unit snapshot; no
-    // placeholder or guessed identity is manufactured. Labelled: with no object the native asks
-    // `0x512a30` before answering nil (unread; the snapshot's `exists` stands in for it).
+    // `0x60c2a0`: the number 1 or nil, never a boolean, and no `Usage:` gate (`lua_tolstring`).
+    // A held object answers (its `vtable+0xa8` predicate is unread; the snapshot's `exists`
+    // stands in), else `0x512a30`: us, our pet, or a group member or its pet, held or not.
     globals.set(
         "UnitExists",
-        lua.create_function(|lua, token: Option<String>| {
-            let exists = token.as_deref().is_some_and(|token| {
-                lua.app_data_ref::<Model>()
-                    .expect("model app_data")
-                    .unit(token)
-                    .is_some_and(|unit| unit.exists)
+        lua.create_function(|lua, token: Value| {
+            let model = lua.app_data_ref::<Model>().expect("model app_data");
+            let exists = super::unit::token::token_text(lua, &token).is_some_and(|token| {
+                let guid = model.resolve_token(&token).guid;
+                let unit = model
+                    .pushed_unit(&token)
+                    .or_else(|| model.unit_by_guid(guid));
+                unit.is_some_and(|unit| unit.exists) || model.ours_or_grouped(guid)
             });
             Ok(exists.then_some(1))
         })?,
     )?;
+    // `0x60e630`: `lua_isstring`, then the resolver's guid as hex, nil for 0 or the sentinel
+    // (`0x60e68e`, `0x60e694`): no object is needed, and `none` answers all ones. Labelled: the
+    // low 24 bits a creature template flagged `0x4000` clears (`0x60e6e1`) are kept.
     globals.set(
         "UnitGUID",
-        lua.create_function(|lua, token: Option<String>| {
-            let guid = token.as_deref().and_then(|token| {
-                lua.app_data_ref::<Model>()
-                    .expect("model app_data")
-                    .unit(token)
-                    .filter(|unit| unit.exists && unit.guid != 0)
-                    .map(|unit| unit.guid)
-            });
-            match guid {
-                Some(guid) => Ok(Value::String(lua.create_string(format!("0x{guid:016X}"))?)),
-                None => Ok(Value::Nil),
+        lua.create_function(|lua, token: Value| {
+            let token = super::binding_abi::string_arg(lua, token, r#"Usage: UnitGUID("unit")"#)?;
+            let guid = lua
+                .app_data_ref::<Model>()
+                .expect("model app_data")
+                .resolve_token(&token)
+                .guid;
+            if guid == 0 || guid == super::unit::token::NOBODY {
+                return Ok(Value::Nil);
             }
+            Ok(Value::String(lua.create_string(format!("0x{guid:016X}"))?))
         })?,
     )?;
     Ok(())

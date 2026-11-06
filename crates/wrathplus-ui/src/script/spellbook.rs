@@ -546,8 +546,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             )?;
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             let can = model
-                .unit_guids
-                .guid_of(&token)?
+                .unit_guid(&token)
                 .is_some_and(|guid| model.spell_targetable_units.contains(&guid));
             Ok(flag(can))
         })?,

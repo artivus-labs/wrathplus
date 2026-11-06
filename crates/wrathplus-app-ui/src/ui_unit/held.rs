@@ -1,7 +1,7 @@
 //! The snapshot of a held unit that a token names other than the player, and the per-guid feed of
 //! the units a `target` chain ends on.
 //!
-//! The reference resolves a token to a guid (`0x515970`) and reads that guid's object, so a unit it
+//! The reference resolves a token to a guid (`0x60abf0`) and reads that guid's object, so a unit it
 //! holds answers a `Unit*` getter however the token spelled it. The app pushes a snapshot
 //! for each base token by name ([`UiScript::set_unit`]); a chain such as `party1target` names a
 //! unit no base does, so the VM resolves it to a guid and reads that guid's snapshot, which
@@ -91,7 +91,7 @@ pub(super) struct ChainMemo {
 
 /// Push the snapshot of each held unit a `target` chain can end on, by guid, so `UnitName`,
 /// `UnitHealth` and the other getters answer for `party1target`, `raid3target` and `pettarget`
-/// (`0x515970` resolves the token, then each getter reads the guid's object, `0x468460`). The
+/// (`0x60abf0` resolves the token, then each getter reads the guid's object, `0x4d4db0`). The
 /// guids are the resolver's own inputs ([`UiScript::chain_end_guids`]), which the aura feed pushes
 /// each frame, so this runs after it. A guid the object manager does not hold, or holds as
 /// anything but a unit, gets no snapshot. The reference still answers such a guid: `UnitExists`
@@ -425,10 +425,10 @@ pub(crate) mod tests {
                 "UnitExists({token})"
             );
         }
-        // The plain tokens read their own push and nothing else: this world pushes none, so
-        // `raid2` answers nil though a chain ends on it, and a token pushed by name wins.
-        assert_eq!(name(&app, "raid2"), None);
-        assert_eq!(name(&app, "target"), None);
+        // A plain token with no push of its own reads the guid it resolves to (`0x60abf0`), so
+        // `raid2` and `target` answer as the chains' ends they are; a token pushed by name wins.
+        assert_eq!(name(&app, "raid2").as_deref(), Some("Alia"));
+        assert_eq!(name(&app, "target").as_deref(), Some("Mob"));
         app.world_mut()
             .non_send_resource_mut::<UiScript>()
             .set_unit(

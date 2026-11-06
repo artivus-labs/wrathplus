@@ -76,8 +76,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         "UnitDetailedThreatSituation",
         lua.create_function(|lua, (unit, mob): (String, String)| {
             let model = lua.app_data_ref::<Model>().expect("model");
-            let member = model.unit_guids.guid_of(&unit)?;
-            let mob = model.unit_guids.guid_of(&mob)?;
+            let member = model.unit_guid(&unit);
+            let mob = model.unit_guid(&mob);
             let details = member
                 .zip(mob)
                 .and_then(|(member, mob)| model.threat.mobs.get(&mob)?.details(member));
@@ -97,11 +97,11 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         "UnitThreatSituation",
         lua.create_function(|lua, (unit, mob): (String, Option<String>)| {
             let model = lua.app_data_ref::<Model>().expect("model");
-            let Some(member) = model.unit_guids.guid_of(&unit)? else {
+            let Some(member) = model.unit_guid(&unit) else {
                 return Ok(None);
             };
             if let Some(mob) = mob {
-                let mob = model.unit_guids.guid_of(&mob)?;
+                let mob = model.unit_guid(&mob);
                 Ok(mob.and_then(|mob| model.threat.mobs.get(&mob)?.details(member).map(|d| d.1)))
             } else {
                 Ok(model

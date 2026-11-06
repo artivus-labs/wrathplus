@@ -109,7 +109,7 @@ fn target(lua: &Lua, model: &Model, args: &MultiValue) -> u64 {
     else {
         return 0;
     };
-    model.unit_guids.resolve(&token).ok().flatten().unwrap_or(0)
+    model.unit_guid(&token).unwrap_or(0)
 }
 
 /// The macro record argument 1 names (`0x566df0`), as its id.

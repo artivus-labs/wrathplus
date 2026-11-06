@@ -110,10 +110,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         lua.create_function(|lua, unit: String| {
             let model = lua.app_data_ref::<Model>().expect("model");
             let guid = model
-                .unit_guids
-                .resolve(&unit)
-                .ok()
-                .flatten()
+                .unit_guid(&unit)
                 .or_else(|| model.unit(&unit).map(|u| u.guid))
                 .or_else(|| {
                     if unit == "player" {

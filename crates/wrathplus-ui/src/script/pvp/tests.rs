@@ -523,9 +523,9 @@ fn get_pvp_rank_info_takes_a_second_argument_three_different_ways() {
         .eval::<bool>(r#"return GetPVPRankInfo(9, "target") == nil"#)
         .unwrap());
 
-    assert!(s
-        .eval::<Option<String>>(r#"return (GetPVPRankInfo(9, "wombat"))"#)
-        .is_err());
+    // A token nothing parses names nobody (`0x60abf0` never raises): team 0, the Horde list.
+    let same = r#"return GetPVPRankInfo(9, "wombat") == GetPVPRankInfo(9, 0)"#;
+    assert!(s.eval::<bool>(same).unwrap());
 }
 
 /// `0x51a930` tests `lua_isnumber` and raises: not a `(nil, 0)` edge.

@@ -312,16 +312,15 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // GetGuildInfo(unit) → guildName, rankName, rankIndex (`0x4c9330`), per unit because the rank
-    // fields are public: it reads the unit snapshot, not the player's guild. The general resolver
-    // (`0x515940`) raises on an unrecognised token (`0x515c1a`); a recognised but unresolvable
-    // token, a non-player, a guildless player and an unarrived guild record all answer
-    // `nil, nil, 0`, the third the number 0 (`mov eax,3` on both legs). Stock
+    // GetGuildInfo(unit) → guildName, rankName, rankIndex (`0x5eaaf0`), per unit because the rank
+    // fields are public: it reads the unit snapshot, not the player's guild. The resolver
+    // (`0x60abf0`) never raises; a token naming nobody, a non-player, a guildless player and an
+    // unarrived guild record all answer `nil, nil, 0`, the third the number 0 (`mov eax,3` on
+    // both legs). Stock
     // `PaperDollFrame_SetGuild` calls it for `"player"` unguarded (`PaperDollFrame.lua:117`).
     g.set(
         "GetGuildInfo",
         lua.create_function(|lua, unit: Option<String>| {
-            crate::script::unit::check_unit_token(lua, &unit)?;
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             let Some(state) = unit.as_deref().and_then(|u| model.unit(u)) else {
                 return Ok((Value::Nil, Value::Nil, Value::Integer(0)));

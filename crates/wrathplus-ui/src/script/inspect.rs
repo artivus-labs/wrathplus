@@ -94,7 +94,7 @@ impl super::UiScript {
 fn reach(lua: &Lua, token: &Option<String>) -> Option<UnitReach> {
     let token = token.as_deref()?;
     let model = lua.app_data_ref::<Model>().expect("model app_data");
-    let guid = model.unit_guids.resolve(token).ok().flatten()?;
+    let guid = model.unit_guid(token)?;
     model.unit_reach.get(&guid).copied()
 }
 

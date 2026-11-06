@@ -64,7 +64,7 @@ fn live(
     pick: impl Fn(&State) -> &HashMap<u64, WrathUnitCast>,
 ) -> mlua::Result<Option<WrathUnitCast>> {
     let model = lua.app_data_ref::<Model>().expect("model app_data");
-    let Some(guid) = model.unit_guids.guid_of(token)? else {
+    let Some(guid) = model.unit_guid(token) else {
         return Ok(None);
     };
     let now_ms = model.now * 1000.0;
@@ -228,7 +228,9 @@ mod tests {
             0,
             "now >= end answers nothing"
         );
-        assert!(s.run("UnitCastingInfo('bogus')").is_err());
+        // The resolver never raises (`0x60abf0`): a token nothing parses answers nothing.
+        let n = s.eval::<i64>("return select('#', UnitCastingInfo('bogus'))");
+        assert_eq!(n.unwrap(), 0);
     }
 
     #[test]

@@ -9,9 +9,8 @@ use super::super::binding_abi::flag;
 use super::super::calls::ScriptCall;
 use super::super::Model;
 use super::{
-    check_unit_token, classification_word, grey_band, level_reads_unknown, pick_unit_token,
-    unit_predicate, unknownobject, with_unit, PlayerRecord, SelectionRequest, UnitBase,
-    UnitTokenParse,
+    classification_word, grey_band, level_reads_unknown, pick_unit_token, unit_predicate,
+    unknownobject, with_unit, PlayerRecord, SelectionRequest, UnitBase, UnitTokenParse,
 };
 
 /// The `"player"` fast path of `UnitName`, `UnitRace`, `UnitClass` and `UnitSex`, never
@@ -83,9 +82,9 @@ pub(in crate::script) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // `UnitIsTapped`/`UnitIsTappedByPlayer` (`0x519c90`/`0x519d00`): the object is present and its
+    // `UnitIsTapped`/`UnitIsTappedByPlayer` (`0x611130`/`0x6111b0`): the object is present and its
     // `UNIT_DYNAMIC_FLAGS` has the mask bit, nothing more. Unlike `UnitIsVisible` they gate with
-    // `lua_isstring`: another type raises `Usage:`, and a number raises `Unknown unit name`.
+    // `lua_isstring`: another type raises `Usage:`, and a number is a token naming nobody.
     for (name, usage, by_player) in [
         ("UnitIsTapped", r#"Usage: UnitIsTapped("unit")"#, false),
         (
@@ -110,25 +109,21 @@ pub(in crate::script) fn install(lua: &Lua) -> mlua::Result<()> {
         )?;
     }
 
-    // `UnitIsPartyLeader(unit)` (`0x516210`): a held player's `PLAYER_FLAGS` bit 0x1, for a
-    // stranger leading their own party, or a GUID equal to the group leader's, for a member not
-    // held. No zero guard (unlike `IsPartyLeader`, `0x4e9130`): GUID 0 matches the zeroed leader,
-    // so `UnitIsPartyLeader(nil)` answers 1 while ungrouped. No `Usage:` gate; a bad token or a
-    // number raises `Unknown unit name`.
+    // `UnitIsPartyLeader(unit)` (`0x60c770`): a held player's `PLAYER_FLAGS` bit 0x1, for a
+    // stranger leading their own party, or the resolver's guid equal to the group leader's
+    // (`0x60c7cb`). No zero guard (unlike `IsPartyLeader`, `0x52ccd0`) and no `Usage:` gate: nil
+    // or a token that does not parse leaves guid 0, which matches the zeroed leader, so it answers
+    // 1 while ungrouped; a recognised token naming nobody is the sentinel and never matches.
     g.set(
         "UnitIsPartyLeader",
-        lua.create_function(|lua, token: Option<String>| {
-            check_unit_token(lua, &token)?;
+        lua.create_function(|lua, token: Value| {
+            let token = super::token::token_text(lua, &token);
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             let by_flag = token
                 .as_ref()
                 .and_then(|t| model.unit(t))
                 .is_some_and(|u| u.group_leader);
-            // A token with no snapshot is GUID 0, the reference's `0:0`.
-            let guid = token
-                .as_ref()
-                .and_then(|t| model.unit(t))
-                .map_or(0, |u| u.guid);
+            let guid = token.map_or(0, |t| model.resolve_token(&t).guid);
             Ok(flag(by_flag || guid == model.party.leader_guid))
         })?,
     )?;
@@ -201,7 +196,6 @@ pub(in crate::script) fn install(lua: &Lua) -> mlua::Result<()> {
                 token,
                 r#"Usage: UnitLevel("unit")"#,
             )?);
-            check_unit_token(lua, &token)?;
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             let Some(u) = token.as_ref().and_then(|t| model.unit(t)) else {
                 return Ok(0i64);
@@ -382,9 +376,9 @@ pub(in crate::script) fn install(lua: &Lua) -> mlua::Result<()> {
             ))
         })?,
     )?;
-    // UnitPlayerControlled(unit) (`0x516410`): `UNIT_FIELD_FLAGS` bit 0x8, vmangos
+    // UnitPlayerControlled(unit) (`0x60cba0`): `UNIT_FIELD_FLAGS` bit 0x8, vmangos
     // `UNIT_FLAG_PLAYER_CONTROLLED`, so a player's pet or a charmed creature answers 1 where
-    // `UnitIsPlayer` answers nil. An unrecognised token answers nil here; the reference raises.
+    // `UnitIsPlayer` answers nil.
     g.set(
         "UnitPlayerControlled",
         lua.create_function(|lua, unit: Option<String>| {
@@ -407,16 +401,15 @@ pub(in crate::script) fn install(lua: &Lua) -> mlua::Result<()> {
     g.set(
         "UnitIsPlusMob",
         lua.create_function(|lua, token: Option<String>| {
-            // No `lua_isstring` gate, so nil answers nil; an unrecognised token still raises in
-            // the resolver (`0x515940`).
+            // No `lua_isstring` gate, so nil answers nil.
             unit_predicate(lua, &token, |u| u.flags & 0x40 != 0)
         })?,
     )?;
 
     // UnitIsUnit(a, b) (12340 `0x60c3d0`): both arguments `lua_isstring`-gated; equal strings,
     // case-insensitively, answer 1 at once; otherwise each side resolves through the token-or-
-    // member-name resolver (`0x60c1c0` → `0x60abf0`) and the same nonzero guid answers 1. An
-    // unknown token or name answers nil, never raises: stock `ShowReadyCheck` passes a name.
+    // member-name resolver (`0x60c1c0` → `0x60abf0`), and the same guid, neither 0 nor the
+    // sentinel (`0x60c44a`), answers 1. Stock `ShowReadyCheck` passes a name.
     g.set(
         "UnitIsUnit",
         lua.create_function(|lua, (a, b): (Value, Value)| {
@@ -427,21 +420,14 @@ pub(in crate::script) fn install(lua: &Lua) -> mlua::Result<()> {
                 return Ok(flag(true));
             }
             let model = lua.app_data_ref::<Model>().expect("model app_data");
-            // A token the guid table seats resolves there, snapshot or not ("player" with no
-            // pushed player unit); otherwise the snapshot, then a member's name.
-            let guid = |t: &str| match model.unit_guids.resolve(t) {
-                Ok(Some(g)) => g,
-                _ => crate::script::wrath_unit_popup::guid_of(&model, t),
-            };
-            let (ga, gb) = (guid(&a), guid(&b));
-            Ok(flag(ga != 0 && ga == gb))
+            let (ga, gb) = (model.resolve_token(&a).guid, model.resolve_token(&b).guid);
+            Ok(flag(ga != 0 && ga != super::token::NOBODY && ga == gb))
         })?,
     )?;
 
-    // UnitAffectingCombat(unit) (`0x517e10`): 1 in combat, else nil. No such unit takes the same
-    // arm as a unit out of combat (`0x517e48`, `0x517e5c`), so it cannot probe existence. A missing
-    // argument, or one neither string nor number, raises `Usage:` (`0x6f3510`, `0x6f4940`), unlike
-    // `UnitInRaid`; a number reaches the resolver, which raises `Unknown unit name` (`0x515c14`).
+    // UnitAffectingCombat(unit) (`0x60f860`): 1 in combat, else nil. No such unit takes the same
+    // arm as a unit out of combat, so it cannot probe existence. A missing argument, or one neither
+    // string nor number, raises `Usage:` (`lua_isstring`), unlike `UnitInRaid`.
     g.set(
         "UnitAffectingCombat",
         lua.create_function(|lua, token: Value| {
@@ -476,7 +462,6 @@ pub(in crate::script) fn install(lua: &Lua) -> mlua::Result<()> {
         g.set(
             name,
             lua.create_function(move |lua, token: Option<String>| {
-                check_unit_token(lua, &token)?;
                 let model = lua.app_data_ref::<Model>().expect("model app_data");
                 let Some(u) = token.as_ref().and_then(|t| model.unit(t)) else {
                     return Ok(Value::Nil);
@@ -510,7 +495,6 @@ pub(in crate::script) fn install(lua: &Lua) -> mlua::Result<()> {
     g.set(
         "UnitInRaid",
         lua.create_function(|lua, token: Option<String>| {
-            check_unit_token(lua, &token)?;
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             let hit = token
                 .as_ref()
@@ -531,7 +515,6 @@ pub(in crate::script) fn install(lua: &Lua) -> mlua::Result<()> {
     g.set(
         "UnitInParty",
         lua.create_function(|lua, token: Option<String>| {
-            check_unit_token(lua, &token)?;
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             let Some(t) = token else {
                 return Ok(Value::Nil);
@@ -772,8 +755,7 @@ pub(in crate::script) fn install(lua: &Lua) -> mlua::Result<()> {
         lua.create_function(|lua, token: Value| {
             let token = match &token {
                 Value::String(s) => Some(s.to_str()?.to_string()),
-                // A number passes `lua_isstring`; here it answers nil, where the reference's
-                // resolver raises `Unknown unit name` for it.
+                // A number passes `lua_isstring`, and as text names no base (`0x60abf0`).
                 Value::Number(_) | Value::Integer(_) => Some(String::new()),
                 _ => return Err(mlua::Error::runtime("Usage: UnitCreatureType(\"unit\")")),
             };
@@ -1066,11 +1048,10 @@ pub(in crate::script) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // SpellTargetUnit(unit) (`0x6e6d90`): an argument that is not a string or a number raises
-    // `Usage:`; while not targeting the call is a silent no-op, before the token is read; an
-    // unknown token then raises `Unknown unit name`. The token queues for the host, which ends
-    // targeting with "Out of range." when it names no unit and otherwise runs `BindTarget`
-    // (`0x6e5b10` → `0x6e5b40`).
+    // SpellTargetUnit(unit) (`0x80dc00`): an argument that is not a string or a number raises
+    // `Usage:`; while not targeting the call is a silent no-op, before the token is read. The token
+    // queues for the host, which ends targeting with "Out of range." when it names no unit and
+    // otherwise runs `BindTarget`.
     g.set(
         "SpellTargetUnit",
         lua.create_function(|lua, token: Value| {
@@ -1086,7 +1067,6 @@ pub(in crate::script) fn install(lua: &Lua) -> mlua::Result<()> {
             {
                 return Ok(());
             }
-            check_unit_token(lua, &Some(token.clone()))?;
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
             model.script_calls.push(ScriptCall::SpellTargetUnit(token));
             Ok(())

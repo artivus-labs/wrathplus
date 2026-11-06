@@ -26,7 +26,7 @@ fn player() -> UnitState {
     }
 }
 
-/// `0x6e6d90`'s order: the `Usage:` check, the not-targeting no-op, the token check, the queue.
+/// `0x80dc00`'s order: the `Usage:` check, the not-targeting no-op, the queue.
 #[test]
 fn spell_target_unit_checks_in_the_references_order() {
     let mut s = UiScript::new().unwrap();
@@ -45,19 +45,14 @@ fn spell_target_unit_checks_in_the_references_order() {
         .expect("a bad token is no error while not targeting");
     assert!(s.take_spell_target_unit().is_empty(), "and nothing queues");
 
-    // Targeting: an unknown token raises, a known one queues, resolved or not.
+    // Targeting: any token queues, resolved or not; the resolver never raises (`0x60abf0`).
     s.set_spell_targeting(true);
     usage(&mut s, "SpellTargetUnit(nil)");
-    let err = s
-        .run(r#"SpellTargetUnit("not-a-unit")"#)
-        .expect_err("an unknown token while targeting")
-        .to_string();
-    assert!(err.contains("Unknown unit name: not-a-unit"), "{err}");
-    s.run(r#"SpellTargetUnit("player") SpellTargetUnit("party1")"#)
+    s.run(r#"SpellTargetUnit("not-a-unit") SpellTargetUnit("party1")"#)
         .unwrap();
     assert_eq!(
         s.take_spell_target_unit(),
-        vec!["player".to_string(), "party1".to_string()]
+        vec!["not-a-unit".to_string(), "party1".to_string()]
     );
 }
 
@@ -801,11 +796,10 @@ fn unit_affecting_combat_is_one_or_nil_and_hides_the_missing_unit() {
             .unwrap(),
         "an unresolvable token is the SAME nil a peaceful unit gives"
     );
-    // A number passes the gate (`0x6f3510`) as the token "5", which matches no prefix and raises.
-    assert!(
-        s.run("UnitAffectingCombat(5)").is_err(),
-        "a number is coerced to a token that matches nothing, so it raises"
-    );
+    // A number passes the gate (`lua_isstring`) as the token "5", which names nobody.
+    assert!(s
+        .eval::<bool>("return UnitAffectingCombat(5) == nil")
+        .unwrap());
 }
 
 /// The usage raise is `luaL_error` (`0x6f4940`), which does not return.
@@ -955,8 +949,7 @@ fn unit_is_plus_mob_reads_the_flag_bit_and_not_the_rank() {
         "no bit, no plus mob — a neighbouring flag (player-controlled) must not read as one"
     );
 
-    // One of the 13 with no `lua_isstring` gate: nil is quiet, and an unrecognised token raises
-    // through the resolver (`0x515940`).
+    // One of the 13 with no `lua_isstring` gate: nil is quiet, and so is any token.
     assert!(s.run("UnitIsPlusMob()").is_ok(), "nil token stays quiet");
     assert!(
         s.run("UnitIsPlusMob(nil)").is_ok(),
@@ -968,11 +961,9 @@ fn unit_is_plus_mob_reads_the_flag_bit_and_not_the_rank() {
             .is_none(),
         "recognised but naming nothing — nil, not a raise"
     );
-    let err = s.run(r#"UnitIsPlusMob("bogus")"#).unwrap_err().to_string();
-    assert!(
-        err.contains("Unknown unit name: bogus"),
-        "an unrecognised token raises the resolver's own text: {err}"
-    );
+    assert!(s
+        .eval::<bool>(r#"return UnitIsPlusMob("bogus") == nil"#)
+        .unwrap());
 }
 
 /// The resolver (`0x515970`) compares every literal with `_strnicmp`, folding ASCII case.
@@ -1050,24 +1041,17 @@ fn seating_a_token_folds_its_key_too() {
     );
 }
 
-/// `0x515970` ends its nine compares in `luaL_error(L, "Unknown unit name: %s")`.
+/// 12340's resolver (`0x60abf0`) never raises: a token nothing parses names nobody, as does a
+/// recognised one with no unit. "Unknown unit name" is 1.12's string, not 12340's.
 #[test]
-fn an_unrecognised_unit_token_raises_and_a_recognised_empty_one_does_not() {
+fn no_unit_token_raises() {
     let mut s = UiScript::new().unwrap();
     s.set_unit("player", Some(player()));
-
-    // `focus`, `boss1..4` and `arena1..5` are build 12340 tokens.
-    let err = s
-        .run(r#"UnitName("bogus")"#)
-        .expect_err("bogus must raise")
-        .to_string();
-    assert!(
-        err.contains("Unknown unit name: bogus"),
-        "the raise carries the client's own text and the offending token: {err}"
-    );
-    // `npc` is the one full-string compare, so a suffix on it matches nothing.
-    assert!(s.run(r#"UnitName("npctarget")"#).is_err());
-    assert!(s.run(r#"UnitName("NPC")"#).is_ok());
+    for t in ["bogus", "npctarget", "NPC"] {
+        assert!(s
+            .eval::<bool>(&format!(r#"return UnitName("{t}") == nil"#))
+            .unwrap());
+    }
 
     for absent in [
         "party5",
@@ -1102,11 +1086,8 @@ fn an_unrecognised_unit_token_raises_and_a_recognised_empty_one_does_not() {
     // own gate (`0x517048`).
     assert!(s.run("UnitName()").is_err(), "absent argument raises");
     assert!(s.run("UnitName(nil)").is_err(), "nil argument raises");
-    // A number passes the gate as "5" and raises the resolver's message instead.
-    assert!(
-        s.run("UnitName(5)").is_err(),
-        "a number reaches the resolver"
-    );
+    // A number passes the gate as "5", a token naming nobody.
+    assert!(s.eval::<bool>("return UnitName(5) == nil").unwrap());
 
     // Three of the 13 with no gate, where nil is quiet.
     for quiet in ["UnitExists", "UnitIsVisible", "UnitClassification"] {
@@ -1127,23 +1108,17 @@ fn an_unrecognised_unit_token_raises_and_a_recognised_empty_one_does_not() {
     assert!(s.run(r#"UnitIsUnit("player", "party3")"#).is_ok());
 }
 
-/// The resolver compares bytes with an ASCII fold, so a non-ASCII token matches no prefix and
-/// raises, where slicing it as a `str` would panic mid-character.
+/// The resolver compares bytes with an ASCII fold, so a non-ASCII token matches no base and no
+/// name, where slicing it as a `str` would panic mid-character.
 #[test]
-fn a_multibyte_unit_token_raises_rather_than_panicking() {
+fn a_multibyte_unit_token_names_nobody_rather_than_panicking() {
     let mut s = UiScript::new().unwrap();
     s.set_unit("player", Some(player()));
 
     // Each puts a multibyte character across a prefix length: 3, 4, 5 or 6 bytes.
     for token in ["pé", "раid", "playér", "targét", "мышь", "日本語のトークン"] {
-        let err = s
-            .run(&format!(r#"UnitName("{token}")"#))
-            .expect_err("a non-ASCII token matches no prefix, so it raises")
-            .to_string();
-        assert!(
-            err.contains("Unknown unit name"),
-            "it must RAISE, not panic and not answer: {err}"
-        );
+        let chunk = format!(r#"return UnitName("{token}") == nil"#);
+        assert!(s.eval::<bool>(&chunk).unwrap(), "{token}");
     }
     assert!(s
         .eval::<Option<String>>(r#"return UnitName("playerfoo")"#)
@@ -1285,7 +1260,7 @@ fn the_tapped_pair_is_two_masks_of_one_field_and_raises_on_a_bad_argument() {
          assertion records which of the two owns it"
     );
 
-    // Shape A, nil included: `check_unit_token` lets nil through, so the gate is the binding's.
+    // Shape A, nil included: the resolver never raises, so the gate is the binding's.
     for bad in ["{}", "true", "nil", "", "function() end"] {
         assert!(
             s.run(&format!("UnitIsTapped({bad})")).is_err(),
@@ -1335,6 +1310,11 @@ fn unit_is_party_leader_ors_two_legs_and_answers_one_when_solo() {
         own_guid: 0,
         ..Default::default()
     });
+    let party = [THEM, ME, 0, 0];
+    s.set_unit_guids(&UnitGuids {
+        party,
+        ..Default::default()
+    });
     s.set_unit(
         "party1",
         Some(UnitState {
@@ -1368,22 +1348,25 @@ fn unit_is_party_leader_ors_two_legs_and_answers_one_when_solo() {
         None
     );
 
-    // No zero guard: solo, the cached leader is 0 and an unresolved token is 0, so the answer is
-    // 1; `IsPartyLeader` (`0x4e9130`) guards a zero leader, `0x516210` does not.
+    // No zero guard (`0x60c7cb`; `IsPartyLeader`, `0x52ccd0`, has one): solo, the leader is 0,
+    // and so is the guid of nil or of a token that does not parse (`0x60b021`), so they answer 1;
+    // a recognised token naming nobody is the sentinel (`0x60b00c`) and answers nil.
     s.set_party(PartyState::default());
-    assert_eq!(
-        s.eval::<i64>("return UnitIsPartyLeader(nil)").unwrap(),
-        1,
-        "solo + unresolvable token: 0 == 0, and the reference answers 1"
-    );
-    assert_eq!(
-        s.eval::<i64>(r#"return UnitIsPartyLeader("target")"#)
-            .unwrap(),
-        1,
-        "...and so does a token with no snapshot, by the same route"
-    );
-
-    assert!(s.run(r#"UnitIsPartyLeader("notatoken")"#).is_err());
+    s.set_unit_guids(&UnitGuids::default());
+    for t in ["target", "party1", "party2"] {
+        s.set_unit(t, None);
+    }
+    for (t, want) in [
+        ("nil", Some(1)),
+        ("'notatoken'", Some(1)),
+        ("'party1target'", Some(1)),
+    ]
+    .into_iter()
+    .chain([("'target'", None), ("'party3'", None)])
+    {
+        let got = s.eval::<Option<i64>>(&format!("return UnitIsPartyLeader({t})"));
+        assert_eq!(got.unwrap(), want, "{t}");
+    }
 }
 
 /// `GetDamageBonusStat()` (`0x48b520`) is the player's class row's field 2 plus one, 0 with no

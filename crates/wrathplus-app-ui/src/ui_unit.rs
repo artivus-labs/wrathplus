@@ -3600,7 +3600,7 @@ mod tests {
         let (tx, _rx) = crossbeam_channel::unbounded();
         app.insert_resource(NetCommands(tx));
         app.insert_non_send_resource(UiScript::new().expect("Wrath VM"));
-        app.add_systems(Update, feed_units);
+        crate::test_guids::with_aura_feed(&mut app, feed_units);
 
         let player = app
             .world_mut()

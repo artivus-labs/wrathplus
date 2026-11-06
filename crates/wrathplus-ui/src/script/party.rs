@@ -997,21 +997,13 @@ mod tests {
         assert!(s
             .eval::<bool>(r#"return UnitInRaid("mouseover") == nil"#)
             .unwrap());
-        // Nil for a missing, wrong-typed or unmatched token: `0x6f3690` gives NULL, `0x515970` maps
-        // it to guid 0, and `0x4baee0` rejects guid 0.
+        // Nil for a missing, wrong-typed, unmatched or unparsed token: the resolver (`0x60abf0`)
+        // never raises, and a number is a token like any other.
         for call in ["UnitInRaid()", "UnitInRaid(nil)", r#"UnitInRaid("party3")"#] {
-            assert!(
-                s.eval::<bool>(&format!("return {call} == nil")).unwrap(),
-                "{call} must answer nil"
-            );
+            assert!(s.eval::<bool>(&format!("return {call} == nil")).unwrap());
         }
-        // A token matching none of the nine prefixes raises `Unknown unit name: %s`, and a number
-        // is coerced to a string first.
         for call in ["UnitInRaid(7)", r#"UnitInRaid("nosuchtoken")"#] {
-            assert!(
-                s.run(call).is_err(),
-                "{call} must raise — the token resolves to no prefix at all"
-            );
+            assert!(s.eval::<bool>(&format!("return {call} == nil")).unwrap());
         }
     }
 
@@ -1152,9 +1144,14 @@ mod tests {
     #[test]
     fn unit_is_unit_compares_guids_and_tokens() {
         let mut s = UiScript::new().unwrap();
-        s.set_unit("player", Some(unit(true, 0x10)));
-        s.set_unit("target", Some(unit(true, 0x10)));
-        s.set_unit("party1", Some(unit(true, 0x20)));
+        let (player, target, party) = (0x10, 0x10, [0x20, 0, 0, 0]);
+        let g = crate::script::UnitGuids {
+            player,
+            target,
+            party,
+            ..Default::default()
+        };
+        s.set_unit_guids(&g);
         assert_eq!(
             s.eval::<i64>(r#"return UnitIsUnit("target", "player")"#)
                 .unwrap(),
@@ -1169,8 +1166,7 @@ mod tests {
             .eval::<bool>(r#"return UnitIsUnit("party1", "player") == nil"#)
             .unwrap());
         // Zero guids never match across tokens.
-        s.set_unit("target", Some(unit(true, 0)));
-        s.set_unit("mouseover", Some(unit(true, 0)));
+        s.set_unit_guids(&crate::script::UnitGuids { target: 0, ..g });
         assert!(s
             .eval::<bool>(r#"return UnitIsUnit("target", "mouseover") == nil"#)
             .unwrap());
