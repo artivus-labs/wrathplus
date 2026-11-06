@@ -159,7 +159,6 @@ export function startClient(home: string, agent: ManagedAgent, character?: strin
   );
 }
 
-/** Wait until the client is past loading: in the world, or at character select with its UI up. */
 /** Why a client that exited at start did: its own words from the log, and what to do about them. */
 export function exitReason(log: string): string {
   const lines = log.split("\n");
@@ -172,20 +171,30 @@ export function exitReason(log: string): string {
   return (reason ? `:\n  ${reason}` : "") + hint;
 }
 
+/** Where a client that never got past loading stopped, from its last status, and what to check. */
+export function stuckReason(status: Record<string, unknown> | null): string {
+  if (!status) return " Its control port never answered.";
+  if (status.state === "Login") return " It is still at the login screen: is the realm running (Manager, Server: Start)?";
+  return ` It stopped at ${String(status.state ?? "an unknown state")}.`;
+}
+
+/** Wait until the client is past loading: in the world, or at character select with its UI up. */
 export async function waitReady(agent: ManagedAgent, token: string, client: Subprocess, logPath: string, timeoutMs = 120_000): Promise<Record<string, unknown>> {
   const until = Date.now() + timeoutMs;
+  let last: Record<string, unknown> | null = null;
   while (Date.now() < until) {
     if (client.exitCode !== null) {
       const log = existsSync(logPath) ? readFileSync(logPath, "utf8") : "";
       throw new Error(`The client exited (code ${client.exitCode})${exitReason(log)}\n(log: ${logPath})`);
     }
     const status = await answering(agent, token);
+    last = status ?? last;
     const player = status?.player as { level?: number } | undefined;
     if (status?.in_world && (player?.level ?? 0) > 0) return status;
     if (status?.ui_ready && status.state === "CharSelect") return status;
     await Bun.sleep(1000);
   }
-  throw new Error(`The client did not reach the world or character select in ${timeoutMs / 1000}s.`);
+  throw new Error(`The client did not reach the world or character select in ${timeoutMs / 1000}s.${stuckReason(last)}`);
 }
 
 export function markRunning(home: string, agent: ManagedAgent, running: Running): void {
