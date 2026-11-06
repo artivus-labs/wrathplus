@@ -176,3 +176,29 @@ fn shapeshift_and_container_cooldowns_keep_their_anchors_too() {
         .eval::<bool>("local st = GetContainerItemCooldown(0, 1); return math.abs(st - 50) < 1e-3")
         .unwrap());
 }
+
+#[test]
+fn action_cooldown_accepts_numeric_strings_and_truncates_or_raises_usage() {
+    let mut s = script();
+    s.set_action_state(
+        3,
+        Some(ActionState {
+            cooldown: Some((0, 0, false)),
+            ..Default::default()
+        }),
+    );
+    for arg in ["3", "3.9", "'3.9'", "0", "-1", "2^31"] {
+        assert_eq!(
+            s.eval::<(i64, i64, i64)>(&format!("return GetActionCooldown({arg})"))
+                .unwrap(),
+            (0, 0, 0)
+        );
+    }
+    for arg in ["", "nil", "true", "{}", "'bad'"] {
+        assert!(s
+            .run(&format!("GetActionCooldown({arg})"))
+            .unwrap_err()
+            .to_string()
+            .contains("Usage: GetActionCooldown(slot)"));
+    }
+}

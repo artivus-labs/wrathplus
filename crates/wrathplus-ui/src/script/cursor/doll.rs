@@ -1,9 +1,9 @@
 //! The paper-doll cursor verbs: an equipped slot is an item source under
 //! [`super::EQUIPMENT_BAG`], so the shared cursor code handles its cancel, clear and world drop.
 
-use mlua::Lua;
+use mlua::{Lua, MultiValue, Value};
 
-use crate::script::binding_abi::flag;
+use crate::script::binding_abi::{flag, ftol_arg, inventory_slot0};
 use crate::script::container::ContainerMove;
 use crate::script::Model;
 
@@ -142,10 +142,58 @@ pub(super) fn pickup_inventory_item(model: &mut Model, id: u32) -> bool {
     }
 }
 
-/// `EquipCursorItem(id)` (`0x51a3d0`): placing the held item on doll slot `id`; with no item
-/// held (`[0xbd0768]` zero, `0x51a452`) it does nothing, never a pickup.
-pub(super) fn equip_cursor_item(model: &mut Model, id: u32) -> bool {
-    matches!(model.cursor, Some(CursorPayload::Item(_))) && pickup_inventory_item(model, id)
+/// `EquipCursorItem` (`0x51a3d0`): put back, swap if fitting, put back a worn source,
+/// otherwise autoequip; 0 and 256 skip directly to autoequip (`0x51a486`).
+pub(super) fn equip_cursor_item(model: &mut Model, id: u32) {
+    let Some(CursorPayload::Item(held)) = model.cursor.clone() else {
+        return;
+    };
+    if id != 0 && id != 256 {
+        if held.bag == EQUIPMENT_BAG && held.slot == id {
+            super::clear_cursor(model);
+            return;
+        }
+        if super::bag_verbs::fits_slot(model, &held, id) {
+            model.container_moves.push(ContainerMove {
+                src_bag: held.bag,
+                src_slot: held.slot,
+                dst_bag: EQUIPMENT_BAG,
+                dst_slot: id,
+                count: None,
+            });
+            // `0x513740` puts the displaced item on the cursor after the swap.
+            super::clear_cursor(model);
+            model.cursor = model
+                .inv_slot("player", id as usize)
+                .filter(|v| v.item_id != 0)
+                .map(|v| {
+                    CursorPayload::Item(CursorItem {
+                        bag: EQUIPMENT_BAG,
+                        slot: id,
+                        item_id: v.item_id,
+                        texture: v.icon,
+                        link: v.link,
+                        quality: Some(u32::try_from(v.quality).unwrap_or(0)),
+                        count: None,
+                        bar_placeable: v.bar_placeable,
+                        equip_slots: v.equip_slots,
+                    })
+                });
+            if model.cursor.is_some() {
+                queue_lock_changed(model, EQUIPMENT_BAG, id);
+            }
+            return;
+        }
+        if held.bag == EQUIPMENT_BAG && (1..=19).contains(&held.slot) {
+            super::clear_cursor(model);
+            return;
+        }
+    }
+    // `0x6dfc40(1)` equips the source, not a split quantity; worn bags are put back too.
+    if held.bag != EQUIPMENT_BAG {
+        model.container_autoequips.push((held.bag, held.slot));
+    }
+    super::clear_cursor(model);
 }
 
 /// `CursorCanGoInSlot(id)`, the doll slot's highlight on `CURSOR_UPDATE`
@@ -235,16 +283,25 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     )?;
     g.set(
         "EquipCursorItem",
-        lua.create_function(|lua, id: u32| {
+        lua.create_function(|lua, id: Value| {
+            let id = ftol_arg(lua, id, "Usage: EquipCursorItem(slot)")? as u32;
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-            Ok(equip_cursor_item(&mut model, id))
+            equip_cursor_item(&mut model, id);
+            Ok(())
         })?,
     )?;
     g.set(
         "CursorCanGoInSlot",
-        lua.create_function(|lua, id: u32| {
+        lua.create_function(|lua, id: Value| {
+            let slot0 = inventory_slot0(lua, id)?;
             let model = lua.app_data_ref::<Model>().expect("model app_data");
-            Ok(flag(cursor_can_go_in_slot(&model, id)))
+            if !model.inventory_slot_reader_accepts(slot0) {
+                return Ok(MultiValue::new());
+            }
+            Ok(MultiValue::from_vec(vec![flag(cursor_can_go_in_slot(
+                &model,
+                slot0.wrapping_add(1) as u32,
+            ))]))
         })?,
     )?;
     g.set(

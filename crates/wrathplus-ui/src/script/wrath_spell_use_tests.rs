@@ -189,3 +189,44 @@ fn find_slot_by_id_answers_the_raw_index() {
     )
     .unwrap();
 }
+
+/// `0x7ffa30` reads ReagentCount as signed, identically to the action-feed helper.
+#[test]
+fn reagent_casts_ignores_sentinels_and_nonpositive_signed_counts() {
+    let mut s = script();
+    s.set_unit_guids(&UnitGuids {
+        player: 1,
+        ..Default::default()
+    });
+    s.set_container(
+        0,
+        Some(ContainerState {
+            num_slots: 16,
+            slots: [(
+                1,
+                ContainerSlot {
+                    item_id: 2512,
+                    count: 7,
+                    ..Default::default()
+                },
+            )]
+            .into(),
+            ..Default::default()
+        }),
+    );
+    let model = s.model_ref();
+    let record = SpellInfoView {
+        reagents: vec![
+            (0, 1),
+            (0xffff_fffe, 1),
+            (2512, 0),
+            (2512, 0xffff_ffff),
+            (2512, 2),
+        ],
+        ..Default::default()
+    };
+    assert_eq!(
+        crate::script::wrath_spell_use::reagent_casts(&model, &record),
+        3
+    );
+}

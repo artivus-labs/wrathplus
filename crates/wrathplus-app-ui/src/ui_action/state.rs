@@ -178,7 +178,11 @@ pub(super) fn feed_action_state(
     let mut fresh: HashMap<u32, ActionState> = HashMap::new();
     for (&slot, button) in &actions.buttons {
         let action = u32::from(slot) + 1;
-        let mut st = ActionState::default();
+        // `0x5a8e40` leaves enable zero until a spell/item cooldown reader resolves.
+        let mut st = ActionState {
+            cooldown: Some((0, 0, false)),
+            ..Default::default()
+        };
         let (kind, id) = match resolve_through_macro(button.kind, button.action, bound) {
             SlotResolve::Action(kind, id) => (kind, id),
             SlotResolve::BareMacro => {
@@ -287,9 +291,11 @@ pub(super) fn feed_action_state(
             }
             ACTION_KIND_ITEM => {
                 // Only the `Copy` on-use spell, not a clone of the template per slot per frame.
-                let use_spell = items
-                    .template(button.action, 0, &commands)
-                    .and_then(|t| t.use_spell);
+                let template = items.template(button.action, 0, &commands);
+                if template.is_some() {
+                    st.cooldown = None;
+                }
+                let use_spell = template.and_then(|t| t.use_spell);
                 // `IsConsumableAction` (`0x4e5250`) reads only the template, so the identity
                 // feed pushes it with the count it gates, not this one.
                 let count = carried.get(&button.action).copied().unwrap_or(0);
@@ -483,6 +489,17 @@ mod tests {
                 },
             );
         }
+        // Unresolved occupied item and spell slots must retain enable 0 (`0x5a8e40`).
+        for (slot, kind) in [(3, ACTION_KIND_ITEM), (4, ACTION_KIND_SPELL)] {
+            actions.buttons.insert(
+                slot,
+                ActionButton {
+                    slot,
+                    action: 999999,
+                    kind,
+                },
+            );
+        }
         // Macro 1 is `.spawn 16032`, 2 an unknown `/cast Pyroblast`, and 3 does not exist.
         let mut bound = MacroBoundSpells::default();
         bound.0.insert(1, BoundSpell::None);
@@ -516,6 +533,14 @@ mod tests {
                 ))
                 .unwrap()
         };
+        for slot in [4, 5, 6] {
+            assert_eq!(
+                script
+                    .eval::<(i64, i64, i64)>(&format!("return GetActionCooldown({slot})"))
+                    .unwrap(),
+                (0, 0, 0)
+            );
+        }
         assert!(usable(1), "a macro that casts nothing is a usable button");
         assert!(
             !usable(2),

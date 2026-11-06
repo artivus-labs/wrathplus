@@ -361,11 +361,12 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     )?;
 
     // GetActionCooldown(action) (`0x5a91c0`) → start, duration, enable, in `GetTime` seconds: an
-    // empty slot (0, 0, 0) (`0x5a8e40` writes nothing), else (0, 0, 1) when none runs, lest a later
-    // `CooldownFrame_SetTimer` replay the flash. Labelled: a slot with no item or spell, (0, 0, 1).
+    // unresolved slot (0, 0, 0) (`0x5a8e40` writes no enable); a resolved idle timer is (0, 0, 1).
     g.set(
         "GetActionCooldown",
-        lua.create_function(|lua, action: u32| {
+        lua.create_function(|lua, action: Value| {
+            let action =
+                super::binding_abi::ftol_arg(lua, action, "Usage: GetActionCooldown(slot)")? as u32;
             let now = crate::script::clock::now(lua);
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             let state = model.action_states.get(&action);
