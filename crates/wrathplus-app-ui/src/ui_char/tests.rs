@@ -176,6 +176,44 @@ fn a_wand_reads_the_damage_bonus_of_its_own_school() {
     assert_eq!(ranged_bonus(&f, &[]), (3, 0, 1.0));
 }
 
+/// Visible slot 17 must work before the inventory item object streams (`0x610618`).
+#[test]
+fn ranged_damage_feed_uses_visible_entry_and_keeps_zero_attack_time() {
+    for attack_ms in [0u32, 2750] {
+        let mut app = world_with_bank_bag(None);
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&mut ObjectStore, With<SelfPlayer>>();
+        q.single_mut(app.world_mut()).unwrap().0 = ObjectFields::from_pairs(&[
+            (
+                Field::PlayerVisibleItems.index() + 2 * u16::from(SLOT_RANGED),
+                9001,
+            ),
+            (Field::UnitRangedattacktime.index(), attack_ms),
+            (Field::PlayerModDamageDonePos.index(), 3),
+            (Field::PlayerModDamageDonePos.index() + 5, 120),
+            (Field::PlayerModDamageDoneNeg.index() + 5, (-7i32) as u32),
+            (Field::PlayerModDamageDonePct.index() + 5, 1.5f32.to_bits()),
+        ]);
+        let mut template = crate::items::test_template("Synthetic shadow wand");
+        template.damages = vec![wrathplus_protocol::types::ItemDamage {
+            min: 20.0,
+            max: 30.0,
+            school: 5,
+        }];
+        app.world_mut()
+            .resource_mut::<Items>()
+            .insert_template(9001, Some(template));
+        app.world_mut().run_system_once(feed_char).unwrap();
+        let vm = app.world().non_send_resource::<UiScript>();
+        assert_eq!(
+            vm.eval::<(f64, f64, f64, i32, i32, f64)>("return UnitRangedDamage('player')")
+                .unwrap(),
+            (f64::from(attack_ms) / 1000.0, 0.0, 0.0, 120, -7, 1.5)
+        );
+    }
+}
+
 /// `PLAYER_FIELD_BANK_BAG_SLOT_1`, bank bag slot 0's guid pair.
 const F_BANK_BAG_1: u16 = Field::PlayerBankbagSlot1.index();
 /// `OBJECT_FIELD_ENTRY` on the item object.

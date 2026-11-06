@@ -448,7 +448,8 @@ pub(crate) fn unit_combat_stats(store: &ObjectStore) -> UnitCombatStats {
         ranged_attack_power_neg: i32::from(rap_neg),
         attack_power_multiplier: f.unit_attack_power_multiplier().unwrap_or(0.0),
         ranged_attack_power_multiplier: f.unit_ranged_attack_power_multiplier().unwrap_or(0.0),
-        ranged_attack_time_ms: base_swing(f.unit_ranged_attack_time()),
+        // `UnitRangedDamage` (0x6105a4) reads the descriptor directly, including zero.
+        ranged_attack_time_ms: f.unit_ranged_attack_time().unwrap_or(0),
         ranged_min_damage: f.unit_min_ranged_damage().unwrap_or(0.0),
         ranged_max_damage: f.unit_max_ranged_damage().unwrap_or(0.0),
         // Physical; the player's snapshot takes its ranged weapon's school (`combat_stats`).
@@ -489,8 +490,15 @@ fn combat_stats(
     let ranged_skill_id = ranged
         .filter(|t| t.class == ITEM_CLASS_WEAPON)
         .and_then(|t| weapon_subclass_skill(t.subclass));
-    let (ranged_bonus_pos, ranged_bonus_neg, ranged_damage_percent) =
-        ranged_bonus(&store.0, ranged.map_or(&[], |t| t.damages.as_slice()));
+    // `0x610611` -> `0x6de330(17)` reads the visible entry, not the inventory item object.
+    let visible_ranged = store
+        .0
+        .player_visible_item_entry(SLOT_RANGED)
+        .and_then(|e| items.template(e, 0, commands));
+    let (ranged_bonus_pos, ranged_bonus_neg, ranged_damage_percent) = ranged_bonus(
+        &store.0,
+        visible_ranged.map_or(&[], |t| t.damages.as_slice()),
+    );
 
     UnitCombatStats {
         has_offhand,

@@ -644,15 +644,27 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     // bonuses the ranged weapon's school's (`0x610611`): a wand's is its element's.
     g.set(
         "UnitRangedDamage",
-        lua.create_function(|lua, token: Option<String>| {
-            Ok(with_unit_stats(lua, &token, |s| {
+        lua.create_function(|lua, token: Value| {
+            let token = binding_abi::string_arg(lua, token, r#"Usage: UnitRangedDamage("unit")"#)?;
+            let model = lua.app_data_ref::<Model>().expect("model app_data");
+            let stats = match token.as_str() {
+                "player" => model.player_combat_stats.as_ref(),
+                "pet" => model.pet_combat_stats.as_ref(),
+                _ => None,
+            };
+            // `0x610598`: unresolved is six zeros; a resolved creature keeps percent 1.
+            Ok(stats.map_or((0.0, 0.0, 0.0, 0, 0, 0.0), |s| {
                 (
                     f64::from(s.ranged_attack_time_ms) / 1000.0,
                     f64::from(s.ranged_min_damage),
                     f64::from(s.ranged_max_damage),
                     i64::from(s.ranged_bonus_pos),
                     i64::from(s.ranged_bonus_neg),
-                    f64::from(s.ranged_damage_percent),
+                    if token == "pet" {
+                        1.0
+                    } else {
+                        f64::from(s.ranged_damage_percent)
+                    },
                 )
             }))
         })?,
@@ -892,6 +904,35 @@ mod tests {
             attack_power_neg: -4,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn ranged_damage_missing_is_zero_but_resolved_creature_has_unit_multiplier() {
+        let mut s = UiScript::new().unwrap();
+        for token in ["player", "pet", "target", "bogus"] {
+            assert_eq!(
+                s.eval::<(f64, f64, f64, i32, i32, f64)>(&format!(
+                    "return UnitRangedDamage('{token}')"
+                ))
+                .unwrap(),
+                (0.0, 0.0, 0.0, 0, 0, 0.0)
+            );
+        }
+        s.set_player_combat_stats(Some(UnitCombatStats {
+            ranged_damage_percent: 1.5,
+            ..Default::default()
+        }));
+        s.set_pet_combat_stats(Some(UnitCombatStats::default()));
+        s.run("local speed,_,_,_,_,pct = UnitRangedDamage('player') assert(speed == 0 and pct == 1.5) local a,b,c,d,e,f = UnitRangedDamage('pet') assert(a == 0 and b == 0 and c == 0 and d == 0 and e == 0 and f == 1)").unwrap();
+        for args in ["", "nil", "true", "{}"] {
+            let err = s
+                .run(&format!("UnitRangedDamage({args})"))
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains(r#"Usage: UnitRangedDamage("unit")"#), "{err}");
+        }
+        s.run("local a,b,c,d,e,f = UnitRangedDamage(123) assert(a == 0 and f == 0)")
+            .unwrap();
     }
 
     #[test]

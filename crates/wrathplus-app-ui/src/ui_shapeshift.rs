@@ -249,6 +249,12 @@ fn feed_shapeshift_bar(
     let raw = store.map_or(0, |s| s.0.unit_shapeshift_form());
     let form_byte = form_cancel.as_deref().map_or(raw, |p| p.form_byte(raw));
     script.set_shapeshift_form_byte(form_byte);
+    script.set_shapeshift_form_flags(
+        spells
+            .forms
+            .get(&u32::from(form_byte))
+            .map_or(0, |row| row.flags),
+    );
     let auras: &[StampedAura] = me
         .and_then(|(_, g)| packets.as_deref()?.by_guid.get(&g.0))
         .map_or(&[], Vec::as_slice);

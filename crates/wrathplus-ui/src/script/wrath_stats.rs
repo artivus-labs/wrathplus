@@ -34,7 +34,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             let class = model.unit("player").and_then(|u| u.damage_bonus_stat);
             Ok(attack_power_for_stat(
                 class,
-                model.shapeshift.form_byte,
+                model.shapeshift.form_flags,
                 stat,
                 value,
             ))
@@ -45,9 +45,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
 /// `0x6d7070`: the class's `ChrClasses` row (field 1, `== 1` for the Agility classes, `0x6d70aa`)
 /// and `a = max(value - 10, 0)`. Strength gives `a`, or `2a` outside those classes; Agility gives
 /// `a` inside them, plus the whole `value` in a form whose flags carry `0x20` (`0x6d7108`), which
-/// `SpellShapeshiftForm.dbc` sets on form 1, Cat Form, alone. No class row, or any other stat, is 0.
-fn attack_power_for_stat(class: Option<u32>, form: u8, stat: i32, value: i32) -> i32 {
-    const CAT_FORM: u8 = 1;
+/// the current `SpellShapeshiftForm.dbc` row supplies. No class row, or any other stat, is 0.
+fn attack_power_for_stat(class: Option<u32>, form_flags: u32, stat: i32, value: i32) -> i32 {
     let Some(bonus_stat) = class else { return 0 };
     let agility_class = bonus_stat == 1;
     let a = value.wrapping_sub(10).max(0);
@@ -56,7 +55,7 @@ fn attack_power_for_stat(class: Option<u32>, form: u8, stat: i32, value: i32) ->
         0 => a.wrapping_mul(2),
         1 => {
             let own = if agility_class { a } else { 0 };
-            own.wrapping_add(if form == CAT_FORM { value } else { 0 })
+            own.wrapping_add(if form_flags & 0x20 != 0 { value } else { 0 })
         }
         _ => 0,
     }
@@ -121,23 +120,32 @@ mod tests {
     }
 
     #[test]
-    fn wrath_druid_agility_only_contributes_in_cat_form() {
+    fn agility_contribution_uses_form_row_flags_not_form_identity() {
         let mut s = UiScript::new().unwrap();
-        s.set_unit(
-            "player",
-            Some(UnitState {
-                exists: true,
-                damage_bonus_stat: Some(0),
-                ..Default::default()
-            }),
-        );
-        // Cat Form (1) adds the whole value; Bear (5), Dire Bear (8) and Moonkin (31) nothing.
-        for (form, expected) in [(1, 40.), (0, 0.), (5, 0.), (8, 0.), (31, 0.)] {
-            s.set_shapeshift_form_byte(form);
-            let agility = s.eval::<f64>("return GetAttackPowerForStat(2,40)").unwrap();
-            assert_eq!(agility, expected, "form {form}");
-            let strength = s.eval::<f64>("return GetAttackPowerForStat(1,40)").unwrap();
-            assert_eq!(strength, 60.);
+        for bonus_stat in [0, 1] {
+            s.set_unit(
+                "player",
+                Some(UnitState {
+                    exists: true,
+                    damage_bonus_stat: Some(bonus_stat),
+                    ..Default::default()
+                }),
+            );
+            // Cat without the flag, a different flagged form, and an absent row.
+            for (form, flags) in [(1, 0), (5, 0x20), (31, 0x21), (0, 0)] {
+                s.set_shapeshift_form_byte(form);
+                s.set_shapeshift_form_flags(flags);
+                let expected =
+                    if bonus_stat == 1 { 30 } else { 0 } + if flags & 0x20 != 0 { 40 } else { 0 };
+                assert_eq!(
+                    s.eval::<i32>("return GetAttackPowerForStat(2,40)").unwrap(),
+                    expected
+                );
+                assert_eq!(
+                    s.eval::<i32>("return GetAttackPowerForStat(1,40)").unwrap(),
+                    if bonus_stat == 1 { 30 } else { 60 }
+                );
+            }
         }
     }
 }
