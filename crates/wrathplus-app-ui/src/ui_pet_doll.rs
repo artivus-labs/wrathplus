@@ -151,6 +151,12 @@ mod tests {
     #[test]
     fn the_feeds_composition_answers_the_pet_bindings() {
         let mut s = wrathplus_ui::script::UiScript::new().unwrap();
+        // The guid table the aura feed seats, which the verbs' resolver reads (`0x60c1f0`).
+        s.set_unit_guids(&wrathplus_ui::script::UnitGuids {
+            player: 1,
+            pet: 2,
+            ..Default::default()
+        });
         s.set_pet_combat_stats(Some(unit_combat_stats(&boar())));
 
         // `PetPaperDollFrame.lua:149`'s read; stamina is the third, 1-based.

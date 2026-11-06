@@ -2,10 +2,10 @@
 //! snapshots the app pushes for `"player"` and `"pet"` and from its inventory-slot snapshot.
 //!
 //! As in the reference, the pet sheet calls the same `PaperDollFrame_Set*` helpers with `"pet"`
-//! (`PetPaperDollFrame.lua:75-81`). Any other token, or a snapshot not yet pushed, serves the
-//! absent shape: zeros, `percent` 1.0. A pet has no PLAYER block, so its buff splits read 0.
+//! (`PetPaperDollFrame.lua:75-81`). A unit verb resolves its token (`0x60c1f0`, see
+//! [`super::stat_unit`]); a token naming nobody, or a snapshot not yet pushed, reads zeros.
 //!
-//! For a third unit, zeros are right for `UnitStat` (`0x518600`): `UNIT_FIELD_STAT*` is PRIVATE +
+//! For a third unit, zeros are right for `UnitStat` (`0x610300`): `UNIT_FIELD_STAT*` is PRIVATE +
 //! OWNER_ONLY, so the reference holds zeros too. Not built: vmangos also sends a beast's
 //! `UNIT_FIELD_RESISTANCES` to the caster of its Beast Lore (`Object.cpp:1065-1067`,
 //! `Player.cpp:2603-2610`), and the reference's `UnitResistance` and `UnitArmor` then answer them.
@@ -16,6 +16,7 @@
 use mlua::{Lua, MultiValue, Value};
 
 use super::binding_abi::flag;
+use super::stat_unit::{stat_unit_of, with_unit_stats, StatUnit};
 use super::{binding_abi, Model};
 
 /// The `SkillLine.dbc` id behind weapon subclass `0..=20` (vmangos `Item.cpp:700-707`), `None`
@@ -370,21 +371,6 @@ pub(super) fn recompute_inventory_alerts(model: &mut Model) {
     model.inventory_alerts = alerts;
 }
 
-fn with_unit_stats<T>(
-    lua: &Lua,
-    token: &Option<String>,
-    f: impl FnOnce(&UnitCombatStats) -> T,
-) -> T {
-    let model = lua.app_data_ref::<Model>().expect("model app_data");
-    let absent = UnitCombatStats::default();
-    let pushed = match token.as_deref() {
-        Some("player") => model.player_combat_stats.as_ref(),
-        Some("pet") => model.pet_combat_stats.as_ref(),
-        _ => None,
-    };
-    f(pushed.unwrap_or(&absent))
-}
-
 /// One attack-power value as `0x610b60` pushes it: times `multiplier + 1.0` (`0x9e1130`), stored
 /// as a float, then `fistp` under the default control word, to nearest with ties to even.
 fn scaled_ap(value: i32, multiplier: f32) -> i64 {
@@ -513,10 +499,10 @@ const RESISTANCE_USAGE: &str = "Usage: UnitResistance(\"unit\", resistanceIndex)
 pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     let g = lua.globals();
 
-    // UnitStat(unit, 1..=5) → (stat, effectiveStat, posBuff, negBuff): `UNIT_FIELD_STAT0+i` raw
-    // (`0x518689`), then clamped at zero (`0x5186a3`-`0x5186b7`), then `POSSTAT0+i` and
-    // `NEGSTAT0+i` behind a SELF gate (`0x518712`, `0x518772`). Unlike `UnitResistance` it is not
-    // decomposed: stock subtracts the buffs itself (`PaperDollFrame.lua:152`). A bad index raises.
+    // UnitStat(unit, 1..=5) → (stat, effectiveStat, posBuff, negBuff) (`0x610300`): any unit's
+    // `UNIT_FIELD_STAT0+i` raw, then clamped at zero (`0x5774b0`), then `POSSTAT0+i` and
+    // `NEGSTAT0+i`, no self gate. Unlike `UnitResistance` it is not decomposed: stock subtracts
+    // the buffs itself (`PaperDollFrame.lua:152`). A bad index raises.
     g.set(
         "UnitStat",
         lua.create_function(|lua, (token, i): (Value, Value)| {
@@ -526,7 +512,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 return Err(mlua::Error::RuntimeError(STAT_INDEX_ERROR.into()));
             }
             let idx = idx as usize;
-            Ok(with_unit_stats(lua, &Some(token), |s| {
+            Ok(with_unit_stats(lua, &token, |s| {
                 let (raw, pos, neg) = (s.stats[idx], s.stat_pos[idx], s.stat_neg[idx]);
                 (
                     i64::from(raw),
@@ -538,8 +524,9 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // UnitResistance(unit, 0..=6) → (base, resistance, positive, negative) through `0x5efcd0`,
-    // school 0 armor: `base = raw - pos - neg` before the clamp, `resistance = max(raw, 0)`.
+    // UnitResistance(unit, 0..=6) → (base, resistance, positive, negative), school 0 armor: the
+    // player's through `0x4f54d0`, `base = raw - pos - neg` before the clamp, `resistance =
+    // max(raw, 0)`; any other unit's is `(res, res, 0, 0)` (`0x6101a0`).
     g.set(
         "UnitResistance",
         lua.create_function(|lua, (token, school): (Value, Value)| {
@@ -549,12 +536,18 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 return Err(mlua::Error::RuntimeError(RESISTANCE_INDEX_ERROR.into()));
             }
             let idx = school as usize;
-            Ok(with_unit_stats(lua, &Some(token), |s| {
+            let own = stat_unit_of(lua, &token) == StatUnit::Player;
+            Ok(with_unit_stats(lua, &token, |s| {
                 let (raw, pos, neg) = (
                     s.resistances[idx],
                     s.resistance_pos[idx],
                     s.resistance_neg[idx],
                 );
+                if !own {
+                    // Any other unit: the clamped field twice, no split.
+                    let res = i64::from(raw.max(0));
+                    return (res, res, 0, 0);
+                }
                 (
                     i64::from(raw - pos - neg),
                     i64::from(raw.max(0)),
@@ -569,7 +562,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     // `0x5efcd0`, effectiveArmor and armor both its clamped total.
     g.set(
         "UnitArmor",
-        lua.create_function(|lua, token: Option<String>| {
+        lua.create_function(|lua, token: Value| {
+            let token = binding_abi::string_arg(lua, token, r#"Usage: UnitArmor("unit")"#)?;
             Ok(with_unit_stats(lua, &token, |s| {
                 let (raw, pos, neg) = (s.resistances[0], s.resistance_pos[0], s.resistance_neg[0]);
                 (
@@ -588,7 +582,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     // `MOD_DAMAGE_DONE` split, which is inferred, not traced in the reference.
     g.set(
         "UnitDamage",
-        lua.create_function(|lua, token: Option<String>| {
+        lua.create_function(|lua, token: Value| {
+            let token = binding_abi::string_arg(lua, token, r#"Usage: UnitDamage("unit")"#)?;
             Ok(with_unit_stats(lua, &token, |s| {
                 (
                     f64::from(s.min_damage),
@@ -606,7 +601,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     // UnitAttackSpeed(unit) → (mainSpeed, offhandSpeed) in seconds; nil offhand without a weapon.
     g.set(
         "UnitAttackSpeed",
-        lua.create_function(|lua, token: Option<String>| {
+        lua.create_function(|lua, token: Value| {
+            let token = binding_abi::string_arg(lua, token, r#"Usage: UnitAttackSpeed("unit")"#)?;
             Ok(with_unit_stats(lua, &token, |s| {
                 (
                     f64::from(s.main_attack_time_ms) / 1000.0,
@@ -618,11 +614,13 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     )?;
 
     // UnitAttackPower(unit) / UnitRangedAttackPower(unit) → (base, posBuff, negBuff): AP and the
-    // signed halves of `_MODS`, each scaled by the multiplier (`0x610b60`, `0x610ca0`).
+    // signed halves of `_MODS`, each scaled by the multiplier (`0x610b60`, `0x610ca0`); one Usage.
     for (name, ranged) in [("UnitAttackPower", false), ("UnitRangedAttackPower", true)] {
         g.set(
             name,
-            lua.create_function(move |lua, token: Option<String>| {
+            lua.create_function(move |lua, token: Value| {
+                let token =
+                    binding_abi::string_arg(lua, token, r#"Usage: UnitAttackPower("unit")"#)?;
                 Ok(with_unit_stats(lua, &token, |s| {
                     let (m, ap) = if ranged {
                         let ap = s.ranged_attack_power;
@@ -646,21 +644,22 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         "UnitRangedDamage",
         lua.create_function(|lua, token: Value| {
             let token = binding_abi::string_arg(lua, token, r#"Usage: UnitRangedDamage("unit")"#)?;
-            let model = lua.app_data_ref::<Model>().expect("model app_data");
-            let stats = match token.as_str() {
-                "player" => model.player_combat_stats.as_ref(),
-                "pet" => model.pet_combat_stats.as_ref(),
-                _ => None,
-            };
-            // `0x610598`: unresolved is six zeros; a resolved creature keeps percent 1.
-            Ok(stats.map_or((0.0, 0.0, 0.0, 0, 0, 0.0), |s| {
+            // A resolved creature keeps percent 1.0 (`0x61075a`), our pet included; unresolved is
+            // six zeros (`0x610598`).
+            let pet = stat_unit_of(lua, &token) == StatUnit::Pet
+                && lua
+                    .app_data_ref::<Model>()
+                    .expect("model app_data")
+                    .pet_combat_stats
+                    .is_some();
+            Ok(with_unit_stats(lua, &token, |s| {
                 (
                     f64::from(s.ranged_attack_time_ms) / 1000.0,
                     f64::from(s.ranged_min_damage),
                     f64::from(s.ranged_max_damage),
                     i64::from(s.ranged_bonus_pos),
                     i64::from(s.ranged_bonus_neg),
-                    if token == "pet" {
+                    if pet {
                         1.0
                     } else {
                         f64::from(s.ranged_damage_percent)
@@ -828,7 +827,19 @@ mod tests {
     use super::{
         weapon_subclass_skill, RESISTANCE_INDEX_ERROR, SKILL_UNARMED, STAT_INDEX_ERROR, STAT_USAGE,
     };
-    use crate::script::{InvSlotView, UiScript, UnitCombatStats};
+    use crate::script::{InvSlotView, UiScript, UnitCombatStats, UnitGuids};
+
+    /// A script holding the guid table the app pushes each frame, which the verbs' resolver
+    /// (`0x60c1f0`) reads: the player 1, its pet 2.
+    fn sheet() -> UiScript {
+        let mut s = UiScript::new().unwrap();
+        s.set_unit_guids(&UnitGuids {
+            player: 1,
+            pet: 2,
+            ..Default::default()
+        });
+        s
+    }
 
     /// A filled snapshot exercising every field the bindings read.
     fn stats() -> UnitCombatStats {
@@ -877,6 +888,7 @@ mod tests {
         UnitCombatStats {
             stats: [63, 45, 68, 32, 42],
             resistances: [1810, 0, 15, 0, 0, 0, 0],
+            resistance_pos: [0, 0, 5, 0, 0, 0, 0],
             min_damage: 30.5,
             max_damage: 44.5,
             main_attack_time_ms: 2000,
@@ -889,7 +901,7 @@ mod tests {
 
     #[test]
     fn ranged_damage_missing_is_zero_but_resolved_creature_has_unit_multiplier() {
-        let mut s = UiScript::new().unwrap();
+        let mut s = sheet();
         for token in ["player", "pet", "target", "bogus"] {
             assert_eq!(
                 s.eval::<(f64, f64, f64, i32, i32, f64)>(&format!(
@@ -943,7 +955,7 @@ mod tests {
 
     #[test]
     fn unit_stat_serves_the_raw_field_twice_and_the_buff_split() {
-        let mut s = UiScript::new().unwrap();
+        let mut s = sheet();
         s.set_player_combat_stats(Some(stats()));
         // Str: raw 25 in both first slots; stock subtracts the +4 itself.
         assert_eq!(
@@ -979,7 +991,7 @@ mod tests {
     /// `0x518663`): 1.9 is stat 1, while 0.5 and any negative raise.
     #[test]
     fn an_out_of_range_stat_index_raises_the_references_own_string() {
-        let mut s = UiScript::new().unwrap();
+        let mut s = sheet();
         s.set_player_combat_stats(Some(stats()));
         for arg in ["6", "0", "-3", "0.5", "-0.5"] {
             let err = s
@@ -1025,7 +1037,7 @@ mod tests {
 
     #[test]
     fn unit_resistance_and_armor_decompose_school_zero() {
-        let mut s = UiScript::new().unwrap();
+        let mut s = sheet();
         s.set_player_combat_stats(Some(stats()));
         // Armor (school 0): 150 total, +30/−10 → base 130.
         assert_eq!(
@@ -1078,7 +1090,7 @@ mod tests {
 
     #[test]
     fn unit_damage_and_attack_speed_read_the_snapshot() {
-        let mut s = UiScript::new().unwrap();
+        let mut s = sheet();
         s.set_player_combat_stats(Some(stats()));
         assert_eq!(
             s.eval::<(f64, f64, f64, f64, i64, i64, f64)>(r#"return UnitDamage("player")"#)
@@ -1098,24 +1110,24 @@ mod tests {
                 .unwrap(),
             (2.9, 1.5)
         );
-        // Another token, or no snapshot: zeros and percent 1.0.
+        // A token naming nobody, or no snapshot: zeros and percent 0 (`0x6109d6`).
         assert_eq!(
             s.eval::<(f64, f64, f64, f64, i64, i64, f64)>(r#"return UnitDamage("target")"#)
                 .unwrap(),
-            (0.0, 0.0, 0.0, 0.0, 0, 0, 1.0)
+            (0.0, 0.0, 0.0, 0.0, 0, 0, 0.0)
         );
         let fresh = UiScript::new().unwrap();
         assert_eq!(
             fresh
                 .eval::<(f64, f64, f64, f64, i64, i64, f64)>(r#"return UnitDamage("player")"#)
                 .unwrap(),
-            (0.0, 0.0, 0.0, 0.0, 0, 0, 1.0)
+            (0.0, 0.0, 0.0, 0.0, 0, 0, 0.0)
         );
     }
 
     #[test]
     fn attack_power_and_weapon_skill_bindings_serve_the_pairs() {
-        let mut s = UiScript::new().unwrap();
+        let mut s = sheet();
         s.set_player_combat_stats(Some(stats()));
         assert_eq!(
             s.eval::<(i64, i64, i64)>(r#"return UnitAttackPower("player")"#)
@@ -1182,7 +1194,7 @@ mod tests {
     /// PLAYER typemask (`0x612b40`, `0x5edae0`, `0x5ea460` are in no vtable), so a pet gets zeros.
     #[test]
     fn ranged_attack_gives_a_pet_zeros_where_defense_gives_it_level_times_five() {
-        let mut s = UiScript::new().unwrap();
+        let mut s = sheet();
         s.set_player_combat_stats(Some(stats()));
         s.set_pet_combat_stats(Some(pet_stats()));
         s.set_unit(
@@ -1216,7 +1228,7 @@ mod tests {
     /// `0x518810` pushes `(base0, mod0, base1, mod1)`, one pair per hand.
     #[test]
     fn attack_both_hands_answers_a_pair_per_hand() {
-        let mut s = UiScript::new().unwrap();
+        let mut s = sheet();
         s.set_player_combat_stats(Some(UnitCombatStats {
             main_weapon_skill: (300, 5),
             offhand_weapon_skill: (275, -12),
@@ -1251,7 +1263,7 @@ mod tests {
 
     #[test]
     fn the_pet_token_reads_the_pet_snapshot_and_only_it() {
-        let mut s = UiScript::new().unwrap();
+        let mut s = sheet();
         s.set_player_combat_stats(Some(stats()));
         s.set_pet_combat_stats(Some(pet_stats()));
 
@@ -1277,7 +1289,7 @@ mod tests {
                 .unwrap(),
             (25, 25, 4, 0)
         );
-        // Fire resistance: the pet's 15, the player's 20 (+25/−5).
+        // Fire resistance: the pet's 15 unsplit, as any other unit's; the player's 20 (+25/−5).
         assert_eq!(
             s.eval::<(i64, i64, i64, i64)>(r#"return UnitResistance("pet", 2)"#)
                 .unwrap(),
@@ -1335,7 +1347,7 @@ mod tests {
         assert_eq!(
             s.eval::<(f64, f64, f64, f64, i64, i64, f64)>(r#"return UnitDamage("pet")"#)
                 .unwrap(),
-            (0.0, 0.0, 0.0, 0.0, 0, 0, 1.0)
+            (0.0, 0.0, 0.0, 0.0, 0, 0, 0.0)
         );
         // The player's is untouched by any of it.
         assert_eq!(
@@ -1349,7 +1361,7 @@ mod tests {
     /// 0 modifier; `UnitAttackBothHands` takes the same fork.
     #[test]
     fn unit_defense_forks_the_player_skill_from_a_pets_level_times_five() {
-        let mut s = UiScript::new().unwrap();
+        let mut s = sheet();
         s.set_player_combat_stats(Some(stats()));
         s.set_pet_combat_stats(Some(pet_stats()));
         s.set_unit(
