@@ -469,7 +469,8 @@ pub(super) fn feed_party(
 
     // ── raid1..raid40 ──────────────────────────────────────────────────────
     //
-    // Raid tokens follow `raid_row_guids`; our own row reads our descriptor.
+    // Token N is `GetRaidRosterInfo` row N, both in `raid_row_guids`' order. Our own row comes off
+    // our descriptor: the wire list never contains us.
     let raid_guids = raid_row_guids(&group, self_guid);
     fed.raid_units.resize(RAID_TOKENS.len(), None);
     for (i, token) in RAID_TOKENS.iter().enumerate() {
@@ -832,6 +833,7 @@ fn member_unit_state(
                 .or_else(|| stats.and_then(|s| s.level))
                 .map_or(0, u32::from),
             power_type: stats.map_or(0, PartyMemberStatsInfo::shown_power_type),
+            // Divided as on the live leg (`UnitMana`'s record path, `0x517744`-`0x51775e`).
             power: stats.map_or(0, PartyMemberStatsInfo::shown_power),
             max_power: stats.map_or(0, PartyMemberStatsInfo::shown_max_power),
             // Connected is the record's own online bit (`+0x08 & 1`, `0x517dd3`), which each list
@@ -867,13 +869,16 @@ fn member_unit_state(
         }
     }
     s.is_player = true;
-    // A party member is a same-faction friendly player (`UnitCanCooperate`).
+    // A party member is always a same-faction friendly player: the popup's `UnitCanCooperate`
+    // gate reads the reaction, which neither leg resolves for a party token.
     s.raid_target = group.raid_target_index(m.guid);
     s.reaction = 5;
     s.faction_group = own_group;
+    // Native status is authoritative for the unstreamed record, including explicit clears.
     if store.is_none() && group.wrath_record(m.guid).is_some() {
         return s;
     }
+    // The roster status byte overlays both legs, but for `is_connected`, which is the record leg's.
     s.is_pvp_ffa = m.status & member_status::PVP_FFA != 0;
     s.pvp = s.pvp || m.status & member_status::PVP != 0;
     s.ghost = s.ghost || m.status & member_status::GHOST != 0;
@@ -884,6 +889,7 @@ fn member_unit_state(
 /// `"party1".."party4"` → the roster entry it names.
 fn member_for_token<'a>(group: &'a GroupState, token: &str) -> Option<&'a GroupMemberEntry> {
     let n: usize = token.strip_prefix("party")?.parse().ok()?;
+    // The slot view the feed publishes the tokens from, so the two agree.
     (1..=4)
         .contains(&n)
         .then(|| group.party_slots().nth(n - 1))?
@@ -1604,67 +1610,14 @@ pub fn synthetic_raid(
 }
 
 #[cfg(test)]
+mod record_status_tests;
+#[cfg(test)]
 mod roster_update_tests;
 
 #[cfg(test)]
 mod tests {
     use super::super::pets::tests::{app, app_with, flag, frame, member, party, stream, ME};
     use super::*;
-
-    #[test]
-    fn an_out_of_range_member_reads_the_record_and_divides_its_rage() {
-        let m = GroupMemberEntry {
-            name: "Brisca".into(),
-            guid: 0x1234,
-            status: member_status::ONLINE,
-            flags: 0,
-        };
-        let record = PartyMemberStatsInfo {
-            status: Some(member_status::ONLINE | member_status::DND),
-            cur_hp: Some(2400),
-            max_hp: Some(3000),
-            level: Some(41),
-            power_type: Some(1), // POWER_RAGE
-            cur_power: Some(570),
-            max_power: Some(1000),
-            ..PartyMemberStatsInfo::default()
-        };
-        let s = member_unit_state(
-            &m,
-            Some(&record),
-            None,
-            &GroupState::default(),
-            None,
-            None,
-            Default::default(),
-        );
-        assert_eq!(
-            (s.health, s.max_health),
-            (2400, 3000),
-            "the bars keep their numbers"
-        );
-        assert_eq!(s.level, 41);
-        assert_eq!(
-            (s.power_type, s.power, s.max_power),
-            (1, 57, 100),
-            "rage reads 57/100, not 570/1000 — `UnitMana`'s record leg divides too (0x517744)"
-        );
-        assert!(s.exists && s.is_player && s.is_connected);
-        assert_eq!(s.roster_status, member_status::ONLINE | member_status::DND);
-
-        // No record at all (a real roster always seats one): an existing player with empty bars.
-        let bare = member_unit_state(
-            &m,
-            None,
-            None,
-            &GroupState::default(),
-            None,
-            None,
-            Default::default(),
-        );
-        assert_eq!((bare.health, bare.max_health, bare.power), (0, 0, 0));
-        assert!(bare.exists);
-    }
 
     /// vmangos re-sends a member's status on join, login and the AFK, DND, PvP, FFA and ghost
     /// toggles, never on a death, so the roster byte can say alive while the record says dead.

@@ -13,6 +13,15 @@ fn own_title_gender_is_player_bytes_3_while_foreign_uses_unit_sex() {
         ]))
     };
     let names = NameCache::default();
+    let mut script = UiScript::new().unwrap();
+    script.set_wrath_char_titles(std::sync::Arc::new(vec![
+        wrathplus_ui::script::WrathCharTitle {
+            id: 1,
+            mask_id: 1,
+            male: "Sir %s".into(),
+            female: "Dame %s".into(),
+        },
+    ]));
     for gender in [0, 1, 2] {
         let own = fields(gender);
         let mut state = snapshot(&own, 42, None, 0, None, Default::default());
@@ -23,5 +32,29 @@ fn own_title_gender_is_player_bytes_3_while_foreign_uses_unit_sex() {
         enrich_unit(&mut foreign, 43, &names, &own, None, Some(&own));
         assert_eq!(foreign.sex, 3);
         assert_eq!(foreign.title_gender, None);
+        for (token, mut unit, want) in [
+            (
+                "player",
+                state,
+                if gender == 1 { "Dame Name" } else { "Sir Name" },
+            ),
+            ("target", foreign, "Dame Name"),
+        ] {
+            unit.name = Some("Name".into());
+            unit.chosen_title = 1;
+            script.set_unit(token, Some(unit));
+            assert_eq!(
+                script
+                    .eval::<String>(&format!("return UnitPVPName('{token}')"))
+                    .unwrap(),
+                want
+            );
+            assert_eq!(
+                script
+                    .eval::<u8>(&format!("return UnitSex('{token}')"))
+                    .unwrap(),
+                3
+            );
+        }
     }
 }
