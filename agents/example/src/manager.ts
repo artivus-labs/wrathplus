@@ -155,6 +155,13 @@ export function startClient(home: string, agent: ManagedAgent, character?: strin
   );
 }
 
+/** Whether a client the agent started needs restarting: it exited, or it was in the world and is
+ *  back at the login screen (a disconnect). Character select is not a disconnect: logging out is a
+ *  planner's choice. */
+export function needsRestart(status: Record<string, unknown> | null, wasInWorld: boolean, exited: boolean): boolean {
+  return exited || (wasInWorld && status?.state === "Login");
+}
+
 /** Wait until the client is past loading: in the world, or at character select with its UI up. */
 /** Why a client that exited at start did: its own words from the log, and what to do about them. */
 export function exitReason(log: string): string {
@@ -171,9 +178,9 @@ export function exitReason(log: string): string {
 export async function waitReady(agent: ManagedAgent, token: string, client: Subprocess, logPath: string, timeoutMs = 120_000): Promise<Record<string, unknown>> {
   const until = Date.now() + timeoutMs;
   while (Date.now() < until) {
-    if (client.exitCode !== null) {
+    if (client.exitCode !== null || client.signalCode !== null) {
       const log = existsSync(logPath) ? readFileSync(logPath, "utf8") : "";
-      throw new Error(`The client exited (code ${client.exitCode})${exitReason(log)}\n(log: ${logPath})`);
+      throw new Error(`The client exited (${client.signalCode ?? `code ${client.exitCode}`})${exitReason(log)}\n(log: ${logPath})`);
     }
     const status = await answering(agent, token);
     const player = status?.player as { level?: number } | undefined;

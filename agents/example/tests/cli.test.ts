@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { recentLines } from "../src/dashboard.ts";
 import { claudeEnv, loadEnv, parseEnv } from "../src/env.ts";
-import { accountFor, exitReason, findAgent } from "../src/manager.ts";
+import { accountFor, exitReason, findAgent, needsRestart } from "../src/manager.ts";
 
 test("agents/.env: KEY=value lines, comments and quotes; the shell wins", () => {
   expect(parseEnv("# keys\nTYPESAFE_API_KEY=abc\nexport A='q r'\nB=\"x\"\nnot a line\n=nokey\n")).toEqual({
@@ -57,4 +57,12 @@ test("a client that exits at start says why, with a hint for an old build", () =
   );
   expect(exitReason("2026-11-03T01:00:00Z ERROR wrathplus: no WOW_DATA\n")).toBe(":\n  wrathplus: no WOW_DATA");
   expect(exitReason("")).toBe("");
+});
+
+test("a client the agent started is restarted after a disconnect or an exit, not a logout", () => {
+  expect(needsRestart({ state: "Login" }, true, false)).toBe(true);
+  expect(needsRestart({ state: "Login" }, false, false)).toBe(false);
+  expect(needsRestart({ state: "CharSelect" }, true, false)).toBe(false);
+  expect(needsRestart({ state: "InWorld", in_world: true }, true, false)).toBe(false);
+  expect(needsRestart(null, true, true)).toBe(true);
 });
