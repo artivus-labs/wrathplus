@@ -150,7 +150,8 @@ impl Plugin for UiUnitPlugin {
                 // First, so a worldport's leaving edge precedes the entering edge `feed_units`
                 // raises for the same port.
                 fire_leaving_world_on_worldport,
-                feed_units,
+                // Synchronous health handlers need the resolver's own/group feign exemptions.
+                feed_units.after(crate::app_core::schedule::AuraEvents),
                 // After the aura feed, whose resolver inputs it measures.
                 feed_unit_reach.after(crate::app_core::schedule::AuraEvents),
                 // After the same feed, whose guids it covers.
@@ -3927,3 +3928,7 @@ mod tests {
 #[cfg(test)]
 #[path = "ui_unit/title_tests.rs"]
 mod title_tests;
+
+#[cfg(test)]
+#[path = "ui_unit_startup_tests.rs"]
+mod startup_tests;

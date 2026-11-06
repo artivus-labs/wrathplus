@@ -22,7 +22,13 @@ pub struct UiPetDollPlugin;
 impl Plugin for UiPetDollPlugin {
     fn build(&self, app: &mut App) {
         // In the unit feed, so the page repaints in the pass that pushes the pet's health.
-        app.add_systems(Update, feed_pet_doll.in_set(UnitFeed));
+        // Synchronous stat handlers resolve "pet" through the aura feed's guid table.
+        app.add_systems(
+            Update,
+            feed_pet_doll
+                .in_set(UnitFeed)
+                .after(crate::app_core::schedule::AuraEvents),
+        );
     }
 }
 

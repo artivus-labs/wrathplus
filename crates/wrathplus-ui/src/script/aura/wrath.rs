@@ -61,6 +61,13 @@ pub(crate) struct Query {
     pub(crate) filter: Filter,
 }
 
+impl Query {
+    /// The buff/debuff siblings force the sign after parsing, preserving every other filter bit.
+    pub(crate) fn force_helpful(&mut self, helpful: bool) {
+        self.filter.helpful = helpful;
+    }
+}
+
 /// `0x6110a0`: `isstring(1)` and (`isnumber(2)` or `isstring(2)`), else `usage` raises. A number,
 /// numeric strings included (`lua_isnumber`), is an index (`lua_tointeger`) with the filter
 /// third; otherwise argument 2 is the name, 3 the rank (`lua_tolstring`, absent unless a string

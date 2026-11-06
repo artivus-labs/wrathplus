@@ -75,11 +75,15 @@ pub(super) fn dispel_types(
     actions: Option<&bevy::prelude::Res<PlayerActions>>,
     catalog_moved: bool,
 ) {
-    if !catalog_moved && !actions.is_some_and(bevy::prelude::DetectChanges::is_changed) {
+    let Some(actions) = actions else {
+        out.clear();
+        return;
+    };
+    if !catalog_moved && !bevy::prelude::DetectChanges::is_changed(actions) {
         return;
     }
     out.clear();
-    let known = actions.into_iter().flat_map(|a| &a.spells);
+    let known = actions.spells.iter();
     for d in known.filter_map(|&id| catalog?.get(id)) {
         for i in 0..3 {
             let misc = d.effect_misc_value[i] as u32;
@@ -104,6 +108,26 @@ fn in_raid_list(ctx: &ListCtx, d: Option<&SpellDisplay>, spell_id: u32, helpful:
         }
         false => ctx.dispels.contains(&d.dispel),
     })
+}
+
+/// Refresh only metadata whose inputs can move without an aura packet. Keep the cached row's
+/// strings, slot order and absolute expiration time; report only observable metadata changes.
+pub(super) fn refresh_context(ctx: &ListCtx, state: &mut AuraState) -> bool {
+    let caster_links = (ctx.held)(state.caster)
+        .filter(|c| c.is_unit())
+        .map_or([0; 2], |c| {
+            let c = &c.0;
+            [
+                c.unit_charmed_by().or(c.unit_created_by()).unwrap_or(0),
+                c.unit_charm().or(c.unit_summon()).unwrap_or(0),
+            ]
+        });
+    let d = ctx.catalog.and_then(|c| c.get(state.spell_id));
+    let raid = in_raid_list(ctx, d, state.spell_id, state.helpful);
+    let changed = state.caster_links != caster_links || state.raid != raid;
+    state.caster_links = caster_links;
+    state.raid = raid;
+    changed
 }
 
 /// `unit`'s list: the record's caster is the wire's, or `unit` itself under `AFLAG_CASTER`
@@ -136,16 +160,9 @@ pub(super) fn list(
             });
             state.until_cancelled = a.remaining_ms.is_none();
             state.caster = a.caster_guid.unwrap_or(unit);
-            if let Some(c) = (ctx.held)(state.caster).filter(|c| c.is_unit()) {
-                let c = &c.0;
-                state.caster_links = [
-                    c.unit_charmed_by().or(c.unit_created_by()).unwrap_or(0),
-                    c.unit_charm().or(c.unit_summon()).unwrap_or(0),
-                ];
-            }
             state.rank = d.and_then(|d| d.rank.clone());
             state.consolidate = d.is_some_and(|d| d.attributes_ex7 & 0x1000_0000 != 0);
-            state.raid = in_raid_list(ctx, d, a.spell_id, state.helpful);
+            refresh_context(ctx, &mut state);
             state
         })
         .collect()

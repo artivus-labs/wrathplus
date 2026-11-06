@@ -278,6 +278,10 @@ pub enum UiCursorMode {
 /// - a split carry places onto an empty or same-item slot, and stays held over another item;
 /// - a spell or action payload stays held.
 fn pickup_container_item(model: &mut super::Model, bag: i64, slot: u32) {
+    // A staged mail or auction item cannot be picked up, swapped, repaired or wrapped.
+    if super::mail::source_reserved(model, bag, slot) {
+        return;
+    }
     // An armed gift wrap completes here, before the cursor is read. `PickupContainerItem` is the
     // only caller of the wrap sender `0x5edfc0`, so an equipped item cannot be wrapped.
     if let Some(wrap) = model.pending_wrap {
@@ -440,7 +444,7 @@ fn queue_move(
 /// locked slot. A slot whose template is in flight still holds an item object.
 fn unlocked_bag_item(model: &Model, bag: i64, slot: u32) -> Option<CursorItem> {
     let s = model.containers.get(&bag)?.slots.get(&slot)?;
-    if s.locked {
+    if s.locked || super::mail::source_reserved(model, bag, slot) {
         return None;
     }
     Some(CursorItem {
@@ -460,8 +464,8 @@ fn unlocked_bag_item(model: &Model, bag: i64, slot: u32) -> Option<CursorItem> {
 /// `0x7fd620`/`0x5210d0`, as stock `ContainerFrameItemButton_OnClick` relies on) and repair. The
 /// bank and a vendor are App's arms (withdraw, deposit, sale, in that order); then the Send Mail
 /// tab (`0xbeb1b9`, `0x56fff0`), the Auctions tab (`0xc0f3f5`, `0x59a280`), a trade (`0x5877b0`)
-/// and the guild vault (`0x5a56b0`); else the use. Labelled: the client-side refusals inside the
-/// mail, auction and vault arms (bound, conjured, damaged; no free mail slot) are the server's;
+/// and the guild vault (`0x5a56b0`); else the use. Labelled: auction and vault eligibility
+/// refusals (bound, conjured, damaged) are the server's;
 /// with `[0xbfa5d8]` set, the trade stages an item with an enchant, temporary or prismatic enchant
 /// or open-lock effect (`0x707c60`: 0x35, 0x36, 0x9c, 0x21) as its enchant item (`0x586c00`),
 /// where this offers it as a slot.
@@ -484,7 +488,10 @@ fn use_bag_item(model: &mut Model, item: CursorItem) {
         && (model.wrath_mail.is_some() || model.mail.is_some())
     {
         // The first free send slot (`0x56d390` over 12), locked, `MAIL_SEND_INFO_UPDATE`.
-        if let Some(free) = model.mail_send_items.iter().position(Option::is_none) {
+        if super::mail::can_attach(model, &item) {
+            let Some(free) = model.mail_send_items.iter().position(Option::is_none) else {
+                return;
+            };
             model.mail_send_items[free] = Some(item);
             cursor::queue_lock_changed(model, bag, slot);
             let update = ("MAIL_SEND_INFO_UPDATE".to_string(), Vec::new());
@@ -666,7 +673,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                     matches!(
                         &model.pending_wrap,
                         Some(w) if w.bag == bag && w.slot == slot
-                    );
+                    ) || super::mail::source_reserved(&model, bag, slot);
                 (
                     model
                         .containers
@@ -690,8 +697,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             Ok(mlua::MultiValue::from_vec(vec![
                 text(&s.texture)?,
                 Value::Integer(i64::from(s.count)),
-                // A held item's source slot reads locked, derived from the cursor so the app's
-                // re-push cannot wipe it.
+                // Cursor, compose and auction reservations survive the app's container re-push.
                 super::binding_abi::flag(s.locked || held_here),
                 Value::Integer(
                     s.quality
