@@ -88,25 +88,33 @@ const headers = { Authorization: "Bearer " + TOKEN };
 const $ = (id) => document.getElementById(id);
 const get = (path) => fetch(path, { headers });
 
-let shown = null, frames = [];
+// A capture waits a few rendered frames for its GPU readback, so one request at a time shows ~8
+// a second; three in flight overlap those waits. Only a newer frame than the one shown replaces it.
+const IN_FLIGHT = 3;
+let shown = null, shownSeq = 0, nextSeq = 0, frames = [];
 async function frameLoop() {
   for (;;) {
     const started = performance.now();
+    const seq = ++nextSeq;
     try {
-      // JPEG: several times smaller and quicker to encode than PNG, so frames keep up.
+      // JPEG: several times smaller and quicker to encode than PNG.
       const response = await get("/screenshot?format=jpeg&quality=90&scale=" + $("scale").value);
       if (response.ok) {
-        const url = URL.createObjectURL(await response.blob());
-        $("frame").src = url;
-        if (shown) URL.revokeObjectURL(shown);
-        shown = url;
-        frames.push(performance.now());
-        frames = frames.filter((t) => t > performance.now() - 3000);
-        $("fps").textContent = (frames.length / 3).toFixed(1) + " fps";
+        const blob = await response.blob();
+        if (seq > shownSeq) {
+          shownSeq = seq;
+          const url = URL.createObjectURL(blob);
+          $("frame").src = url;
+          if (shown) URL.revokeObjectURL(shown);
+          shown = url;
+          frames.push(performance.now());
+          frames = frames.filter((t) => t > performance.now() - 3000);
+          $("fps").textContent = (frames.length / 3).toFixed(1) + " fps";
+        }
       }
     } catch (_) { await sleep(1000); }
-    // Back to back, at most 30 a second: the client answers one frame per request.
-    await sleep(Math.max(0, 33 - (performance.now() - started)));
+    // Each loop at most 10 a second, so the three together stay near the client's own rate.
+    await sleep(Math.max(0, 100 - (performance.now() - started)));
   }
 }
 
@@ -191,7 +199,8 @@ function render() {
 
 $("filter").addEventListener("input", render);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-frameLoop(); statusLoop(); eventLoop();
+for (let i = 0; i < IN_FLIGHT; i++) frameLoop();
+statusLoop(); eventLoop();
 </script>
 </body>
 </html>
