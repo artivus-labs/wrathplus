@@ -208,6 +208,16 @@ impl Plugin for UiShapeshiftPlugin {
     }
 }
 
+/// Feed the effective form and its actual catalog row before any stance-bar early return.
+fn push_current_form(
+    script: &mut UiScript,
+    form_byte: u8,
+    forms: &std::collections::HashMap<u32, wrathplus_formats::ShapeshiftForm>,
+) {
+    script.set_shapeshift_form_byte(form_byte);
+    script.set_shapeshift_form_flags(forms.get(&u32::from(form_byte)).map_or(0, |row| row.flags));
+}
+
 /// Build the bar from the known spells and the catalog (module doc), and diff-push it.
 #[allow(clippy::type_complexity)] // a Bevy system's full input set
 fn feed_shapeshift_bar(
@@ -248,13 +258,7 @@ fn feed_shapeshift_bar(
     // As `0x71af70` reads it: no form while a cancel is predicted, so no form spell is lit.
     let raw = store.map_or(0, |s| s.0.unit_shapeshift_form());
     let form_byte = form_cancel.as_deref().map_or(raw, |p| p.form_byte(raw));
-    script.set_shapeshift_form_byte(form_byte);
-    script.set_shapeshift_form_flags(
-        spells
-            .forms
-            .get(&u32::from(form_byte))
-            .map_or(0, |row| row.flags),
-    );
+    push_current_form(&mut script, form_byte, &spells.forms);
     let auras: &[StampedAura] = me
         .and_then(|(_, g)| packets.as_deref()?.by_guid.get(&g.0))
         .map_or(&[], Vec::as_slice);
