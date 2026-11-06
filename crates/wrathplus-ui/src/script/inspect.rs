@@ -88,9 +88,8 @@ impl super::UiScript {
     }
 }
 
-/// The reach of the unit `token` names, through the resolver (`0x515970`, which both verbs call via
-/// `0x515940`): the guid it answers, then that guid's entry. A token the resolver does not
-/// recognise answers nobody here.
+/// The reach of the unit `token` names, through the resolver (`0x60abf0`): the guid it answers,
+/// then that guid's entry. A token the resolver does not recognise answers nobody here.
 fn reach(lua: &Lua, token: &Option<String>) -> Option<UnitReach> {
     let token = token.as_deref()?;
     let model = lua.app_data_ref::<Model>().expect("model app_data");
@@ -127,8 +126,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     // `d² < table[type-1]`, strictly, unlike `CanInspect` (`test ah,0x5; jp`). A token with no unit
     // answers nil (`0x48babe`), as does a `type` outside 1..=4 once truncated toward zero, the
     // compare being unsigned (`0x48bac5`); a missing or non-number `type` raises (`0x48bb48`).
-    // The reference also raises for a missing unit (`0x48ba18`) or an unknown token (`0x515c14`),
-    // where this answers nil.
+    // The reference also raises for a missing unit (`0x48ba18`), where this answers nil; its
+    // resolver never raises (`0x60abf0`).
     g.set(
         "CheckInteractDistance",
         lua.create_function(|lua, (unit, kind): (Option<String>, Option<f64>)| {

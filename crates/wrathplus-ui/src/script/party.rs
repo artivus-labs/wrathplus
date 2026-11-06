@@ -19,21 +19,21 @@ pub struct PartyMemberInfo {
     pub guid: u64,
 }
 
-/// One raid roster row, `GetRaidRosterInfo`'s nine returns in push order (`0x4bb560`). The
+/// One raid roster row, `GetRaidRosterInfo`'s first nine returns in push order (`0x573690`). The
 /// binding, not the row, applies the subgroup's +1 and the offline zone.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RaidMemberInfo {
-    /// Return 1, from the name cache (`0x4bb5ee`). Empty means not cached, which the reference
-    /// answers with the miss tuple, as for an empty slot (`0x4bb5f8 je 0x4bb7b9`).
+    /// Return 1, from the name cache (`0x573722`). Empty means not cached, which the reference
+    /// answers with the miss tuple, as for an empty slot (`0x57372b je 0x5739e6`).
     pub name: String,
-    /// The identity `UnitInRaid` matches a token against; `0` never matches, as the reference's
-    /// membership test rejects a zero guid (`0x4baee0`).
+    /// The identity `UnitInRaid`'s row walk (`0x608130`) matches a token's guid against; `0`
+    /// never matches.
     pub guid: u64,
-    /// Return 2, exposed as stored (`0x4bb607 fild [edi+0xc]`): 0 member, 1 assistant, 2 leader,
+    /// Return 2, exposed as stored (`0x57374b fild [edi+0xc]`): 0 member, 1 assistant, 2 leader,
     /// the convention addons read (`ChatLog.lua:351-353`).
     pub rank: u32,
     /// Return 3, stored 0-based as the wire's `GroupMemberEntry::flags` bits 0-2 carry it; the
-    /// binding exposes it 1-based (`0x4bb61a inc eax`).
+    /// binding exposes it 1-based (`0x57375a add ecx,0x1`).
     pub subgroup: u32,
     /// Return 4, `0` until an object or a stats packet carries it, as in the reference's third arm.
     pub level: u32,
@@ -61,13 +61,13 @@ pub struct PartyState {
     pub members: Vec<PartyMemberInfo>,
     /// `GetPartyLeaderIndex`: `0` the player, `1..=4` that `members` slot.
     pub leader_index: u32,
-    /// The cached group-leader guid (the reference's `[0xbc75f8]:[0xbc75fc]`), `0` when
+    /// The cached group-leader guid (the reference's `[0xbd1968]:[0xbd196c]`), `0` when
     /// ungrouped, fed from the wire rather than derived from [`Self::leader_index`].
-    /// `UnitIsPartyLeader` (`0x516210`) compares a resolved token's guid with it and, unlike
-    /// `IsPartyLeader` (`0x4e9130`), has no zero guard, so an unresolvable token answers `1` while
+    /// `UnitIsPartyLeader` (`0x60c770`) compares a resolved token's guid with it and, unlike
+    /// `IsPartyLeader` (`0x52ccd0`), has no zero guard, so an unresolvable token answers `1` while
     /// solo.
     pub leader_guid: u64,
-    /// The player's own guid (`0x468550`, `[0xb41414]+0xc0`), `0` out of world. With
+    /// The player's own guid (`0x4d3790`, the object manager's `+0xc0`), `0` out of world. With
     /// [`Self::leader_guid`] it is the ready-check timeout's leader gate, a bare guid compare, so a
     /// solo player never matches.
     pub own_guid: u64,
@@ -227,10 +227,11 @@ impl super::UiScript {
     }
 }
 
-/// `GetRaidRosterInfo`'s values for one row, or the miss tuple for `None`. Nine on every path
-/// (`0x4bb560`, every return `mov eax,9`): out of range, an empty slot and a name-cache miss all
-/// reach `0x4bb7b9`, which pushes `nil, 0, 1, 1` and five `nil`s. Takes the row by value because
-/// every arm re-enters Lua, and a callback drops its `app_data` borrow before that.
+/// `GetRaidRosterInfo`'s first nine values for one row, or the miss tuple's for `None`; build
+/// 12340's `0x573690` answers fourteen on every path (`mov eax,0xe`), `wrath_group.rs` adding the
+/// last five. Out of range, an empty slot and a name-cache miss all reach `0x5739e6`, which pushes
+/// `nil, 0, 1, 1` and ten `nil`s. Takes the row by value because every arm re-enters Lua, and a
+/// callback drops its `app_data` borrow before that.
 fn raid_roster_info(lua: &Lua, row: Option<RaidMemberInfo>) -> mlua::Result<MultiValue> {
     let Some(m) = row else {
         return Ok(MultiValue::from_vec(vec![
@@ -297,22 +298,22 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // GetRaidRosterInfo(index) → name, rank, subgroup, level, class, fileName, zone, online and an
-    // unnamed ninth, 1-based. Its only raise is a non-number argument (`0x4bb582 call 0x6f34d0`,
-    // `0x4bb591 call 0x6f4940`, usage string `0x8474a0`).
+    // GetRaidRosterInfo(index) (`0x573690`), 1-based: name, rank, subgroup, level, class,
+    // fileName, zone, online and isDead here; `wrath_group.rs` adds the last five. Its only raise
+    // is a non-number argument (`lua_isnumber` at `0x5736a0`, the Usage at `0x5736ac`).
     g.set(
         "GetRaidRosterInfo",
         lua.create_function(|lua, index: Value| {
             let index = number_arg(lua, index, "Usage: GetRaidRosterInfo(index)")?;
             let row = {
                 let model = lua.app_data_ref::<Model>().expect("model app_data");
-                // One unsigned compare after the decrement (`0x4bb5bb dec eax`, `0x4bb5be jae`)
+                // One unsigned compare after the decrement (`0x5736e6 sub eax,0x1`, `0x5736f2 jae`)
                 // catches an index of 0 or below and one past the count; `dec` wraps, and
                 // `wrapping_sub` keeps that true of `i32::MIN`.
                 usize::try_from(index.wrapping_sub(1))
                     .ok()
                     .and_then(|i| model.party.raid.get(i))
-                    // A name-cache miss shares that same arm (`0x4bb5f8 je 0x4bb7b9`).
+                    // A name-cache miss shares that same arm (`0x57372b je 0x5739e6`).
                     .filter(|m| !m.name.is_empty())
                     .cloned()
             };
@@ -450,9 +451,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     )?;
 
     // ── The raid-management verbs ────────────────────────────────────────────
-    // Each only marshals its arguments into a client call or a send (`ConvertToRaid 0x4bbc90`,
-    // `SetRaidSubgroup 0x4bb990`, `SwapRaidSubgroup 0x4bbb00`, `PromoteToAssistant 0x4bbd20`,
-    // `UninviteFromRaid 0x48a580`,
+    // Each only marshals its arguments into a client call or a send (`SetRaidSubgroup 0x4bb990`,
+    // `SwapRaidSubgroup 0x4bbb00`, `PromoteToAssistant 0x4bbd20`, `UninviteFromRaid 0x48a580`,
     // `SetRaidRosterSelection 0x4bb820`), so the verbs here queue a request.
     // SetRaidSubgroup(index, group) / SwapRaidSubgroup(index, other), the drag's two drops: a
     // non-number raises the usage error rather than queueing a zero.
@@ -810,7 +810,7 @@ mod tests {
         assert_eq!(s.arity("GetRaidRosterInfo(1)").unwrap(), 14);
     }
 
-    /// `0x4bb7b9` pushes `nil, 0, 1, 1` and five nils.
+    /// `0x5739e6` pushes `nil, 0, 1, 1` and ten nils.
     #[test]
     fn get_raid_roster_info_misses_with_the_fixed_tuple() {
         let mut s = UiScript::new().unwrap();
@@ -827,7 +827,7 @@ mod tests {
         );
         assert!(e && f && g && h && i, "the last five are nil");
 
-        // An in-range member with no cached name takes the same arm (`0x4bb5f8 je 0x4bb7b9`).
+        // An in-range member with no cached name takes the same arm (`0x57372b je 0x5739e6`).
         let mut party = ten_player_raid();
         party.raid[1].name = String::new();
         s.set_party(party);
@@ -856,7 +856,7 @@ mod tests {
             .unwrap();
         assert_eq!(name, "Me");
         assert_eq!(rank, 2, "as stored, no adjustment");
-        assert_eq!(subgroup, 1, "stored 0 → exposed 1 (`0x4bb61a inc eax`)");
+        assert_eq!(subgroup, 1, "stored 0 → exposed 1 (`0x57375a add ecx,0x1`)");
         assert_eq!(level, 60);
         assert_eq!((class.as_str(), file.as_str()), ("Warrior", "WARRIOR"));
         assert_eq!(zone, "Molten Core");
@@ -870,7 +870,7 @@ mod tests {
         );
     }
 
-    /// Return 8 goes nil on the same arm (`0x4bb705`).
+    /// Return 8 goes nil on the same arm (`0x573858`).
     #[test]
     fn get_raid_roster_info_puts_player_offline_in_the_zone_slot() {
         let mut s = UiScript::new().unwrap();
@@ -887,7 +887,7 @@ mod tests {
         assert_eq!(online, None);
     }
 
-    /// The raise at `0x4bb591` goes through `0x6f4940`, which never returns.
+    /// The raise at `0x5736b2` goes through `luaL_error` (`0x84f280`), which does not return.
     #[test]
     fn get_raid_roster_info_raises_only_on_a_non_number() {
         let s = UiScript::new().unwrap();

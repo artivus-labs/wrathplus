@@ -74,7 +74,7 @@ pub struct UnitState {
     /// object-presence check.
     pub tapped: bool,
     /// `UnitIsPartyLeader`'s first leg: `PLAYER_FLAGS & 0x1` on a player's own descriptor, true
-    /// for a stranger leading their own party. The reference (`0x516210`) ORs it with a compare
+    /// for a stranger leading their own party. The reference (`0x60c770`) ORs it with a compare
     /// against our group leader's guid.
     pub group_leader: bool,
     /// `UnitIsTappedByPlayer` (`0x519d00`): the same field's bit `0x8`. Tapped without it is
@@ -225,7 +225,7 @@ impl UnitState {
     }
 }
 
-/// The name of a unit whose name is not yet known, as the reference's `UnitName` (`0x517220`) and
+/// The name of a unit whose name is not yet known, as the reference's `UnitName` (`0x60e740`) and
 /// unit tooltip title (`0x609324`) both answer it: the `UNKNOWNOBJECT` GlobalString (enUS
 /// "Unknown"), else the literal "Unknown Being" (`0x860fa4`) when the global is missing or empty.
 pub fn unknownobject(lua: &Lua) -> mlua::Result<mlua::String> {
@@ -343,7 +343,7 @@ impl super::UiScript {
     /// Push, or clear with `None`, the snapshot of a unit a `target` chain can end on, by guid. A
     /// token with a hop that no push names (`"party1target"`, `"raid3targettarget"`) resolves
     /// through [`UnitGuids`] to a guid and reads that guid's entry, the reference's order
-    /// (`0x515970`, then each getter's object lookup `0x468460`); the guids to cover are
+    /// (`0x60abf0`, then each getter's object lookup `0x4d4db0`); the guids to cover are
     /// [`Self::chain_end_guids`]. A token without a hop reads its own push, not this.
     pub fn set_unit_by_guid(&mut self, guid: u64, state: Option<UnitState>) {
         let mut model = self.model_mut();

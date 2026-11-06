@@ -1,5 +1,5 @@
 //! The getters and `SpellCanTargetUnit` over a `target` chain: the token resolves to a guid
-//! through [`UnitGuids`] (`0x515970`), and the guid's snapshot answers.
+//! through `0x60abf0` (`Model::resolve_token`), and the guid's snapshot answers.
 
 use std::collections::HashMap;
 

@@ -128,7 +128,7 @@ pub(in crate::script) fn install(lua: &Lua) -> mlua::Result<()> {
             // player or a non-player (`0x609210`), so always nil in single-realm wrathplus. A second
             // argument (stock `UnitPopup.lua:106` passes `true`) is not read. The name is nil only
             // for an empty `"player"` buffer (`0x51708c`, `0x6f3895`) or GUID 0 (`0x5170c0`);
-            // otherwise a string, `UNKNOWNOBJECT` until the name cache answers (`0x517220`,
+            // otherwise a string, `UNKNOWNOBJECT` until the name cache answers (`0x60e740`,
             // `0x609324`), as for a new pet. A seated snapshot answers even where `exists` is
             // false; the `"player"` arm reads the local name buffer (`0xc27d88`), never the unit.
             if let Some(seeded) = player_record_arm(lua, &token, |r| r.name.clone()) {

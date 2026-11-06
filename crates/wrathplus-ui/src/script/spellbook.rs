@@ -533,9 +533,9 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     )?;
 
     // SpellCanTargetUnit("unit") (`0x6e6d00`): the argument is a string or a number (`0x6e6d0e`,
-    // else `Usage:`), resolved through `0x515970` (`0x6e6d3a`), which raises for a token it does
-    // not know; a token naming nobody answers nil (`0x6e6d43`), and a guid asks `0x6e6460`'s unit
-    // leg whether the standing word clears against it, answering 1 or nil.
+    // else `Usage:`), resolved through `0x60abf0`, which never raises; a token naming nobody
+    // answers nil (`0x6e6d43`), and a guid asks `0x6e6460`'s unit leg whether the standing word
+    // clears against it, answering 1 or nil.
     g.set(
         "SpellCanTargetUnit",
         lua.create_function(|lua, unit: Value| {

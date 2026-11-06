@@ -1,7 +1,7 @@
 //! The aura bindings, over the lists the app pushes in display order: the player's in the
 //! reference's insertion-ordered cache (`0xbc6040`), kept by `wrathplus::ui_aura`, every other unit's
 //! by guid, in ascending aura slot. A token resolves to its guid as the reference's resolver
-//! `0x515970` does ([`super::UnitGuids`]), so `"mouseover"`, `"party1target"` and `"PLAYER"` read
+//! `0x60abf0` does (`Model::resolve_token`), so `"mouseover"`, `"party1target"` and `"PLAYER"` read
 //! the list of the unit they name, and a token naming the player reads the player's list in cache
 //! order, where the reference's `UnitBuff("player", i)` reads by slot.
 //!
@@ -474,7 +474,7 @@ mod tests {
             .unwrap()
     }
 
-    /// Every token reads the list of the unit the resolver names (`0x515970` at `0x519542`): the
+    /// Every token reads the list of the unit the resolver names (`0x60abf0`): the
     /// mouseover, a group member's target and any depth of `target` chain.
     #[test]
     fn a_token_reads_the_list_of_the_unit_it_names() {
