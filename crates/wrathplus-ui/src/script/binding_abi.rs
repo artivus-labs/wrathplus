@@ -368,6 +368,7 @@ mod tests {
             (two31, i32::MIN),
             (-two31, i32::MIN),
             (f64::NAN, i32::MIN),
+            (2f64.powi(32) + 5.0, i32::MIN),
         ] {
             assert_eq!(ftol(n), want, "{n}");
         }
