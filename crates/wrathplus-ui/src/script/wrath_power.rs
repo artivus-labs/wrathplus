@@ -94,6 +94,10 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 let Some(value) = powers.get(usize::from(ty)) else {
                     return Ok(0);
                 };
+                // `0x60ee1c`: a feigning unit not exempted by `0x512a30` reads 0; not the maximum.
+                if !maximum && crate::script::unit::feign_masked(&model, unit) {
+                    return Ok(0);
+                }
                 // Build-12340 helper 0x7fde00/table0xaf5220; third arguments are ignored.
                 let divisor = match ty {
                     1 | 6 => 10,

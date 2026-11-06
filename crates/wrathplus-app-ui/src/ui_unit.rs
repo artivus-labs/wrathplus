@@ -751,21 +751,24 @@ pub(crate) fn snapshot(
         // What the token resolver `0x60abf0` yields, and `UnitIsUnit` (`0x60c3d0`) compares.
         guid,
         name,
-        // The UI getters: `UNIT_DYNFLAG_DEAD` (feign death) zeroes `UnitHealth` (`0x5174d0`) and
-        // `UnitMana` (`0x517670`) but not the maxima, so its edge fires the reference's pair
-        // (`0x6004c5`, `0x6004f0`); the power getters divide rage by 10 and happiness by 1000.
-        health: store.0.unit_shown_health().unwrap_or(0),
+        // Raw: the bindings apply `UNIT_DYNFLAG_DEAD`'s gate (`0x60ebe6`, `0x60ee1c`), which
+        // exempts us and the group (`0x512a30`), so its edge fires the health and power events
+        // ([`fire_transitions`]); the power getters divide rage by 10 and happiness by 1000.
+        health: store.0.unit_health().unwrap_or(0),
         max_health: store.0.unit_max_health().unwrap_or(0),
         level: store.0.unit_level().unwrap_or(0),
         power_type,
-        power: store.0.unit_shown_power(power_type).unwrap_or(0),
+        power: store.0.unit_power(power_type).map_or(0, |p| {
+            p / wrathplus_protocol::types::power_display_scale(u32::from(power_type))
+        }),
         max_power: store.0.unit_shown_max_power(power_type).unwrap_or(0),
         powers: store.0.wrath_powers().map(|powers| {
             powers
                 .map(|(current, maximum)| wrathplus_ui::script::UnitPowerState { current, maximum })
         }),
-        // `UnitIsDead` (`0x517ac0`): health ≤ 0 or the dead-looking flag.
-        dead: store.0.unit_reads_dead(),
+        // `UnitIsDead`'s health leg (`0x60f4fe`: health <= 0, no stand-state leg); the binding
+        // adds the feign gate.
+        dead: store.0.unit_health().unwrap_or(0) == 0,
         // `PLAYER_FLAGS` bit `0x10`; a ghost's health is 1, so `dead` is false for it.
         ghost: store.0.player_is_ghost(),
         // `UnitIsCharmed` (`0x516cf0`): `UNIT_FIELD_CHARMEDBY != 0`.
@@ -1059,7 +1062,10 @@ pub(crate) fn fire_transitions(
     let tok = || ScriptValue::Str(token.to_string());
     let changed = |f: fn(&UnitState) -> u64| prev.is_none_or(|p| f(p) != f(cur));
 
-    if changed(|u| u64::from(u.health)) {
+    // `UNIT_DYNFLAG_DEAD` moves `UnitHealth` as the power arm's same edge moves `UnitPower`.
+    if changed(|u| u64::from(u.health))
+        || prev.is_some_and(|old| (old.dynamic_flags ^ cur.dynamic_flags) & 0x20 != 0)
+    {
         script.fire_event("UNIT_HEALTH", vec![tok()]);
     }
     if changed(|u| u64::from(u.max_health)) {
@@ -3219,69 +3225,52 @@ mod tests {
         );
     }
 
-    /// `UNIT_DYNFLAG_DEAD` alone makes empty bars over real maxima, through `snapshot`'s wiring.
+    /// `UNIT_DYNFLAG_DEAD` leaves the snapshot's health, power and health-leg `dead` raw: the
+    /// bindings gate them per unit (`0x60ebe6`, exempting `0x512a30`'s us and the group), so the
+    /// flag's edge alone fires the health and power events.
     #[test]
-    fn a_feigning_unit_snapshots_empty_bars_over_a_real_maximum() {
-        use wrathplus_protocol::types::ObjectFields;
-
-        /// `UNIT_FIELD_HEALTH` / `MAXHEALTH` / `POWER1` / `MAXPOWER1` / `DYNAMIC_FLAGS`.
-        const HEALTH: u16 = wrathplus_protocol::types::Field::UnitHealth.index();
-        const POWER1: u16 = wrathplus_protocol::types::Field::UnitPower.index();
-        const MAXHEALTH: u16 = wrathplus_protocol::types::Field::UnitMaxHealth.index();
-        const MAXPOWER1: u16 = wrathplus_protocol::types::Field::UnitMaxPower.index();
-        const DYNFLAGS: u16 = wrathplus_protocol::types::Field::UnitDynamicFlags.index();
-
+    fn a_feigning_unit_snapshots_raw_vitals_and_its_flag_edge_fires_health() {
+        use wrathplus_protocol::types::{Field, ObjectFields};
+        let health = Field::UnitHealth.index();
         let vitals = [
-            (HEALTH, 1200),
-            (MAXHEALTH, 1500),
-            (POWER1, 300),
-            (MAXPOWER1, 900),
+            (health, 1200),
+            (Field::UnitMaxHealth.index(), 1500),
+            (Field::UnitPower.index(), 300),
+            (Field::UnitMaxPower.index(), 900),
         ];
-        let alive = snapshot(
-            &ObjectStore(ObjectFields::from_pairs(&vitals)),
-            0,
-            Some("Hunter".into()),
-            0,
-            None,
-            Default::default(),
+        let snap = |extra: &[(u16, u32)]| {
+            let fields = ObjectFields::from_pairs(&[vitals.as_slice(), extra].concat());
+            snapshot(&ObjectStore(fields), 0, None, 0, None, Default::default())
+        };
+        let alive = snap(&[]);
+        let feigning = snap(&[(Field::UnitDynamicFlags.index(), 0x20)]);
+        assert_eq!(
+            (
+                feigning.health,
+                feigning.max_health,
+                feigning.power,
+                feigning.max_power
+            ),
+            (1200, 1500, 300, 900)
         );
-        assert_eq!((alive.health, alive.max_health), (1200, 1500));
-        assert_eq!((alive.power, alive.max_power), (300, 900));
-        assert!(!alive.dead);
+        assert!(!alive.dead && !feigning.dead && !feigning.ghost);
+        let stand = Field::UnitBytes1.index();
+        assert!(!snap(&[(stand, 7)]).dead, "0x60f4fe has no stand-state leg");
+        assert!(snap(&[(health, 0)]).dead, "health <= 0 is dead");
 
-        let feigning = snapshot(
-            &ObjectStore(ObjectFields::from_pairs(
-                &[vitals.as_slice(), &[(DYNFLAGS, 0x20)]].concat(),
-            )),
-            0,
-            Some("Hunter".into()),
-            0,
-            None,
-            Default::default(),
+        let mut script = UiScript::new().unwrap();
+        script.run("HITS = 0 local f = CreateFrame('Frame') f:RegisterEvent('UNIT_HEALTH') f:SetScript('OnEvent', function() HITS = HITS + 1 end)").unwrap();
+        fire_transitions(
+            &mut script,
+            "target",
+            Some(&alive),
+            &feigning,
+            &FieldEdges::default(),
         );
         assert_eq!(
-            (feigning.health, feigning.max_health),
-            (0, 1500),
-            "UnitHealth 0x5174d0 zeroes, UnitHealthMax 0x5175b0 does not — an EMPTY bar, not a gone one"
-        );
-        assert_eq!(
-            (feigning.power, feigning.max_power),
-            (0, 900),
-            "UnitMana 0x517670 zeroes, UnitManaMax 0x5177e0 does not"
-        );
-        assert!(feigning.dead, "UnitIsDead 0x517ac0's dynflag leg");
-        assert!(
-            !feigning.ghost,
-            "feign is not a ghost — PLAYER_FLAGS is clear"
-        );
-
-        // The flag moves only health and power, the pair the reference's watcher fires
-        // (`0x6004c5`, `0x6004f0`).
-        assert_ne!(alive.health, feigning.health);
-        assert_ne!(alive.power, feigning.power);
-        assert_eq!(
-            (alive.max_health, alive.max_power, alive.level),
-            (feigning.max_health, feigning.max_power, feigning.level),
+            script.eval::<i64>("return HITS").unwrap(),
+            1,
+            "the flag edge fires UNIT_HEALTH"
         );
     }
 

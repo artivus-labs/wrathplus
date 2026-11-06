@@ -29,8 +29,15 @@ pub(super) fn level_line(lua: &Lua, u: &UnitState, player_level: u32) -> Option<
     } else {
         u.level.to_string()
     };
-    // `CORPSE` when dead, "Race Class" for a player, the creature type only if hostile or neutral.
-    let class_slot = if u.dead {
+    // `CORPSE` when dead as `UnitIsDead` reads it (the builder's own test is untraced), "Race
+    // Class" for a player, the creature type only if hostile or neutral.
+    let dead = u.dead || {
+        let model = lua
+            .app_data_ref::<crate::script::Model>()
+            .expect("model app_data");
+        crate::script::unit::feign_masked(&model, u)
+    };
+    let class_slot = if dead {
         get("CORPSE")
     } else if u.is_player {
         match (&u.race, &u.class) {

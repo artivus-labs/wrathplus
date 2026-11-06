@@ -145,6 +145,15 @@ fn set_subject(lua: &Lua, h: FrameHandle, guid: Option<u64>) {
 /// Drive the `<name>StatusBar` child from a unit snapshot (`None` hides it); FrameXML's
 /// `HealthBar_OnValueChanged` colours the fill.
 fn update_bar(lua: &Lua, h: FrameHandle, unit: Option<&UnitState>) {
+    // `UnitHealth`'s value, feign gate included.
+    let health = unit.map(|u| {
+        let model = lua.app_data_ref::<Model>().expect("model app_data");
+        if super::unit::feign_masked(&model, u) {
+            0
+        } else {
+            u.health
+        }
+    });
     let bar = {
         let model = lua.app_data_mut::<Model>().expect("model app_data");
         let name = model.arena.frame(h).and_then(|f| f.name.clone());
@@ -156,11 +165,11 @@ fn update_bar(lua: &Lua, h: FrameHandle, unit: Option<&UnitState>) {
         let Some(f) = model.arena.frame_mut(bar) else {
             return;
         };
-        match (&mut f.kind_state, unit) {
-            (KindState::StatusBar(sb), Some(u)) => {
+        match (&mut f.kind_state, unit.zip(health)) {
+            (KindState::StatusBar(sb), Some((u, health))) => {
                 sb.min = 0.0;
                 sb.max = u.max_health.max(1) as f32;
-                let v = u.health.min(u.max_health.max(1)) as f32;
+                let v = health.min(u.max_health.max(1)) as f32;
                 let changed = (sb.value - v).abs() > f32::EPSILON;
                 sb.value = v;
                 (changed, true)

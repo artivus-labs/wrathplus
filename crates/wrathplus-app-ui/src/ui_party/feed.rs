@@ -882,8 +882,10 @@ fn member_unit_state(
     // The roster status byte overlays both legs, but for `is_connected`, which is the record leg's.
     s.is_pvp_ffa = m.status & member_status::PVP_FFA != 0;
     s.pvp = s.pvp || m.status & member_status::PVP != 0;
-    s.ghost = s.ghost || m.status & member_status::GHOST != 0;
-    s.dead = s.dead || m.status & member_status::DEAD != 0;
+    // Dead and ghost read the record only with no object (`0x60f54b`, `0x60f631`).
+    let unheld = store.is_none();
+    s.ghost = s.ghost || unheld && m.status & member_status::GHOST != 0;
+    s.dead = s.dead || unheld && m.status & member_status::DEAD != 0;
     s
 }
 
@@ -1631,18 +1633,18 @@ mod tests {
             status: member_status::ONLINE,
             flags: 0,
         };
-        let dead = PartyMemberStatsInfo {
-            status: Some(member_status::ONLINE | member_status::DEAD),
+        let state = |m: &GroupMemberEntry, rec: Option<&PartyMemberStatsInfo>, live| {
+            let group = GroupState::default();
+            member_unit_state(m, rec, live, &group, None, None, Default::default())
+        };
+        let record = |status| PartyMemberStatsInfo {
+            status: Some(status),
             ..PartyMemberStatsInfo::default()
         };
-        let s = member_unit_state(
+        let s = state(
             &m,
-            Some(&dead),
+            Some(&record(member_status::ONLINE | member_status::DEAD)),
             None,
-            &GroupState::default(),
-            None,
-            None,
-            Default::default(),
         );
         assert!(
             s.dead,
@@ -1650,37 +1652,30 @@ mod tests {
         );
         assert!(!s.ghost);
 
-        let ghost = PartyMemberStatsInfo {
-            status: Some(member_status::ONLINE | member_status::GHOST),
-            ..PartyMemberStatsInfo::default()
-        };
-        let s = member_unit_state(
+        let s = state(
             &m,
-            Some(&ghost),
+            Some(&record(member_status::ONLINE | member_status::GHOST)),
             None,
-            &GroupState::default(),
-            None,
-            None,
-            Default::default(),
         );
         assert!(s.ghost);
         assert!(!s.dead, "a released ghost is not `dead` — only a ghost");
 
         // The overlay ORs: a roster byte carrying the bit still wins over a record without it.
         let stale = GroupMemberEntry {
-            status: member_status::ONLINE | member_status::DEAD,
+            status: member_status::ONLINE | member_status::DEAD | member_status::GHOST,
             ..m.clone()
         };
-        let s = member_unit_state(
-            &stale,
-            Some(&PartyMemberStatsInfo::placeholder(true)),
-            None,
-            &GroupState::default(),
-            None,
-            None,
-            Default::default(),
-        );
+        let s = state(&stale, Some(&PartyMemberStatsInfo::placeholder(true)), None);
         assert!(s.dead);
+
+        // A held member reads its descriptor alone (`0x60f54b`, `0x60f631`).
+        use wrathplus_protocol::types::{Field, ObjectFields};
+        let live = ObjectStore(ObjectFields::from_pairs(&[(
+            Field::UnitHealth.index(),
+            900,
+        )]));
+        let s = state(&stale, None, Some(&live));
+        assert!(!s.dead && !s.ghost, "the roster byte does not overlay it");
     }
 
     /// Send member 1 alone as the party or raid roster with `status`, as a server's list does: the
