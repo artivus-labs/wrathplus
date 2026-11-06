@@ -79,9 +79,9 @@ fn render_unit_view(lua: &Lua, this: &Table, unit: Option<UnitState>) -> mlua::R
         show_or_hide_empty(lua, h);
         return Ok(false);
     };
-    // The name: `CGUnit_C::GetUnitName` `0x609210` (`0x52a187`), whose every miss falls to
-    // `UNKNOWNOBJECT`, as `UnitName`'s does. A token with no object never reaches the builder
-    // (`0x468460`): no plate, and `SetUnit` answers nil.
+    // The name: `CGUnit_C::GetUnitName` `0x72a000`, through the title builder `0x72a290`
+    // (`0x72a3c7`, `0x72a44e`), whose every miss falls to `UNKNOWNOBJECT`, as `UnitName`'s does.
+    // wrathplus draws no plate for a token with no object.
     let title = match &u.name {
         Some(n) => n.clone(),
         None => unknownobject(lua)?.to_str()?.to_string(),

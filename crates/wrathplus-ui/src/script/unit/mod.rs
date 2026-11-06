@@ -227,8 +227,8 @@ impl UnitState {
 }
 
 /// The name of a unit whose name is not yet known, as the reference's `UnitName` (`0x60e740`) and
-/// unit tooltip title (`0x609324`) both answer it: the `UNKNOWNOBJECT` GlobalString (enUS
-/// "Unknown"), else the literal "Unknown Being" (`0x860fa4`) when the global is missing or empty.
+/// unit tooltip title (`0x72a24d`) both answer it: the `UNKNOWNOBJECT` GlobalString (enUS
+/// "Unknown"), else the literal "Unknown Being" (`0xa34c60`) when the global is missing or empty.
 pub fn unknownobject(lua: &Lua) -> mlua::Result<mlua::String> {
     // One expression: `wrathplus-app`'s `reference_strings` check matches
     // `globals().get::<String>`, and a line break inside it would hide this lookup.

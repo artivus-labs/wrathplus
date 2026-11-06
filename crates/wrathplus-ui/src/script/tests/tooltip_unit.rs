@@ -88,9 +88,12 @@ fn unqueried_wolf() -> UnitState {
     }
 }
 
-/// `CGUnit_C::GetUnitName 0x609210` (`0x52a187`) reads the name, as for `UnitName 0x517020`, and
-/// every miss, a null `CGUnit+0xb30` among them (`0x609353 je 0x609324`), ends at
-/// `FrameScript_GetText("UNKNOWNOBJECT")`. The `"player"` fast path is the binding's (`0x517083`).
+/// The tooltip's unit setter (`0x621070`, from `GameTooltip:SetUnit` `0x625e10`) builds the title
+/// in `0x72a290` (`0x6213b2`, `0x6213e5`), which reads the name through
+/// `CGUnit_C::GetUnitName 0x72a000` (`0x72a3c7`, `0x72a44e`), as `UnitName 0x60e740` does through
+/// `0x4fd0e0`, and every miss, a null creature record `CGUnit+0x964` among them
+/// (`0x72a27d je 0x72a24d`), ends at `FrameScript_GetText("UNKNOWNOBJECT")` (`0x72a256`). The
+/// `"player"` fast path is the binding's (`0x60e78b`).
 #[test]
 fn a_pending_name_titles_unknownobject_and_the_answer_replaces_it() {
     let mut s = script();
@@ -137,7 +140,7 @@ fn a_pending_name_titles_unknownobject_and_the_answer_replaces_it() {
     )
     .unwrap();
 
-    // An empty or absent global falls to the binary's own literal `0x860fa4` (`0x609324`).
+    // An empty or absent global falls to the binary's own literal `0xa34c60` (`0x72a267`).
     s.set_unit("target", Some(unqueried_wolf()));
     s.run(
         r#"
