@@ -48,7 +48,9 @@ bun run agent dashboard             # http://127.0.0.1:17900: every running agen
 - **`run`** starts the agent's headless client (logged in, `--character` entered; without it the
   planner picks or creates one at character select), waits for it, runs the planner and Jev, and
   stops the client when you stop the agent (Ctrl-C). A client already started from the Manager is
-  driven as it is. Lines typed into the terminal reach the planner as operator notes.
+  driven as it is. Lines typed into the terminal reach the planner as operator notes. A client `run`
+  started is restarted into the same character if it exits or is disconnected (back at the login
+  screen), so the planner carries on.
 - **Several at once:** one `run` per terminal; each agent has its own account and port.
 - **Watching:** each client serves a live view (`run` prints its address); the dashboard shows
   all of them side by side, with what each planner last said and did.
