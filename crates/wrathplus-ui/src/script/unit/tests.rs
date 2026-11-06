@@ -458,7 +458,7 @@ fn a_dead_unit_reports_dead_and_zero_health() {
     );
 }
 
-/// `UnitName` (`0x517020`) is nil only for a zero guid or an empty `"player"` record, else a
+/// `UnitName` (`0x60e740`) is nil only for a zero guid or an empty `"player"` record, else a
 /// string: the name, or `UNKNOWNOBJECT` while it is in flight (`0x609324`). `PetStable.lua:129`
 /// concatenates it on `UNIT_PET`, before a called pet's name arrives.
 #[test]
@@ -975,7 +975,7 @@ fn unit_is_plus_mob_reads_the_flag_bit_and_not_the_rank() {
     );
 }
 
-/// The resolver (`0x515970`) compares every literal with `_strnicmp`, folding ASCII case.
+/// The resolver (`0x60abf0`) compares every literal with `_strnicmp`, folding ASCII case.
 #[test]
 fn a_unit_token_resolves_whatever_its_case() {
     let mut s = UiScript::new().unwrap();
@@ -1824,7 +1824,7 @@ fn unit_on_taxi_is_one_or_nil_and_raises_the_reference_usage() {
     );
 }
 
-/// The reference's `"player"` arm reads the record (`0x51708c` reads `0xc27d88`), never the
+/// The reference's `"player"` arm reads the record (`0x6b1060` reads `0xc79d18`), never the
 /// snapshot, so a nameless player push cannot blank the name.
 #[test]
 fn the_player_record_outlives_every_snapshot() {
@@ -1934,9 +1934,9 @@ fn the_player_record_outlives_every_snapshot() {
     );
 }
 
-/// An all-zero record, which a bare VM here can reach: `UnitName` nil (`0x517095`), `UnitRace` and
-/// `UnitClass` `nil, nil` as race and class 0 have no row, and `UnitSex` 2, as `0x517ef9` indexes
-/// its table (`0x808be4`) unchecked.
+/// An all-zero record, which a bare VM here can reach: `UnitName` nil (`0x6b1060`), `UnitRace` and
+/// `UnitClass` `nil, nil` as race and class 0 have no row, and `UnitSex` 2, as `0x60f93c` indexes
+/// its table (`0x9fe7ec`) unchecked.
 #[test]
 fn an_unseeded_player_record_answers_the_references_four_ways() {
     let s = UiScript::new().unwrap();

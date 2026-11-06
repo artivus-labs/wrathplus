@@ -817,7 +817,7 @@ fn send_spell_cast(
         }
     }
     // The GCD arms at send (`0x6e2de0` from `0x6e58fb`); a failed cast result clears it
-    // (`0x6e1630`).
+    // (1.12 `0x6e1630`; 12340 not located).
     if let Some(d) = def {
         cooldowns.start_gcd(spell_id, d, now, spell_mods);
     }

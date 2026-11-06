@@ -1,4 +1,4 @@
-//! The units `GetMinMaxRange` (`0x6e3480`) reads, built from the world: the caster, a target unit,
+//! The units `GetMinMaxRange` (`0x7ff480`) reads, built from the world: the caster, a target unit,
 //! and the caster's auto-attack target, each as its combat reach, player bit and motion
 //! ([`wrathplus_formats::RangeUnit`]).
 

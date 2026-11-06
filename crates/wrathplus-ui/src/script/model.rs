@@ -1007,9 +1007,9 @@ pub(crate) struct Model {
     pub(crate) screenshot_asks: u32,
     /// `GetRealmName()`: `""` until pushed, never nil, since addons index tables with it at load.
     pub(crate) realm_name: String,
-    /// The local player record (`0xc27d80`), seeded at world entry before addons load, then kept by
-    /// `"player"` pushes that carry it: corrected, never blanked. A per-login rebuild is unseen, as
-    /// its verbs exist only in game (`0x850438`), not at the glue screen (`0x46abb0`).
+    /// The local player record (`0xc79d18`..), seeded at world entry before addons load, then kept
+    /// by `"player"` pushes that carry it: corrected, never blanked. A per-login rebuild is unseen,
+    /// as its verbs exist only in game (`0x850438`), not at the glue screen (`0x46abb0`).
     pub(crate) player_record: super::PlayerRecord,
     /// `GetBindLocation()`, the bind point's area name: `""` before it lands, never nil.
     pub(crate) bind_location: String,

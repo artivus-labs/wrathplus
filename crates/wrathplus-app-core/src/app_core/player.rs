@@ -365,7 +365,8 @@ impl Player {
         }
     }
 
-    /// The commanded planar speed (yd/s), the reference's `[[player+0x118]+0x84]` from `0x7c4c90`:
+    /// The commanded planar speed (yd/s), the reference's `GetCurrentSpeed` (`0x987570`; 1.12 read
+    /// `[[player+0x118]+0x84]`):
     /// exactly 0 with no direction bit set, and live, not averaged like the weather wind's
     /// (`0x67c150`). The precipitation slab's tilt reads it (`0x67bf8b`).
     pub fn planar_speed(&self) -> f32 {

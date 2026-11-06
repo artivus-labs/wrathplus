@@ -317,9 +317,10 @@ fn the_realm_cvars_are_read_only_to_lua_only_in_the_world() {
     let _ = std::fs::remove_dir_all(&tmp);
 }
 
-/// The reference's one guard in the shutdown tail: `0x490bd0` tests the active player's GUID pair
-/// (`0x490bee call 0x468550`, `0x490bf3 or eax,edx`) and with none jumps (`0x490bf5 je 0x490c25`)
-/// past only the `PLAYER_LEAVING_WORLD` fire, `0x490c20 call 0x490a80`; in-world roots fire both.
+/// The reference's one guard in the shutdown tail (1.12; 12340 not located): `0x490bd0` tests the
+/// active player's GUID pair (`0x490bee call 0x468550`, `0x490bf3 or eax,edx`) and with none jumps
+/// (`0x490bf5 je 0x490c25`) past only the `PLAYER_LEAVING_WORLD` fire, `0x490c20 call 0x490a80`;
+/// in-world roots fire both.
 #[test]
 fn a_quit_from_the_character_screen_fires_logout_without_leaving_world() {
     let _l = ENV_LOCK
@@ -1274,7 +1275,7 @@ ScreenProbeHeight = GetScreenHeight()
 
 /// [`super::lifecycle::seat_from_roster`]'s `"player"` push is replaced when the descriptor
 /// streams in, but `UnitName("player")` reads only the record seeded beside it, which neither a
-/// nameless snapshot nor a despawn clears, as the reference never clears `0xc27d88`.
+/// nameless snapshot nor a despawn clears, as the reference never clears `0xc79d18`.
 #[test]
 fn the_entry_load_seeds_a_record_the_feed_cannot_take_away() {
     let _l = ENV_LOCK

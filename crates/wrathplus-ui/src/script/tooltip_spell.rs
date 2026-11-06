@@ -636,7 +636,8 @@ pub(super) fn install_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
                         .unwrap_or(0),
                     _ => 0,
                 };
-                // The token resolves as `UnitBuff`'s does (`0x515970`, called at `0x534b8b`).
+                // The token resolves as `UnitBuff`'s does (`0x6110a0` → `0x60abf0`, from
+                // `0x6262c0` and `0x626350`).
                 let hit = {
                     let model = lua.app_data_ref::<Model>().expect("model app_data");
                     let idx = usize::try_from(index.max(1) - 1).unwrap_or(0);

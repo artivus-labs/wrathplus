@@ -713,7 +713,7 @@ pub(super) fn control(
                 wire_jump,
                 knock_launch,
                 water_floor,
-                // The air nudge speed is `min(walk, run)`, live (`0x7c4c90(1)`, `0x7c4d19`), with
+                // The air nudge speed is `min(walk, run)`, live (`0x987570(1)`, `0x98762c`), with
                 // the default walk speed until the server sends speeds.
                 mover_speeds.map_or(super::AIR_NUDGE_SPEED, |s| s.walk.min(s.run)),
             )

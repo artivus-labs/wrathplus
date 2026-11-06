@@ -710,7 +710,7 @@ fn raid_guid_for_name(
         .map(|m| m.guid)
 }
 
-/// `GetRaidRosterInfo`'s array (`0x4bb560`) in [`raid_row_guids`]' order: empty outside a raid,
+/// `GetRaidRosterInfo`'s array (`0x573690`) in [`raid_row_guids`]' order: empty outside a raid,
 /// so `GetNumRaidMembers()` answers 0 in a party. The reference's array holds the local player
 /// and the wire's list does not, so our row comes from [`RaidSelf`].
 fn raid_roster(
@@ -747,7 +747,7 @@ fn raid_roster(
             name,
             guid,
             rank: rank_of(guid, flags),
-            // Stored 0-based; the binding adds one (`0x4bb61a`).
+            // Stored 0-based; the binding adds one (1.12 `0x4bb61a`).
             subgroup: u32::from(flags & GROUP_MEMBER_SUBGROUP),
             level,
             class: class.map(|(n, _)| n.to_string()),
@@ -761,7 +761,8 @@ fn raid_roster(
     if let Some(me) = me {
         roster.push(row(
             me.guid,
-            // An unresolved name gets the binding's miss tuple, not a half-filled row (`0x4bb5f8`).
+            // An unresolved name gets the binding's miss tuple, not a half-filled row (1.12
+            // `0x4bb5f8`).
             names.peek(me.guid).unwrap_or_default().to_string(),
             me.flags,
             me.level,

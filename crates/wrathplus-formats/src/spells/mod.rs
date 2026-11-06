@@ -93,7 +93,7 @@ const COL_MANA_COST: usize = 32;
 const COL_MANA_COST_PCT: usize = 156;
 const COL_MANA_COST_PER_LEVEL: usize = 33;
 const COL_MANA_PER_SECOND: usize = 34;
-/// `rangeIndex` (`+0x90`), resolved by `GetMinMaxRange` (`0x6e3480`).
+/// `rangeIndex` (`+0x90`), resolved by `GetMinMaxRange` (`0x7ff480`).
 const COL_RANGE_INDEX: usize = 36;
 /// `modalNextSpell` (`+0x98`): 52 of its 57 nonzero rows are hunter shots naming Auto Shot.
 const COL_MODAL_NEXT_SPELL: usize = 38;
@@ -463,7 +463,7 @@ pub fn load_spell_catalog(chain: &mut Chain) -> Result<SpellCatalog> {
     let icons = crate::dbc::load_spell_icon_map(chain)?;
     let dispel_types = load_spell_dispel_types(chain)?;
     // Categories whose `SpellCategory.dbc` flags carry `0x2` match every cooldown query
-    // (`GetCooldownInfo` `0x6e13e0`); only wand Shoot's 351 does. Flag `0x1` scales the category
+    // (`GetCooldownInfo` `0x807980`); only wand Shoot's 351 does. Flag `0x1` scales the category
     // recovery by the main-hand weapon's delay (`007fef60`).
     let (wildcard_categories, weapon_speed_categories) = {
         let bytes = chain
@@ -594,7 +594,7 @@ pub fn load_spell_catalog(chain: &mut Chain) -> Result<SpellCatalog> {
                 }),
                 dispel: u32_at(r, COL_DISPEL).unwrap_or(0),
                 category: u32_at(r, COL_CATEGORY).unwrap_or(0),
-                // Resolved at load, read off the armed record (`0x6e1563`).
+                // Resolved at load, read off the armed record (`0x807b63`).
                 category_wildcard: u32_at(r, COL_CATEGORY)
                     .is_some_and(|c| wildcard_categories.contains(&c)),
                 category_weapon_speed: u32_at(r, COL_CATEGORY)

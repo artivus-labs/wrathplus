@@ -134,7 +134,7 @@ pub(super) struct SubjectState {
     pub(super) facing: f32,
     /// `UNIT_FIELD_MOUNTDISPLAYID > 0`.
     pub(super) mounted: bool,
-    /// Current speed, yd/s (`GetCurrentSpeed`, `0x7c4c90`).
+    /// Current speed, yd/s (`GetCurrentSpeed`, `0x987570`).
     pub(super) speed: f32,
     /// The input-command word ([`super::camera::follow_cmd`]); its edges arm head bob (`0x511170`).
     pub(super) command: u32,

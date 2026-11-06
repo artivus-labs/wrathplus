@@ -683,13 +683,13 @@ fn cast_result(
     // arm clears the guard: both clears are the reference's one `0x6e741a call 0x6e4940(0x1c)`.
     let in_flight = pending.committed(Instant::now()) == Some(spell_id);
     if !success {
-        // `HandleCastFailed 0x6e1a00` clears the GCD armed at send (`0x6e1d83 → 0x6e1630`), and the
-        // bit-25 revert below drops a parked record; the spell's own recovery starts at SPELL_GO,
-        // which a failed cast never reaches. A failing cached auto-repeat spell not DONT_REPORT
-        // runs the full local cancel (`0x6e1cd9`–`0x6e1cea` → `0x6ea080`, the
-        // `SMSG_CANCEL_AUTO_REPEAT` routine). A deselect arrives as this failure (vmangos
-        // `HandleSetSelectionOpcode` → `Spell::cancel` → `SendCastResult(INTERRUPTED)`); target
-        // death arrives as [`cancel_auto_repeat`].
+        // `HandleCastFailed` (12340 `0x808200`, 1.12 `0x6e1a00`) clears the GCD armed at send (1.12
+        // `0x6e1d83 → 0x6e1630`), and the bit-25 revert below drops a parked record; the spell's
+        // own recovery starts at SPELL_GO, which a failed cast never reaches. A failing cached
+        // auto-repeat spell not DONT_REPORT runs the full local cancel (1.12 `0x6e1cd9`–`0x6e1cea`
+        // → `0x6ea080`, the `SMSG_CANCEL_AUTO_REPEAT` routine). A deselect arrives as this failure
+        // (vmangos `HandleSetSelectionOpcode` → `Spell::cancel` → `SendCastResult(INTERRUPTED)`);
+        // target death arrives as [`cancel_auto_repeat`].
         let now = Instant::now();
         // DONT_REPORT skips the GCD clear and the display (12340 `0x808200`'s `!= 0x1b` gates);
         // the in-flight clear below still runs, as AzerothCore sends it for real aborts.
@@ -1240,7 +1240,7 @@ fn pet_go_cooldown(
         == Some(me)
 }
 
-/// `SMSG_SPELL_COOLDOWN` (`0x6e9460`): server-pushed cooldowns (school lockouts, the pet's list),
+/// `SMSG_SPELL_COOLDOWN` (`0x806dd0`): server-pushed cooldowns (school lockouts, the pet's list),
 /// into the store [`addressed_store`] picked.
 fn spell_cooldowns(
     caster: u64,
@@ -1259,7 +1259,7 @@ fn spell_cooldowns(
     }
 }
 
-/// `SMSG_ITEM_COOLDOWN` (`0x6e95d0`): the fixed 30 s use cooldown, keyed on the item instance's
+/// `SMSG_ITEM_COOLDOWN` (`0x807060`): the fixed 30 s use cooldown, keyed on the item instance's
 /// template entry, as the reference resolves it.
 fn item_cooldown(
     item_guid: u64,
@@ -1279,14 +1279,14 @@ fn item_cooldown(
     }
 }
 
-/// `SMSG_COOLDOWN_EVENT` (`0x6e9670` → `0x6e3050(force=0)`): start an on-hold cooldown's parked
+/// `SMSG_COOLDOWN_EVENT` (`0x804010`; 1.12 `0x6e3050(force=0)`): start an on-hold cooldown's parked
 /// timers now (Stealth ends, Feign Death drops).
 fn cooldown_event(spell_id: u32, caster: u64, cooldowns: &mut Cooldowns) {
     debug!("net: cooldown event — spell {spell_id} on {caster:#x}");
     cooldowns.cooldown_event(spell_id, Instant::now());
 }
 
-/// `SMSG_CLEAR_COOLDOWN` (`0x6e9670` → `0x6e3050(force=1)`): remove the spell's record outright.
+/// `SMSG_CLEAR_COOLDOWN` (`0x804010`; 1.12 `0x6e3050(force=1)`): drop the spell's record outright.
 fn clear_cooldown(spell_id: u32, caster: u64, cooldowns: &mut Cooldowns) {
     debug!("net: clear cooldown — spell {spell_id} on {caster:#x}");
     cooldowns.clear_spell(spell_id);

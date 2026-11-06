@@ -1016,7 +1016,7 @@ fn the_constructors_string_arguments_are_four_shapes_not_one() {
 }
 
 /// `SetPortraitTexture` lowercases the token, which the app matches exactly: the reference reads
-/// unit tokens case-insensitively (`0x515970`, `_strnicmp`), and stock `MerchantFrame.lua:68`
+/// unit tokens case-insensitively (`0x60abf0`, `_strnicmp`), and stock `MerchantFrame.lua:68`
 /// passes `"NPC"`.
 #[test]
 fn set_portrait_texture_folds_the_token_to_lowercase() {

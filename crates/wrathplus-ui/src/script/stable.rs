@@ -384,8 +384,9 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // UnstablePet(i): silently refused with a pet out (`0x468550`), a gate the drag path lacks; its
-    // unsigned bound rejects slot 0. The reference's other gate, no charmed unit, is not built.
+    // UnstablePet(i): silently refused with a pet out (1.12 `0x468550`), a gate the drag path
+    // lacks; its unsigned bound rejects slot 0. The reference's other gate, no charmed unit, is not
+    // built.
     g.set(
         "UnstablePet",
         lua.create_function(|lua, i: i64| {

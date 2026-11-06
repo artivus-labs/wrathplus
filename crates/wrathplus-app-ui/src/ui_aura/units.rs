@@ -1,10 +1,10 @@
 //! Every unit's aura list but the player's, one per guid, and the unit-token resolver's inputs
-//! (`0x515970`, [`UnitGuids`]) that `UnitBuff 0x519500` and `UnitDebuff 0x5198f0` read them through:
+//! (`0x60abf0`, [`UnitGuids`]) that `UnitBuff 0x614ca0` and `UnitDebuff 0x614cf0` read them through:
 //! the guid globals, the group tables, and each held unit a `target` chain can reach. A list is the
 //! live unit's slots, gated as any unit's; a group member or pet with no live object diverts to its
-//! roster record's block (`0x519592`-`0x5195a4` to `0x519735`, `0x519b25`). Lists are built only for
-//! guids some token can name, once per guid whatever names it, and rebuilt only when what they are
-//! built from moves: a 40-man raid names up to 80 units, and their targets.
+//! roster record's block (1.12 `0x519592`-`0x5195a4` to `0x519735`, `0x519b25`). Lists are built
+//! only for guids some token can name, once per guid whatever names it, and rebuilt only when what
+//! they are built from moves: a 40-man raid names up to 80 units, and their targets.
 
 use std::collections::hash_map::{Entry, HashMap};
 
@@ -1183,8 +1183,8 @@ mod tests {
     }
 
     /// `UnitDebuff` reads the list of whatever unit the token names, through the resolver
-    /// (`0x515970`, called at `0x519542`): the mouseover, a member's target, any depth of `target`
-    /// chain, in any case, and the player's own list at the end of a chain that comes back to us.
+    /// (`0x60abf0` via `0x6110a0`): the mouseover, a member's target, any depth of `target` chain,
+    /// in any case, and the player's own list at the end of a chain that comes back to us.
     #[test]
     fn every_token_reads_the_list_of_the_unit_it_names() {
         let mut app = chain_app();

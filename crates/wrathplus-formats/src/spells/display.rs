@@ -87,7 +87,8 @@ pub struct SpellDisplay {
     /// `Category` (column 2): the shared-cooldown category; 0 is none.
     pub category: u32,
     /// The category's `SpellCategory.dbc` flags carry `0x2`, matching every cooldown query
-    /// (`GetCooldownInfo` `0x6e13e0`); true only for wand Shoot's 351, whose swing sweeps the bar.
+    /// (`GetCooldownInfo` `0x807980`, `0x807b63`); true only for wand Shoot's 351, whose swing
+    /// sweeps the bar.
     pub category_wildcard: bool,
     /// The category's `SpellCategory.dbc` flags carry `0x1`: its recovery scales by the main-hand
     /// weapon's delay, per 1000 ms (`007fef60`).
@@ -444,14 +445,14 @@ impl SpellDisplay {
             )
     }
 
-    /// No tooltip range cell: tested before `GetMinMaxRange` (`0x6e3480`), an on-next-swing spell
+    /// No tooltip range cell: tested before `GetMinMaxRange` (`0x7ff480`), an on-next-swing spell
     /// (`0x52e9a5`) or `AttributesEx3` bit 30 (`0x52e9b2`); after it, a max of 0 (`0x52e9ed`).
     pub fn tooltip_omits_range_line(&self) -> bool {
         self.on_next_swing() || self.attributes_ex3 & 0x4000_0000 != 0
     }
 
-    /// `GetCooldownInfo` (`0x6e13e0`) reports no cooldown for `Effect[0]` 78 (attack) or 47
-    /// (trade skill): those buttons never show one and are never refused by one.
+    /// `GetCooldownInfo` (`0x807980`, `0x8079cb`) reports no cooldown for `Effect[0]` 78 (attack)
+    /// or 47 (trade skill): those buttons never show one and are never refused by one.
     pub fn cooldown_query_excluded(&self) -> bool {
         matches!(
             self.effects[0],

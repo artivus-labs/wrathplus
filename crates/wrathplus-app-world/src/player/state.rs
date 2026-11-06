@@ -73,7 +73,7 @@ pub(super) const WEDGE_STALL_RATIO: f32 = 0.15;
 /// Fall speed (yd/s) before stalled frames count: a jump apex never qualifies, a wedge soon does.
 pub(super) const WEDGE_MIN_FALL: f32 = 1.0;
 /// The one-shot air nudge (yd/s) a standstill jump may steer by. The reference's is the live
-/// `min(walk, run)` (`0x7c4c90(1)`, `0x7c4d19`); this is the default walk speed, not the live one.
+/// `min(walk, run)` (`0x987570(1)`, `0x98762c`); this is the default walk speed, not the live one.
 pub(super) const AIR_NUDGE_SPEED: f32 = 2.5;
 /// Skin width (yd) kept between the capsule and geometry on casts.
 pub(super) const SKIN_WIDTH: f32 = 0.02;

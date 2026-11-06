@@ -243,7 +243,7 @@ pub(super) fn step(
         // Air control: one nudge for a jump taken standing, re-seeding the airborne direction
         // flags. The reference opens it only while the direction nibble (`+0x40 & 0xf`) is clear
         // (`0x7c6afc`, guarding the `arg = 1` openers of `0x7c5a20`/`0x7c5c20`); `nudge_speed` is
-        // the live `min(walk, run)` (`0x7c4c90(1)`).
+        // the live `min(walk, run)` (`0x987570(1)`).
         player.horiz_vel = dir.normalize_or_zero() * nudge_speed;
         air_nudged = true;
         // The press sets the nibble, so there is no second steer.
@@ -2069,8 +2069,8 @@ mod tests {
         );
     }
 
-    /// The nudge is the live `min(walk, run)`: `0x7c5c20(1)` calls `0x7c4c90(1)`, whose walk
-    /// override returns `min(+0x88, +0x8c)`.
+    /// The nudge is the live `min(walk, run)`: 1.12's `0x7c5c20(1)` calls `GetCurrentSpeed(1)`
+    /// (12340 `0x987570`), whose walk override (`0x98762c`) returns `min(+0x90, +0x94)`.
     #[test]
     fn the_standstill_nudge_takes_the_speed_it_is_given() {
         let flat: [(f32, f32); 2] = [(-3.0, 0.0), (3.0, 0.0)];

@@ -20,7 +20,8 @@ pub enum DuelRequest {
     /// does nothing on a miss.
     StartByName(String),
     /// `StartDuelUnit(unit)`, the unit popup's Duel row. The app casts only at a player; the
-    /// reference resolves the token (`0x515970`) with no player gate of its own.
+    /// reference resolves the token (1.12 `0x515970`; 12340 not located) with no player gate of its
+    /// own.
     StartByUnit(String),
 }
 
