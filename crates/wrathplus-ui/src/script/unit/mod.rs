@@ -178,10 +178,10 @@ pub struct UnitState {
     /// `UnitIsPVPFreeForAll`: `PLAYER_FLAGS` bit `0x80`, or the roster status byte's `0x10`;
     /// independent of [`Self::pvp`].
     pub is_pvp_ffa: bool,
-    /// `UnitPVPRank`: the current rank on the internal `0..=18` scale (0 none), from the public
-    /// `PLAYER_BYTES_3` byte 2. The private lifetime highest rides
-    /// [`HonorState`](super::HonorState); [`super::pvp`] converts to the `-4..=14` visual scale.
-    pub pvp_rank: u8,
+    /// Own title gender: `PLAYER_BYTES_3` byte 0 (`0x72a328`); foreign uses `sex` (`0x72a334`).
+    pub title_gender: Option<u8>,
+    /// Roster record status (`0x513c30`, +8), used by DND only without a held player.
+    pub roster_status: u8,
     /// `PLAYER_BYTES_3` byte 2: a titled `UnitPVPName` appends `PVP_MEDAL<n>` (`0x72a3ea`).
     pub pvp_medal: u8,
     /// `PLAYER_CHOSEN_TITLE`, a CharTitles `MaskID` (0 none), `UnitPVPName`'s (`0x72a2ce`).

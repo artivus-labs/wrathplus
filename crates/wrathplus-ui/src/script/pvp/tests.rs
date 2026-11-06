@@ -42,7 +42,7 @@ fn player() -> UnitState {
         // race walk (`0x5efe00`) that keys every rank title.
         faction_group: Some("Alliance".into()),
         pvp_team: 1,
-        pvp_rank: 9,
+        pvp_medal: 9,
         ..Default::default()
     }
 }
@@ -332,7 +332,7 @@ fn a_sideless_player_still_has_a_team_digit_because_his_race_has_one() {
             // …and the race still names Alliance.
             pvp_team: 1,
             sex: 2,
-            pvp_rank: 18,
+            pvp_medal: 18,
             ..player()
         }),
     );
@@ -347,7 +347,7 @@ fn a_sideless_player_still_has_a_team_digit_because_his_race_has_one() {
         Some(UnitState {
             faction_group: Some("Alliance".into()),
             pvp_team: -1,
-            pvp_rank: 18,
+            pvp_medal: 18,
             ..player()
         }),
     );
@@ -437,7 +437,7 @@ fn get_pvp_rank_info_takes_a_second_argument_three_different_ways() {
             is_player: true,
             faction_group: Some("Horde".into()),
             pvp_team: 0,
-            pvp_rank: 14,
+            pvp_medal: 14,
             ..Default::default()
         }),
     );
@@ -543,9 +543,9 @@ fn get_pvp_rank_info_raises_without_a_numeric_first_argument() {
         .is_ok());
 }
 
-/// `PLAYER_BYTES_3` is public, and the reference's inspect pane calls `UnitPVPRank("target")`.
+/// Build 12340 `0x611c40` pushes zero even for a player carrying a nonzero medal.
 #[test]
-fn unit_pvp_rank_answers_for_a_foreign_unit() {
+fn unit_pvp_rank_is_zero_even_with_a_medal() {
     let mut s = seated();
     s.set_unit(
         "target",
@@ -555,17 +555,13 @@ fn unit_pvp_rank_answers_for_a_foreign_unit() {
             is_player: true,
             faction_group: Some("Horde".into()),
             pvp_team: 0,
-            pvp_rank: 14,
+            pvp_medal: 14,
             ..Default::default()
         }),
     );
-    assert_eq!(
-        s.eval::<i64>(r#"return UnitPVPRank("target")"#).unwrap(),
-        14
-    );
-    assert_eq!(s.eval::<i64>(r#"return UnitPVPRank("player")"#).unwrap(), 9);
-    // A creature reads 0 because it has no player descriptor block to decode a rank from; the
-    // binding does not re-gate on `is_player`.
+    assert_eq!(s.eval::<i64>(r#"return UnitPVPRank("target")"#).unwrap(), 0);
+    assert_eq!(s.eval::<i64>(r#"return UnitPVPRank("player")"#).unwrap(), 0);
+    // Creatures and unresolved units also return the same constant.
     s.set_unit(
         "mouseover",
         Some(UnitState {
@@ -615,11 +611,12 @@ fn unit_pvp_name_formats_the_chosen_title() {
     assert_eq!(
         name(&s, "player"),
         "WrathPlus",
-        "rank 9 alone decorates nothing"
+        "a medal without a chosen title decorates nothing"
     );
     let titled = |chosen_title, sex, pvp_medal| UnitState {
         chosen_title,
-        sex,
+        sex: if sex == 3 { 2 } else { 3 }, // opposite unit gender must not select own title
+        title_gender: Some(if sex == 3 { 1 } else { 0 }),
         pvp_medal,
         ..player()
     };
@@ -672,11 +669,24 @@ fn unit_pvp_name_formats_the_chosen_title() {
             ..Default::default()
         }),
     );
-    assert!(
-        s.eval::<bool>(r#"return UnitPVPName("mouseover") == nil"#)
-            .unwrap(),
-        "a snapshot whose name has not resolved is nil, not an empty decoration"
+    assert_eq!(name(&s, "mouseover"), "Unknown Being");
+    s.run("UNKNOWNOBJECT = 'Localized unknown'").unwrap();
+    assert_eq!(name(&s, "mouseover"), "Localized unknown");
+    s.run("UNKNOWNOBJECT = ''").unwrap();
+    assert_eq!(name(&s, "mouseover"), "Unknown Being");
+    s.set_unit(
+        "target",
+        Some(UnitState {
+            title_gender: None,
+            sex: 3,
+            pvp_medal: 0,
+            chosen_title: 1,
+            ..player()
+        }),
     );
+    assert_eq!(name(&s, "target"), "Private (f) WrathPlus");
+    s.set_unit("player", Some(titled(1, 2, 255)));
+    assert_eq!(name(&s, "player"), "Private WrathPlus\n");
     assert!(s.eval::<String>("return UnitPVPName()").is_err());
 }
 

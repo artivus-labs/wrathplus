@@ -799,7 +799,6 @@ pub(crate) fn snapshot(
             Some(1) => 3,
             _ => 0,
         },
-        // Direct replicated state only; reaction/ownership policy is evaluated separately.
         pvp: store.0.unit_is_pvp(),
         skinnable: crate::ui_action::gather_line_key(store, types.names),
         // `UnitPlayerControlled`: bit `0x8`, set by pets and charmed creatures as well as players.
@@ -815,17 +814,11 @@ pub(crate) fn snapshot(
             .unwrap_or(0),
         // `UnitAffectingCombat` (`0x517e10`): bit 19, the one combat bit for every token.
         in_combat: store.0.unit_flags() & crate::app_core::state::UNIT_FLAG_IN_COMBAT != 0,
-        // Direct replicated state, with the descriptor dialect selecting the packed field.
         is_pvp_ffa: store.0.unit_is_ffa_pvp(),
-        // The honor rank, `PLAYER_BYTES_3` byte 2 (0..=18), public for every player in view.
-        pvp_rank: store.0.player_pvp_rank().unwrap_or(0),
         // The team digit of `PVP_RANK_<rank>_<team>`, from the race ([`race_pvp_team`]).
         pvp_team: store.0.unit_race().map_or(-1, race_pvp_team),
-        // `PLAYER_BYTES_3` byte 2, the `PVP_MEDAL<n>` a titled `UnitPVPName` appends (`0x72a3ea`).
         pvp_medal: store.0.player_pvp_medal().unwrap_or(0),
-        // `PLAYER_CHOSEN_TITLE`, the CharTitles `MaskID` `UnitPVPName` formats (`0x72a2ce`).
         chosen_title: store.0.get(Field::PlayerChosenTitle).unwrap_or(0),
-        // `is_player` and the creature-record fields come from [`enrich_unit`].
         ..Default::default()
     }
 }
@@ -842,7 +835,9 @@ pub(crate) fn enrich_unit(
 ) {
     if wrathplus_protocol::guid::is_player(guid) {
         state.is_player = true;
-        // No faction line for players: their factions have no reputation slot.
+        if self_store.and_then(|s| s.0.get_field_guid(Field::ObjectGuid, 0)) == Some(guid) {
+            state.title_gender = store.0.get(Field::PlayerBytes3).map(|b| b as u8);
+        }
         return;
     }
     let Some(entry) = wrathplus_protocol::guid::entry(guid) else {
@@ -1216,6 +1211,7 @@ fn feed_units(
             .map(str::to_string);
         let mut s = snapshot(store, guid.0, name, 0, chr, types);
         s.is_player = true;
+        s.title_gender = store.0.get(Field::PlayerBytes3).map(|b| b as u8);
         s.raid_target = group.raid_target_index(guid.0);
         s.faction_group = faction_group(store, factions.as_deref());
         s.faction_group_localized = faction_group_localized(store, factions.as_deref());
@@ -3940,3 +3936,7 @@ mod tests {
         assert_eq!(eval(&mut app, "return SEEN"), 2);
     }
 }
+
+#[cfg(test)]
+#[path = "ui_unit/title_tests.rs"]
+mod title_tests;

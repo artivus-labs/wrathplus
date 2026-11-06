@@ -4,8 +4,8 @@
 //! The local player's counters are private descriptor fields the app pushes as a [`HonorState`];
 //! another player's arrive as a `MSG_INSPECT_HONOR_STATS` reply ([`InspectHonorData`]), whose
 //! presence is `HasInspectHonorData`. With nothing held every getter answers zeros at full width,
-//! as the reference reads zero-initialised slots ungated. A foreign player's current rank is
-//! public (`PLAYER_BYTES_3` byte 2) and rides [`UnitState::pvp_rank`](super::UnitState::pvp_rank).
+//! as the reference reads zero-initialised slots ungated. `UnitPVPRank` always returns zero in
+//! build 12340; `PLAYER_BYTES_3` byte 2 is the title medal, not a current honor rank.
 //!
 //! The internal rank (0 none, 1..=4 dishonorable, 5..=18 Scout or Private to High Warlord or
 //! Grand Marshal, 19 the racial "Leader") is what the wire carries and what keys the
@@ -216,19 +216,14 @@ fn format_name(fmt: &str, name: &str) -> String {
     out
 }
 
-/// `0x72a290` as `UnitPVPName` calls it: a player with a chosen title formats that CharTitles
-/// row's name (`0x719900`) around its own; the row's female text for a female, each falling back
-/// to the other when empty (`0x72a33d`). A non-zero `PLAYER_BYTES_3` byte 2 then adds a line,
-/// `PVP_MEDAL<n>` (`0x72a3ea`). Else the plain name. The snapshot's `sex` is `UNIT_FIELD_BYTES_0`
-/// byte 2 for every unit, the active player included, as the builder reads it for another
-/// (`0x72a334`). Labelled: the active player's gender from `PLAYER_BYTES_3` byte 0 (`0x72a328`).
-/// Deviation: a chosen title with no CharTitles row answers the plain name, where the builder
-/// returns the caller's buffer unwritten (`0x72a466`, `0x72a471`).
+/// `0x72a290`: chosen CharTitles text, with opposite-sex fallback, then the medal line.
+/// Own title gender is `PLAYER_BYTES_3` byte 0 (`0x72a328`), others use unit gender (`0x72a334`).
+/// Deviation: a missing CharTitles row answers the plain name instead of an unwritten buffer.
 fn pvp_name(lua: &Lua, u: &super::UnitState, name: &str) -> String {
     let title = {
         let model = lua.app_data_ref::<Model>().expect("model app_data");
         super::wrath_titles::by_mask(&model, u.chosen_title).map(|t| {
-            let (own, other) = match u.sex == 3 {
+            let (own, other) = match u.title_gender.map_or(u.sex == 3, |gender| gender == 1) {
                 true => (&t.female, &t.male),
                 false => (&t.male, &t.female),
             };
@@ -240,8 +235,8 @@ fn pvp_name(lua: &Lua, u: &super::UnitState, name: &str) -> String {
     };
     let mut out = format_name(&title, name);
     if u.pvp_medal != 0 {
+        out.push('\n'); // `0x72a40c`: appended before looking up the medal string.
         if let Some(medal) = global_string(lua, &format!("PVP_MEDAL{}", u.pvp_medal)) {
-            out.push('\n');
             out.push_str(&medal);
         }
     }
@@ -338,24 +333,13 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // UnitPVPRank(unit) → the unit's current rank, internal, 0 for none. `0x51a8a0` reads the
-    // named object's own byte (`[+0xe68]+0x1f`, in public `PLAYER_BYTES_3`), which is how the
-    // inspect pane reads a foreign rank. Anything unresolved reads 0, never nil (`0x51a916`); a
-    // non-string argument raises (`0x51a8ac`).
-    //
-    // The engine's player gate (`0x51a8e1`) is not re-applied: it tests the type mask, while our
-    // `is_player` comes from the app's later guid-keyed enrichment, so a snapshot pushed before
-    // it would zero a real player's rank. A creature has no player block, so its byte is 0.
+    // Build 12340 `0x611c40` validates/resolves the argument, then pushes constant zero.
     g.set(
         "UnitPVPRank",
         lua.create_function(|lua, token: Value| {
             let token = Some(string_arg(lua, token, "Usage: UnitPVPRank(\"unit\")")?);
             check_unit_token(lua, &token)?;
-            let model = lua.app_data_ref::<Model>().expect("model app_data");
-            Ok(token
-                .as_ref()
-                .and_then(|t| model.unit(t))
-                .map_or(0i64, |u| i64::from(u.pvp_rank)))
+            Ok(0i64)
         })?,
     )?;
 
@@ -373,9 +357,12 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             let Some(u) = unit.filter(|u| u.has_object) else {
                 return Ok(Value::Nil);
             };
-            let Some(name) = u.name.clone() else {
-                return Ok(Value::Nil);
-            };
+            // `0x72a000`: held unnamed objects use localized UNKNOWNOBJECT.
+            let name = u.name.clone().filter(|n| !n.is_empty()).unwrap_or_else(|| {
+                global_string(lua, "UNKNOWNOBJECT")
+                    .filter(|n| !n.is_empty())
+                    .unwrap_or_else(|| "Unknown Being".into())
+            });
             let decorated = pvp_name(lua, &u, &name);
             Ok(Value::String(lua.create_string(&decorated)?))
         })?,

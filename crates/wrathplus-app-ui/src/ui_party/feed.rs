@@ -469,8 +469,7 @@ pub(super) fn feed_party(
 
     // ── raid1..raid40 ──────────────────────────────────────────────────────
     //
-    // Token N is `GetRaidRosterInfo` row N, both in `raid_row_guids`' order. Our own row comes off
-    // our descriptor: the wire list never contains us.
+    // Raid tokens follow `raid_row_guids`; our own row reads our descriptor.
     let raid_guids = raid_row_guids(&group, self_guid);
     fed.raid_units.resize(RAID_TOKENS.len(), None);
     for (i, token) in RAID_TOKENS.iter().enumerate() {
@@ -480,6 +479,10 @@ pub(super) fn feed_party(
                 let name = names.peek(*guid).map(str::to_string);
                 let mut s = crate::ui_unit::snapshot(store, *guid, name, 0, chr, types);
                 s.is_player = true;
+                s.title_gender = store
+                    .0
+                    .get(wrathplus_protocol::types::Field::PlayerBytes3)
+                    .map(|b| b as u8);
                 s.raid_target = group.raid_target_index(*guid);
                 s.faction_group = own_group.clone();
                 // A same-faction friendly player, as in `member_unit_state`.
@@ -829,7 +832,6 @@ fn member_unit_state(
                 .or_else(|| stats.and_then(|s| s.level))
                 .map_or(0, u32::from),
             power_type: stats.map_or(0, PartyMemberStatsInfo::shown_power_type),
-            // Divided as on the live leg (`UnitMana`'s record path, `0x517744`-`0x51775e`).
             power: stats.map_or(0, PartyMemberStatsInfo::shown_power),
             max_power: stats.map_or(0, PartyMemberStatsInfo::shown_max_power),
             // Connected is the record's own online bit (`+0x08 & 1`, `0x517dd3`), which each list
@@ -837,9 +839,10 @@ fn member_unit_state(
             // moves alone, so the roster byte is not read. A held member never gets here, its 1 is
             // `snapshot`'s (`0x517daf`); a member with no record has no bit to read.
             is_connected: stats.is_some_and(PartyMemberStatsInfo::is_online),
+            roster_status: stats.and_then(|s| s.status).unwrap_or(0),
             // Dead and ghost from the record, as the reference's `UnitIsDead` (`0x517b5d`,
             // `+0x08 & 4`) and `UnitIsGhost` (`0x517c32`, `& 8`) read it: fresher than the roster
-            // byte, which only `SMSG_GROUP_LIST` moves. 1.12 has no AFK or DND predicate to feed.
+            // byte, which only `SMSG_GROUP_LIST` moves.
             dead: stats.is_some_and(|s| s.status.unwrap_or(0) & member_status::DEAD != 0),
             ghost: stats.is_some_and(|s| s.status.unwrap_or(0) & member_status::GHOST != 0),
             ..Default::default()
@@ -855,6 +858,7 @@ fn member_unit_state(
             s.power = u32::from(native.cur_power.unwrap_or(0)) / scale;
             s.max_power = u32::from(native.max_power.unwrap_or(0)) / scale;
             let status = native.status.unwrap_or(0);
+            s.roster_status = status as u8;
             s.is_connected = status & 1 != 0;
             s.dead = status & 4 != 0;
             s.ghost = status & 8 != 0;
@@ -863,16 +867,13 @@ fn member_unit_state(
         }
     }
     s.is_player = true;
-    // A party member is always a same-faction friendly player: the popup's `UnitCanCooperate`
-    // gate reads the reaction, which neither leg resolves for a party token.
+    // A party member is a same-faction friendly player (`UnitCanCooperate`).
     s.raid_target = group.raid_target_index(m.guid);
     s.reaction = 5;
     s.faction_group = own_group;
-    // Native status is authoritative for the unstreamed record, including explicit clears.
     if store.is_none() && group.wrath_record(m.guid).is_some() {
         return s;
     }
-    // The roster status byte overlays both legs, but for `is_connected`, which is the record leg's.
     s.is_pvp_ffa = m.status & member_status::PVP_FFA != 0;
     s.pvp = s.pvp || m.status & member_status::PVP != 0;
     s.ghost = s.ghost || m.status & member_status::GHOST != 0;
@@ -883,7 +884,6 @@ fn member_unit_state(
 /// `"party1".."party4"` → the roster entry it names.
 fn member_for_token<'a>(group: &'a GroupState, token: &str) -> Option<&'a GroupMemberEntry> {
     let n: usize = token.strip_prefix("party")?.parse().ok()?;
-    // The slot view the feed publishes the tokens from, so the two agree.
     (1..=4)
         .contains(&n)
         .then(|| group.party_slots().nth(n - 1))?
@@ -1620,7 +1620,7 @@ mod tests {
             flags: 0,
         };
         let record = PartyMemberStatsInfo {
-            status: Some(member_status::ONLINE),
+            status: Some(member_status::ONLINE | member_status::DND),
             cur_hp: Some(2400),
             max_hp: Some(3000),
             level: Some(41),
@@ -1650,6 +1650,7 @@ mod tests {
             "rage reads 57/100, not 570/1000 — `UnitMana`'s record leg divides too (0x517744)"
         );
         assert!(s.exists && s.is_player && s.is_connected);
+        assert_eq!(s.roster_status, member_status::ONLINE | member_status::DND);
 
         // No record at all (a real roster always seats one): an existing player with empty bars.
         let bare = member_unit_state(

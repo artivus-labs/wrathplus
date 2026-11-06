@@ -418,17 +418,11 @@ impl ObjectFields {
         self.get(Field::PlayerFieldBytes)
             .map(|b| ((b >> 16) & 0xff) as u8)
     }
-    /// `PLAYER_FIELD_BYTES` byte 3 (private): the highest honor rank held, 0 never ranked, which
-    /// `RequiredHonorRank` checks (`0x5ea930`); only ever raised (`HonorMgr.cpp:894-895`), so it
-    /// outlives a demotion, unlike [`Self::player_pvp_rank`].
+    /// `PLAYER_FIELD_BYTES` byte 3 (private): the highest honor rank held, 0 never ranked,
+    /// checked by `RequiredHonorRank` (`0x5ea930`).
     pub fn player_honor_rank(&self) -> Option<u8> {
         self.get(Field::PlayerFieldBytes)
             .map(|b| ((b >> 24) & 0xff) as u8)
-    }
-    /// `PLAYER_BYTES_3` byte 2 (public): the current internal rank (`HonorMgr.cpp:900`), 0
-    /// unranked, 1-4 negative, 5 up positive, indexing `PVP_RANK_*`.
-    pub fn player_pvp_rank(&self) -> Option<u8> {
-        self.get(Field::PlayerBytes3).map(|b| (b >> 16) as u8)
     }
     /// `PLAYER_BYTES_3` byte 2 (public; the player block's `+0x1e` at `0x72a3ea`): the
     /// `PVP_MEDAL<n>` index a titled `UnitPVPName` appends.

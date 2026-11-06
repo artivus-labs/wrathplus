@@ -1,8 +1,8 @@
 //! Build 12340's unit and player readers over the pushed unit snapshots, roster and auras.
 //! Evidence: `/tmp/azb-app-mig/ghidra/{audit1,unit1,unit2,unit4}.log`.
 //!
-//! - `UnitIsAFK` (`0x60cc30`), `UnitIsDND` (`0x60cd50`): a held player's `PLAYER_FLAGS` bit `0x2`
-//!   or `0x4`.
+//! - `UnitIsAFK` (`0x60cc30`), `UnitIsDND` (`0x60cd50`): a held player's flags `0x2` or `0x4`;
+//!   DND without a held player reads roster-record status bit 7.
 //! - `IsXPUserDisabled` (`0x614140`): `PLAYER_FLAGS & 0x2000000`, a boolean, nothing without a
 //!   player.
 //! - `UnitIsTappedByAllThreatList` (`0x611230`): `UNIT_DYNAMIC_FLAGS & 0x80`.
@@ -20,7 +20,7 @@
 //! - `GetNumLanguages` (`0x500760`): the known languages.
 //!
 //! Labelled: `UnitIsAFK`'s two local overrides (`0x729740`, `0x4cee50` with `0xbcefec`) and a
-//! roster-only member's status bits (`0x513c30`, `+8` bits 6 and 7) are not read. The link
+//! roster-only member's AFK bit (`0x513c30`, `+8` bit 6) are not read. The link
 //! queries also take a friend's name (stock `FriendsFrame.lua:99`, `:117`): a non-token string
 //! reads the held unit of that name, else nil, never raising; their non-held arms (`0x52bee0`,
 //! `0x5727b0`) and the summon spell's writer (`0x53ec40`) are not decompiled.
@@ -157,7 +157,7 @@ fn selection_color(unit: Option<&super::UnitState>) -> (f64, f64, f64) {
 pub(crate) fn install(lua: &Lua) -> mlua::Result<()> {
     let g = lua.globals();
     // `UnitIsAFK` (`0x60cc30`) is nil for a player we can attack (`0x729740` at `0x60cccd`), DND
-    // never. Labelled: AFK's local override (`[0xbcefec]`), the group-record bits (`0x513c30`), and
+    // never. Labelled: AFK's local override (`[0xbcefec]`), its group-record bit, and
     // `can_attack`, fed for target, targettarget, npc and chain ends only.
     for (name, usage, bit) in [
         ("UnitIsAFK", "Usage: UnitIsAFK(\"unit\")", PLAYER_FLAGS_AFK),
@@ -168,10 +168,12 @@ pub(crate) fn install(lua: &Lua) -> mlua::Result<()> {
             lua.create_function(move |lua, token: Value| {
                 let token = unit_arg(lua, token, usage)?;
                 let hit = with_unit(lua, &token, false, |u| {
-                    u.has_object
-                        && u.is_player
-                        && !(bit == PLAYER_FLAGS_AFK && u.can_attack)
-                        && u.player_flags & bit != 0
+                    if u.has_object && u.is_player {
+                        !(bit == PLAYER_FLAGS_AFK && u.can_attack) && u.player_flags & bit != 0
+                    } else {
+                        // `0x60cdda`: DND falls back to the record's status bit 7.
+                        bit == PLAYER_FLAGS_DND && u.roster_status & 0x80 != 0
+                    }
                 })?;
                 Ok(flag(hit))
             })?,

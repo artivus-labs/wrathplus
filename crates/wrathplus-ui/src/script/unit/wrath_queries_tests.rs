@@ -216,3 +216,33 @@ fn pvp_inactive_takes_a_token_or_a_raid_members_name() {
         "the usage gate stays"
     );
 }
+
+/// `0x60cdda`: absent held player uses record status bit 7, never bit 6 or online.
+#[test]
+fn dnd_uses_record_only_without_a_held_player() {
+    let mut s = UiScript::new().unwrap();
+    for (has_object, is_player, flags, status, want) in [
+        (false, true, 0, 0x80, true),
+        (false, true, 0, 0x40, false),
+        (false, true, 4, 0, false),
+        (true, true, 0, 0x80, false),
+        (true, true, 4, 0, true),
+        (true, false, 4, 0, false),
+    ] {
+        s.set_unit(
+            "party1",
+            Some(UnitState {
+                exists: true,
+                has_object,
+                is_player,
+                player_flags: flags,
+                roster_status: status,
+                ..Default::default()
+            }),
+        );
+        assert_eq!(
+            s.eval::<bool>("return UnitIsDND('party1') == 1").unwrap(),
+            want
+        );
+    }
+}

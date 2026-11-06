@@ -925,7 +925,7 @@ fn dialect_packed_bytes_never_borrow_neighbor_meanings() {
     assert_eq!(fields.player_bank_bag_slots_purchased(), Some(7));
     assert_eq!(fields.player_rest_state(), Some(2));
     assert_eq!(fields.player_drunk_byte(), Some(26));
-    assert_eq!(fields.player_pvp_rank(), Some(27));
+    assert_eq!(fields.player_pvp_medal(), Some(27));
     assert_eq!(fields.player_pvp_medal(), Some(27));
     assert_eq!(fields.player_action_bar_toggles(), Some(29));
     assert_eq!(fields.player_honor_rank(), Some(30));
