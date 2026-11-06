@@ -8,10 +8,6 @@
 //!    launcher's): a shipped binary must not carry the build machine's source tree.
 //! 3. `<exe dir>/wrathplus-config/`.
 //!
-//! At either resident root a home still under the old name, `benilla-config`, is renamed to
-//! `wrathplus-config` on first use; with both names present the old one is used, unmoved. See
-//! [`wrathplus_formats::default_state_home`].
-//!
 //! With `$WOW_CAPTURE` set every path resolves to `None`: a capture neither reads nor writes
 //! player state.
 

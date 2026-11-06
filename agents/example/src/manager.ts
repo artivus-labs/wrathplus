@@ -39,14 +39,10 @@ export function mainCheckout(from = import.meta.dir): string {
   return dirname(run.stdout.toString().trim());
 }
 
-/** `wrathplus_formats::default_state_home`: `wrathplus-config`, or a home still under its old
- * name, `benilla-config`, until the Manager or a client has moved it. */
+/** `wrathplus_formats::default_state_home`: `wrathplus-config` in the main checkout. */
 export function stateHome(env = process.env): string {
   if (env.WRATHPLUS_STATE_HOME) return env.WRATHPLUS_STATE_HOME;
-  const root = mainCheckout();
-  const home = join(root, "wrathplus-config");
-  const legacy = join(root, "benilla-config");
-  return !existsSync(home) && existsSync(legacy) ? legacy : home;
+  return join(mainCheckout(), "wrathplus-config");
 }
 
 export const agentDir = (home: string, account: string) => join(home, "agents", account);

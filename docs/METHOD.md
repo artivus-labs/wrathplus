@@ -48,7 +48,6 @@ crate of its own or a fork, and WrathPlus opens a piece of itself to such a crat
   cache or scratch file. `scripts/smoke.sh` fails a run that leaves the install changed.
 - **Local state lives in one folder**, `wrathplus-config/`, at the repo root in a dev build and
   beside the binary in the player build; every path to it resolves through `crate::local_state`.
-  A home under the old name, `benilla-config/`, is renamed to it on first use.
   Player settings are CVars persisted as a diff in `wrathplus-config/config.toml`.
 - **The core UI is the stock UI; WrathPlus's own is one layer on top.** The core loads the stock
   3.3.5a FrameXML off the player's own archives, byte for byte, and builds the engine verbs those

@@ -120,17 +120,12 @@ fn the_home_law_override_then_the_residents_and_hermetic_captures() {
 }
 
 #[test]
-fn explicit_legacy_custom_and_empty_overrides_are_not_rewritten() {
+fn explicit_custom_and_empty_overrides_are_not_rewritten() {
     let _l = ENV_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let _c = EnvGuard::unset("WOW_CAPTURE");
-    for value in [
-        "/custom/wrathplus-config",
-        "/custom/wrathplus-config",
-        "/custom/state",
-        "",
-    ] {
+    for value in ["/custom/wrathplus-config", "/custom/state", ""] {
         let _h = EnvGuard::set("WRATHPLUS_HOME", value);
         assert_eq!(home(), Some(PathBuf::from(value)));
         assert_eq!(addons_root(), Some(PathBuf::from(value).join("AddOns")));
@@ -165,11 +160,7 @@ fn the_state_folder_no_longer_depends_on_finding_the_install() {
         "home() still reads $WOW_DATA: {}",
         h.display()
     );
-    assert!(
-        h.ends_with(STATE_DIR) || h.ends_with("benilla-config"),
-        "{}",
-        h.display()
-    );
+    assert!(h.ends_with(STATE_DIR), "{}", h.display());
 }
 
 /// A player build resolves beside the binary; a dev build to the primary checkout, even from a
@@ -182,11 +173,7 @@ fn the_state_folder_lands_where_the_build_says() {
     let _c = EnvGuard::unset("WOW_CAPTURE");
     let _h = EnvGuard::unset("WRATHPLUS_HOME");
     let h = resident_home().expect("the resident folder always resolves");
-    assert!(
-        h.ends_with(STATE_DIR) || h.ends_with("benilla-config"),
-        "{}",
-        h.display()
-    );
+    assert!(h.ends_with(STATE_DIR), "{}", h.display());
 
     let Some(here) = wrathplus_formats::project_folder() else {
         // Player build: beside the binary.

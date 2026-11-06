@@ -272,11 +272,9 @@ fn symlink_outputs_and_state_aliases_cannot_write_to_install() {
     symlink(&f.config.data, &f.config.target).unwrap();
     assert!(validate(&f.config).is_err());
     fs::remove_file(&f.config.target).unwrap();
-    for name in ["wrathplus-config", "benilla-config"] {
-        symlink(&f.config.data, f.config.repo.join(name)).unwrap();
-        assert!(validate(&f.config).is_err());
-        fs::remove_file(f.config.repo.join(name)).unwrap();
-    }
+    symlink(&f.config.data, f.config.repo.join("wrathplus-config")).unwrap();
+    assert!(validate(&f.config).is_err());
+    fs::remove_file(f.config.repo.join("wrathplus-config")).unwrap();
     f.fake_binary();
     let alias = f.root.join("state-alias");
     symlink(&f.config.data, &alias).unwrap();
@@ -456,37 +454,4 @@ fn existing_live_build_can_be_used_and_saved_without_copy_or_cargo() {
     assert!(!f.config.binary_path().exists());
     fs::remove_file(&live).unwrap();
     assert!(!available(&f.config));
-}
-
-#[test]
-fn legacy_setup_and_launch_home_stay_together_even_if_new_home_exists() {
-    let f = Fixture::new();
-    f.fake_binary();
-    let legacy = f.config.repo.join("benilla-config");
-    let new = f.config.repo.join("wrathplus-config");
-    fs::create_dir(&legacy).unwrap();
-    // Both names from the start: the old home is not moved, and wins.
-    fs::create_dir(&new).unwrap();
-    for name in ["account", "realmlist.wtf", "config.toml"] {
-        fs::write(legacy.join(name), name).unwrap();
-    }
-    save_config(&f.config, &legacy.join("manager.json")).unwrap();
-    // An unrelated or partial new home cannot suppress old startup settings.
-    fs::write(new.join("manager.json"), b"invalid partial settings").unwrap();
-    let saved = load(&f.config).unwrap();
-    assert_eq!(saved, f.config);
-    assert_eq!(saved.state_root(), legacy);
-    let command = launch_command(&saved, &saved.state_root());
-    assert_eq!(command.get_current_dir(), Some(legacy.as_path()));
-    assert!(command
-        .get_envs()
-        .any(|(k, v)| { k == "WRATHPLUS_HOME" && v == Some(legacy.as_os_str()) }));
-    assert_eq!(
-        fs::read_to_string(legacy.join("account")).unwrap(),
-        "account"
-    );
-    assert_eq!(
-        fs::read(new.join("manager.json")).unwrap(),
-        b"invalid partial settings"
-    );
 }
