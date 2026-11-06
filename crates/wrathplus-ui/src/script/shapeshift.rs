@@ -30,6 +30,8 @@ pub(crate) struct ShapeshiftBar {
     pub(crate) forms: Vec<StoredShapeshiftForm>,
     /// The player's form id (`UNIT_FIELD_BYTES_2` byte 3, descriptor byte 0x1eb), 0 out of any form.
     pub(crate) form_byte: u8,
+    /// Current form row flags; zero when the row is absent.
+    pub(crate) form_flags: u32,
 }
 
 /// A pushed form with its cooldown in `GetTime` seconds.
@@ -63,6 +65,11 @@ impl super::UiScript {
     /// `GetShapeshiftForm` reads beside the bar.
     pub fn set_shapeshift_form_byte(&mut self, form: u8) {
         self.model_mut().shapeshift.form_byte = form;
+    }
+
+    /// The current `SpellShapeshiftForm.dbc` row's flags (`0x6d7108` reads bit 0x20).
+    pub fn set_shapeshift_form_flags(&mut self, flags: u32) {
+        self.model_mut().shapeshift.form_flags = flags;
     }
 
     /// The bar's form count, `GetNumShapeshiftForms`'s answer; the cooldown flush fires

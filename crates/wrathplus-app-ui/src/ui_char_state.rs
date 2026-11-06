@@ -163,6 +163,7 @@ impl CharSources<'_, '_> {
                 modifier(Field::UnitPowerRegenFlatModifier),
                 modifier(Field::UnitPowerRegenInterruptedFlatModifier),
             ),
+            power_type: power,
             ..Default::default()
         }
     }

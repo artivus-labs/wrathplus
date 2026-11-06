@@ -24,12 +24,10 @@ use crate::net::{current_speed, GuidIndex, UnitSpeeds};
 /// The descriptor's default combat reach, before a unit's store streams.
 pub const DEFAULT_REACH: f32 = 1.5;
 
-/// One unit's motion as `0x7c4c90` and the moving test read it (`0x5fc350`, `0x6e364c`): `flags`
-/// is the movement word (`[[unit+0x118]+0x40]`), and the current speed is 0 with no direction bit
-/// (`0x7c4c99`), then the live server spline's speed, its length over its duration (`0x7c4caa`),
-/// then the swim, walk, run or run-back speed the flags pick ([`current_speed`]). A unit with no
-/// speeds streamed reads no current speed here, so it is not running; every unit's create block
-/// applies its speeds, so none is seen that way.
+/// One unit's motion as the moving test reads it: `flags` is the movement word, and the current
+/// speed is `CMovement::GetCurrentSpeed` (`0x987570`), [`speed_12340`] over the unit's speeds and
+/// spline. A unit with no speeds streamed reads no current speed here, so it is not running; every
+/// unit's create block applies its speeds, so none is seen that way.
 pub(crate) fn unit_motion(
     flags: u32,
     speeds: Option<&MoveSpeeds>,
@@ -41,10 +39,7 @@ pub(crate) fn unit_motion(
             ..UnitMotion::default()
         };
     };
-    let speed = match spline {
-        Some(spline) if flags & move_flags::ANY_MOVE != 0 => spline.speed(),
-        _ => current_speed(speeds, flags),
-    };
+    let speed = speed_12340(speeds, flags, spline.map(spline_speed));
     UnitMotion {
         flags,
         speed,
@@ -134,48 +129,31 @@ impl RangeUnits<'_, '_> {
             let flags = unify(None, remote, spline, swimming, modes).flags;
             (flags, remote.map_or(0.0, |r| r.pitch))
         };
-        // A zero duration reads 0: `0x987570` divides only by a non-zero one.
-        let spline_speed = spline.map(|sp| {
-            if sp.duration.is_zero() {
-                0.0
-            } else {
-                sp.speed()
-            }
-        });
+        let spline_speed = spline.map(spline_speed);
         let speed = speeds.map_or(0.0, |s| speed_12340(&s.0, flags, spline_speed));
         Some((speed, pitch))
     }
 }
 
+/// A spline's speed as `0x987570` reads it: its length over its duration, 0 for a zero duration
+/// (`0x98759b`).
+fn spline_speed(spline: &Spline) -> f32 {
+    if spline.duration.is_zero() {
+        0.0
+    } else {
+        spline.speed()
+    }
+}
+
 /// `CMovement`'s current speed as build 12340 refreshes it (`0x987570`, into `+0x8c`): 0 without a
-/// direction or vertical bit (`0xc0000f`); a live spline's length over its duration; then flight,
-/// swim, walk mode, or run, each taking its back speed when moving backward and it is no faster.
-/// Unlike [`current_speed`], flight is tested before swimming.
+/// direction or vertical bit (`0xc0000f`); a live spline's length over its duration (`0x987584`);
+/// else [`current_speed`]'s flight, swim, walk or run arm.
 pub fn speed_12340(s: &MoveSpeeds, flags: u32, spline_speed: Option<f32>) -> f32 {
     use move_flags as f;
-    if flags & (f::ANY_MOVE | f::ASCENDING | f::DESCENDING) == 0 {
-        return 0.0;
+    match spline_speed {
+        Some(speed) if flags & (f::ANY_MOVE | f::ASCENDING | f::DESCENDING) != 0 => speed,
+        _ => current_speed(s, flags),
     }
-    if let Some(speed) = spline_speed {
-        return speed;
-    }
-    let back = |fwd: f32, back: f32| {
-        if flags & f::BACKWARD != 0 && back <= fwd {
-            back
-        } else {
-            fwd
-        }
-    };
-    if flags & f::FLYING != 0 {
-        return back(s.flight, s.flight_back);
-    }
-    if flags & f::SWIMMING != 0 {
-        return back(s.swim, s.swim_back);
-    }
-    if flags & f::WALK_MODE != 0 {
-        return if s.walk < s.run { s.walk } else { s.run };
-    }
-    back(s.run, s.run_back)
 }
 
 #[cfg(test)]
@@ -236,7 +214,7 @@ mod tests {
         assert_eq!(speed_12340(&odd, f::BACKWARD, None), 7.0);
     }
 
-    /// `0x7c4c90` for a forward runner answers the run speed, and `0x5fc350` finds it above twice
+    /// `0x987570` for a forward runner answers the run speed, and `0x5fc350` finds it above twice
     /// the walk speed.
     #[test]
     fn a_forward_runner_is_running() {
@@ -265,9 +243,9 @@ mod tests {
         assert!(unit_motion(f::FORWARD | f::SWIMMING, Some(&fast), None).moves_at_run_speed());
     }
 
-    /// A live spline is the current speed (`0x7c4caa`), whatever the flags pick: a mob fleeing at
+    /// A live spline is the current speed (`0x987584`), whatever the flags pick: a mob fleeing at
     /// 8 yd/s runs, and one wandering at 2.5 does not though its flags are a runner's (a creature's
-    /// spline sets forward and no walk mode, [`unify`]); with no direction bit it is 0.
+    /// spline sets forward and no walk mode, [`unify`]); with no direction or vertical bit it is 0.
     #[test]
     fn a_spline_is_its_own_speed() {
         let s = speeds();
@@ -278,6 +256,9 @@ mod tests {
         assert_eq!(wandering.speed, 2.5);
         assert!(!wandering.moves_at_run_speed());
         assert_eq!(unit_motion(0, Some(&s), Some(&spline(16.0, 2))).speed, 0.0);
+        // An ascend bit alone takes the spline (`0xc0000f`).
+        let ascending = unit_motion(f::ASCENDING, Some(&s), Some(&spline(16.0, 2)));
+        assert_eq!(ascending.speed, 8.0);
     }
 
     /// No speeds streamed: not running.

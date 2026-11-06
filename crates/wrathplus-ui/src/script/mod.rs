@@ -82,6 +82,7 @@ pub use wrath_static_popup::{WrathInstanceLock, WrathPopupRequest, WrathPopupSta
 pub use wrath_titles::WrathCharTitle;
 pub use wrath_unit_casts::WrathUnitCast;
 pub use wrath_unit_popup::{WrathChatLine, WrathUnitPopupRequest, WrathUnitPopupState};
+mod char_skill;
 mod char_stats;
 mod chat_misc;
 mod chat_send;
