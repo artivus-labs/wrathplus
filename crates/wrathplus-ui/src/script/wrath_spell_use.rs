@@ -283,7 +283,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             if id <= 0 {
                 return Err(usage());
             }
-            let pet = super::wrath_surface::wrath_spell_queries::pet_flag(lua, pet)?;
+            // isPet is `0x815500(L, 2, 0)` (`0x53b701`), as IsSpellKnown's.
+            let pet = super::binding_abi::bool_or_default(Some(&pet), false);
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             let book = if pet {
                 &model.pet_book.slots
