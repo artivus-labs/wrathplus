@@ -54,18 +54,28 @@ impl Manager {
         };
         let mut status = column![
             row![
-                column![text("Local Playerbots server").size(20), text(state.label()).color(style::GOLD)].spacing(6),
+                column![
+                    text("Local Playerbots server").size(20),
+                    text(state.label()).color(style::GOLD)
+                ]
+                .spacing(6),
                 space().width(Fill),
-                button(state.control_label()).style(style::primary)
+                button(state.control_label())
+                    .style(style::primary)
                     .on_press_maybe(state.control_input().map(Message::Server)),
                 action("Refresh", Action::Status),
                 button("View logs").on_press(Message::Navigate(crate::Page::Activity)),
-            ].spacing(12).align_y(iced::Center),
-            text("Play locally with computer-controlled companions. Stopping the server keeps your characters and progress.").size(13).color(style::MUTED),
+            ]
+            .spacing(12)
+            .align_y(iced::Center),
+            text("Play locally with computer-controlled companions.")
+                .size(13)
+                .color(style::MUTED),
             text(state.detail()).size(12).color(style::MUTED),
             action("Start / check LLM bridge", Action::Start),
             button("Use this server for the client").on_press(Message::Server(Input::Connect)),
-        ].spacing(12);
+        ]
+        .spacing(12);
         if state.busy && !matches!(state.active, Some(Action::Status)) {
             status = status.push(text(&state.stage).size(14));
             if let Some(started) = state.started {
@@ -103,8 +113,10 @@ impl Manager {
             status = status.push(text(error).color(style::GOLD));
         }
         let settings = column![
-            text("Server files (advanced)").size(18),
-            text("Set up by the steps above. Already have a clean AzerothCore Playerbot checkout or extracted server data? Enter their folders here instead.").size(13).color(style::MUTED),
+            text("Server files").size(18),
+            text("Filled in by the steps above, or enter your own folders.")
+                .size(13)
+                .color(style::MUTED),
             text("Source folder").size(13),
             text_input("AzerothCore source folder", &state.source)
                 .on_input_maybe(editable.then_some(|v| Message::Server(Input::Source(v))))
@@ -136,13 +148,14 @@ impl Manager {
         if let Some(guide) = self.server_guide() {
             page = page.push(guide);
         }
+        // The server files sit right under the status: nothing else works until they are set.
         page.push(card(status))
+            .push(card(settings))
             .push(self.transfer_card())
             .push(card(self.server_types()))
             .push(card(self.server_settings()))
             .push(card(build))
             .push(state.build_feedback_view())
-            .push(card(settings))
             .into()
     }
 }

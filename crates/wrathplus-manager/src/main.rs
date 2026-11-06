@@ -275,15 +275,9 @@ impl Manager {
             Page::Activity => self.activity(),
             Page::Settings => self.settings(),
         };
-        let content = column![
-            header,
-            text("Client, addon and managed server setup · Profiles carry server modules and settings")
-                .size(11)
-                .color(style::GOLD),
-            scrollable(body).height(Fill),
-        ]
-        .spacing(14)
-        .height(Fill);
+        let content = column![header, scrollable(body).height(Fill),]
+            .spacing(14)
+            .height(Fill);
         self.config_overlay(
             row![
                 sidebar,
