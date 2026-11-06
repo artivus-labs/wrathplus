@@ -36,15 +36,22 @@ fn guids() -> UnitGuids {
     }
 }
 
-/// A model over `g`, party1 named "Bob", the player "Me", the pet a pushed "Rex".
+/// A model over `g`, party1 named "Bob", party2 a name of `0x30` bytes, the player "Me", the pet
+/// a pushed "Rex".
 fn model(g: UnitGuids) -> Model {
     let mut m = Model::new();
     m.unit_guids = g;
     m.player_record.name = "Me".into();
-    m.party.members = vec![PartyMemberInfo {
-        name: "Bob".into(),
-        guid: P1,
-    }];
+    m.party.members = vec![
+        PartyMemberInfo {
+            name: "Bob".into(),
+            guid: P1,
+        },
+        PartyMemberInfo {
+            name: "x".repeat(0x30),
+            guid: FAR,
+        },
+    ];
     let rex = UnitState {
         name: Some("Rex".into()),
         guid: PET,
@@ -237,7 +244,15 @@ fn the_resolver_answers_a_guid_the_sentinel_or_false() {
         ("rex", ok(PET)),
         ("rex-target", ok(NOBODY)),
         ("Bobtarget", fail),
+        // `-targettarget` is neither the whole `-target` nor `-target-`: it stays in the name.
+        ("Bob-targettarget", fail),
+        ("Bob-target-", fail),
         ("Bob-Realm", fail),
+        // The copy stops at `0x30` bytes (`0x60a667`), and the rest is the suffix loop's.
+        (
+            "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxtarget",
+            ok(NOBODY),
+        ),
     ] {
         assert_eq!(m.resolve_token(t), want, "{t}");
     }

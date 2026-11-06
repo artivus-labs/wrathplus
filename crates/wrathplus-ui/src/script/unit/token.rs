@@ -215,6 +215,7 @@ impl Model {
     /// text; `None` (false, guid zeroed) on anything else or on a `pet` it does not allow.
     fn suffixes(&self, mut guid: u64, mut p: &[u8]) -> Option<u64> {
         let g = &self.unit_guids;
+        let me = self.me();
         while !p.is_empty() {
             if p[0] == b'-' {
                 p = &p[1..];
@@ -223,7 +224,7 @@ impl Model {
                 p = &p[6..];
                 // The player's target is the target global (`0x60aae3`); another unit's is its
                 // `UNIT_FIELD_TARGET`, and a unit not held is 0 (`0x60ab10`), which loops on.
-                guid = if guid == g.player {
+                guid = if guid == me {
                     g.target
                 } else {
                     g.held.get(&guid).copied().unwrap_or(0)
@@ -232,8 +233,8 @@ impl Model {
                 // `0x60ab41`-`0x60ab76`: the player, a group member (`0x512a00`), or any unit
                 // while the player's `PLAYER_FLAGS` bit 19 is set.
                 let flags = self.pushed_unit("player").map_or(0, |u| u.player_flags);
-                let any = g.player != 0 && flags & PLAYER_FLAGS_PET_ANY != 0;
-                if !(guid == g.player || self.is_member(guid) || any) {
+                let any = me != 0 && flags & PLAYER_FLAGS_PET_ANY != 0;
+                if !(guid == me || self.is_member(guid) || any) {
                     return None;
                 }
                 p = &p[3..];
@@ -245,45 +246,87 @@ impl Model {
         Some(guid)
     }
 
-    /// `0x512a00`: the player or a party slot (`0x52c680`), or a raid row (`0x5726f0`).
-    fn is_member(&self, guid: u64) -> bool {
-        let g = &self.unit_guids;
-        guid != 0 && (guid == g.player || g.party.contains(&guid) || g.raid.contains(&guid))
+    /// A guid-table slot, else the guid of the snapshot pushed under its token, as [`Self::base`]
+    /// reads a base.
+    fn slot(&self, table: u64, token: impl FnOnce() -> String) -> u64 {
+        if table != 0 {
+            return table;
+        }
+        let pushed = self.pushed_unit(&token()).filter(|u| u.exists);
+        pushed.map_or(0, |u| u.guid)
     }
 
-    /// `0x512a30`: us or our pet (`0x52d310`), a party member or its pet, a raid member or its pet
-    /// (`0x573200`).
-    pub(crate) fn ours_or_grouped(&self, guid: u64) -> bool {
+    /// The active player's guid (`0x4d3790`).
+    fn me(&self) -> u64 {
+        self.slot(self.unit_guids.player, || "player".into())
+    }
+
+    /// The player's pet, `CHARM` else `SUMMON` (`0x60acc3`-`0x60acd8`); 0 without the player.
+    fn my_pet(&self) -> u64 {
+        match self.me() {
+            0 => 0,
+            _ => self.slot(self.unit_guids.pet, || "pet".into()),
+        }
+    }
+
+    /// A party slot's index (`0xbd1948`).
+    fn party_index(&self, guid: u64) -> Option<usize> {
+        self.unit_guids.party.iter().position(|&m| m == guid)
+    }
+
+    /// A raid row's index (`0xbeb568`).
+    fn raid_index(&self, guid: u64) -> Option<usize> {
+        self.unit_guids.raid.iter().position(|&m| m == guid)
+    }
+
+    /// The pet of party slot `i` or raid row `i`.
+    fn member_pet(&self, raid: bool, i: usize) -> u64 {
         let g = &self.unit_guids;
+        let table = if raid {
+            &g.raid_pets[..]
+        } else {
+            &g.party_pets[..]
+        };
+        table.get(i).copied().unwrap_or(0)
+    }
+
+    /// `0x512a00`: the player or a party slot (`0x52c680`), or a raid row (`0x5726f0`).
+    fn is_member(&self, guid: u64) -> bool {
         guid != 0
-            && (guid == g.player
-                || guid == g.pet
-                || [&g.party[..], &g.party_pets, &g.raid, &g.raid_pets]
-                    .iter()
-                    .any(|t| t.contains(&guid)))
+            && (guid == self.me()
+                || self.party_index(guid).is_some()
+                || self.raid_index(guid).is_some())
+    }
+
+    /// `0x512a30` = `0x52d310 || 0x573200`: us or our pet; a party member or its pet; a raid
+    /// member or its pet, the member's `CHARM`/`SUMMON` or its row's pet (`0x573255`-`0x57328c`).
+    pub(crate) fn ours_or_grouped(&self, guid: u64) -> bool {
+        let rows = self.unit_guids.raid_pets.len();
+        names_unit(guid)
+            && (self.is_member(guid)
+                || guid == self.my_pet()
+                || (0..4).any(|i| self.member_pet(false, i) == guid)
+                || (0..rows).any(|i| self.member_pet(true, i) == guid))
     }
 
     /// A `pet` hop's unit (`0x60ab8e`-`0x60abb1`): the held unit's `CHARM`, else `SUMMON`, 0 when
     /// not held. The app carries it for the player and its group members; any other unit's, which
     /// only the bit-19 arm reaches, reads 0.
     fn pet_of(&self, guid: u64) -> u64 {
-        let g = &self.unit_guids;
         if guid == 0 {
             return 0;
         }
-        if guid == g.player {
-            return g.pet;
+        if guid == self.me() {
+            return self.my_pet();
         }
-        if !g.held.contains_key(&guid) {
+        let held = self.unit_guids.held.contains_key(&guid)
+            || self.unit_by_guid(guid).is_some_and(|u| u.has_object);
+        if !held {
             return 0;
         }
-        let row = |table: &[u64], pets: &[u64]| {
-            let i = table.iter().position(|&m| m == guid)?;
-            pets.get(i).copied()
-        };
-        row(&g.party, &g.party_pets)
-            .or_else(|| row(&g.raid, &g.raid_pets))
-            .unwrap_or(0)
+        let party = self.party_index(guid).map(|i| self.member_pet(false, i));
+        let raid = || self.raid_index(guid).map(|i| self.member_pet(true, i));
+        party.or_else(raid).unwrap_or(0)
     }
 
     /// The name fallback `0x60a630`: the text up to `0x30` bytes, cut before a `-` that starts the
@@ -311,42 +354,43 @@ impl Model {
     /// The names `0x60a630` compares ([`sstr_eq_i`], `0x76ea40`), in its order: the player
     /// (`0x60a6f0`), then each raid row if there is a raid, else each party slot, else each arena
     /// slot (`0x60a74c`-`0x60a892`); then, still nobody, our pet (`0x60a8bc`) and the same rows'
-    /// pets (`0x60a916`-`0x60aa66`). The members are the roster's rows, names and guids together.
+    /// pets (`0x60a916`-`0x60aa66`). The members are the roster's rows, each named as `0x60a360`
+    /// names it ([`Self::name_of`]).
     /// Single realm: a name carries no `-realm`. 0 for no match.
     fn name_guid(&self, name: &[u8]) -> u64 {
         let (g, party) = (&self.unit_guids, &self.party);
         let is = |n: &str| !n.is_empty() && sstr_eq_i(n.as_bytes(), name);
         let named = |guid: u64| guid != 0 && self.name_of(guid).is_some_and(is);
         let arena = g.arena_count();
-        let row = |rows: &mut dyn Iterator<Item = (u64, &str)>| {
-            Iterator::find(&mut &mut *rows, |&(m, n)| m != 0 && is(n)).map_or(0, |(m, _)| m)
-        };
         let (raid, slots) = (!party.raid.is_empty(), !party.members.is_empty());
-        let pets = if raid {
-            &g.raid_pets[..]
+        let rows: Vec<u64> = if raid {
+            party.raid.iter().map(|m| m.guid).collect()
         } else if slots {
-            &g.party_pets[..party.members.len().min(4)]
+            party.members.iter().take(4).map(|m| m.guid).collect()
         } else {
-            &g.arena_pets[..arena]
+            g.arena[..arena].to_vec()
         };
         // The player's name answers its guid and skips the members (`0x60a6f0`-`0x60a739`).
-        let guid = if g.player != 0 && is(&self.player_record.name) {
-            g.player
-        } else if raid {
-            row(&mut party.raid.iter().map(|m| (m.guid, m.name.as_str())))
-        } else if slots {
-            row(&mut party.members.iter().map(|m| (m.guid, m.name.as_str())))
-        } else {
-            let names = g.arena[..arena].iter();
-            row(&mut names.map(|&a| (a, self.name_of(a).unwrap_or(""))))
+        let me = self.me();
+        if me != 0 && (named(me) || is(&self.player_record.name)) {
+            return me;
+        }
+        if let Some(&m) = rows.iter().find(|&&m| named(m)) {
+            return m;
+        }
+        let pet = self.my_pet();
+        if named(pet) {
+            return pet;
+        }
+        let pet_of_row = |i: usize| match (raid, slots) {
+            (true, _) => self.member_pet(true, i),
+            (false, true) => self.member_pet(false, i),
+            _ => g.arena_pets.get(i).copied().unwrap_or(0),
         };
-        if guid != 0 {
-            return guid;
-        }
-        if g.player != 0 && named(g.pet) {
-            return g.pet;
-        }
-        pets.iter().copied().find(|&p| named(p)).unwrap_or(0)
+        (0..rows.len())
+            .map(pet_of_row)
+            .find(|&p| named(p))
+            .unwrap_or(0)
     }
 
     /// A unit's name as `0x60a360` reads it, the object's else the name cache's: here a

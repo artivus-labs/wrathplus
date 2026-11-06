@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use super::*;
-use crate::script::{PartyMemberInfo, PartyState};
+use crate::script::{PartyMemberInfo, PartyState, RaidMemberInfo, UnitGuids};
 
 fn vm() -> UiScript {
     UiScript::new().unwrap()
@@ -164,6 +164,13 @@ fn feign_death_shows_only_for_our_own_group() {
         ],
         ..Default::default()
     });
+    s.set_unit_guids(&UnitGuids {
+        player: 1,
+        target: 0x99,
+        focus: 0x22,
+        party: [0x21, 0x22, 0, 0],
+        ..Default::default()
+    });
     assert!(s
         .eval::<bool>(
             "return UnitIsFeignDeath('party1') == 1 and UnitIsFeignDeath('target') == nil \
@@ -172,6 +179,28 @@ fn feign_death_shows_only_for_our_own_group() {
         .unwrap());
     let err = s.run("UnitIsFeignDeath()").unwrap_err().to_string();
     assert!(err.contains("Usage: UnitIsFeignDeath(\"unit\")"), "{err}");
+    // A raid member's pet is in the group too (`0x573200`, the member's pet `0x573255`-`0x57328c`).
+    s.set_party(PartyState {
+        own_guid: 1,
+        raid: (1..=5)
+            .map(|i| RaidMemberInfo {
+                guid: 0x40 + i,
+                online: true,
+                ..Default::default()
+            })
+            .collect(),
+        ..Default::default()
+    });
+    s.set_unit_guids(&UnitGuids {
+        player: 1,
+        raid: (0x41..=0x45).collect(),
+        raid_pets: vec![0, 0, 0, 0, 0x31],
+        ..Default::default()
+    });
+    s.set_unit("raidpet5", Some(feigning(0x31)));
+    assert!(s
+        .eval::<bool>("return UnitIsFeignDeath('raidpet5') == 1")
+        .unwrap());
 }
 
 #[test]
@@ -297,26 +326,6 @@ fn dismount_clears_the_mount_locally_until_the_display_moves() {
 }
 
 #[test]
-fn a_name_splits_at_target_and_pet_suffixes_only() {
-    assert_eq!(split_name("Bob-target"), ("Bob", "-target"));
-    assert_eq!(split_name("Bob-PET"), ("Bob", "-PET"));
-    assert_eq!(split_name("Bob-pet-target"), ("Bob", "-pet-target"));
-    assert_eq!(split_name("Bob-Realm-target-"), ("Bob-Realm", "-target-"));
-    // `-targettarget` is neither the whole `-target` nor `-target-`, so it stays in the name.
-    assert_eq!(split_name("Bob-targettarget"), ("Bob-targettarget", ""));
-    let long = "x".repeat(60);
-    assert_eq!(split_name(&long), (&long[..48], &long[48..]));
-    assert_eq!(
-        suffix_hops("-target-pettarget"),
-        Some(vec![Hop::Target, Hop::Pet, Hop::Target])
-    );
-    assert_eq!(suffix_hops("TARGETpet"), Some(vec![Hop::Target, Hop::Pet]));
-    assert_eq!(suffix_hops(""), Some(vec![]));
-    assert_eq!(suffix_hops("-"), None);
-    assert_eq!(suffix_hops("-focus"), None);
-}
-
-#[test]
 fn a_pet_hop_names_our_or_a_group_members_pet_only() {
     let mut s = vm();
     let named = |guid, name: &str| UnitState {
@@ -338,6 +347,13 @@ fn a_pet_hop_names_our_or_a_group_members_pet_only() {
             .to_vec(),
         ..Default::default()
     });
+    s.set_unit_guids(&UnitGuids {
+        player: 1,
+        pet: 2,
+        party: [0x21, 0x31, 0, 0],
+        party_pets: [0x22, 0, 0, 0],
+        ..Default::default()
+    });
     let speed = |speed| WrathUnitExtra {
         speed,
         ..Default::default()
@@ -355,5 +371,15 @@ fn a_pet_hop_names_our_or_a_group_members_pet_only() {
         .unwrap(),
         // A pet has no pet hop (not a group member), `-pets` is no hop, and Ann has no pet.
         (9.0, 6.0, 3.0, 0.0, 0.0, 0.0)
+    );
+    // A `pet` suffix off a base (`0x60aaa0`), and a name that starts with a base word: `ra` after
+    // `pet` is no suffix, so the text goes to the names (`0x60ad67`).
+    s.set_unit("party2", Some(named(0x31, "Petra")));
+    assert_eq!(
+        s.eval::<(f64, f64, f64)>(
+            "return GetUnitSpeed('playerpet'), GetUnitSpeed('party1pet'), GetUnitSpeed('petra')"
+        )
+        .unwrap(),
+        (9.0, 6.0, 3.0)
     );
 }

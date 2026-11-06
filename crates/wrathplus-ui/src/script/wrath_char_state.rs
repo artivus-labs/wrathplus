@@ -187,134 +187,11 @@ fn player_flag(lua: &Lua, pick: Pick) -> Value {
     flag(s.player.has_player && pick(&s.player))
 }
 
-/// One hop of `0x60aaa0`'s suffix chain.
-#[derive(Clone, Copy, Debug, PartialEq)]
-enum Hop {
-    /// `target`: the unit's target, ours for us.
-    Target,
-    /// `pet`: the unit's charm, else its summon; only for us or a party or raid member
-    /// (`0x512a00`).
-    Pet,
-}
-
-/// The longest name `0x60a630` copies (`0x2f < len` stops it).
-const NAME_MAX: usize = 0x30;
-
-/// `0x60a630`'s split: the name runs to a `-` that starts `-target` or `-pet` (the whole rest)
-/// or `-target-` / `-pet-`, compared case-blind; any other `-` is part of the name. The copy stops
-/// at 48 bytes, the rest going to the suffix chain.
-fn split_name(arg: &str) -> (&str, &str) {
-    let b = arg.as_bytes();
-    let starts = |i: usize, p: &str| {
-        b.get(i..i + p.len())
-            .is_some_and(|s| s.eq_ignore_ascii_case(p.as_bytes()))
-    };
-    let whole = |i: usize, p: &str| b.len() - i == p.len() && starts(i, p);
-    let end = (0..b.len().min(NAME_MAX))
-        .find(|&i| {
-            b[i] == b'-'
-                && (whole(i, "-target")
-                    || whole(i, "-pet")
-                    || starts(i, "-target-")
-                    || starts(i, "-pet-"))
-        })
-        .unwrap_or(b.len().min(NAME_MAX));
-    // A cut inside a multi-byte character reads as no name match, as no ASCII name ends there.
-    (arg.get(..end).unwrap_or(""), arg.get(end..).unwrap_or(""))
-}
-
-/// `0x60aaa0`'s chain: `target` and `pet` hops, each after an optional `-`, compared case-blind
-/// (`__strnicmp`); `None` when anything else follows.
-fn suffix_hops(mut s: &str) -> Option<Vec<Hop>> {
-    let mut hops = Vec::new();
-    while !s.is_empty() {
-        s = s.strip_prefix('-').unwrap_or(s);
-        let (hop, len) = if s.get(..6).is_some_and(|p| p.eq_ignore_ascii_case("target")) {
-            (Hop::Target, 6)
-        } else if s.get(..3).is_some_and(|p| p.eq_ignore_ascii_case("pet")) {
-            (Hop::Pet, 3)
-        } else {
-            return None;
-        };
-        hops.push(hop);
-        s = &s[len..];
-    }
-    Some(hops)
-}
-
-/// A `pet` hop from `token`: the pet token of us or the party or raid member the token's unit is
-/// (`0x512a00` → `0x52c680`, `0x5726f0`). `None` for anyone else, where stock fails the resolve.
-fn pet_of(model: &Model, token: &str) -> Option<String> {
-    let guid = model.unit(token).map(|u| u.guid).filter(|&g| g != 0)?;
-    let party = &model.party;
-    if model.unit("player").is_some_and(|u| u.guid == guid) || party.own_guid == guid {
-        return Some("pet".into());
-    }
-    let slot = |n: usize, group: &str| {
-        (1..=n).find(|i| {
-            model
-                .unit(&format!("{group}{i}"))
-                .is_some_and(|u| u.guid == guid)
-        })
-    };
-    if party.members.iter().any(|m| m.guid == guid) {
-        return slot(4, "party").map(|i| format!("partypet{i}"));
-    }
-    if party.raid.iter().any(|m| m.guid == guid) {
-        return slot(40, "raid").map(|i| format!("raidpet{i}"));
-    }
-    None
-}
-
-/// `0x60a630`, `0x60abf0`'s name arm: the name ([`split_name`]) matched case-blind against
-/// `UnitName` of `player`, then the raid members (else the party, else the arena opponents), then
-/// `pet` and those members' pets; then the `target`/`pet` hops of `0x60aaa0` ([`suffix_hops`]).
-/// The token it names, `None` when nobody bears the name or a hop fails.
-fn token_for_name(model: &Model, arg: &str) -> Option<String> {
-    let (name, suffix) = split_name(arg);
-    let hops = suffix_hops(suffix)?;
-    if name.is_empty() {
-        return None;
-    }
-    let party = &model.party;
-    let (group, size) = if !party.raid.is_empty() {
-        ("raid", party.raid.len())
-    } else if !party.members.is_empty() {
-        ("party", party.members.len())
-    } else {
-        ("arena", 5)
-    };
-    let members = (1..=size).map(|i| format!("{group}{i}"));
-    let pets = (1..=size).map(|i| format!("{group}pet{i}"));
-    let base = std::iter::once("player".to_string())
-        .chain(members)
-        .chain(std::iter::once("pet".to_string()))
-        .chain(pets)
-        .find(|t| {
-            let n = model.unit(t).and_then(|u| u.name.as_deref());
-            n.is_some_and(|n| n.eq_ignore_ascii_case(name))
-        })?;
-    hops.into_iter().try_fold(base, |token, hop| match hop {
-        Hop::Target => Some(format!("{token}target")),
-        Hop::Pet => pet_of(model, &token),
-    })
-}
-
-/// The token `0x60abf0` resolves an argument to: a unit token as given, else a group member's
-/// name ([`token_for_name`]). It never raises.
-pub(crate) fn resolve_unit_arg(lua: &Lua, arg: &str) -> Option<String> {
-    let model = lua.app_data_ref::<Model>().expect("model app_data");
-    if model.resolve_token(arg).ok {
-        return Some(arg.to_string());
-    }
-    token_for_name(&model, arg)
-}
-
-/// The held unit an argument names through `0x60abf0`, mapped by `f`; `None` for no unit.
+/// The held unit an argument names through `0x60abf0` (a token, or a group member's name),
+/// mapped by `f`; `None` for no unit.
 fn held_unit<T>(lua: &Lua, arg: &str, f: impl FnOnce(&Model, &UnitState) -> T) -> Option<T> {
-    let token = resolve_unit_arg(lua, arg)?;
     let model = lua.app_data_ref::<Model>().expect("model app_data");
-    let unit = model.unit(&token).filter(|u| u.exists && u.has_object)?;
+    let unit = model.unit(arg).filter(|u| u.exists && u.has_object)?;
     Some(f(&model, unit))
 }
 
@@ -323,22 +200,6 @@ fn extra(lua: &Lua, token: &str) -> Option<WrathUnitExtra> {
     let guid = held_unit(lua, token, |_, u| u.guid)?;
     let s = lua.app_data_ref::<State>().expect("char state");
     Some(s.units.get(&guid).copied().unwrap_or_default())
-}
-
-/// `0x512a30`: the guid is us or our pet (`0x52d310`), a party member or their pet, or a raid
-/// member (`0x573200`).
-fn in_own_group(model: &Model, guid: u64) -> bool {
-    if guid == 0 {
-        return false;
-    }
-    let party = &model.party;
-    let token_guid = |t: &str| model.unit(t).map(|u| u.guid);
-    guid == party.own_guid
-        || token_guid("player") == Some(guid)
-        || token_guid("pet") == Some(guid)
-        || party.members.iter().any(|m| m.guid == guid)
-        || party.raid.iter().any(|m| m.guid == guid)
-        || (1..=4).any(|i| token_guid(&format!("partypet{i}")) == Some(guid))
 }
 
 /// `0x6de130` (`UnitIsTrivial`): not a player, and more than the grey band below the player:
@@ -409,7 +270,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         lua.create_function(|lua, token: Value| {
             let token = string_arg(lua, token, "Usage: UnitIsFeignDeath(\"unit\")")?;
             let hit = held_unit(lua, &token, |model, u| {
-                u.dynamic_flags & 0x20 != 0 && in_own_group(model, u.guid)
+                u.dynamic_flags & 0x20 != 0 && model.ours_or_grouped(u.guid)
             });
             Ok(flag(hit == Some(true)))
         })?,
