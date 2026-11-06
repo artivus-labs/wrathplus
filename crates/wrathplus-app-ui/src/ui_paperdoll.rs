@@ -46,22 +46,40 @@ fn load_tables(
     }
 }
 
-// Player.cpp:5393/5416. Health is per tick (2s); mana is per second, and the
-// stock PaperDollFrame.lua multiplies mana by five for its spirit tooltip.
+/// `0x71ba60` and `0x71b9f0`, per second: health `n * gtOCTRegenHP + (spi - n) * gtRegenHPPerSpt`
+/// with `n = min(max(spi, 0), 50)` (`0xadaa10`); mana `max(spi, 0) * sqrt(max(int, 0)) *
+/// gtRegenMPPerSpt`. A missing row reads 0.
 fn spirit_regen(
-    spirit: f32,
+    spirit: i32,
+    intellect: i32,
     hp_base: Option<f32>,
     hp_more: Option<f32>,
     mp: Option<f32>,
-) -> (f32, f32) {
+) -> (f64, f64) {
+    let spirit = spirit.max(0);
     let hp = hp_base
         .zip(hp_more)
         .map(|(base, more)| {
-            let first = spirit.min(50.0);
-            (first * base + (spirit - first) * more) * 2.0
+            let first = spirit.min(50);
+            f64::from(first) * f64::from(base) + f64::from(spirit - first) * f64::from(more)
         })
         .unwrap_or(0.0);
-    (hp, mp.map(|ratio| spirit * ratio).unwrap_or(0.0))
+    let mp = mp.map_or(0.0, |ratio| {
+        // `0x71ba4e`: the ratio times the root, then `fimul` by the spirit.
+        f64::from(ratio) * f64::from(intellect.max(0)).sqrt() * f64::from(spirit)
+    });
+    (hp, mp)
+}
+
+/// `0x71bae0` (Agility) and `0x71bb70` (Intellect): `(max(stat, 0) * ratio + base) * 100`, and 0
+/// when the class/level ratio is 0 (`0x71bb29`). A missing row reads 0.
+fn stat_crit(stat: i32, ratio: Option<f32>, base: Option<f32>) -> f64 {
+    ratio
+        .zip(base)
+        .filter(|&(ratio, _)| ratio != 0.0)
+        .map_or(0.0, |(ratio, base)| {
+            (f64::from(stat.max(0)) * f64::from(ratio) + f64::from(base)) * 100.0
+        })
 }
 
 // Player.cpp:5358. Do not use its server-side 1.0 fallback when a client row
@@ -78,9 +96,10 @@ fn conversions(f: &ObjectFields, tables: &WrathGameTables) -> WrathStatConversio
     let class = f.unit_class().unwrap_or(0);
     let level = f.unit_level().unwrap_or(0);
     let row = |table| tables.class_level(table, class, level);
-    let stat = |index| f.unit_stat(index).unwrap_or(0) as f32;
+    let stat = |index| f.unit_stat(index).unwrap_or(0) as i32;
     let (health_from_spirit, mana_from_spirit) = spirit_regen(
         stat(4),
+        stat(3),
         row(GameTable::OctRegenHp),
         row(GameTable::RegenHpPerSpirit),
         row(GameTable::RegenMpPerSpirit),
@@ -92,16 +111,21 @@ fn conversions(f: &ObjectFields, tables: &WrathGameTables) -> WrathStatConversio
             tables.combat_rating(i as u8, level),
         )
     });
-    // These APIs expose only the stat contribution, not Player.cpp's base intercept.
+    let base = |table| tables.crit_base(table, class);
     WrathStatConversions {
-        crit_from_agility: row(GameTable::MeleeCrit)
-            .map(|ratio| stat(1) * ratio * 100.0)
-            .unwrap_or(0.0),
-        spell_crit_from_intellect: row(GameTable::SpellCrit)
-            .map(|ratio| stat(3) * ratio * 100.0)
-            .unwrap_or(0.0),
+        crit_from_agility: stat_crit(
+            stat(1),
+            row(GameTable::MeleeCrit),
+            base(GameTable::MeleeCritBase),
+        ),
+        spell_crit_from_intellect: stat_crit(
+            stat(3),
+            row(GameTable::SpellCrit),
+            base(GameTable::SpellCritBase),
+        ),
         health_from_spirit,
-        mana_from_spirit,
+        // `GetUnitManaRegenRateFromSpirit` adds `0x9e1134`, 0.001f, past its gate (`0x612a64`).
+        mana_from_spirit: mana_from_spirit + f64::from(0.001f32),
         rating_bonus,
     }
 }
@@ -242,17 +266,26 @@ mod tests {
         );
     }
     #[test]
-    fn spirit_tick_split_and_missing_rows_are_not_fabricated() {
+    fn spirit_regen_and_stat_crit_are_the_clients_per_second_formulas() {
         assert_eq!(
-            spirit_regen(40.0, Some(0.5), Some(0.2), Some(0.1)),
-            (40.0, 4.0)
+            spirit_regen(40, 100, Some(0.5), Some(0.25), Some(0.125)),
+            (20.0, 50.0)
         );
         assert_eq!(
-            spirit_regen(60.0, Some(0.5), Some(0.2), Some(0.1)),
-            (54.0, 6.0)
+            spirit_regen(60, -4, Some(0.5), Some(0.25), Some(0.125)),
+            (27.5, 0.0)
         );
-        assert_eq!(spirit_regen(60.0, None, Some(0.2), Some(0.1)), (0.0, 6.0));
-        assert_eq!(spirit_regen(60.0, Some(0.5), None, None), (0.0, 0.0));
+        assert_eq!(
+            spirit_regen(-9, 100, Some(0.5), Some(0.25), Some(0.125)),
+            (0.0, 0.0)
+        );
+        assert_eq!(spirit_regen(60, 100, None, Some(0.2), None), (0.0, 0.0));
+        // A level-1 Warrior's Agility 20: the class base is added; a zero ratio is a flat 0.
+        let crit = stat_crit(20, Some(0.002587), Some(0.031891));
+        assert!((crit - 8.3631).abs() < 1e-4, "{crit}");
+        assert_eq!(stat_crit(-5, Some(0.5), Some(0.25)), 25.0);
+        assert_eq!(stat_crit(20, Some(0.0), Some(0.25)), 0.0);
+        assert_eq!(stat_crit(20, None, Some(0.25)), 0.0);
     }
     #[test]
     fn rating_conversion_requires_both_verified_rows_and_positive_divisor() {

@@ -96,6 +96,7 @@ mod death;
 pub mod diagnostics;
 mod editbox;
 pub mod instance;
+mod stat_unit;
 pub(crate) use editbox::{adopt_text_region, editbox_text_region_wrapper};
 pub(crate) mod addon;
 mod addon_enable;
