@@ -149,7 +149,7 @@ fn unit_guid(model: &Model, unit: Option<&Value>) -> Option<u64> {
     if token.is_empty() {
         return Some(model.unit_guids.target);
     }
-    model.unit_guids.resolve(&token).ok()?
+    model.unit_guid(&token)
 }
 
 /// `0x809610`'s target word: `Targets` adjusted by each `EffectImplicitTargetA`, and whether one

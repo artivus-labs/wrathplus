@@ -7,7 +7,7 @@ use mlua::{Lua, MultiValue, Value};
 
 use super::binding_abi::{bool_or_default, flag, number_arg};
 use super::calls::{NearestMode, ScriptCall};
-use super::wrath_char_state::{resolve_unit_arg, with_char};
+use super::wrath_char_state::with_char;
 use super::Model;
 
 /// `VEHICLE_SEAT_FLAG_CAN_CONTROL`, `UnitInVehicleControlSeat`'s bit (`0x613700`).
@@ -40,10 +40,8 @@ fn ignored(lua: &Lua, model: &Model, arg: &str) -> bool {
         .iter()
         .any(|n| n.eq_ignore_ascii_case(arg));
     listed
-        || resolve_unit_arg(lua, arg)
-            .and_then(|t| model.unit(&t))
-            .map(|u| u.guid)
-            .filter(|&g| g != 0)
+        || model
+            .unit_guid(arg)
             .is_some_and(|g| with_char(lua, |c| c.ignore_guids.contains(&g)))
 }
 
@@ -72,11 +70,10 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     g.set(
         "UnitInVehicleControlSeat",
         lua.create_function(|lua, token: Value| {
-            let token = super::binding_abi::optional_string(lua, &token)
-                .and_then(|t| resolve_unit_arg(lua, &t));
+            let token = super::binding_abi::optional_string(lua, &token);
             let model = model(lua);
             let seat = token
-                .and_then(|t| model.unit(&t).map(|u| u.guid))
+                .and_then(|t| model.unit_guid(&t))
                 .and_then(|guid| model.wrath_vehicles.units.get(&guid))
                 .and_then(|v| v.seat);
             Ok(seat.is_some_and(|(flags, _)| flags & SEAT_CAN_CONTROL != 0))

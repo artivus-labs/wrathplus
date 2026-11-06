@@ -11,8 +11,14 @@ fn action_state_bindings_answer_the_reference_conventions() {
 
     assert!(s.eval::<bool>("return IsUsableAction(3) == nil").unwrap());
     assert!(s.eval::<bool>("return IsActionInRange(3) == nil").unwrap());
+    assert!(
+        s.eval::<bool>("return IsActionInRange('x') == nil")
+            .unwrap(),
+        "no raise"
+    );
+    // An empty slot's enable is 0 (`0x5a8e40` writes nothing).
     assert!(s
-        .eval::<bool>("local st, d, e = GetActionCooldown(3); return st == 0 and d == 0 and e == 1")
+        .eval::<bool>("local st, d, e = GetActionCooldown(3); return st == 0 and d == 0 and e == 0")
         .unwrap());
 
     s.tick(100.0); // an arbitrary clock epoch
@@ -169,4 +175,30 @@ fn shapeshift_and_container_cooldowns_keep_their_anchors_too() {
     assert!(s
         .eval::<bool>("local st = GetContainerItemCooldown(0, 1); return math.abs(st - 50) < 1e-3")
         .unwrap());
+}
+
+#[test]
+fn action_cooldown_accepts_numeric_strings_and_truncates_or_raises_usage() {
+    let mut s = script();
+    s.set_action_state(
+        3,
+        Some(ActionState {
+            cooldown: Some((0, 0, false)),
+            ..Default::default()
+        }),
+    );
+    for arg in ["3", "3.9", "'3.9'", "0", "-1", "2^31"] {
+        assert_eq!(
+            s.eval::<(i64, i64, i64)>(&format!("return GetActionCooldown({arg})"))
+                .unwrap(),
+            (0, 0, 0)
+        );
+    }
+    for arg in ["", "nil", "true", "{}", "'bad'"] {
+        assert!(s
+            .run(&format!("GetActionCooldown({arg})"))
+            .unwrap_err()
+            .to_string()
+            .contains("Usage: GetActionCooldown(slot)"));
+    }
 }

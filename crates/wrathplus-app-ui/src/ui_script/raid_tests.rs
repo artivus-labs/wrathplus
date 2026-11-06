@@ -195,15 +195,20 @@ fn convert_to_raid_is_live_only_for_a_party_leader() {
         "and no raid verbs"
     );
 
-    // A party we lead: `leader_index == 0` with members.
-    s.set_party(PartyState {
+    let party = |leader_index, leader_guid| PartyState {
         members: vec![PartyMemberInfo {
             name: "Alice".into(),
             guid: 0xA,
         }],
-        leader_index: 0,
+        leader_index,
+        leader_guid,
+        ..Default::default()
+    };
+    s.set_player_req_state(wrathplus_ui::script::PlayerReqState {
+        level: 10,
         ..Default::default()
     });
+    s.set_party(party(0, 1)); // we lead (`0x52ccd0`) at level 10 (`0x574a59`)
     s.fire_event("PARTY_MEMBERS_CHANGED", Vec::new());
     assert_eq!(
         s.eval::<i64>("return RaidFrameConvertToRaidButton:IsEnabled()")
@@ -218,14 +223,7 @@ fn convert_to_raid_is_live_only_for_a_party_leader() {
         "and the button really sends it"
     );
 
-    s.set_party(PartyState {
-        members: vec![PartyMemberInfo {
-            name: "Alice".into(),
-            guid: 0xA,
-        }],
-        leader_index: 1,
-        ..Default::default()
-    });
+    s.set_party(party(1, 0xA));
     s.fire_event("PARTY_LEADER_CHANGED", Vec::new());
     assert_eq!(
         s.eval::<i64>("return RaidFrameConvertToRaidButton:IsEnabled()")
@@ -455,13 +453,15 @@ fn ready_check_is_the_leaders() {
         .take_party_requests()
         .contains(&PartyRequest::ReadyCheckStart));
 
-    let raid = twelve();
+    let mut raid = twelve(); // another leads, and our rank 0 is no officer (`0x5732b0`)
+    raid[0].rank = 0;
     s.set_party(PartyState {
         members: vec![PartyMemberInfo {
             name: "Member1".into(),
             guid: raid[1].guid,
         }],
         leader_index: 1,
+        leader_guid: raid[1].guid,
         raid,
         ..Default::default()
     });

@@ -477,24 +477,6 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // One return on every path, with no class gate (`0x51a310`). Answers the `"pet"` token only:
-    // the reference resolves any unit off its cached creature record (`[[unit+0xb30]+0x1c]`), so
-    // a wild boar's `"target"` answers "Boar" there and nil here. The pet page is the only stock
-    // caller.
-    g.set(
-        "UnitCreatureFamily",
-        lua.create_function(move |lua, token: Option<String>| {
-            let model = lua.app_data_ref::<Model>().expect("model app_data");
-            let family = token
-                .filter(|t| t.eq_ignore_ascii_case("pet"))
-                .and_then(|_| model.pet_bar.stats.family.as_deref());
-            Ok(match family {
-                Some(name) => Value::String(lua.create_string(name)?),
-                None => Value::Nil,
-            })
-        })?,
-    )?;
-
     // A real nil, never "": the stable reads it as a predicate and as a texture
     // (`PetStable.lua:51`, `161-162`), and an empty path would draw white.
     g.set(
@@ -1047,9 +1029,26 @@ mod tests {
             .unwrap());
     }
 
+    /// `0x611820`: `lua_isstring(1)`, then any held unit's template family word; the pet's is
+    /// the pet bar's.
     #[test]
     fn unit_creature_family_is_nil_on_every_absent_path() {
         let mut s = UiScript::new().unwrap();
+        let pet = 0xF140_0000_0000_0077;
+        s.set_unit_guids(&crate::script::UnitGuids {
+            player: 1,
+            pet,
+            ..Default::default()
+        });
+        let boar = crate::script::UnitState {
+            exists: true,
+            creature_family: Some("Boar".into()),
+            ..Default::default()
+        };
+        s.set_unit("mouseover", Some(boar));
+        let wild = s.eval::<String>(r#"return UnitCreatureFamily("mouseover")"#);
+        assert_eq!(wild.unwrap(), "Boar", "any unit, not only the pet");
+        assert!(s.run("UnitCreatureFamily()").is_err(), "the Usage gate");
         // No pet pushed.
         assert!(s
             .eval::<bool>(r#"return UnitCreatureFamily("pet") == nil"#)
@@ -1080,7 +1079,7 @@ mod tests {
                 .unwrap(),
             "Boar"
         );
-        for token in [r#""target""#, r#""player""#, "nil"] {
+        for token in [r#""target""#, r#""player""#] {
             assert!(
                 s.eval::<bool>(&format!("return UnitCreatureFamily({token}) == nil"))
                     .unwrap(),
@@ -1121,6 +1120,11 @@ mod tests {
     #[test]
     fn the_family_word_answers_for_a_non_hunter_pet() {
         let mut s = UiScript::new().unwrap();
+        s.set_unit_guids(&crate::script::UnitGuids {
+            player: 1,
+            pet: 2,
+            ..Default::default()
+        });
         s.set_pet_stats(
             true,
             PetStats {

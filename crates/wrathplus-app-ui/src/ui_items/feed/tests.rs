@@ -337,14 +337,16 @@ fn an_absent_self_player_is_no_source_never_an_empty_bag_burst() {
         Vec::new(),
         Vec::new(),
     );
-    assert_eq!(s.eval::<i64>("return GetContainerNumSlots(0)").unwrap(), 16);
+    // `GetContainerNumSlots(0)` is the constant 16; the free-slot table needs the pushed bag.
+    let free = "return select('#', GetContainerFreeSlots(0))";
+    assert_eq!(s.eval::<i64>(free).unwrap(), 1);
     assert_eq!(s.eval::<i64>("return BAG_EVENTS").unwrap(), 1);
 
     // The logout despawn frame: the VM keeps its bags and nothing fires.
     apply_container_source(&mut s, &mut memory, None, NO_BAGS, Vec::new(), Vec::new());
     assert_eq!(
-        s.eval::<i64>("return GetContainerNumSlots(0)").unwrap(),
-        16,
+        s.eval::<i64>(free).unwrap(),
+        1,
         "an absent source must not empty the VM's containers"
     );
     assert_eq!(
@@ -362,7 +364,7 @@ fn an_absent_self_player_is_no_source_never_an_empty_bag_burst() {
         Vec::new(),
         Vec::new(),
     );
-    assert_eq!(s.eval::<i64>("return GetContainerNumSlots(0)").unwrap(), 0);
+    assert_eq!(s.eval::<i64>(free).unwrap(), 0, "the backpack is gone");
     assert_eq!(s.eval::<i64>("return BAG_EVENTS").unwrap(), 2);
 }
 

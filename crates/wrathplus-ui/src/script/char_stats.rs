@@ -13,7 +13,7 @@
 //! vmangos narrows the four buff-split arrays with `uint32(float)` (`Object.cpp:759-763`), so a
 //! negative delta arrives as 0 from an arm64 server and intact from x86.
 
-use mlua::{Lua, Value};
+use mlua::{Lua, MultiValue, Value};
 
 use super::binding_abi::flag;
 use super::{binding_abi, Model};
@@ -707,38 +707,29 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // The reference's verbatim strings: `0x8489b4` when arg 1 is neither number nor string
-    // (`0x6f3510`), `0x848984` when arg 2 is not a number or not a whitelisted slot.
-    const USAGE_GET_INVENTORY_ITEM_COUNT: &str = "Usage: GetInventoryItemCount(unit, slot)";
-    const INVALID_SLOT_GET_INVENTORY_ITEM_COUNT: &str =
-        "Invalid inventory slot in GetInventoryItemCount";
-    // GetInventoryItemCount(unit, slot) (`0x4c8680`): an empty slot pushes 1 (`0x4c8797`), a
-    // non-container its stack count, a container past 0-based slot `0x16` 0 before any lookup
-    // (`0x4c87af`, so a bank bag shows no digit), and an equipped bag its `contents_count`.
+    // GetInventoryItemCount(unit, slot) (`0x5e9e40`): zero values, silently, for a slot the reader
+    // (`0x5e7c00`) refuses; an empty slot pushes 1, a non-container its count, a container past
+    // 0-based slot `0x16` 0, a worn bag its `contents_count`. Labelled: slot names (`0xad4350`) are
+    // not read; 12340 answers a quiver's ammo count and 0 for any other bag.
     g.set(
         "GetInventoryItemCount",
         lua.create_function(|lua, (unit, slot): (Value, Value)| {
-            let token = super::binding_abi::string_arg(lua, unit, USAGE_GET_INVENTORY_ITEM_COUNT)?;
-            let slot0 =
-                super::binding_abi::number_arg(lua, slot, INVALID_SLOT_GET_INVENTORY_ITEM_COUNT)?;
-            let slot0 = slot0.wrapping_sub(1);
-            if !lua
-                .app_data_ref::<Model>()
-                .expect("model")
-                .inventory_slot_reader_accepts(slot0)
-            {
-                return Err(mlua::Error::RuntimeError(
-                    INVALID_SLOT_GET_INVENTORY_ITEM_COUNT.into(),
-                ));
+            let usage = "Usage: GetInventoryItemCount(unit, slot)";
+            let token = super::binding_abi::string_arg(lua, unit, usage)?;
+            let slot0 = super::binding_abi::inventory_slot0(lua, slot)?;
+            let model = lua.app_data_ref::<Model>().expect("model");
+            if !model.inventory_slot_reader_accepts(slot0) {
+                return Ok(MultiValue::new());
             }
-            let Some(v) = player_inv_slot(lua, &Some(token), i64::from(slot0) + 1) else {
-                return Ok(1i64);
+            let count = match model.inv_slot(&token, (slot0 + 1) as usize) {
+                None => 1,
+                Some(v) => match v.contents_count {
+                    None => i64::from(v.count),
+                    Some(_) if slot0 > 0x16 => 0,
+                    Some(n) => i64::from(n),
+                },
             };
-            Ok(match v.contents_count {
-                None => i64::from(v.count),
-                Some(_) if slot0 > 0x16 => 0,
-                Some(n) => i64::from(n),
-            })
+            Ok(MultiValue::from_vec(vec![Value::Integer(count)]))
         })?,
     )?;
 
@@ -761,16 +752,6 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 Some(v) if slot_is_broken(&v) => Ok(Value::Integer(1)),
                 _ => Ok(Value::Nil),
             }
-        })?,
-    )?;
-
-    // GetInventoryItemCooldown(unit, slot) → (start, duration, enable). Not fed: with no
-    // equipped-item cooldown source it answers `(0, 0, 1)`, no cooldown, as the container verb
-    // does; stock calls it on every slot update (`PaperDollFrame.lua:691`).
-    g.set(
-        "GetInventoryItemCooldown",
-        lua.create_function(|_, (_token, _slot): (Option<String>, i64)| {
-            Ok((0.0f64, 0.0f64, 1i64))
         })?,
     )?;
 
@@ -1488,27 +1469,20 @@ mod tests {
             "0-based 67 (build 12340's first bank bag) is past 0x16: every container short-circuits, quiver or not"
         );
 
-        // Both arms raise. The backpack's item slots (Lua 24..=39) are outside the whitelist.
-        let err = |code: &str| s.run(code).unwrap_err().to_string();
+        // A slot the reader refuses (the backpack band, past the keyring) answers zero values,
+        // silently (`0x5e9e40`); a non-number reads as slot 1, the head (`0x5e7c00`).
+        let arity = |code: &str| s.arity(code).unwrap();
+        assert_eq!(arity(r#"GetInventoryItemCount("player", 30)"#), 0);
+        assert_eq!(arity(r#"GetInventoryItemCount("player", 200)"#), 0);
+        assert_eq!(arity(r#"GetInventoryItemCount("player", 2^31)"#), 0);
+        assert_eq!(arity(r#"GetInventoryItemCount("player", {})"#), 1);
+        let err = s
+            .run("GetInventoryItemCount({}, 1)")
+            .unwrap_err()
+            .to_string();
         assert!(
-            err(r#"GetInventoryItemCount("player", 30)"#)
-                .contains("Invalid inventory slot in GetInventoryItemCount"),
-            "the backpack band raises"
-        );
-        assert!(
-            err(r#"GetInventoryItemCount("player", 200)"#)
-                .contains("Invalid inventory slot in GetInventoryItemCount"),
-            "and so does anything past the keyring"
-        );
-        assert!(
-            err(r#"GetInventoryItemCount("player", {})"#)
-                .contains("Invalid inventory slot in GetInventoryItemCount"),
-            "a non-number slot takes the SAME string, not the Usage one"
-        );
-        assert!(
-            err("GetInventoryItemCount({}, 1)")
-                .contains("Usage: GetInventoryItemCount(unit, slot)"),
-            "…and only a bad unit takes the Usage string"
+            err.contains("Usage: GetInventoryItemCount(unit, slot)"),
+            "a bad unit raises"
         );
         assert_eq!(
             count(0),

@@ -7,7 +7,7 @@
 
 use mlua::{Lua, MultiValue, Value};
 
-use super::binding_abi::flag;
+use super::binding_abi::{flag, ftol_arg};
 use super::Model;
 
 /// The kind byte, bits 24-31 of the packed slot word (vmangos `Player.h:133`). Must match
@@ -25,10 +25,10 @@ pub struct ActionSlot {
     pub kind: u8,
     /// The spell, macro or item id (bits 0-23 of the packed slot word).
     pub action: u32,
-    /// `GetActionCount`'s bag count for an item slot, 0 otherwise.
+    /// `GetActionCount` (`0xc1e118`): an item's bag count, a reagent spell's casts (`0x7ffa30`).
     pub count: u32,
-    /// `IsConsumableAction`: `0x4e5250` reads only the slot's item template, so this rides the
-    /// icon's push, not [`ActionState`]'s.
+    /// `IsConsumableAction` (`0x5a9360`): the item template or the spell's reagents, so this
+    /// rides the icon's push, not [`ActionState`]'s.
     pub consumable: bool,
 }
 
@@ -272,11 +272,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         "GetActionCount",
         lua.create_function(|lua, action: u32| {
             let model = lua.app_data_ref::<Model>().expect("model app_data");
-            Ok(model
-                .actions
-                .get(&action)
-                .filter(|s| s.kind == ACTION_KIND_ITEM)
-                .map_or(0, |s| s.count))
+            Ok(model.actions.get(&action).map_or(0, |s| s.count))
         })?,
     )?;
 
@@ -311,7 +307,12 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
 
     g.set(
         "IsActionInRange",
-        lua.create_function(|lua, action: u32| {
+        lua.create_function(|lua, action: Value| {
+            // Nil for a non-number, no Usage raise (`0x5a9d67`); a number truncates (`0x88b9c0`).
+            let n = lua.coerce_number(action)?.map(super::binding_abi::ftol);
+            let Some(action) = n.and_then(|n| u32::try_from(n).ok()) else {
+                return Ok(Value::Nil);
+            };
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             Ok(
                 match model
@@ -359,22 +360,21 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         lua.create_function(|lua, action: u32| Ok(state_flag(lua, action, |s| s.equipped)))?,
     )?;
 
-    // GetActionCooldown(action) → start, duration, enable, in `GetTime` seconds. An absent or
-    // elapsed enabled cooldown answers `(0, 0, 1)`, or a later `CooldownFrame_SetTimer` would
-    // replay the sweep and its finish flash.
+    // GetActionCooldown(action) (`0x5a91c0`) → start, duration, enable, in `GetTime` seconds: an
+    // unresolved slot (0, 0, 0) (`0x5a8e40` writes no enable); a resolved idle timer is (0, 0, 1).
     g.set(
         "GetActionCooldown",
-        lua.create_function(|lua, action: u32| {
+        lua.create_function(|lua, action: Value| {
+            let action = ftol_arg(lua, action, "Usage: GetActionCooldown(slot)")? as u32;
             let now = crate::script::clock::now(lua);
             let model = lua.app_data_ref::<Model>().expect("model app_data");
-            Ok(
-                match model.action_states.get(&action).and_then(|s| s.cooldown) {
-                    Some((start, duration, enabled)) if start + duration > now || !enabled => {
-                        (start, duration, i32::from(enabled))
-                    }
-                    _ => (0.0, 0.0, 1),
-                },
-            )
+            let state = model.action_states.get(&action);
+            Ok(match state.and_then(|s| s.cooldown) {
+                Some((start, duration, enabled)) if start + duration > now || !enabled => {
+                    (start, duration, i32::from(enabled))
+                }
+                _ => (0.0, 0.0, i32::from(state.is_some())),
+            })
         })?,
     )?;
 

@@ -698,6 +698,7 @@ pub(crate) struct UnitStores<'w, 's> {
 pub(crate) struct SnapshotTables<'w> {
     classes: Option<Res<'w, crate::chr_classes::ChrClassTable>>,
     spells: Option<Res<'w, crate::app_core::state::Spells>>,
+    families: Option<Res<'w, crate::app_core::catalogs::PetFamilyTables>>,
 }
 
 impl SnapshotTables<'_> {
@@ -793,12 +794,8 @@ pub(crate) fn snapshot(
         damage_bonus_stat: matches!(store.0.object_type(), Some(ObjectType::Player))
             .then(|| class_id.and_then(|c| classes.and_then(|t| t.damage_bonus_stat(u32::from(c)))))
             .flatten(),
-        // Gender byte 0 male, 1 female, on `UnitSex`'s scale: 2 male, 3 female, 0 unknown (nil).
-        sex: match store.0.unit_gender() {
-            Some(0) => 2,
-            Some(1) => 3,
-            _ => 0,
-        },
+        sex: UnitState::sex_of_gender(store.0.unit_gender()),
+        // Direct replicated state only; reaction/ownership policy is evaluated separately.
         pvp: store.0.unit_is_pvp(),
         skinnable: crate::ui_action::gather_line_key(store, types.names),
         // `UnitPlayerControlled`: bit `0x8`, set by pets and charmed creatures as well as players.
@@ -1248,6 +1245,7 @@ fn feed_units(
         self_store: self_pair.map(|(s, _)| s),
         classes: chr,
         types,
+        families: tables.families(),
         relations: crate::target::RelationContext::new(Some(&names), &lookup),
     };
     let target = selection.target.zip(selection.guid).and_then(|(e, guid)| {
@@ -3596,7 +3594,7 @@ mod tests {
         let (tx, _rx) = crossbeam_channel::unbounded();
         app.insert_resource(NetCommands(tx));
         app.insert_non_send_resource(UiScript::new().expect("Wrath VM"));
-        app.add_systems(Update, feed_units);
+        crate::test_guids::with_aura_feed(&mut app, feed_units);
 
         let player = app
             .world_mut()

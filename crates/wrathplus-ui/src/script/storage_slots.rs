@@ -96,7 +96,7 @@ mod tests {
                     .unwrap(),
                 key_first
             );
-            s.run(&format!("assert(GetInventoryItemCount('player',{bank_last})==3); assert(GetInventoryItemCount('player',{key_last})==2); assert(not pcall(GetInventoryItemCount,'player',{})); assert(not pcall(GetInventoryItemCount,'player',{}))",bag_last+1,key_first-1)).unwrap();
+            s.run(&format!("assert(GetInventoryItemCount('player',{bank_last})==3); assert(GetInventoryItemCount('player',{key_last})==2); assert(select('#',GetInventoryItemCount('player',{}))==0); assert(select('#',GetInventoryItemCount('player',{}))==0)",bag_last+1,key_first-1)).unwrap();
             s.run("assert(GetInventoryItemID('player',74)==104); PickupBagFromSlot(74); assert(CursorHasItem()); ClearCursor(); assert(GetInventoryItemID('player',64)==nil)").unwrap();
         }
     }

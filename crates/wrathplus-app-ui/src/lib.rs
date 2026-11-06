@@ -14,6 +14,8 @@ pub mod quest_rewards;
 pub mod realm_select;
 pub mod script_calls;
 pub mod shipped_cvars;
+#[cfg(test)]
+mod test_guids;
 pub mod textinput;
 pub mod tutorial;
 pub mod ui_achievements;

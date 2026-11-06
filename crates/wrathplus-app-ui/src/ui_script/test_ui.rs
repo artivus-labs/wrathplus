@@ -621,6 +621,12 @@ pub(crate) fn loot_at_left_slot(s: &UiScript) {
 }
 
 #[cfg(test)]
+pub(crate) fn kits(space_separated: &str) -> Vec<wrathplus_ui::script::SoundRequest> {
+    let kit = |n: &str| wrathplus_ui::script::SoundRequest::KitName(n.into());
+    space_separated.split(' ').map(kit).collect()
+}
+
+#[cfg(test)]
 mod tests {
     /// The merged kit runs toc rows in the toc's order, each once.
     #[test]

@@ -522,6 +522,13 @@ pub(super) fn install_wrath(lua: &Lua) -> mlua::Result<()> {
                 Some(CursorPayload::Money(m)) => {
                     vec![text("money")?, Value::Integer(m.copper.into())]
                 }
+                // A companion (`0x8009b0`) is "companion", its index and its list (`0x53b410`).
+                Some(CursorPayload::Spell(s))
+                    if matches!(s.book_type.as_str(), "CRITTER" | "MOUNT") =>
+                {
+                    let index = Value::Integer(s.book_slot.into());
+                    vec![text("companion")?, index, text(&s.book_type)?]
+                }
                 Some(CursorPayload::Spell(s)) => vec![
                     text("spell")?,
                     Value::Integer(s.book_slot.into()),
@@ -560,7 +567,10 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         "CursorHasItem",
         lua.create_function(|lua, ()| {
             let model = lua.app_data_ref::<Model>().expect("model app_data");
-            Ok(matches!(model.cursor, Some(CursorPayload::Item(_))))
+            Ok(super::binding_abi::flag(matches!(
+                model.cursor,
+                Some(CursorPayload::Item(_))
+            )))
         })?,
     )?;
     g.set(
@@ -615,23 +625,13 @@ mod tests {
         slots.insert(
             1,
             crate::script::container::ContainerSlot {
-                duration_ms: None,
-                petition: None,
-                already_bound: false,
                 bar_placeable: true,
-                durability: None,
                 texture: Some("Interface\\Icons\\INV_Misc_Food_16".into()),
                 count: 5,
                 quality: Some(3),
                 item_id: 117,
                 link: Some("|cffffffff|Hitem:117|h[Tough Jerky]|h|r".into()),
-                locked: false,
-                equip_slots: Vec::new(),
-                cooldown: None,
-                readable: false,
-                creator: None,
-                flags: 0,
-                enchants: Vec::new(),
+                ..Default::default()
             },
         );
         crate::script::container::ContainerState {

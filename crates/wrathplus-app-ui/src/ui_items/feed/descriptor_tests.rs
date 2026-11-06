@@ -72,7 +72,8 @@ fn rolled_slot(
     let mut pairs = vec![
         (Field::ObjectEntry.span().unwrap().index, 15969),
         (Field::ItemStackCount.span().unwrap().index, 1),
-        (Field::ItemFlags.span().unwrap().index, 1),
+        // Soulbound and readable (`ITEM_FIELD_FLAGS & 0x200`, a mail copy's text).
+        (Field::ItemFlags.span().unwrap().index, 0x201),
         (Field::ItemRandomPropertiesId.span().unwrap().index, 2027),
     ];
     let first = Field::ItemEnchantment.span().unwrap().index;
@@ -94,6 +95,7 @@ fn rolled_slot(
     template.inventory_type = 23;
     template.required_level = 5;
     template.random_property = 6273;
+    template.flags = 0x4; // lootable
     template.stats.clear();
     template.spells.clear();
     items.insert_template(15969, Some(template));
@@ -129,6 +131,11 @@ fn wrath_inventory_random_enchants_reach_bag_tooltip() {
         Default::default(),
     ));
     let slot = rolled_slot(&cat, None, &[(7, 2307), (11, 82)]);
+    // `GetContainerItemInfo`'s readable, lootable and quality inputs (`0x5d7ba7`-`0x5d7c1a`).
+    assert_eq!(
+        (slot.readable, slot.lootable, slot.inventory_type),
+        (true, true, 23)
+    );
     assert_eq!(
         slot.enchants.iter().map(|e| e.slot).collect::<Vec<_>>(),
         vec![7, 11]

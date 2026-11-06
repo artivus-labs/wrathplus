@@ -579,17 +579,19 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     )?;
     // GetContainerNumFreeSlots(bag) (`0x5d7590`): the backpack's empty slots and 0, always; a bag
     // 1..11 that exists, its empty slots and `BagFamily`; the open bank's (-1) empty slots and 0;
-    // anything else (an empty bag slot, the keyring, the closed bank) a lone 0. Labelled: the bank
-    // is open when App has published container -1.
+    // anything else (an empty bag slot, the keyring, the vault or a bank bag with the banker away,
+    // `0x5d7803`, `0x5d6f20`) a lone 0.
     g.set(
         "GetContainerNumFreeSlots",
         lua.create_function(|lua, args: MultiValue| {
             let bag = number(lua, &args, 0)
-                .map(|n| n as i64)
+                .map(|n| i64::from(super::binding_abi::ftol(n)))
                 .ok_or_else(|| mlua::Error::runtime("Usage: GetContainerFreeSlots(index)"))?;
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             let lone = || Ok(MultiValue::from_vec(vec![Value::Number(0.0)]));
-            let c = model.containers.get(&bag);
+            let needs_banker = bag == -1 || (5..=11).contains(&bag);
+            let open = !needs_banker || model.bank.is_some();
+            let c = model.containers.get(&bag).filter(|_| open);
             let free = match (bag, c) {
                 (0, None) => 16,
                 (-1..=11, Some(c)) => (1..=c.num_slots)
@@ -1018,6 +1020,8 @@ mod tests {
         }
         s.set_wrath_bag_family(-1, 8);
         assert_eq!(free(&s, 0), vec![27.0, 0.0]);
+        assert_eq!(free(&s, -1), vec![0.0], "pushed, but the banker is away");
+        s.set_bank(Some(crate::script::BankState::default()));
         assert_eq!(free(&s, -1), vec![27.0, 0.0], "the bank's family is 0");
         assert_eq!(free(&s, -2), vec![0.0], "the keyring answers a lone 0");
     }

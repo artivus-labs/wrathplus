@@ -69,7 +69,10 @@ fn the_flag_readers_read_their_descriptor_bits() {
         .eval::<bool>("return UnitIsRaidOfficer('target') == 1")
         .unwrap());
     assert!(s
-        .eval::<bool>("return UnitInBattleground('target') == nil")
+        .eval::<bool>(
+            "return UnitInBattleground('target') == nil and UnitInBattleground({}) == nil \
+             and UnitIsRaidOfficer(true) == nil and UnitPlayerControlled({}) == nil"
+        )
         .unwrap());
 }
 

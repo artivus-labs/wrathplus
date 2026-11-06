@@ -59,11 +59,11 @@ fn load_page(s: &mut UiScript) {
     }
 }
 
-/// A player with both halves of race and class: `UnitRace`/`UnitClass` answer nil without the
-/// pair, and `PaperDollFrame_SetLevel` formats them unguarded (PaperDollFrame.lua:101).
+/// A player with a guid and race and class pairs, unguarded in PaperDollFrame.lua:101.
 fn player(level: u32) -> UnitState {
     UnitState {
         exists: true,
+        guid: 0x0100_0000_0000_0001,
         level,
         race: Some("Human".into()),
         race_file: Some("Human".into()),
@@ -536,7 +536,7 @@ fn the_watch_bar_shows_the_watched_factions_progress_and_swaps_at_max_level() {
     let mut s = UiScript::new().unwrap();
     s.set_screen_size(1024.0, 768.0);
     load_page(&mut s);
-    s.set_unit("player", Some(player(40)));
+    crate::test_guids::push_player(&mut s, player(40));
     // The XP bar needs its range before the watch bar's update, or `TextStatusBar_UpdateTextString`
     // hides it (TextStatusBar.lua:76-82); the live client has XP from login.
     s.set_player_xp(0, 50_000);

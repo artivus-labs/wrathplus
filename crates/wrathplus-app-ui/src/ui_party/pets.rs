@@ -413,6 +413,7 @@ pub(in crate::ui_party) mod tests {
 
     /// Run a frame and take the pet events it fired; `UNIT_PET`, or a unit event naming a pet.
     pub(in crate::ui_party) fn frame(app: &mut App) -> Vec<String> {
+        crate::test_guids::seat_group(app, ME);
         app.update();
         let mut s = app.world_mut().non_send_resource_mut::<UiScript>();
         s.resolve();
@@ -789,9 +790,8 @@ pub(in crate::ui_party) mod tests {
         assert_eq!(num(&mut app, "UnitHealth('partypet1')"), 250.0);
     }
 
-    /// A raid's pets are its rows' (`0x491960`): the record leg has no online test at the
-    /// resolver, but `UnitExists`' roster fallback (`0x4bb040`) has one, so an offline member's
-    /// pet resolves to a guid the client never holds and does not exist.
+    /// A raid's pets are its rows' (`0x518ce0`, no online test), but `UnitExists`' group leg tests
+    /// the row's online bit (`0x573273`): an offline row's pet has a guid and does not exist.
     #[test]
     fn raid_pets_follow_their_rows_and_an_offline_rows_pet_does_not_exist() {
         let mut app = app();
@@ -803,7 +803,8 @@ pub(in crate::ui_party) mod tests {
                 .map(|i| GroupMemberEntry {
                     name: format!("M{i}"),
                     guid: member(i),
-                    status: member_status::ONLINE,
+                    // Row 2 has gone offline, in its row (`[row+0x18] & 1`) and its record.
+                    status: [member_status::ONLINE, member_status::OFFLINE][i as usize - 1],
                     flags: 0,
                 })
                 .collect(),
@@ -811,7 +812,6 @@ pub(in crate::ui_party) mod tests {
             None,
             Some(ME),
         );
-        // Row 2 has gone offline.
         app.world_mut()
             .resource_mut::<GroupState>()
             .stats

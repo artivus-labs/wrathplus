@@ -2,7 +2,7 @@
 //! Installed EquipmentManager.lua:25,271-287 supplies the signatures, including the
 //! caller-owned empty-slot work table (not GetContainerNumFreeSlots's bag-family result).
 use super::Model;
-use mlua::{Lua, Table};
+use mlua::{Lua, MultiValue, Value};
 
 pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     let g = lua.globals();
@@ -54,23 +54,41 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             Ok((durability.map(|d| d.0), durability.map(|d| d.1)))
         })?,
     )?;
+    // GetContainerFreeSlots(index [, returnTable]) (`0x5d7820`): the empty slots' 1-based numbers
+    // appended to the table (a new one when argument 2 is not a table), which it returns; the
+    // backpack, the vault with the banker, and a bag 1..11 (a bank bag with the banker), else
+    // zero values.
     g.set(
         "GetContainerFreeSlots",
-        lua.create_function(|lua, (bag, work): (i64, Table)| {
+        lua.create_function(|lua, (bag, work): (Value, Value)| {
+            const USAGE: &str = "Usage: GetContainerFreeSlots(index [, returnTable])";
+            let bag = i64::from(super::binding_abi::ftol_arg(lua, bag, USAGE)?);
             // Release the model borrow before invoking table operations in Lua.
             let free = {
                 let model = lua.app_data_ref::<Model>().expect("model");
-                model.containers.get(&bag).map(|b| {
+                let open = match bag {
+                    0..=4 => true,
+                    -1 | 5..=11 => model.bank.is_some(),
+                    _ => false,
+                };
+                let c = model.containers.get(&bag).filter(|_| open);
+                c.map(|b| {
                     (1..=b.num_slots)
                         .filter(|s| !b.slots.contains_key(s))
                         .collect::<Vec<_>>()
                 })
             };
-            let Some(free) = free else { return Ok(false) };
+            let Some(free) = free else {
+                return Ok(MultiValue::new());
+            };
+            let work = match work {
+                Value::Table(t) => t,
+                _ => lua.create_table()?,
+            };
             for (i, slot) in free.into_iter().enumerate() {
-                work.raw_set(i + 1, slot)?;
+                work.set(i + 1, slot)?;
             }
-            Ok(true)
+            Ok(MultiValue::from_vec(vec![Value::Table(work)]))
         })?,
     )?;
     Ok(())

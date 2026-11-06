@@ -1270,23 +1270,14 @@ fn seed_cooldown_filmstrip(
         slots.insert(
             slot,
             wrathplus_ui::script::ContainerSlot {
-                petition: None,
-                durability: None,
-                duration_ms: None,
                 bar_placeable: true,
                 texture: texture.clone(),
                 count: 1,
                 quality: Some(1),
                 item_id: 6948,
                 link: Some("|cffffffff|Hitem:6948|h[Hearthstone]|h|r".into()),
-                locked: false,
-                equip_slots: Vec::new(),
                 cooldown: Some(((now_ms - fraction * span_ms) as i64, span_ms as u32, true)),
-                readable: false,
-                creator: None,
-                flags: 0,
-                already_bound: false,
-                enchants: Vec::new(),
+                ..Default::default()
             },
         );
     }
@@ -1322,23 +1313,13 @@ fn seed_bag_window(
     };
     let slot = |disp: u32, count: u32, id: u32, name: &str, quality: u32| {
         wrathplus_ui::script::ContainerSlot {
-            petition: None,
-            durability: None,
-            duration_ms: None,
             bar_placeable: true,
             texture: icon(disp),
             count,
             quality: Some(quality),
             item_id: id,
             link: Some(format!("|cffffffff|Hitem:{id}|h[{name}]|h|r")),
-            locked: false,
-            equip_slots: Vec::new(),
-            cooldown: None,
-            readable: false,
-            creator: None,
-            flags: 0,
-            already_bound: false,
-            enchants: Vec::new(),
+            ..Default::default()
         }
     };
     // Five items under their real template ids. Game slot 1, the Small Shield the Tooltip
@@ -1408,23 +1389,12 @@ fn seed_equipped_bags(
     };
     let slot =
         |disp: u32, count: u32, name: &str, quality: u32| wrathplus_ui::script::ContainerSlot {
-            petition: None,
-            durability: None,
-            duration_ms: None,
             bar_placeable: true,
             texture: icon(disp),
             count,
             quality: Some(quality),
-            item_id: 0,
             link: Some(format!("|cffffffff|Hitem:0|h[{name}]|h|r")),
-            locked: false,
-            equip_slots: Vec::new(),
-            cooldown: None,
-            readable: false,
-            creator: None,
-            flags: 0,
-            already_bound: false,
-            enchants: Vec::new(),
+            ..Default::default()
         };
 
     // The equipped-bag slots (inv ids 20-23, `Bag0Slot`-`Bag3Slot`) get an icon each, so each

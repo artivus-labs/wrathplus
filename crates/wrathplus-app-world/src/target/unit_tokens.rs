@@ -40,10 +40,10 @@ impl UnitTokens<'_, '_> {
         Some((*self.index.as_ref()?.0.get(&guid)?, guid))
     }
 
-    /// Resolve `token` as `0x515970` does: its base, then a hop for each `target` after it. The
-    /// text is read by [`parse_unit_token`], which the VM's resolver shares, so both take the same
-    /// tokens; a token that names nobody, or a base or hop the object manager does not hold, is
-    /// `None`.
+    /// Resolve `token` as `0x515970` does: its base, then a hop for each `target` after it, the
+    /// text read by [`parse_unit_token`]. The VM resolves through build 12340's `0x60abf0`, which
+    /// also takes `pet` suffixes and group members' names. A token that names nobody, or a base
+    /// or hop the object manager does not hold, is `None`.
     pub fn resolve(&self, token: &str, selection: &Selection) -> Option<(Entity, u64)> {
         let UnitTokenParse::Unit { base, hops } = parse_unit_token(token) else {
             return None;

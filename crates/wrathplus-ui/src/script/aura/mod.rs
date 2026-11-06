@@ -1,7 +1,7 @@
 //! The aura bindings, over the lists the app pushes in display order: the player's in the
 //! reference's insertion-ordered cache (`0xbc6040`), kept by `wrathplus::ui_aura`, every other unit's
 //! by guid, in ascending aura slot. A token resolves to its guid as the reference's resolver
-//! `0x515970` does ([`super::UnitGuids`]), so `"mouseover"`, `"party1target"` and `"PLAYER"` read
+//! `0x60abf0` does (`Model::resolve_token`), so `"mouseover"`, `"party1target"` and `"PLAYER"` read
 //! the list of the unit they name, and a token naming the player reads the player's list in cache
 //! order, where the reference's `UnitBuff("player", i)` reads by slot.
 //!
@@ -91,12 +91,11 @@ fn returns(lua: &Lua, a: &AuraState, with_dispel_type: bool) -> mlua::Result<Mul
     Ok(MultiValue::from_vec(out))
 }
 
-/// The list of the unit `token` names, through the resolver (`0x515970`, which `UnitBuff` calls at
-/// `0x519542`): the player's cache list for the player, else that guid's; `None` for nobody or a
-/// unit with no list. A token the resolver does not recognise raises `Unknown unit name`.
+/// The list of the unit `token` names, through the resolver (`0x60abf0`): the player's cache list
+/// for the player, else that guid's; `None` for nobody or a unit with no list, never a raise.
 pub(crate) fn auras_of<'m>(model: &'m Model, token: &str) -> mlua::Result<Option<&'m [AuraState]>> {
     let guids = &model.unit_guids;
-    Ok(guids.guid_of(token)?.and_then(|g| {
+    Ok(model.unit_guid(token).and_then(|g| {
         if g == guids.player {
             Some(model.player_auras.as_slice())
         } else {
@@ -475,7 +474,7 @@ mod tests {
             .unwrap()
     }
 
-    /// Every token reads the list of the unit the resolver names (`0x515970` at `0x519542`): the
+    /// Every token reads the list of the unit the resolver names (`0x60abf0`): the
     /// mouseover, a group member's target and any depth of `target` chain.
     #[test]
     fn a_token_reads_the_list_of_the_unit_it_names() {
@@ -534,10 +533,10 @@ mod tests {
             .unwrap());
     }
 
-    /// A recognised token naming nobody is nil; a token none of the resolver's nine compares match
-    /// raises `Unknown unit name: %s` (`0x515c14`), at any index, as the resolver runs first.
+    /// A token naming nobody is nil, and so is one nothing parses: 12340's resolver (`0x60abf0`)
+    /// never raises, at any index.
     #[test]
-    fn an_unknown_token_raises_and_a_recognised_empty_one_is_nil() {
+    fn a_token_naming_nobody_or_nothing_is_nil() {
         let s = group_script();
         for call in [
             r#"UnitBuff("party2", 1)"#,
@@ -546,16 +545,13 @@ mod tests {
             r#"UnitBuff("playerfoo", 1)"#,
             r#"UnitBuff("pet", 1)"#,
             r#"UnitBuff("", 1)"#,
+            r#"UnitBuff("bogus", 1)"#,
+            r#"UnitBuff("bogus", 0)"#,
         ] {
             assert!(
                 s.eval::<bool>(&format!("return {call} == nil")).unwrap(),
                 "{call}"
             );
-        }
-        // `focus` and `npc` are 3.3.5 tokens; only a name no compare matches raises.
-        for call in [r#"UnitBuff("bogus", 1)"#, r#"UnitBuff("bogus", 0)"#] {
-            let err = s.eval::<()>(call).unwrap_err().to_string();
-            assert!(err.contains("Unknown unit name: "), "{call}: {err}");
         }
     }
 
@@ -575,10 +571,6 @@ mod tests {
             s.eval::<String>("return TTTextLeft1:GetText()").unwrap(),
             "on the mouseover"
         );
-        let err = s
-            .run(r#"TT:SetUnitBuff("bogus", 1)"#)
-            .unwrap_err()
-            .to_string();
-        assert!(err.contains("Unknown unit name: bogus"), "{err}");
+        s.run(r#"TT:SetUnitBuff("bogus", 1)"#).unwrap();
     }
 }

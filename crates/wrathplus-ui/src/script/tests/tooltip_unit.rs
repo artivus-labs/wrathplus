@@ -61,13 +61,10 @@ fn creature_line_law() {
         assert(TTTextLeft2:GetText() == "Alpha")
         assert(TTTextLeft3:GetText() == "[LEVEL_CLASS_TYPE 10 Beast [ELITE]]", "got " .. TTTextLeft3:GetText())
         assert(TTTextLeft4:GetText() == "Skinnable")
-        -- A RECOGNISED token naming nothing answers nil...
+        -- A token naming nothing answers nil, and so does one nothing parses: the resolver
+        -- (`0x60abf0`) never raises.
         assert(tt:SetUnit("party4") == nil, "a recognised but absent unit answers nil")
-        -- ...while an UNRECOGNISED one raises, because SetUnit resolves through the client's one
-        -- token resolver like every Unit* verb (`0x515970`: a token matching
-        -- none of the nine prefixes reaches `luaL_error("Unknown unit name: %s")` and longjmps).
-        -- This used to read `SetUnit("nosuch") == nil`, which was the refuted claim.
-        assert(pcall(tt.SetUnit, tt, "nosuch") == false, "an unrecognised token raises")
+        assert(tt:SetUnit("nosuch") == nil, "an unparsed token answers nil")
     "#,
     )
     .unwrap();

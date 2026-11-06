@@ -1,5 +1,5 @@
 //! The getters and `SpellCanTargetUnit` over a `target` chain: the token resolves to a guid
-//! through [`UnitGuids`] (`0x515970`), and the guid's snapshot answers.
+//! through `0x60abf0` (`Model::resolve_token`), and the guid's snapshot answers.
 
 use std::collections::HashMap;
 
@@ -191,11 +191,10 @@ fn a_token_without_a_hop_still_reads_its_own_push() {
     }
     assert_eq!(eval::<i64>(&s, r#"return UnitHealth("target")"#), 500);
 
-    // A guid entry for the unit a plain token resolves to is not that token's snapshot: the
-    // app pushes each base by name.
+    // A plain token with no push of its own reads the guid it resolves to (`0x60abf0`).
     s.set_unit_by_guid(R3, Some(state("Raider", R3, 700)));
-    assert!(eval::<bool>(&s, r#"return UnitName("raid3") == nil"#));
-    assert_eq!(eval::<i64>(&s, r#"return UnitHealth("raid3")"#), 0);
+    assert_eq!(eval::<String>(&s, r#"return UnitName("raid3")"#), "Raider");
+    assert_eq!(eval::<i64>(&s, r#"return UnitHealth("raid3")"#), 700);
     // A push under the token wins over a guid entry, which is what `targettarget` is.
     s.set_unit("targettarget", Some(state("Tot", P1, 1)));
     assert_eq!(
@@ -208,18 +207,19 @@ fn a_token_without_a_hop_still_reads_its_own_push() {
         eval::<String>(&s, r#"return UnitName("targettarget")"#),
         "Pia"
     );
-    // And the entry is dropped with `None`.
+    // With the entry dropped, the guid is party1's, whose push answers (`0x60abf0` resolves to
+    // a guid, and any token's object is that guid's).
     s.set_unit_by_guid(P1, None);
-    assert!(eval::<bool>(
-        &s,
-        r#"return UnitName("targettarget") == nil"#
-    ));
+    assert_eq!(
+        eval::<String>(&s, r#"return UnitName("targettarget")"#),
+        "Pia"
+    );
 }
 
-/// The junk after a hop and an unknown token behave as the resolver does: the first names
-/// nobody, the second raises.
+/// The junk after a hop and an unknown token behave as 12340's resolver does (`0x60abf0`): both
+/// name nobody, and neither raises.
 #[test]
-fn a_malformed_chain_is_nobody_and_an_unknown_token_raises() {
+fn a_malformed_chain_and_an_unknown_token_are_nobody() {
     let s = world();
     for token in [
         "party1targetfoo",
@@ -232,13 +232,8 @@ fn a_malformed_chain_is_nobody_and_an_unknown_token_raises() {
             "{token}"
         );
     }
-    for chunk in [
-        r#"return UnitName("npctarget")"#,
-        r#"return UnitHealth("bogustarget")"#,
-    ] {
-        let err = s.eval::<mlua::Value>(chunk).expect_err(chunk).to_string();
-        assert!(err.contains("Unknown unit name"), "{chunk}: {err}");
-    }
+    assert!(eval::<bool>(&s, r#"return UnitName("npctarget") == nil"#));
+    assert_eq!(eval::<i64>(&s, r#"return UnitHealth("bogustarget")"#), 0);
 }
 
 /// `UnitInParty` judges a chain by the unit it ends on, not by the `party` in its text.
@@ -301,10 +296,10 @@ fn spell_can_target_unit_answers_the_verdict_of_the_unit_the_token_names() {
     assert!(refused(&s, "raid3target"));
 }
 
-/// The reference gates the argument (`0x6e6d0e`) and resolves through `0x515970`, which raises for
-/// a token it does not know.
+/// The reference gates the argument and resolves through `0x60abf0`, which never raises: a token
+/// it does not know names nobody.
 #[test]
-fn spell_can_target_unit_raises_as_the_resolver_and_the_gate_do() {
+fn spell_can_target_unit_raises_only_at_the_gate() {
     let s = world();
     let err = |chunk: &str| s.eval::<mlua::Value>(chunk).expect_err(chunk).to_string();
     for chunk in [
@@ -318,11 +313,11 @@ fn spell_can_target_unit_raises_as_the_resolver_and_the_gate_do() {
         );
     }
     for chunk in [
-        r#"return SpellCanTargetUnit("bogus")"#,
-        r#"return SpellCanTargetUnit("npctarget")"#,
-        "return SpellCanTargetUnit(5)",
+        r#"return SpellCanTargetUnit("bogus") == nil"#,
+        r#"return SpellCanTargetUnit("npctarget") == nil"#,
+        "return SpellCanTargetUnit(5) == nil",
     ] {
-        assert!(err(chunk).contains("Unknown unit name"), "{chunk}");
+        assert!(s.eval::<bool>(chunk).unwrap(), "{chunk}");
     }
 }
 

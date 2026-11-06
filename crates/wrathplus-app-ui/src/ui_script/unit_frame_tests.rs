@@ -1649,9 +1649,9 @@ fn the_player_frame_wears_the_leader_and_master_looter_icons() {
             guid: 0x7A17,
         }],
         leader_index,
-        // Follows `leader_index`: 0 = the player (unset here), else the member who leads.
-        leader_guid: if leader_index == 0 { 0 } else { 0x7A17 },
-        own_guid: 0,
+        // Follows `leader_index`: 0 = the player, else the member who leads.
+        leader_guid: if leader_index == 0 { 0x5E1F } else { 0x7A17 },
+        own_guid: 0x5E1F,
         raid: Vec::new(),
         loot_method: method.into(),
         master_looter,

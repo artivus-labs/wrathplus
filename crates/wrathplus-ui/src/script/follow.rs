@@ -38,7 +38,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         "FollowUnit",
         lua.create_function(|lua, (who, exact): (String, Option<mlua::Value>)| {
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-            let request = if model.unit_guids.guid_of(&who).is_ok() {
+            let request = if super::unit::token_recognised(&who, true) {
                 FollowRequest::ByUnit(who)
             } else {
                 FollowRequest::ByName {

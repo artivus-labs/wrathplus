@@ -1302,23 +1302,15 @@ mod bind_confirm_tests {
         slots.insert(
             1,
             ContainerSlot {
-                duration_ms: None,
-                petition: None,
-                already_bound: false,
                 bar_placeable: true,
-                durability: None,
                 texture: Some("Interface\\Icons\\INV_Axe_01".into()),
                 count: 1,
                 quality: Some(quality),
                 item_id: FLURRY_AXE,
                 link: Some("|cffa335ee|Hitem:871:0:0:0|h[Flurry Axe]|h|r".into()),
-                locked: false,
                 equip_slots: vec![16], // MainHandSlot
                 cooldown: None,
-                readable: false,
-                creator: None,
-                flags: 0,
-                enchants: Vec::new(),
+                ..Default::default()
             },
         );
         ContainerState {
