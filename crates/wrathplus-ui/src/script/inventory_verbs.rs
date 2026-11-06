@@ -83,32 +83,29 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // SetInventoryPortaitTexture(texture, unit, slot) (`0x4c9150`, the reference's spelling):
-    // the texture is cleared (`0x4c91ed`) before arguments 2 and 3 are read, each of which raises
-    // on a bad value. The unit is then read from argument 1 (`0x4c9247`), the texture itself,
-    // which `lua_tostring` answers NULL for, so the token resolves no unit (`0x515940`) and the
-    // item's icon is never painted: the call only blanks the texture. No stock caller.
+    // SetInventoryPortraitTexture(texture, unit, slot) (`0x5ea9b0`): the texture clears first; a
+    // unit that is not a string or number raises the Usage line, a slot the reader (`0x5e7c00`)
+    // refuses ends the call, and the local player's item at the slot paints its icon
+    // (`0x619330`). Labelled: another player's inventory, which the client does not hold, paints
+    // nothing. No stock caller.
     g.set(
-        "SetInventoryPortaitTexture",
+        "SetInventoryPortraitTexture",
         lua.create_function(|lua, (texture, unit, slot): (Value, Value, Value)| {
             let rh = this_texture(lua, &texture)?;
-            clear_texture(
-                &mut lua.app_data_mut::<Model>().expect("model app_data"),
-                rh,
-            );
-            if !matches!(
-                unit,
-                Value::String(_) | Value::Number(_) | Value::Integer(_)
-            ) {
+            let mut model = lua.app_data_mut::<Model>().expect("model app_data");
+            clear_texture(&mut model, rh);
+            let Some(token) = super::unit::token::token_text(lua, &unit) else {
                 return Err(mlua::Error::runtime(
-                    "Usage: SetInventoryPortaitTexture(texure, unit, slot)",
+                    "Usage: SetInventoryPortraitTexture(texture, unit, slot)",
                 ));
-            }
-            inventory_slot_arg(
-                lua,
-                slot,
-                "Invalid inventory slot in SetInventoryPortaitTexture",
-            )?;
+            };
+            let slot0 = super::binding_abi::inventory_slot0(lua, slot)?;
+            let me = model.local_guid();
+            let icon = (model.inventory_slot_reader_accepts(slot0)
+                && model.resolve_token(&token).unit().is_some_and(|g| g == me))
+            .then(|| model.inv_slot("player", (slot0 + 1) as usize)?.icon)
+            .flatten();
+            model.region_data.entry(rh).or_default().texture = icon;
             Ok(())
         })?,
     )?;
@@ -273,9 +270,11 @@ mod tests {
         assert_eq!(s.ui_cursor(), None);
     }
 
+    /// `0x5ea9b0` reads the unit from argument 2 and paints the worn item's icon; a slot the
+    /// reader refuses ends the call silently.
     #[test]
-    fn inventory_portrait_setter_only_blanks_the_texture() {
-        let s = UiScript::new().unwrap();
+    fn inventory_portrait_setter_paints_the_worn_items_icon() {
+        let mut s = UiScript::new().unwrap();
         s.run(
             r#"local f = CreateFrame("Frame", "PortHost", UIParent)
                PortTex = f:CreateTexture("PortTex")
@@ -283,15 +282,30 @@ mod tests {
                PortText = f:CreateFontString("PortText")"#,
         )
         .unwrap();
-        s.run("SetInventoryPortaitTexture(PortTex, 'player', 1)")
+        s.run("SetInventoryPortraitTexture(PortTex, 'player', 1)")
             .unwrap();
         assert_eq!(
             s.eval::<Option<String>>("return PortTex:GetTexture()")
                 .unwrap(),
             None
         );
+        let mut slots: crate::script::InventorySlots = Default::default();
+        let helm = "Interface\\Icons\\INV_Helmet_01";
+        slots[1] = Some(InvSlotView {
+            icon: Some(helm.into()),
+            ..Default::default()
+        });
+        s.set_inventory_slots(slots);
+        s.model_mut().unit_guids.player = 1;
+        s.run("SetInventoryPortraitTexture(PortTex, 'player', 1)")
+            .unwrap();
+        let painted = s.eval::<Option<String>>("return PortTex:GetTexture()");
+        assert_eq!(painted.unwrap().as_deref(), Some(helm));
+        // 1.12's spellings ("Portait") are absent from the build-12340 exe.
+        let gone = "return SetBagPortaitTexture == nil and SetInventoryPortaitTexture == nil";
+        assert!(s.eval::<bool>(gone).unwrap());
         assert_eq!(
-            s.eval::<i64>("local n = function(...) return arg.n end return n(SetInventoryPortaitTexture(PortTex, 'player', 1))")
+            s.eval::<i64>("local n = function(...) return arg.n end return n(SetInventoryPortraitTexture(PortTex, 'player', 1))")
                 .unwrap(),
             0
         );
@@ -300,11 +314,11 @@ mod tests {
         s.run(r#"PortTex:SetTexture("Interface\\Icons\\INV_Misc_Bag_08")"#)
             .unwrap();
         let err = s
-            .run("SetInventoryPortaitTexture(PortTex, nil, 1)")
+            .run("SetInventoryPortraitTexture(PortTex, nil, 1)")
             .unwrap_err()
             .to_string();
         assert!(
-            err.contains("Usage: SetInventoryPortaitTexture(texure, unit, slot)"),
+            err.contains("Usage: SetInventoryPortraitTexture(texture, unit, slot)"),
             "{err}"
         );
         assert_eq!(
@@ -312,30 +326,27 @@ mod tests {
                 .unwrap(),
             None
         );
-        let err = s
-            .run("SetInventoryPortaitTexture(PortTex, 'player', 30)")
-            .unwrap_err()
-            .to_string();
-        assert!(
-            err.contains("Invalid inventory slot in SetInventoryPortaitTexture"),
-            "{err}"
-        );
+        s.run("SetInventoryPortraitTexture(PortTex, 'player', 30)")
+            .unwrap();
+        // `0x88b9c0` makes 2^31 and NaN `i32::MIN`, a refused slot, not an overflow.
+        s.run("SetInventoryPortraitTexture(PortTex, 'player', 2^31) SetInventoryPortraitTexture(PortTex, 'player', 0/0)")
+            .unwrap();
 
         for (call, message) in [
             (
-                "SetInventoryPortaitTexture(1, 'player', 1)",
+                "SetInventoryPortraitTexture(1, 'player', 1)",
                 "non-table object",
             ),
             (
-                "SetInventoryPortaitTexture({}, 'player', 1)",
+                "SetInventoryPortraitTexture({}, 'player', 1)",
                 "non-framescript object",
             ),
             (
-                "SetInventoryPortaitTexture(PortText, 'player', 1)",
+                "SetInventoryPortraitTexture(PortText, 'player', 1)",
                 "Wrong object type for member function",
             ),
             (
-                "SetInventoryPortaitTexture(PortHost, 'player', 1)",
+                "SetInventoryPortraitTexture(PortHost, 'player', 1)",
                 "Wrong object type for member function",
             ),
         ] {

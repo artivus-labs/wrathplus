@@ -27,7 +27,7 @@ pub(super) fn region_handle_of(lua: &Lua, this: &Table) -> mlua::Result<RegionHa
 }
 
 /// Argument 1 of a global that takes a Texture as its `this` (`SetLootPortrait` `0x4c2b40`,
-/// `SetInventoryPortaitTexture` `0x4c9150`), with the member prologue's three raises: a non-table
+/// `SetInventoryPortraitTexture` `0x5ea9b0`), with the member prologue's three raises: a non-table
 /// (`0x847ef8`), a table with no object at `[0]` (`0x847ec0`), and any object but a Texture, the
 /// `IsA` test against the Texture class token `[0xcf4cdc]` (`0x847e98`).
 pub(super) fn this_texture(lua: &Lua, this: &Value) -> mlua::Result<RegionHandle> {

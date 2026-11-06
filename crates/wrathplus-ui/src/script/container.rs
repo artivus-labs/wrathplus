@@ -3,7 +3,7 @@
 //! resolver's (`0x5d7380`: 0 the backpack, 1-4 the worn bags, -1 the bank's own slots, 5-11 the
 //! bank bags, -2 the keyring); slots are 1-based.
 
-use mlua::{Lua, Table, Value};
+use mlua::{Lua, Value};
 
 use super::binding_abi::ftol_arg;
 use super::cursor::{self, CursorItem, CursorPayload};
@@ -552,42 +552,6 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             }
             let model = lua.app_data_ref::<Model>().expect("model");
             Ok(i64::from(model.container_inventory_slot(id)))
-        })?,
-    )?;
-
-    // SetBagPortaitTexture(texture, containerID) (`0x4fa4f0`, the reference's spelling): 0 and
-    // below return before the clear (`0x4fa5b9`), 1-10 clear and then set the bag's icon, 11 and
-    // up raise. The reference also needs the bank open for 5-10, which is not checked here.
-    lua.globals().set(
-        "SetBagPortaitTexture",
-        lua.create_function(|lua, (region, container): (Table, i64)| {
-            if container >= 12 {
-                return Err(mlua::Error::runtime("Invalid slot in SetBagPortaitTexture"));
-            }
-            if container <= 0 {
-                return Ok(());
-            }
-            // `ContainerIDToInventoryID`'s arithmetic, inlined: an addon may replace that global,
-            // and the reference's portrait read does not go through Lua.
-            let inv = lua
-                .app_data_ref::<Model>()
-                .expect("model")
-                .container_inventory_slot(container as i32);
-            let path = {
-                let model = lua.app_data_ref::<Model>().expect("model app_data");
-                usize::try_from(inv)
-                    .ok()
-                    .and_then(|slot| model.inv_slot("player", slot))
-                    .and_then(|v| v.icon.clone())
-            };
-            let rh = crate::script::region::region_handle_of(lua, &region)?;
-            let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-            let data = model.region_data.entry(rh).or_default();
-            // An empty slot's `None` is the answer: the reference clears first, then sets.
-            data.texture = path;
-            data.circular = true;
-            data.portrait_unit = None;
-            Ok(())
         })?,
     )?;
 

@@ -1398,7 +1398,7 @@ fn seed_equipped_bags(
         };
 
     // The equipped-bag slots (inv ids 20-23, `Bag0Slot`-`Bag3Slot`) get an icon each, so each
-    // window's portrait shows its own bag through `SetBagPortaitTexture`; live, the char feed
+    // window's portrait shows its own bag through `SetBagPortraitTexture`; live, the char feed
     // does this.
     let mut inv: wrathplus_ui::script::InventorySlots = Default::default();
     for (id, icon_name) in [
