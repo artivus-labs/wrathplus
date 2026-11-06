@@ -723,7 +723,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             };
             let token = super::unit::token::token_text(lua, &arg(2)).filter(|t| !t.is_empty());
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-            if token.is_some_and(|t| !model.resolve_token(&t).ok) {
+            // A bank bag with the banker away is no container to `0x5d7380` (`0x5d86bc`).
+            if bank_bag_closed(&model, bag) || token.is_some_and(|t| !model.resolve_token(&t).ok) {
                 return Ok(());
             }
             cursor::clear_cursor(&mut model);

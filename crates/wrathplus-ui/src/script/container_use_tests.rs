@@ -105,7 +105,10 @@ fn use_container_item_reads_its_target_and_numbers_first() {
         s.cursor_item().is_some(),
         "an unresolved token returns first"
     );
-    assert!(s.take_container_uses().is_empty());
+    // A bank bag with the banker away resolves no container (`0x5d7380`), before the clear.
+    s.set_container(5, Some(backpack()));
+    s.run("UseContainerItem(5, 1)").unwrap();
+    assert!(s.cursor_item().is_some() && s.take_container_uses().is_empty());
     s.run("UseContainerItem(0, 8) UseContainerItem(0, 9)")
         .unwrap();
     assert!(s.cursor_item().is_none(), "the clear ran");
