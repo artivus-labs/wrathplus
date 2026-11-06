@@ -21,6 +21,9 @@ fn wrath_current_power_uses_identity() {
         script.eval::<u32>("return UnitPower('target',0)").unwrap(),
         731
     );
+    // `lua_tointeger` rounds, ties to even: 0.6 is rage (1, tenths), 0.5 mana.
+    let rounded = "return UnitPower('target', 0.6), UnitPower('target', '0.5')";
+    assert_eq!(script.eval::<(u32, u32)>(rounded).unwrap(), (73, 731));
     unit.guid = 43;
     script.set_unit("target", Some(unit.clone()));
     assert_eq!(
@@ -127,7 +130,10 @@ fn wrath_power_readers_use_all_resources_and_native_integer_scaling() {
             .unwrap(),
         (0, "".into())
     );
-    assert!(script.run("UnitPowerType('player',2)").is_err());
+    // 12340 answers `0, ""` for an index with no vehicle power-display row (`0x60f327`).
+    let indexed = script.eval::<(u8, String)>("return UnitPowerType('player', 2)");
+    assert_eq!(indexed.unwrap(), (0, "".into()));
+    assert!(script.run("UnitPowerType()").is_err(), "the Usage gate");
 }
 
 #[test]
@@ -137,6 +143,7 @@ fn wrath_power_reads_zero_before_the_snapshot() {
         "player",
         Some(UnitState {
             exists: true,
+            has_object: true,
             power: 100,
             ..Default::default()
         }),

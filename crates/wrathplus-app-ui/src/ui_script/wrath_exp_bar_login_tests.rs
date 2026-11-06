@@ -9,7 +9,12 @@ use wrathplus_ui::script::UiScript;
 fn session(data: &std::path::Path) -> UiScript {
     let (mut s, _failures) = super::super::stock_session(data);
     s.clear_instruction_budget();
-    s.set_unit("player", Some(super::super::stock_player(10)));
+    let me = super::super::stock_player(10);
+    s.set_unit_guids(&wrathplus_ui::script::UnitGuids {
+        player: me.guid,
+        ..Default::default()
+    });
+    s.set_unit("player", Some(me));
     s.set_player_xp(2_500, 7_600);
     s.fire_event("PLAYER_XP_UPDATE", vec![]);
     s
@@ -109,6 +114,14 @@ fn real_unit_and_party_feeds_preserve_and_update_the_xp_strip() {
         .spawn((SelfPlayer, Guid(ME), ObjectStore(fields(2500, 7600))))
         .id();
     app.world_mut().resource_mut::<GuidIndex>().0.insert(ME, me);
+    // The guid table the aura feed seats beside the unit feed's snapshots; this app runs no aura
+    // feed.
+    app.world_mut()
+        .non_send_resource_mut::<UiScript>()
+        .set_unit_guids(&wrathplus_ui::script::UnitGuids {
+            player: ME,
+            ..Default::default()
+        });
     app.world_mut().resource_mut::<NameCache>().insert_player(
         ME,
         "Benchone".into(),

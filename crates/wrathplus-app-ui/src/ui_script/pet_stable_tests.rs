@@ -2,7 +2,7 @@
 //! (`PetStable.lua:20`) and concatenates `UnitName("pet")` (`PetStable.lua:129`); until the pet
 //! name query answers, `UnitName` reads `UNKNOWNOBJECT`, as in the reference.
 
-use wrathplus_ui::script::{PetStats, ScriptValue, UiScript, UnitState};
+use wrathplus_ui::script::{PetStats, ScriptValue, UiScript, UnitGuids, UnitState};
 
 use super::test_ui::load_ui_strict;
 
@@ -87,6 +87,11 @@ fn call_pet_repaints_the_closed_stable_with_unknownobject_while_the_name_is_in_f
 
     // No stable visited: `GetStablePetInfo` misses and `GetSelectedStablePet()` is -1.
     s.set_unit("pet", Some(pet(None)));
+    s.set_unit_guids(&UnitGuids {
+        player: 1,
+        pet: pet(None).guid,
+        ..Default::default()
+    });
     s.set_pet_stats(true, hunter_pet_stats());
     // `GetPetTalentTree`, the 3.3.5 info line's fourth fill (`STABLE_PET_INFO_TEXT`).
     s.set_wrath_pet_stable(Some("Ferocity".into()), false);

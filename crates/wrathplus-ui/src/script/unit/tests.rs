@@ -171,83 +171,6 @@ fn the_name_plate_faction_branch_picks_player_red_blue_over_the_reaction_swatch(
 }
 
 #[test]
-fn unit_level_reads_minus_one_when_the_level_cant_be_told() {
-    use crate::script::PlayerReqState;
-    let mut s = UiScript::new().unwrap();
-    s.set_player_req_state(PlayerReqState {
-        level: 3,
-        ..Default::default()
-    });
-    // Hostile (2) and 10 levels above the player: -1, the target frame's skull.
-    s.set_unit(
-        "target",
-        Some(UnitState {
-            exists: true,
-            level: 13,
-            reaction: 2,
-            ..Default::default()
-        }),
-    );
-    assert_eq!(s.eval::<i64>(r#"return UnitLevel("target")"#).unwrap(), -1);
-    // 9 above: the level.
-    s.set_unit(
-        "target",
-        Some(UnitState {
-            exists: true,
-            level: 12,
-            reaction: 2,
-            ..Default::default()
-        }),
-    );
-    assert_eq!(s.eval::<i64>(r#"return UnitLevel("target")"#).unwrap(), 12);
-    // Neutral (4) at 10 above: the level, as the gate is hostile-only.
-    s.set_unit(
-        "target",
-        Some(UnitState {
-            exists: true,
-            level: 13,
-            reaction: 4,
-            ..Default::default()
-        }),
-    );
-    assert_eq!(s.eval::<i64>(r#"return UnitLevel("target")"#).unwrap(), 13);
-    // A world boss (rank 3) at any gap: -1.
-    s.set_unit(
-        "target",
-        Some(UnitState {
-            exists: true,
-            level: 5,
-            reaction: 4,
-            rank: 3,
-            ..Default::default()
-        }),
-    );
-    assert_eq!(s.eval::<i64>(r#"return UnitLevel("target")"#).unwrap(), -1);
-    s.set_unit(
-        "target",
-        Some(UnitState {
-            exists: true,
-            level: 60,
-            reaction: 2,
-            is_player: true,
-            ..Default::default()
-        }),
-    );
-    assert_eq!(s.eval::<i64>(r#"return UnitLevel("target")"#).unwrap(), 60);
-    // An unstreamed level 0 answers 0, not -1: `0x517fc0` pushes the raw field.
-    s.set_unit(
-        "target",
-        Some(UnitState {
-            exists: true,
-            level: 0,
-            reaction: 2,
-            ..Default::default()
-        }),
-    );
-    assert_eq!(s.eval::<i64>(r#"return UnitLevel("target")"#).unwrap(), 0);
-}
-
-#[test]
 fn corpse_can_attack_and_green_range_bindings() {
     use crate::script::PlayerReqState;
     let mut s = UiScript::new().unwrap();
@@ -522,8 +445,14 @@ fn unitname_reads_unknownobject_for_a_resolved_unit_whose_name_is_in_flight() {
 #[test]
 fn power_bindings_read_the_active_type() {
     let mut s = UiScript::new().unwrap();
-    s.set_unit("player", Some(player())); // rage 35/100
-                                          // One value: `0x517940` pushes a number, never a string.
+    let mut rage = player(); // rage 35/100, 350/1000 on the wire
+    let mut powers = [crate::script::UnitPowerState::default(); 7];
+    powers[1] = crate::script::UnitPowerState {
+        current: 350,
+        maximum: 1000,
+    };
+    rage.powers = Some(powers);
+    s.set_unit("player", Some(rage));
     assert_eq!(
         s.eval::<i64>(r#"return UnitPowerType("player")"#).unwrap(),
         1
@@ -533,7 +462,10 @@ fn power_bindings_read_the_active_type() {
         s.eval::<i64>(r#"return UnitManaMax("player")"#).unwrap(),
         100
     );
-    // `UnitMana` reports the active power, here rage.
+    // `UnitMana` is `UnitPower` (both `0x60ed40`): the active power, here rage, divided by 10.
+    assert!(s
+        .eval::<bool>("return UnitMana == UnitPower and UnitManaMax == UnitPowerMax")
+        .unwrap());
     // An absent unit is the number 0, never nil: `UnitFrame.lua:122` indexes `ManaBarColor` by it.
     assert_eq!(
         s.eval::<i64>(r#"return UnitPowerType("target")"#).unwrap(),
@@ -547,21 +479,6 @@ fn get_money_reads_the_pushed_purse() {
     assert_eq!(s.eval::<i64>("return GetMoney()").unwrap(), 0);
     s.set_money(123_456);
     assert_eq!(s.eval::<i64>("return GetMoney()").unwrap(), 123_456);
-}
-
-#[test]
-fn unit_xp_reads_the_player_globals_only_for_the_player_token() {
-    let mut s = UiScript::new().unwrap();
-    assert_eq!(s.eval::<i64>(r#"return UnitXP("player")"#).unwrap(), 0);
-    assert_eq!(s.eval::<i64>(r#"return UnitXPMax("player")"#).unwrap(), 0);
-    s.set_player_xp(4200, 6000);
-    assert_eq!(s.eval::<i64>(r#"return UnitXP("player")"#).unwrap(), 4200);
-    assert_eq!(
-        s.eval::<i64>(r#"return UnitXPMax("player")"#).unwrap(),
-        6000
-    );
-    assert_eq!(s.eval::<i64>(r#"return UnitXP("target")"#).unwrap(), 0);
-    assert_eq!(s.eval::<i64>(r#"return UnitXPMax("target")"#).unwrap(), 0);
 }
 
 #[test]
@@ -641,14 +558,14 @@ fn unit_race_class_sex_report_the_snapshot_or_the_absent_shape() {
         ("Warrior".into(), "WARRIOR".into())
     );
     assert_eq!(s.eval::<i64>(r#"return UnitSex("player")"#).unwrap(), 3);
-    // An absent token: `nil, nil` for the pairs, but `UnitSex` answers the number 2 (`0x517f9f`).
+    // An absent token: `nil, nil` for the pairs, but `UnitSex` answers the number 1 (`0x60f9b7`).
     assert!(s
         .eval::<bool>(r#"local a, b = UnitRace("target") return a == nil and b == nil"#)
         .unwrap());
     assert!(s
         .eval::<bool>(r#"local a, b = UnitClass("target") return a == nil and b == nil"#)
         .unwrap());
-    assert_eq!(s.eval::<i64>(r#"return UnitSex("target")"#).unwrap(), 2);
+    assert_eq!(s.eval::<i64>(r#"return UnitSex("target")"#).unwrap(), 1);
     s.set_unit(
         "target",
         Some(UnitState {
@@ -659,8 +576,8 @@ fn unit_race_class_sex_report_the_snapshot_or_the_absent_shape() {
     assert!(s
         .eval::<bool>(r#"local a, b = UnitRace("target") return a == nil and b == nil"#)
         .unwrap());
-    // An unstreamed sex byte reads 2 too.
-    assert_eq!(s.eval::<i64>(r#"return UnitSex("target")"#).unwrap(), 2);
+    // An unstreamed sex byte reads 1 too.
+    assert_eq!(s.eval::<i64>(r#"return UnitSex("target")"#).unwrap(), 1);
 }
 
 /// `UnitFactionGroup` answers (English, localized), or `nil, nil` for a unit with no side.
@@ -1949,7 +1866,7 @@ fn an_unseeded_player_record_answers_the_references_four_ways() {
         .unwrap());
     assert_eq!(
         s.eval::<i64>(r#"return UnitSex("playerfoo")"#).unwrap(),
-        2,
-        "…which for UnitSex is the same 2, by the binding's own unresolved-token default"
+        1,
+        "…which for UnitSex is `[0x9fe7f4]`, 1, not the record's 2 (`0x60f9b7`)"
     );
 }

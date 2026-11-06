@@ -3,7 +3,7 @@
 //! with the pet.
 
 use wrathplus_ui::script::{
-    PetStats, QuadContent, ScriptValue, UiScript, UnitCombatStats, UnitState,
+    PetStats, QuadContent, ScriptValue, UiScript, UnitCombatStats, UnitGuids, UnitState,
 };
 
 /// The whole character block: the page calls seven `PaperDollFrame_Set*` setters
@@ -43,6 +43,8 @@ fn player_unit() -> UnitState {
 fn pet_unit() -> UnitState {
     UnitState {
         exists: true,
+        // `UnitCreatureFamily` reads the unit the token names (`0x611820`), so the pet has a guid.
+        guid: 0xF140_0000_0000_0077,
         name: Some("Snarl".into()),
         health: 900,
         max_health: 1000,
@@ -104,9 +106,19 @@ fn tab_left(s: &mut UiScript, tab: u32) -> f64 {
         .unwrap_or_else(|e| panic!("tab {tab} has no resolved rect: {e}"))
 }
 
+/// The guid table the app's unit feed seats beside the `"pet"` snapshot, under a player.
+fn seat_pet(s: &mut UiScript) {
+    s.set_unit_guids(&UnitGuids {
+        player: 1,
+        pet: pet_unit().guid,
+        ..Default::default()
+    });
+}
+
 /// Put a pet in the world and tell the page about it, the way the app's feeds do.
 fn give_pet(s: &mut UiScript) {
     s.set_unit("pet", Some(pet_unit()));
+    seat_pet(s);
     s.set_pet_stats(true, hunter_pet_stats());
     s.set_pet_combat_stats(Some(pet_combat_stats()));
     s.fire_event("PET_BAR_UPDATE", vec![]);
@@ -317,6 +329,7 @@ fn the_level_line_names_the_family_and_is_untouched_without_one() {
     let with_family = |family: Option<String>| {
         let mut s = load_pet_page();
         s.set_unit("pet", Some(pet_unit()));
+        seat_pet(&mut s);
         s.set_pet_combat_stats(Some(pet_combat_stats()));
         s.set_pet_stats(
             true,

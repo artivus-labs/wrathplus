@@ -27,6 +27,9 @@ pub(crate) mod wrath_group;
 #[path = "wrath_party_assignment.rs"]
 mod wrath_party_assignment;
 
+#[path = "wrath_group_verbs.rs"]
+pub(crate) mod wrath_group_verbs;
+
 #[path = "wrath_spell_queries.rs"]
 pub(crate) mod wrath_spell_queries;
 
@@ -45,6 +48,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     super::loot_roll::wrath::install_actions(lua)?;
     wrath_power::install(lua)?;
     wrath_group::install(lua)?;
+    wrath_group_verbs::install(lua)?;
+    super::unit::wrath_verbs::install(lua)?;
     wrath_party_assignment::install(lua)?;
     super::wrath_channel_bindings::install(lua)?;
     super::aura::wrath::install(lua)?;

@@ -123,8 +123,8 @@ pub struct UnitState {
     /// `ChrClasses.dbc` field 2 for a player's class, 0-based (Strength 0, Agility 1), which
     /// `GetDamageBonusStat` (`0x48b520`) reads for the active player; `None` with no class row.
     pub damage_bonus_stat: Option<u32>,
-    /// `UnitSex`'s scale, 2 male and 3 female, from `UNIT_FIELD_BYTES_0` byte 2 (0 male, 1
-    /// female). The unfilled 0 answers 2, the reference's unresolved answer (`0x517f9f`).
+    /// `UnitSex`'s scale, 2 male, 3 female and 1 neuter, from `UNIT_FIELD_BYTES_0` byte 2 (0, 1,
+    /// 2) through `{2, 3, 1}` (`0x9fe7ec`). The unfilled 0 answers 1, as no unit does (`0x60f9b7`).
     pub sex: u8,
     /// `UnitIsPlayer`: a player character by guid, whose tooltip level line shows race and class.
     pub is_player: bool,
@@ -155,6 +155,12 @@ pub struct UnitState {
     /// race's. `UnitCreatureType` answers it, and a creature's level line takes it as its class
     /// slot; a player's reads race and class instead. `None` for type 0 or no descriptor.
     pub creature_type_name: Option<String>,
+    /// The creature template's type flags (`[rec+0xc]`), 0 for a player or before the query
+    /// answers: `UnitLevel` reads the boss bit `0x4` (`0x715d70`).
+    pub creature_type_flags: u32,
+    /// `UnitCreatureFamily`'s word: the template's family (`[rec+0x14]`) in `CreatureFamily.dbc`
+    /// (`+0x28`); `None` for no template, family 0 or an id with no row.
+    pub creature_family: Option<String>,
     /// Creature rank 0..=4 as the reference's getter (`0x605620`) answers it, so already gated:
     /// 0 without a cached creature template or with a pet number. The tooltip's rank word,
     /// `UnitLevel`'s boss -1 and `UnitClassification` all read it.
@@ -211,6 +217,14 @@ pub struct UnitState {
     pub in_combat: bool,
 }
 
+impl UnitState {
+    /// The gender byte (0, 1, 2) on `UnitSex`'s scale `{2, 3, 1}` (`0x9fe7ec`), else 0.
+    pub fn sex_of_gender(gender: Option<u8>) -> u8 {
+        let sex = gender.and_then(|g| [2, 3, 1].get(usize::from(g)).copied());
+        sex.unwrap_or(0)
+    }
+}
+
 /// The name of a unit whose name is not yet known, as the reference's `UnitName` (`0x517220`) and
 /// unit tooltip title (`0x609324`) both answer it: the `UNKNOWNOBJECT` GlobalString (enUS
 /// "Unknown"), else the literal "Unknown Being" (`0x860fa4`) when the global is missing or empty.
@@ -253,8 +267,8 @@ pub fn is_civilian_kill(u: &UnitState, player_level: u32) -> bool {
 }
 
 /// The tooltip's "??" level gate (`0x529fe0`): never a player; level 0, world-boss rank 3, or a
-/// hostile (reaction <= 2) at least 10 levels above the player. `UnitLevel` (`0x517fc0`) answers
-/// the boss and hostile legs with -1, but returns a level of 0 as is.
+/// hostile (reaction <= 2) at least 10 levels above the player. `UnitLevel` has its own -1 legs
+/// ([`wrath_verbs`]).
 pub fn level_reads_unknown(u: &UnitState, player_level: u32) -> bool {
     let much_higher_hostile =
         u.reaction != 0 && u.reaction <= 2 && u.level >= player_level.saturating_add(10);
@@ -520,9 +534,10 @@ mod resolve;
 mod tests;
 pub(crate) mod token;
 pub(crate) mod wrath_queries;
+pub(crate) mod wrath_verbs;
 
 pub(crate) use resolve::token_recognised;
-pub use resolve::{parse_unit_token, parse_unit_token_in, UnitBase, UnitGuids, UnitTokenParse};
+pub use resolve::{parse_unit_token, UnitBase, UnitGuids, UnitTokenParse};
 
 pub(super) use bindings::class_pair;
 pub(super) use bindings::install;

@@ -340,7 +340,8 @@ pub(crate) fn install(lua: &Lua) -> mlua::Result<()> {
     )?;
     g.set(
         "UnitIsRaidOfficer",
-        lua.create_function(|lua, token: Option<String>| {
+        lua.create_function(|lua, token: Value| {
+            let token = super::token::token_text(lua, &token);
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             let guid = token.as_ref().and_then(|t| model.unit(t)).map(|u| u.guid);
             Ok(flag(guid.is_some_and(|g| {
@@ -350,7 +351,8 @@ pub(crate) fn install(lua: &Lua) -> mlua::Result<()> {
     )?;
     g.set(
         "UnitInBattleground",
-        lua.create_function(|lua, token: Option<String>| {
+        lua.create_function(|lua, token: Value| {
+            let token = super::token::token_text(lua, &token);
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             let guid = token.as_ref().and_then(|t| model.unit(t)).map(|u| u.guid);
             let slot = guid.and_then(|g| model.party.raid.iter().position(|m| m.guid == g));

@@ -117,6 +117,14 @@ impl Model {
         }
     }
 
+    /// The active player's guid (`0x4d3790`): the guid table's, else the party push's.
+    pub(crate) fn local_guid(&self) -> u64 {
+        match self.unit_guids.player {
+            0 => self.party.own_guid,
+            me => me,
+        }
+    }
+
     /// The guid `token` names when an object can hold it; `None` for nobody.
     pub(crate) fn unit_guid(&self, token: &str) -> Option<u64> {
         self.resolve_token(token).unit()
@@ -215,7 +223,7 @@ impl Model {
     /// text; `None` (false, guid zeroed) on anything else or on a `pet` it does not allow.
     fn suffixes(&self, mut guid: u64, mut p: &[u8]) -> Option<u64> {
         let g = &self.unit_guids;
-        let me = self.me();
+        let me = self.local_guid();
         while !p.is_empty() {
             if p[0] == b'-' {
                 p = &p[1..];
@@ -246,26 +254,11 @@ impl Model {
         Some(guid)
     }
 
-    /// A guid-table slot, else the guid of the snapshot pushed under its token, as [`Self::base`]
-    /// reads a base.
-    fn slot(&self, table: u64, token: impl FnOnce() -> String) -> u64 {
-        if table != 0 {
-            return table;
-        }
-        let pushed = self.pushed_unit(&token()).filter(|u| u.exists);
-        pushed.map_or(0, |u| u.guid)
-    }
-
-    /// The active player's guid (`0x4d3790`).
-    fn me(&self) -> u64 {
-        self.slot(self.unit_guids.player, || "player".into())
-    }
-
     /// The player's pet, `CHARM` else `SUMMON` (`0x60acc3`-`0x60acd8`); 0 without the player.
     fn my_pet(&self) -> u64 {
-        match self.me() {
+        match self.local_guid() {
             0 => 0,
-            _ => self.slot(self.unit_guids.pet, || "pet".into()),
+            _ => self.unit_guids.pet,
         }
     }
 
@@ -293,20 +286,31 @@ impl Model {
     /// `0x512a00`: the player or a party slot (`0x52c680`), or a raid row (`0x5726f0`).
     fn is_member(&self, guid: u64) -> bool {
         guid != 0
-            && (guid == self.me()
+            && (guid == self.local_guid()
                 || self.party_index(guid).is_some()
                 || self.raid_index(guid).is_some())
     }
 
     /// `0x512a30` = `0x52d310 || 0x573200`: us or our pet; a party member or its pet; a raid
-    /// member or its pet, the member's `CHARM`/`SUMMON` or its row's pet (`0x573255`-`0x57328c`).
+    /// member or its pet.
     pub(crate) fn ours_or_grouped(&self, guid: u64) -> bool {
-        let rows = self.unit_guids.raid_pets.len();
         names_unit(guid)
             && (self.is_member(guid)
                 || guid == self.my_pet()
                 || (0..4).any(|i| self.member_pet(false, i) == guid)
-                || (0..rows).any(|i| self.member_pet(true, i) == guid))
+                || self.in_raid_or_raid_pet(guid))
+    }
+
+    /// `0x573200`: a raid row, or a raid member's pet: the held member's `CHARM`/`SUMMON`
+    /// (`0x573255`), else the row's stored pet while the row is online (`[row+0x18] & 1`,
+    /// `0x573273`). `raidpetN` (`0x518ce0`) reads the stored pet with no online test.
+    pub(crate) fn in_raid_or_raid_pet(&self, guid: u64) -> bool {
+        let g = &self.unit_guids;
+        let online = |m: u64| self.party.raid.iter().any(|r| r.guid == m && r.online);
+        let pet_of_row =
+            |(&m, &pet): (&u64, &u64)| pet == guid && (g.held.contains_key(&m) || online(m));
+        names_unit(guid)
+            && (g.raid.contains(&guid) || g.raid.iter().zip(&g.raid_pets).any(pet_of_row))
     }
 
     /// A `pet` hop's unit (`0x60ab8e`-`0x60abb1`): the held unit's `CHARM`, else `SUMMON`, 0 when
@@ -316,7 +320,7 @@ impl Model {
         if guid == 0 {
             return 0;
         }
-        if guid == self.me() {
+        if guid == self.local_guid() {
             return self.my_pet();
         }
         let held = self.unit_guids.held.contains_key(&guid)
@@ -371,7 +375,7 @@ impl Model {
             g.arena[..arena].to_vec()
         };
         // The player's name answers its guid and skips the members (`0x60a6f0`-`0x60a739`).
-        let me = self.me();
+        let me = self.local_guid();
         if me != 0 && (named(me) || is(&self.player_record.name)) {
             return me;
         }

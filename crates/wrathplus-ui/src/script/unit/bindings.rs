@@ -9,8 +9,8 @@ use super::super::binding_abi::flag;
 use super::super::calls::ScriptCall;
 use super::super::Model;
 use super::{
-    classification_word, grey_band, level_reads_unknown, pick_unit_token, unit_predicate,
-    unknownobject, with_unit, PlayerRecord, SelectionRequest, UnitBase, UnitTokenParse,
+    classification_word, grey_band, pick_unit_token, unit_predicate, unknownobject, with_unit,
+    PlayerRecord, SelectionRequest,
 };
 
 /// The `"player"` fast path of `UnitName`, `UnitRace`, `UnitClass` and `UnitSex`, never
@@ -57,21 +57,9 @@ fn player_record_arm<T>(
     Some(f(&model.player_record))
 }
 
-/// The class ids `GetComboPoints` (`0x51a190`) accepts: it compares the class, `UNIT_FIELD_BYTES_0`
-/// byte 1, with 4 and 0xb.
-const CLASS_ROGUE: u32 = 4;
-const CLASS_DRUID: u32 = 11;
-
 /// Register the `Unit*` globals.
 pub(in crate::script) fn install(lua: &Lua) -> mlua::Result<()> {
     let g = lua.globals();
-
-    g.set(
-        "UnitExists",
-        lua.create_function(|lua, token: Option<String>| {
-            unit_predicate(lua, &token, |u| u.exists)
-        })?,
-    )?;
 
     // `UnitIsVisible(unit)` (`0x516030`): whether the client holds the unit's object, nothing else.
     // Not `UnitExists`: an out-of-range party member exists through its roster entry, unseen.
@@ -182,31 +170,6 @@ pub(in crate::script) fn install(lua: &Lua) -> mlua::Result<()> {
                 r#"Usage: UnitHealthMax("unit")"#,
             )?);
             with_unit(lua, &token, 0i64, |u| i64::from(u.max_health))
-        })?,
-    )?;
-
-    // UnitLevel (`0x517fc0`): the raw level (a raw 0 stays 0), or -1 for a world boss or a hostile
-    // unit 10 or more levels above the player. The reference's attackable-decay override
-    // (`max(1, raw - round(min(b, 100) * 0.05))`, `b` an untraced byte not seen set) is not built.
-    g.set(
-        "UnitLevel",
-        lua.create_function(|lua, token: Value| {
-            let token = Some(crate::script::binding_abi::string_arg(
-                lua,
-                token,
-                r#"Usage: UnitLevel("unit")"#,
-            )?);
-            let model = lua.app_data_ref::<Model>().expect("model app_data");
-            let Some(u) = token.as_ref().and_then(|t| model.unit(t)) else {
-                return Ok(0i64);
-            };
-            Ok(if u.level == 0 {
-                0
-            } else if level_reads_unknown(u, model.player_req.level) {
-                -1
-            } else {
-                i64::from(u.level)
-            })
         })?,
     )?;
 
@@ -381,7 +344,8 @@ pub(in crate::script) fn install(lua: &Lua) -> mlua::Result<()> {
     // `UnitIsPlayer` answers nil.
     g.set(
         "UnitPlayerControlled",
-        lua.create_function(|lua, unit: Option<String>| {
+        lua.create_function(|lua, unit: Value| {
+            let unit = super::token::token_text(lua, &unit);
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             Ok(flag(
                 unit.and_then(|u| model.unit(&u))
@@ -452,102 +416,15 @@ pub(in crate::script) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // UnitPlayerOrPetInParty/InRaid(unit): the unit or its owner (`UnitState::owner`) is in the
-    // group. The reference's predicate behind `0x5162f0`/`0x5163b0` is untraced; the owner reading
-    // is WrathPlus's.
-    for (name, raid) in [
-        ("UnitPlayerOrPetInParty", false),
-        ("UnitPlayerOrPetInRaid", true),
-    ] {
-        g.set(
-            name,
-            lua.create_function(move |lua, token: Option<String>| {
-                let model = lua.app_data_ref::<Model>().expect("model app_data");
-                let Some(u) = token.as_ref().and_then(|t| model.unit(t)) else {
-                    return Ok(Value::Nil);
-                };
-                if !u.exists || u.guid == 0 {
-                    return Ok(Value::Nil);
-                }
-                let me = model.unit("player").map(|p| p.guid).unwrap_or(0);
-                let in_group = |guid: u64| {
-                    guid != 0
-                        && if raid {
-                            model.party.raid.iter().any(|m| m.guid == guid)
-                        } else {
-                            guid == me || model.party.members.iter().any(|m| m.guid == guid)
-                        }
-                };
-                let grouped = if raid {
-                    !model.party.raid.is_empty()
-                } else {
-                    !model.party.members.is_empty()
-                };
-                let hit = grouped && (in_group(u.guid) || in_group(u.owner));
-                Ok(flag(hit))
-            })?,
-        )?;
-    }
-
-    // UnitInRaid(unit) (`0x516350`): the constant 1 on a hit (`0x51637e`), never an index. The
-    // reference never raises `Usage:`: a missing or uncoercible argument is GUID 0 (`0x6f3690`,
-    // `0x515970`), a miss (`0x4baee0`). The roster holds the player, unlike `UnitInParty`'s.
+    // UnitPlayerOrPetInRaid(unit) (`0x60cb20`): no gate, so a non-string is no token; `0x573200`
+    // on the resolved guid, held or not: a raid row, which holds us, or a raid member's pet.
     g.set(
-        "UnitInRaid",
-        lua.create_function(|lua, token: Option<String>| {
+        "UnitPlayerOrPetInRaid",
+        lua.create_function(|lua, token: Value| {
+            let token = super::token::token_text(lua, &token);
             let model = lua.app_data_ref::<Model>().expect("model app_data");
-            let hit = token
-                .as_ref()
-                .and_then(|t| model.unit(t))
-                .filter(|u| u.exists && u.guid != 0)
-                .is_some_and(|u| {
-                    model
-                        .party
-                        .raid
-                        .iter()
-                        .any(|m| m.guid != 0 && m.guid == u.guid)
-                });
-            Ok(flag(hit))
-        })?,
-    )?;
-
-    // UnitInParty(unit): the grouped player or a party member, by token or by roster GUID.
-    g.set(
-        "UnitInParty",
-        lua.create_function(|lua, token: Option<String>| {
-            let model = lua.app_data_ref::<Model>().expect("model app_data");
-            let Some(t) = token else {
-                return Ok(Value::Nil);
-            };
-            let Some(u) = model.unit(&t) else {
-                return Ok(Value::Nil);
-            };
-            let grouped = !model.party.members.is_empty();
-            if !u.exists || !grouped {
-                return Ok(Value::Nil);
-            }
-            // A `partyN` token itself names a member; a chain off one (`party1target`) names
-            // whoever that member targets, which the guid arms below judge.
-            let party_slot = matches!(
-                crate::script::unit::parse_unit_token_in(
-                    &t,
-                    lua.app_data_ref::<Model>().expect("model").unit_guids.wrath
-                ),
-                UnitTokenParse::Unit {
-                    base: UnitBase::Party(_),
-                    hops: 0
-                }
-            );
-            let hit = party_slot
-                || t.eq_ignore_ascii_case("player")
-                || (u.guid != 0
-                    && (model.unit("player").is_some_and(|p| p.guid == u.guid)
-                        || model
-                            .party
-                            .members
-                            .iter()
-                            .any(|m| m.guid != 0 && m.guid == u.guid)));
-            Ok(flag(hit))
+            let guid = token.map_or(0, |t| model.resolve_token(&t).guid);
+            Ok(flag(model.in_raid_or_raid_pet(guid)))
         })?,
     )?;
 
@@ -723,8 +600,8 @@ pub(in crate::script) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // UnitSex(unit): 2 male, 3 female, or 1 neuter, which no feed sends. A unit that does not
-    // resolve answers 2, never nil (`0x517f9f`).
+    // UnitSex(unit) (`0x60f8e0`): the gender byte through `{2, 3, 1}` (`0x9fe7ec`), 2 male, 3
+    // female, 1 neuter; a unit that does not resolve answers `[0x9fe7f4]`, 1 (`0x60f9b7`).
     g.set(
         "UnitSex",
         lua.create_function(|lua, token: Value| {
@@ -733,13 +610,20 @@ pub(in crate::script) fn install(lua: &Lua) -> mlua::Result<()> {
                 token,
                 r#"Usage: UnitSex("unit")"#,
             )?);
-            // The `"player"` arm reads the record's byte (`0x517ef9`, `0xc27e82`) into
-            // `{2, 3, 1, 6}` unchecked (`0x808be4`), so an unset record answers 2 there too.
-            let sex = match player_record_arm(lua, &token, |r| r.sex) {
-                Some(sex) => sex,
-                None => with_unit(lua, &token, 0u8, |u| u.sex)?,
-            };
-            Ok(Value::Integer(i64::from(if sex == 0 { 2 } else { sex })))
+            // The `"player"` arm reads the record's byte (`0x60f92b`, `0xc79e90`) through the same
+            // table, so an unset record answers 2.
+            Ok(Value::Integer(i64::from(
+                match player_record_arm(lua, &token, |r| r.sex) {
+                    Some(sex) => {
+                        if sex == 0 {
+                            2
+                        } else {
+                            sex
+                        }
+                    }
+                    None => with_unit(lua, &token, 1u8, |u| u.sex.max(1))?,
+                },
+            )))
         })?,
     )?;
 
@@ -777,83 +661,6 @@ pub(in crate::script) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // UnitPowerType(unit) (`0x517940`): one number, the power index (0 mana, 1 rage, ...), with no
-    // token string. A unit that does not resolve answers 0, never nil: `UnitFrame.lua:122` indexes
-    // `ManaBarColor` with it.
-    g.set(
-        "UnitPowerType",
-        lua.create_function(|lua, token: Value| {
-            let token = Some(crate::script::binding_abi::string_arg(
-                lua,
-                token,
-                r#"Usage: UnitPowerType("unit")"#,
-            )?);
-            let ty = with_unit(lua, &token, 0u8, |u| u.power_type)?;
-            Ok(i64::from(ty))
-        })?,
-    )?;
-
-    // UnitMana/UnitManaMax(unit): the current and maximum of whatever power the unit uses; 1.12
-    // has no `UnitPower` and no power-type argument.
-    g.set(
-        "UnitMana",
-        lua.create_function(|lua, token: Value| {
-            let token = Some(crate::script::binding_abi::string_arg(
-                lua,
-                token,
-                r#"Usage: UnitMana("unit")"#,
-            )?);
-            with_unit(lua, &token, 0i64, |u| i64::from(u.power))
-        })?,
-    )?;
-    g.set(
-        "UnitManaMax",
-        lua.create_function(|lua, token: Value| {
-            let token = Some(crate::script::binding_abi::string_arg(
-                lua,
-                token,
-                r#"Usage: UnitManaMax("unit")"#,
-            )?);
-            with_unit(lua, &token, 0i64, |u| i64::from(u.max_power))
-        })?,
-    )?;
-
-    // UnitXP/UnitXPMax(unit): `PLAYER_XP` is a private field, so only `"player"` has a value and
-    // any other token answers 0.
-    let is_player = |token: &Option<String>| token.as_deref() == Some("player");
-    g.set(
-        "UnitXP",
-        lua.create_function(move |lua, token: Value| {
-            let token = Some(crate::script::binding_abi::string_arg(
-                lua,
-                token,
-                r#"Usage: UnitXP("unit")"#,
-            )?);
-            let model = lua.app_data_ref::<Model>().expect("model app_data");
-            Ok(if is_player(&token) {
-                i64::from(model.player_xp)
-            } else {
-                0
-            })
-        })?,
-    )?;
-    g.set(
-        "UnitXPMax",
-        lua.create_function(move |lua, token: Value| {
-            let token = Some(crate::script::binding_abi::string_arg(
-                lua,
-                token,
-                r#"Usage: UnitXPMax("unit")"#,
-            )?);
-            let model = lua.app_data_ref::<Model>().expect("model app_data");
-            Ok(if is_player(&token) {
-                i64::from(model.player_next_level_xp)
-            } else {
-                0
-            })
-        })?,
-    )?;
-
     // UnitIsCharmed(unit) (`0x516cf0`): `UNIT_FIELD_CHARMEDBY` is nonzero, not a flags bit, so the
     // charmed unit answers 1 and its charmer nil. 1.12 has no `UnitIsPossessed`.
     g.set(
@@ -868,26 +675,6 @@ pub(in crate::script) fn install(lua: &Lua) -> mlua::Result<()> {
         lua.create_function(|lua, ()| {
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             Ok(model.money as i64)
-        })?,
-    )?;
-
-    // GetComboPoints() (`0x51a190`): `PLAYER_FIELD_BYTES` byte 1, behind two gates stock
-    // `ComboFrame.lua` does not repeat: the class is rogue or druid (`0x51a1cc`), so a warrior's
-    // dodge point never shows, and `PLAYER_FIELD_COMBO_TARGET` equals the current target
-    // (`0x51a205`), so the points read per target. Both are plain equality, GUID 0 included.
-    g.set(
-        "GetComboPoints",
-        lua.create_function(|lua, ()| {
-            let model = lua.app_data_ref::<Model>().expect("model app_data");
-            let class = model.player_req.class_id;
-            if class != CLASS_ROGUE && class != CLASS_DRUID {
-                return Ok(0_i64);
-            }
-            let target = model.unit("target").map_or(0, |u| u.guid);
-            if model.combo_target != target {
-                return Ok(0_i64);
-            }
-            Ok(i64::from(model.combo_points))
         })?,
     )?;
 

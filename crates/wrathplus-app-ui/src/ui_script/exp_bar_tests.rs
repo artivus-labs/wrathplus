@@ -1,11 +1,13 @@
 //! The XP bar: its hover plate, the exhaustion tick and the on-bar numerals.
 
-use wrathplus_ui::script::{QuadContent, ScriptValue, UiScript, UnitState};
+use wrathplus_ui::script::{QuadContent, ScriptValue, UiScript, UnitGuids, UnitState};
+
+const ME: u64 = 0x0100_0000_0000_0001;
 
 fn stock_player(level: u32) -> UnitState {
     UnitState {
         exists: true,
-        guid: 0x0100_0000_0000_0001,
+        guid: ME,
         name: Some("Benchone".into()),
         level,
         race: Some("Human".into()),
@@ -29,6 +31,14 @@ fn enter_world(s: &mut UiScript) {
     s.fire_event("PLAYER_XP_UPDATE", vec![ScriptValue::Str("player".into())]);
     s.fire_event("UPDATE_FACTION", vec![]);
     s.fire_event("PLAYER_ENTERING_WORLD", vec![]);
+}
+
+/// The guid table the app's unit feed seats beside the `"player"` snapshot.
+fn seat_player(s: &mut UiScript, player: u64) {
+    s.set_unit_guids(&UnitGuids {
+        player,
+        ..Default::default()
+    });
 }
 
 fn exp_bar_harness() -> UiScript {
@@ -57,7 +67,10 @@ fn exp_bar_harness() -> UiScript {
     ] {
         super::test_ui::load_ui(&mut s, file);
     }
-    // A level 60 player's XP (3.3.5 caps at 80), then world entry.
+    // A level 60 player's XP (3.3.5 caps at 80), then world entry; `UnitXP` reads it for a token
+    // naming us (`0x60a5d0`).
+    s.set_unit("player", Some(stock_player(60)));
+    seat_player(&mut s, ME);
     s.set_player_xp(0, 494_900);
     enter_world(&mut s);
     // The stock default, detailed tips on (`UIOptionsFrame.lua:100`); no options file loads here.
@@ -90,6 +103,7 @@ fn party_roster_events_leave_the_level_ten_xp_bar_rendering_unchanged() {
         super::test_ui::load_ui(&mut s, file);
     }
     s.set_unit("player", Some(stock_player(10)));
+    seat_player(&mut s, ME);
     s.set_player_xp(2500, 7600);
     enter_world(&mut s);
     s.resolve();
@@ -319,10 +333,12 @@ fn the_max_level_rail_replaces_the_xp_bar_at_80() {
         "player",
         Some(UnitState {
             exists: true,
+            guid: 1,
             level: 79,
             ..UnitState::default()
         }),
     );
+    seat_player(&mut s, 1);
     enter_world(&mut s);
     s.resolve();
 
