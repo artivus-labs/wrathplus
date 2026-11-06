@@ -747,7 +747,7 @@ pub(crate) fn snapshot(
         // `UnitIsConnected` (`0x517d50`) answers 1 for any unit the object manager holds
         // (`0x517daf`); only an unheld member reads the roster record's online bit.
         is_connected: true,
-        // What the token resolver `0x515970` yields, and `UnitIsUnit` (`0x516070`) compares.
+        // What the token resolver `0x60abf0` yields, and `UnitIsUnit` (`0x60c3d0`) compares.
         guid,
         name,
         // The UI getters: `UNIT_DYNFLAG_DEAD` (feign death) zeroes `UnitHealth` (`0x5174d0`) and
@@ -1736,7 +1736,7 @@ mod tests {
         assert_eq!(resolve(&mut app), None, "a nearer GameObject names nobody");
     }
 
-    /// `partypetN` and `raidpetN` through the one resolver (`0x515970`): the pet the member's
+    /// `partypetN` and `raidpetN` through the one resolver (`0x60abf0`): the pet the member's
     /// descriptor names while it is held, else the roster record's, and a pet the object manager
     /// does not hold names no unit.
     mod group_pet_tokens {

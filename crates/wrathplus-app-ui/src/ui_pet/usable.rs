@@ -10,9 +10,9 @@ use crate::app_core::session::ObjectStore;
 
 use super::{PetBar, PetUnit};
 
-/// `0x4bcf70`, every exit in the order the bytes take them. `me` is the client's active player
-/// guid (`0x468550`); `player` is that guid's object and `pet` the bar's cached guid's (typemasks
-/// `0x10` and `8`), each `None` while it is not streamed.
+/// 1.12's `0x4bcf70`, every exit in the order the bytes take them. `me` is the client's active
+/// player guid (12340's `0x4d3790`); `player` is that guid's object and `pet` the bar's cached
+/// guid's (typemasks `0x10` and `8`), each `None` while it is not streamed.
 pub(super) fn actions_usable(
     bar: &PetBar,
     me: Option<u64>,

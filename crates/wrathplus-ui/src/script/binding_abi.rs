@@ -162,8 +162,8 @@ fn trim_g(s: &str) -> &str {
 ///
 /// Build 12340's twin is `0x815500(L, idx, default)`, by `lua_type`: nil 0, boolean itself, number
 /// through `0x88b9c0` (the same truncation, low dword), string through `0x815400` (the same byte
-/// switch, then `0x76e780` against `"off"` (`0xa09e84`), `"disabled"`, `"on"` (`0xa09e88`) and
-/// `"enabled"`; case-insensitivity inferred), any other type `default`. `GetShapeshiftForm`'s flag
+/// switch, then `_strnicmp` (`0x76e780`) against `"off"` (`0xa09e84`), `"disabled"`, `"on"`
+/// (`0xa09e88`) and `"enabled"`), any other type `default`. `GetShapeshiftForm`'s flag
 /// is one. A number past ±2^63 stores the x87 integer indefinite, whose low dword is 0: false.
 pub(crate) fn bool_or_default(v: Option<&Value>, default: bool) -> bool {
     let Some(v) = v else {

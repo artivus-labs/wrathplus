@@ -118,8 +118,8 @@ pub(super) fn load_session_ui(script: &mut UiScript, addons: bool) -> Vec<String
         );
     } else {
         // A caller's own player still has the Enter World record a session always holds:
-        // `UnitRace("player")` and `UnitClass("player")` read only that record (`0x518269`),
-        // never the unit, so a seat without one leaves `DressUpTexturePath` a nil race file.
+        // `UnitRace("player")` and `UnitClass("player")` read only that record (`0x6b1070`,
+        // `0x6b1080`), so a seat without one leaves `DressUpTexturePath` a nil race file.
         let (name, race_file) = script
             .lua()
             .load("local _, f = UnitRace('player') return UnitName('player'), f")

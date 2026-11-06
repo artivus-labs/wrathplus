@@ -24,26 +24,26 @@ pub enum SelectionRequest {
     LastEnemy,
 }
 
-/// The reference's local player record (`0xc27d80`): a copy of the chosen `SMSG_CHAR_ENUM` row,
-/// written once at the Enter World commit (`0x5abd9e`) before FrameXML loads, and never cleared.
-/// `UnitName` (`0x517020`), `UnitRace` (`0x518200`), `UnitClass` (`0x518350`) and `UnitSex`
-/// (`0x517e90`) answer `"player"`, matched whole in any case, from it and never from the
-/// descriptor, so they answer before the player object exists; so does `UnitFactionGroup`
-/// (`0x60d0e5`). `UnitLevel` reads the descriptor: the record's level accessor (`0x5abe00`) has
-/// no caller. Race, class and faction group are held resolved, as this crate has no DBC.
+/// The reference's local player record (name `0xc79d18`, race, class, gender `0xc79e88`..8a): a
+/// copy of the chosen `SMSG_CHAR_ENUM` row, written once at Enter World (1.12 `0x5abd9e`) before
+/// FrameXML loads, and never cleared. `UnitName` (`0x60e740`), `UnitRace` (`0x60fd40`), `UnitClass`
+/// (`0x60fec0`) and `UnitSex` (`0x60f8e0`) answer `"player"`, matched whole in any case, from it
+/// and never from the descriptor, so they answer before the player object exists, as does
+/// `UnitFactionGroup` (`0x60d0e5`). `UnitLevel` reads the descriptor (1.12's record level accessor
+/// `0x5abe00` has no caller). Race, class and faction group are held resolved: no DBC here.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PlayerRecord {
-    /// `+0x08`, the name; empty is the unset record, whose `UnitName("player")` is nil
-    /// (`0x517095`).
+    /// `0xc79d18`, the name; empty is the unset record, whose `UnitName("player")` is nil
+    /// (`0x6b1060` answers null for a zero first byte).
     pub name: String,
-    /// `+0x100` as `UnitRace`'s (localized, file token) pair; `None` is race 0, which has no
-    /// `ChrRaces` row and answers `nil, nil`.
+    /// `0xc79e88` (`0x6b1070`) as `UnitRace`'s (localized, file token) pair; `None` is race 0,
+    /// which has no `ChrRaces` row and answers `nil, nil`.
     pub race: Option<(String, String)>,
-    /// `+0x101` as `UnitClass`'s (localized, uppercase token) pair; `None` answers `nil, nil`.
+    /// `0xc79e89` (`0x6b1080`): `UnitClass`'s (localized, uppercase token); `None` is `nil, nil`.
     pub class: Option<(String, String)>,
-    /// `+0x102` on `UnitSex`'s scale (2 male, 3 female), not the wire's 0/1. The unset 0 answers
-    /// 2, as the reference's all-zero record does: `0x517ef9` indexes `{2,3,1,6}` (`0x808be4`)
-    /// with no bounds check.
+    /// `0xc79e8a` (`0x6b1090`) on `UnitSex`'s scale (2 male, 3 female), not the wire's 0/1. The
+    /// unset 0 answers 2, as the reference's all-zero record does: `0x60f93c` indexes `{2,3,1}`
+    /// (`0x9fe7ec`) with no bounds check.
     pub sex: u8,
     /// `UnitFactionGroup`'s (`InternalName`, `Name0`) for the race; `None` answers `nil, nil`.
     pub faction_group: Option<(String, String)>,

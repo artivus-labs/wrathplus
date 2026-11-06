@@ -1473,7 +1473,7 @@ impl UiScript {
     }
 
     /// Hand each queued script error to the Lua error handler, as the reference's catch closure
-    /// (`0x703b40`) calls the one `seterrorhandler` (`0x702900`) holds, read from its slot and not
+    /// (`0x819730`) calls the one `seterrorhandler` (`0x8173c0`) holds, read from its slot and not
     /// through the `geterrorhandler` global; FrameXML installs `_ERRORMESSAGE`, the ScriptErrors
     /// dialog (`BasicControls.xml:16`). With none installed the error stays on the host channel,
     /// [`UiScript::errors`], alone; a handler that raises is recorded there only and stops the

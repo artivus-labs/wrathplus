@@ -383,8 +383,8 @@ fn drain_duel(
                 }
             }
             DuelRequest::StartByUnit(token) => {
-                // `StartDuelUnit` (`0x4d4c90`) resolves the token through `0x515970`, with no
-                // player gate; these are the tokens the unit popup passes.
+                // `StartDuelUnit` (1.12 `0x4d4c90` through `0x515970`; 12340 not located) resolves
+                // the token with no player gate; these are the tokens the unit popup passes.
                 let guid = match token.as_str() {
                     "target" => selection.guid,
                     "player" => self_guid,

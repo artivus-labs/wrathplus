@@ -26,7 +26,7 @@ pub(in crate::script) fn class_pair(
     usage: &'static str,
 ) -> mlua::Result<(Value, Value)> {
     let token = Some(crate::script::binding_abi::string_arg(lua, token, usage)?);
-    // The `"player"` arm reads the record's class byte (`0x5183b9`, `0xc27e81`); the second
+    // The `"player"` arm reads the record's class byte (`0x6b1080`, `0xc79e89`); the second
     // return is the uppercase token.
     let pair = match player_record_arm(lua, &token, |r| r.class.clone()) {
         Some(pair) => pair,
@@ -687,8 +687,8 @@ pub(in crate::script) fn install(lua: &Lua) -> mlua::Result<()> {
                 token,
                 r#"Usage: UnitRace("unit")"#,
             )?);
-            // The `"player"` arm reads the character-select record's race byte (`0x518269`,
-            // `0xc27e80`), never the unit resolver.
+            // The `"player"` arm reads the character-select record's race byte (`0x6b1070` at
+            // `0x60fd94`, `0xc79e88`), never the unit resolver.
             let pair = match player_record_arm(lua, &token, |r| r.race.clone()) {
                 Some(pair) => pair,
                 None => with_unit(lua, &token, None, |u| {

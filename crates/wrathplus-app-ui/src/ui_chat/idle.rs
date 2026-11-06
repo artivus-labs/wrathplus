@@ -158,7 +158,7 @@ pub(crate) fn idle_handler(
     });
     let action = match gates {
         Some(g) => idle_action(idle, g),
-        // No body yet: the reference resolves the local player inside the block (`0x468550`,
+        // No body yet: the reference resolves the local player in the block (1.12 `0x468550`,
         // `0x468460`), so the sit and the AFK have nothing to read; the camp leg never reads it.
         None => IdleAction {
             camp: idle >= AUTO_LOGOUT_AFTER,

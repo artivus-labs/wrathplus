@@ -80,9 +80,9 @@ fn spell_target_unit_ends_waits_or_binds_as_the_reference() {
     assert_eq!((selection.target, selection.guid), (Some(ally), Some(ALLY)));
 }
 
-/// `SpellTargetUnit` takes a `target` chain as the resolver does (`0x6e6de1` into `0x515970`):
-/// `"pettarget"` and `"playertarget"` bind the unit our pet and we target, where a chain that
-/// names no unit still ends the cast with "Out of range.".
+/// `SpellTargetUnit` takes a `target` chain as the resolver does (1.12 `0x6e6de1` into `0x515970`;
+/// 12340 not located): `"pettarget"` and `"playertarget"` bind the unit our pet and we target,
+/// where a chain that names no unit still ends the cast with "Out of range.".
 #[test]
 fn spell_target_unit_follows_a_target_chain() {
     const PET: u64 = 0xF140_0000_0000_0077;
