@@ -84,13 +84,34 @@ pub(crate) fn min_max(
     unit: Option<&RangeUnitFacts>,
     friendly: bool,
 ) -> (f32, f32) {
-    let f = &spell.range;
-    if f.attributes & 0x404 != 0 {
+    range_limits(
+        spell.range.attributes,
+        spell.range.row,
+        caster,
+        unit,
+        friendly,
+        state.range_mods.get(&spell.spell_id).copied(),
+        state.ranged_mod,
+    )
+}
+
+/// Build 12340's `0x7ff480`, shared by Lua spell/item queries and action buttons.
+/// Apply the range modifier to the authored maximum before adding reach and moving pads.
+pub fn range_limits(
+    attributes: u32,
+    row: Option<RangeRow>,
+    caster: &RangeUnitFacts,
+    unit: Option<&RangeUnitFacts>,
+    friendly: bool,
+    range_mod: Option<(i32, i32)>,
+    ranged_mod: Option<f32>,
+) -> (f32, f32) {
+    if attributes & 0x404 != 0 {
         return (0.0, NEXT_SWING_MAX);
     }
     let col = usize::from(friendly);
     let (mut min, mut max, mut pad) = (0.0f32, 0.0f32, 0.0f32);
-    if let Some(row) = f.row {
+    if let Some(row) = row {
         let reach_sum =
             || f64::from(unit.map_or(caster.reach, |u| u.reach)) + f64::from(caster.reach);
         if row.flags & 1 == 0 {
@@ -115,12 +136,12 @@ pub(crate) fn min_max(
             pad += MOVING_BONUS;
         }
     }
-    if f.attributes & 2 != 0 && caster.player {
-        if let Some(m) = state.ranged_mod {
+    if attributes & 2 != 0 && caster.player {
+        if let Some(m) = ranged_mod {
             max *= m * 0.01;
         }
     }
-    if let Some(&(flat, pct)) = state.range_mods.get(&spell.spell_id) {
+    if let Some((flat, pct)) = range_mod {
         max = (flat as f32 + max) * pct as f32 * 0.01;
     }
     (min, max + pad)
