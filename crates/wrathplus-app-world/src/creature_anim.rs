@@ -269,6 +269,8 @@ pub struct AttackSeam<'w, 's> {
     pub net: Res<'w, crate::net::NetCommands>,
     pub queued_melee: ResMut<'w, crate::spell::QueuedMeleeSpell>,
     pub auto_repeat: ResMut<'w, crate::spell::AutoRepeatActive>,
+    pub spells: Option<Res<'w, crate::app_core::state::Spells>>,
+    pub book: Option<Res<'w, crate::app_core::state::PlayerActions>>,
     pub sheath: MessageWriter<'w, SheathRequest>,
     pub ecs: Commands<'w, 's>,
     /// Our own entity.
@@ -292,6 +294,31 @@ impl AttackSeam<'_, '_> {
         }
     }
 
+    /// Admit a stock attack request to the ranged controller when its ability is learned.
+    pub fn request_ranged(&mut self, close_only: bool) -> bool {
+        let known = self
+            .spells
+            .as_deref()
+            .zip(self.book.as_deref())
+            .and_then(|(s, b)| self.auto_repeat.learned(s, b));
+        crate::spell::auto_ranged::request(&mut self.auto_repeat, known, close_only)
+    }
+
+    /// Controller teardown (`0x6e1660`), distinct from a running-repeat cancellation.
+    pub fn stop_controller(&mut self, engaged: bool) {
+        let queued = self.auto_repeat.1.queued;
+        self.auto_repeat.clear_intent();
+        stop_attack_local(engaged, &mut self.queued_melee, &self.net);
+        if queued.is_some() && queued == self.auto_repeat.0 {
+            cancel_auto_repeat_local(
+                self.me.single().ok(),
+                &mut self.auto_repeat,
+                &mut self.ecs,
+                &self.net,
+            );
+        }
+    }
+
     /// StopAttack (`0x5ecac0`). Unsupported wire dialects refuse before un-queuing a strike.
     pub(crate) fn stop(&mut self, engaged: bool) -> bool {
         stop_attack_local(engaged, &mut self.queued_melee, &self.net)
@@ -307,6 +334,17 @@ impl AttackSeam<'_, '_> {
         let Ok(e) = self.me.single() else {
             return false;
         };
+        let known = self
+            .spells
+            .as_deref()
+            .zip(self.book.as_deref())
+            .and_then(|(s, b)| self.auto_repeat.learned(s, b));
+        if crate::spell::auto_ranged::request(&mut self.auto_repeat, known, false) {
+            return true;
+        }
+        if stop_in_flight {
+            self.auto_repeat.clear_intent();
+        }
         start_attack_local(
             e,
             target,

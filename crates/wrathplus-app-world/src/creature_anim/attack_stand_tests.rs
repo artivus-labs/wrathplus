@@ -10,7 +10,7 @@ fn start_once(engaged: bool, stop_in_flight: bool, keep_receiver: bool) -> (bool
         drop(rx);
     }
     app.insert_resource(crate::net::NetCommands(tx));
-    app.insert_resource(crate::spell::AutoRepeatActive(Some(75)));
+    app.insert_resource(crate::spell::AutoRepeatActive(Some(75), Default::default()));
     let me = app.world_mut().spawn_empty().id();
     let sent = app
         .world_mut()

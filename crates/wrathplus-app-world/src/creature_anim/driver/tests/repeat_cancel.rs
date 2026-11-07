@@ -25,7 +25,10 @@ fn fixture(flags: u32, spell_id: u32) -> (App, Entity) {
     let (mut app, unit) = super::wrath_oneshot::fixture((0, 0));
     app.add_message::<SpellKitFx>()
         .add_message::<SpellKitSound>();
-    app.insert_resource(crate::spell::AutoRepeatActive(Some(REPEAT)));
+    app.insert_resource(crate::spell::AutoRepeatActive(
+        Some(REPEAT),
+        Default::default(),
+    ));
     // Reuse the real clock and production two-bone pose fixture: Load's terminal is Y*4,
     // Stand/Run is Y, and bind is zero. Both full-body and masked nodes are real graph clips.
     {

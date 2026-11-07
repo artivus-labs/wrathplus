@@ -16,6 +16,32 @@ use crate::spell::{ActiveChannel, AutoRepeatActive, PendingCast, QueuedMeleeSpel
 
 const FIREBALL: u32 = 133;
 
+/// The queued repeat must be stoppable before movement/facing permits its first send.
+#[test]
+fn esc_spends_one_press_on_queued_auto_repeat_without_cancelling_the_pending_cast() {
+    let (mut app, rx) = harness(HashMap::new());
+    app.insert_non_send_resource(UiScript::new().unwrap());
+    app.world_mut().resource_mut::<AutoRepeatActive>().1.queued = Some(75);
+    app.world_mut()
+        .resource_mut::<PendingCast>()
+        .arm(FIREBALL, Instant::now(), true);
+    app.world_mut().run_system_once(push_casting_flag).unwrap();
+    assert_eq!(
+        app.world()
+            .non_send_resource::<UiScript>()
+            .eval::<Option<i64>>("return SpellStopCasting()")
+            .unwrap(),
+        Some(1)
+    );
+    apply_stops(&mut app);
+    assert!(!app.world().resource::<AutoRepeatActive>().any());
+    assert!(app
+        .world()
+        .resource::<PendingCast>()
+        .in_flight(Instant::now()));
+    assert!(rx.is_empty(), "no running repeat or cast was cancelled");
+}
+
 /// Apply the `SpellStopCasting()` calls the VM queued, as `crate::script_calls` does.
 fn apply_stops(app: &mut App) {
     app.world_mut()

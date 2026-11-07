@@ -13,7 +13,9 @@ use crate::app_core::schedule::UnitFeed;
 use crate::app_core::state::ClientState;
 use wrathplus_world::schedule::WorldStage;
 
+pub mod auto_ranged;
 mod bind_gates;
+mod cast_commit;
 pub mod cast_fail_keys;
 mod cast_send;
 pub mod cast_target;
@@ -78,6 +80,21 @@ pub struct SpellPlugin;
 impl Plugin for SpellPlugin {
     fn build(&self, app: &mut App) {
         crate::cvars::RegisterCvars::register_cvars(app, secure_toggle::CVARS);
+        crate::cvars::RegisterCvars::register_cvars(app, auto_ranged::CVARS);
+        app.add_observer(auto_ranged::on_cvar)
+            .add_systems(
+                Update,
+                // One native controller pass against this frame's packet state, modifier
+                // family and transported positions, before UI feeds and command producers.
+                auto_ranged::tick
+                    .after(WorldStage::Net)
+                    .after(mods::track_class_family)
+                    .after(crate::swing_refusal::apply_swing_refusals)
+                    .after(crate::transport::TransportPose)
+                    .before(UiFeed)
+                    .run_if(in_state(ClientState::InWorld)),
+            )
+            .add_systems(OnExit(ClientState::InWorld), auto_ranged::reset);
         app.init_resource::<PendingCast>()
             .init_resource::<QueuedMeleeSpell>()
             .init_resource::<ActiveChannel>()
