@@ -431,7 +431,7 @@ fn buff_hover_hangs_below_left_of_the_button() {
         helpful: true,
         cancelable: true,
         until_cancelled: false,
-        channeled: false,
+        ..Default::default()
     }]);
     // The update the player's `UNIT_AURA` runs (`BuffFrame.lua:41-45`, `:143`); its unit is
     // `PlayerFrame.unit` (`:124`), and this kit loads no `PlayerFrame`, so a stand-in carries it.

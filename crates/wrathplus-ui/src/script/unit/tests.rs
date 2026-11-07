@@ -1,6 +1,6 @@
 //! The `Unit*` binding tests.
 
-use crate::script::{PartyState, PlayerRecord, UiScript, UnitGuids, UnitState};
+use crate::script::{PartyState, PlayerRecord, UiScript, UnitGuids, UnitPowerState, UnitState};
 
 #[path = "is_unit_tests.rs"]
 mod is_unit;
@@ -374,6 +374,51 @@ fn a_dead_unit_reports_dead_and_zero_health() {
         s.eval::<String>(r#"return UnitName("target")"#).unwrap(),
         "Unknown Being"
     );
+
+    // Feign death (`UNIT_DYNFLAG_DEAD`) over real health: a stranger reads dead with 0 health and
+    // power, us and the group (`0x512a30`) read alive and real (`0x60ebe6`, `0x60ee1c`, `0x60f50d`,
+    // `0x60f71a`); the maxima carry no gate.
+    s.set_unit_guids(&UnitGuids {
+        player: 0x10,
+        party: [0x21, 0, 0, 0],
+        target: 0x30,
+        ..Default::default()
+    });
+    let mut powers = [UnitPowerState::default(); 7];
+    powers[0] = UnitPowerState {
+        current: 300,
+        maximum: 900,
+    };
+    for (guid, gated) in [(0x30, true), (0x21, false), (0x10, false)] {
+        s.set_unit(
+            "target",
+            Some(UnitState {
+                exists: true,
+                has_object: true,
+                guid,
+                health: 500,
+                max_health: 3200,
+                powers: Some(powers),
+                dynamic_flags: 0x20,
+                ..Default::default()
+            }),
+        );
+        let want = if gated {
+            "0 3200 0 900 1 1"
+        } else {
+            "500 3200 300 900 nil nil"
+        };
+        assert_eq!(
+            s.eval::<String>(
+                r#"return strjoin(" ", UnitHealth("target"), UnitHealthMax("target"),
+                    UnitPower("target"), UnitPowerMax("target"),
+                    tostring(UnitIsDead("target")), tostring(UnitIsDeadOrGhost("target")))"#
+            )
+            .unwrap(),
+            want,
+            "guid {guid:#x}"
+        );
+    }
 }
 
 /// `UnitName` (`0x60e740`) is nil only for a zero guid or an empty `"player"` record, else a

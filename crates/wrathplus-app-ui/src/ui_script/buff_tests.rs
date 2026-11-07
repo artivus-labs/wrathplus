@@ -54,6 +54,7 @@ fn aura(
         cancelable: helpful,
         until_cancelled: duration == 0.0,
         channeled: false,
+        ..Default::default()
     }
 }
 

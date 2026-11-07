@@ -10,7 +10,7 @@ use super::super::calls::ScriptCall;
 use super::super::Model;
 use super::{
     classification_word, grey_band, pick_unit_token, unit_predicate, unknownobject, with_unit,
-    PlayerRecord, SelectionRequest,
+    PlayerRecord, SelectionRequest, UnitState,
 };
 
 /// The `"player"` fast path of `UnitName`, `UnitRace`, `UnitClass` and `UnitSex`, never
@@ -55,6 +55,16 @@ fn player_record_arm<T>(
     }
     let model = lua.app_data_ref::<Model>().expect("model app_data");
     Some(f(&model.player_record))
+}
+
+/// `UNIT_DYNFLAG_DEAD` (dynamic flags bit 5), which `UnitIsFeignDeath` reads too (`0x60f442`).
+const UNIT_DYNFLAG_DEAD: u32 = 0x20;
+
+/// The feign gate of `UnitHealth` (`0x60ebe6`), `UnitPower` (`0x60ee1c`), `UnitIsDead`
+/// (`0x60f50d`) and `UnitIsDeadOrGhost` (`0x60f71a`): a held unit flagged `UNIT_DYNFLAG_DEAD`
+/// reads dead, unless `0x512a30` exempts it as us, our pet or a group member or its pet.
+pub(in crate::script) fn feign_masked(model: &Model, u: &UnitState) -> bool {
+    u.has_object && u.dynamic_flags & UNIT_DYNFLAG_DEAD != 0 && !model.ours_or_grouped(u.guid)
 }
 
 /// Register the `Unit*` globals.
@@ -159,7 +169,13 @@ pub(in crate::script) fn install(lua: &Lua) -> mlua::Result<()> {
                 token,
                 r#"Usage: UnitHealth("unit")"#,
             )?);
-            with_unit(lua, &token, 0i64, |u| i64::from(u.health))
+            // `0x60ebe6`: a feigning unit not exempted by `0x512a30` reads 0.
+            let model = lua.app_data_ref::<Model>().expect("model app_data");
+            Ok(match token.as_deref().and_then(|t| model.unit(t)) {
+                Some(u) if feign_masked(&model, u) => 0,
+                Some(u) => i64::from(u.health),
+                None => 0,
+            })
         })?,
     )?;
 
@@ -226,7 +242,12 @@ pub(in crate::script) fn install(lua: &Lua) -> mlua::Result<()> {
                 token,
                 r#"Usage: UnitIsDead("unit")"#,
             )?);
-            unit_predicate(lua, &token, |u| u.dead)
+            // `0x60f4fe`: health <= 0, else the feign gate; no stand-state leg.
+            let model = lua.app_data_ref::<Model>().expect("model app_data");
+            let unit = token.as_deref().and_then(|t| model.unit(t));
+            Ok(flag(
+                unit.is_some_and(|u| u.dead || feign_masked(&model, u)),
+            ))
         })?,
     )?;
 
@@ -250,7 +271,13 @@ pub(in crate::script) fn install(lua: &Lua) -> mlua::Result<()> {
                 token,
                 r#"Usage: UnitIsDeadOrGhost("unit")"#,
             )?);
-            unit_predicate(lua, &token, |u| u.dead || u.ghost)
+            // `0x60f6fd`: the unit's vtable test (`0x716490` health <= 0; a player's `0x6dac10`
+            // adds `PLAYER_FLAGS & 0x10`), then the feign gate (`0x60f71a`).
+            let model = lua.app_data_ref::<Model>().expect("model app_data");
+            let unit = token.as_deref().and_then(|t| model.unit(t));
+            Ok(flag(unit.is_some_and(|u| {
+                u.dead || u.ghost || feign_masked(&model, u)
+            })))
         })?,
     )?;
 

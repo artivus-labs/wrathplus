@@ -222,7 +222,9 @@ mod tests {
         assert_eq!(s.eval::<i64>("return GetShapeshiftForm()").unwrap(), 1);
         assert_eq!(s.eval::<i64>("return GetShapeshiftForm(1)").unwrap(), 0);
         // The flag is `0x815500`'s read, not Lua truth: strings parse, a table or 0.5 is false.
-        for flag in ["\"1\"", "\"on\"", "\"yes\"", "true"] {
+        for flag in [
+            "\"1\"", "\"on\"", "\"yes\"", "true", "2^32", "1e300", "-1e300", "1/0", "-1/0", "0/0",
+        ] {
             let lua = format!("return GetShapeshiftForm({flag})");
             assert_eq!(s.eval::<i64>(&lua).unwrap(), 0, "{flag}");
         }

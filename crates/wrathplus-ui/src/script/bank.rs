@@ -359,11 +359,25 @@ mod tests {
             37,
             "trunc toward zero gives -2, not -3"
         );
-        assert_eq!(
-            s.eval::<i64>("return BankButtonIDToInvSlotID(2^32)")
-                .unwrap(),
-            i64::from(i32::MIN + 39)
-        );
+        for input in ["2^32", "1e300", "-1e300", "1/0", "-1/0", "0/0"] {
+            for (bag, offset) in [("nil", 39), ("1", 63)] {
+                let call = format!("return BankButtonIDToInvSlotID({input}, {bag})");
+                assert_eq!(
+                    s.eval::<i64>(&call).unwrap(),
+                    i64::from(i32::MIN + offset),
+                    "{call}"
+                );
+            }
+        }
+        // Conversion and offset arithmetic are separate: valid i32 values wrap on addition.
+        for (bag, offset) in [("nil", 39_i32), ("1", 63)] {
+            let call = format!("return BankButtonIDToInvSlotID(2147483647, {bag})");
+            assert_eq!(
+                s.eval::<i64>(&call).unwrap(),
+                i64::from(i32::MAX.wrapping_add(offset)),
+                "{call}"
+            );
+        }
         assert_eq!(
             s.eval::<i64>("return BankButtonIDToInvSlotID(\"7\")")
                 .unwrap(),

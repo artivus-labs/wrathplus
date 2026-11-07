@@ -141,16 +141,9 @@ pub struct MailSendRequest {
 /// Build 12340's send attachment slots (`ATTACHMENTS_MAX_SEND`, MailFrame.lua:6).
 pub const SEND_SLOTS: usize = 12;
 
-/// A send-slot argument as the 12340 getters read it (`0x570750`): none is slot 0, a number is
-/// rounded after subtracting 1; `None` past the slots.
-fn send_slot_arg(lua: &Lua, v: Option<&Value>) -> mlua::Result<Option<usize>> {
-    let Some(n) = lua.coerce_number(v.cloned().unwrap_or(Value::Nil))? else {
-        return Ok(Some(0));
-    };
-    Ok(usize::try_from((n - 1.0).round_ties_even() as i64)
-        .ok()
-        .filter(|i| *i < SEND_SLOTS))
-}
+mod attachments;
+use attachments::send_slot_arg;
+pub(super) use attachments::{can_attach, source_reserved};
 
 /// `0x4acdc0`'s clears: every attachment, whose lock it lifts (`0x495420`, firing
 /// `ITEM_LOCK_CHANGED`), then money, COD, stationery and package. Returns the lock events to fire.
@@ -169,6 +162,7 @@ fn clear_compose(model: &mut Model) -> Vec<(String, Vec<super::ScriptValue>)> {
             )
         })
         .collect();
+    model.wrath_mail_family.send_locked = false;
     model.mail_send_money = 0;
     model.mail_send_cod = 0;
     model.mail_stationery = 0;
@@ -289,7 +283,8 @@ impl super::UiScript {
             .mail_send_items
             .get_mut(usize::from(slot))
             .and_then(Option::take);
-        if taken.is_some() {
+        if let Some(item) = taken {
+            cursor::queue_lock_changed(&mut model, item.bag, item.slot);
             model
                 .pending_events
                 .push(("MAIL_SEND_INFO_UPDATE".to_string(), Vec::new()));
@@ -907,6 +902,10 @@ fn click_send_mail_item(model: &mut Model, target: Option<usize>) {
             if same {
                 // `0x519280`: the slot's own item is put back; the cursor empties.
                 cursor::queue_cursor_update(model);
+                return;
+            }
+            if !can_attach(model, &item) {
+                model.cursor = Some(CursorPayload::Item(item));
                 return;
             }
             let (bag, slot) = (item.bag, item.slot);

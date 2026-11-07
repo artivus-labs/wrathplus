@@ -180,6 +180,31 @@ fn gestures_name_the_vault_and_zero_based_coordinates() {
             },
         })))
     );
+    // A bag right-click deposits into the current tab's first free slot: slot 0xff, no item.
+    let Some(ClientCommand::NativeGuildBankSwap(swap)) =
+        crate::ui_items::guild_bank_deposit(open.banker, 2, 0, 1)
+    else {
+        panic!("a deposit");
+    };
+    assert_eq!(
+        (swap.banker, format!("{:?}", swap.transfer)),
+        (
+            0x77,
+            format!(
+                "{:?}",
+                Transfer::InventoryToBank {
+                    destination: BankSlot {
+                        tab: 2,
+                        slot: 0xff,
+                        item: 0
+                    },
+                    container: 255,
+                    container_slot: 23,
+                    stack_count: 0,
+                }
+            )
+        )
+    );
     assert_eq!(
         dbg(command(
             &mut bank,
@@ -190,6 +215,10 @@ fn gestures_name_the_vault_and_zero_based_coordinates() {
         dbg(None)
     );
     assert!(open.banker().is_none() && !bank.open);
+    assert!(
+        crate::ui_items::guild_bank_deposit(open.banker, 2, 0, 1).is_none(),
+        "the vault closed"
+    );
 }
 
 #[test]

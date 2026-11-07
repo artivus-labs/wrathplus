@@ -356,7 +356,7 @@ pub(crate) fn split_container_item(model: &mut Model, bag: i64, slot: u32, count
     let Some(s) = model.containers.get(&bag).and_then(|c| c.slots.get(&slot)) else {
         return false;
     };
-    if s.item_id == 0 || s.locked {
+    if s.item_id == 0 || s.locked || super::mail::source_reserved(model, bag, slot) {
         return false;
     }
     let n = count.min(i64::from(s.count)) as u32;

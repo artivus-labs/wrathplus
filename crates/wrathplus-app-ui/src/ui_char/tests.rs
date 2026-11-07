@@ -205,6 +205,13 @@ fn ranged_damage_feed_uses_visible_entry_and_keeps_zero_attack_time() {
             .resource_mut::<Items>()
             .insert_template(9001, Some(template));
         app.world_mut().run_system_once(feed_char).unwrap();
+        // The guid table the aura feed seats beside the stats, which the resolver reads.
+        app.world_mut()
+            .non_send_resource_mut::<UiScript>()
+            .set_unit_guids(&wrathplus_ui::script::UnitGuids {
+                player: 1,
+                ..Default::default()
+            });
         let vm = app.world().non_send_resource::<UiScript>();
         assert_eq!(
             vm.eval::<(f64, f64, f64, i32, i32, f64)>("return UnitRangedDamage('player')")

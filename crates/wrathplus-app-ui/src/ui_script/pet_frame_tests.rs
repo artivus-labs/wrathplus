@@ -113,7 +113,7 @@ fn pet_debuff(spell_id: u32, name: &str, count: u8) -> AuraState {
         helpful: false,
         cancelable: false,
         until_cancelled: false,
-        channeled: false,
+        ..Default::default()
     }
 }
 

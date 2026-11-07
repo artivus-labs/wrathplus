@@ -78,9 +78,11 @@ impl Plugin for UiCharPlugin {
             (
                 // Before `feed_containers`: a `BAG_UPDATE` handler may read the bag item's own
                 // row (`GetInventoryItemLink("player", ContainerIDToInventoryID(bag))`), so the
-                // inventory push lands first.
+                // inventory push lands first. After the aura feed: the stat events' handlers
+                // resolve their token through the guid table it seats.
                 feed_char
                     .before(crate::ui_items::feed::feed_containers)
+                    .after(crate::app_core::schedule::AuraEvents)
                     .in_set(UiFeed),
                 watch_skill_ups.in_set(UiFeed),
                 feed_skills.in_set(UiFeed),

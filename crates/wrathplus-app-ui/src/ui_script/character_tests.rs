@@ -139,7 +139,11 @@ fn shipped_character_frame_drives_end_to_end() {
         super::test_ui::load_ui_strict(&mut s, f);
     }
 
-    s.set_unit("player", Some(player_unit()));
+    let me = UnitState {
+        guid: 1,
+        ..player_unit()
+    };
+    crate::test_guids::push_player(&mut s, me);
     s.set_player_combat_stats(Some(combat_stats()));
     s.set_inventory_slots(inventory_with_head_item());
     // A warrior's saved pane choices, as the sheet's `VARIABLES_LOADED` arm writes them on a first

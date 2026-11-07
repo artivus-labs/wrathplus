@@ -300,6 +300,7 @@ fn a_minion_gets_the_page_without_the_hunter_furniture() {
     let _data = wrathplus_formats::wow_data_or_skip!();
     let mut s = load_pet_page();
     s.set_unit("pet", Some(pet_unit()));
+    seat_pet(&mut s);
     s.set_pet_stats(true, PetStats::default()); // has_ui, but hunter_pet == false
     s.set_pet_combat_stats(Some(pet_combat_stats()));
     s.fire_event("PET_BAR_UPDATE", vec![]);

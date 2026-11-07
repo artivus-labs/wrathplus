@@ -1,16 +1,19 @@
 //! Wrath player descriptor values and separately supplied GameTables conversions.
 //! Missing conversions remain zero until the app has the corresponding table rows.
 
+use super::stat_unit::StatUnit;
 use super::{binding_abi, Model, UiScript};
 use mlua::{Lua, Value};
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct WrathStatConversions {
     pub rating_bonus: [f32; 25],
-    pub crit_from_agility: f32,
-    pub spell_crit_from_intellect: f32,
-    pub health_from_spirit: f32,
-    pub mana_from_spirit: f32,
+    /// The four spirit and crit conversions, the active player's (`0x71bae0`, `0x71bb70`,
+    /// `0x71ba60`, `0x71b9f0` with the mana verb's `0.001f`), as the doubles they push.
+    pub crit_from_agility: f64,
+    pub spell_crit_from_intellect: f64,
+    pub health_from_spirit: f64,
+    pub mana_from_spirit: f64,
 }
 
 /// Percentages and mana/second are already resolved by the server. School arrays use
@@ -93,23 +96,37 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             })?,
         )?;
     }
-    for (name, pick) in [
+    // `0x60e130`, `0x60e1b0`, `0x612980`, `0x612a00`: `isstring` or the Usage, then the active
+    // player or a unit with a pet number (`0x4cee50`, `UNIT_FIELD_PETNUMBER`); anything else 0.
+    // Labelled: a pet's own conversions, which read its class, level and stats, are not fed.
+    for (name, usage, pick) in [
         (
             "GetCritChanceFromAgility",
-            (|s: &WrathStatConversions| s.crit_from_agility) as fn(&WrathStatConversions) -> f32,
+            r#"Usage: GetCritChanceFromAgility("unit")"#,
+            (|s: &WrathStatConversions| s.crit_from_agility) as fn(&WrathStatConversions) -> f64,
         ),
-        ("GetSpellCritChanceFromIntellect", |s| {
-            s.spell_crit_from_intellect
-        }),
-        ("GetUnitHealthRegenRateFromSpirit", |s| s.health_from_spirit),
-        ("GetUnitManaRegenRateFromSpirit", |s| s.mana_from_spirit),
+        (
+            "GetSpellCritChanceFromIntellect",
+            r#"Usage: GetSpellCritChanceFromIntellect("unit")"#,
+            |s| s.spell_crit_from_intellect,
+        ),
+        (
+            "GetUnitHealthRegenRateFromSpirit",
+            r#"Usage: GetUnitHealthRegenRateFromSpirit("unit")"#,
+            |s| s.health_from_spirit,
+        ),
+        (
+            "GetUnitManaRegenRateFromSpirit",
+            r#"Usage: GetUnitManaRegenRateFromSpirit("unit")"#,
+            |s| s.mana_from_spirit,
+        ),
     ] {
         lua.globals().set(
             name,
-            lua.create_function(move |lua, unit: Option<String>| {
+            lua.create_function(move |lua, unit: Value| {
+                let unit = binding_abi::string_arg(lua, unit, usage)?;
                 let m = lua.app_data_ref::<Model>().expect("model");
-                // These private player tables are not a claim about arbitrary target units.
-                Ok(if unit.as_deref().unwrap_or("player") == "player" {
+                Ok(if m.stat_unit(&unit) == StatUnit::Player {
                     pick(&m.wrath_paperdoll_stats.conversions)
                 } else {
                     0.0
@@ -224,7 +241,20 @@ mod tests {
         stats.conversions.health_from_spirit = 3.5;
         stats.conversions.mana_from_spirit = 4.5;
         s.set_wrath_paperdoll_stats(stats);
+        // The conversions answer the unit `0x60c1f0` resolves when it is the active player
+        // (`0x4cee50`), whatever the spelling.
+        s.set_unit_guids(&crate::script::UnitGuids {
+            player: 1,
+            ..Default::default()
+        });
+        s.run("assert(GetCritChanceFromAgility('PLAYER')==1.5)")
+            .unwrap();
         s.run("assert(GetDodgeChance()==5.5 and GetParryChance()==6.5 and GetBlockChance()==7.5) assert(GetCritChance()==8.5 and GetRangedCritChance()==9.5) assert(GetShieldBlock()==123 and GetSpellBonusHealing()==456 and GetSpellPenetration()==34) for i=1,25 do assert(GetCombatRating(i)==99+i) assert(GetCombatRatingBonus(i)==i-.5) assert(GetMaxCombatRatingBonus(i)==(i>=15 and i<=17 and 33.000001311302185 or -1)) end for i=1,7 do assert(GetSpellCritChance(i)==i+3.5) assert(GetSpellBonusDamage(i)==49+i) end local a,b=GetExpertise() assert(a==12 and b==8) a,b=GetExpertisePercent() assert(a==3 and b==2) assert(GetCritChanceFromAgility('player')==1.5 and GetSpellCritChanceFromIntellect('player')==2.5) assert(GetUnitHealthRegenRateFromSpirit('player')==3.5 and GetUnitManaRegenRateFromSpirit('player')==4.5) assert(GetUnitHealthRegenRateFromSpirit('target')==0)").unwrap();
+        let err = s.run("GetCritChanceFromAgility()").unwrap_err().to_string();
+        assert!(
+            err.contains(r#"Usage: GetCritChanceFromAgility("unit")"#),
+            "{err}"
+        );
         for (call, raise) in [
             ("GetCombatRating(0)", "ratingIndex is in the range 1 .. 25"),
             (

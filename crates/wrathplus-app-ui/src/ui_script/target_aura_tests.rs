@@ -82,6 +82,7 @@ fn debuff(spell_id: u32, name: &str, count: u8, debuff_type: Option<&str>) -> Au
         // Only the player's auras carry `untilCancelled`, read by `GetPlayerBuff` alone.
         until_cancelled: false,
         channeled: false,
+        ..Default::default()
     }
 }
 
@@ -98,6 +99,7 @@ fn buff(spell_id: u32, name: &str) -> AuraState {
         cancelable: false,
         until_cancelled: false,
         channeled: false,
+        ..Default::default()
     }
 }
 

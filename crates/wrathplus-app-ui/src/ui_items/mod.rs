@@ -87,6 +87,34 @@ pub(crate) fn lua_pos_for(bag_index: u8, slot: u8) -> Option<(i64, u32)> {
     lua_bag_pos(bag_index, slot)
 }
 
+/// `UseContainerItem` with the vault open (`0x5a56b0`): `0x5a50c0` into the current tab with slot
+/// `0xff` and no split, so the server picks the tab's first free slot.
+pub(crate) fn guild_bank_deposit(
+    banker: Option<u64>,
+    tab: u8,
+    bag: i64,
+    slot: u32,
+) -> Option<crate::net::ClientCommand> {
+    use wrathplus_protocol::wrath_guild_bank_swap::{BankSlot, Swap, Transfer};
+    let (container, container_slot) = wire_pos_for(bag, slot)?;
+    let destination = BankSlot {
+        tab,
+        slot: 0xff,
+        item: 0,
+    };
+    let transfer = Transfer::InventoryToBank {
+        destination,
+        container,
+        container_slot,
+        stack_count: 0,
+    };
+    let banker = banker?;
+    Some(crate::net::ClientCommand::NativeGuildBankSwap(Swap {
+        banker,
+        transfer,
+    }))
+}
+
 pub(crate) fn wire_pos_for(bag: i64, slot1: u32) -> Option<(u8, u8)> {
     let storage = StorageSlots::GEOMETRY;
     let slot0 = u8::try_from(slot1.checked_sub(1)?).ok()?;
@@ -128,6 +156,17 @@ pub(super) fn lock_args(bag: i64, slot: u32) -> Vec<wrathplus_ui::script::Script
 #[cfg(test)]
 fn wire_pos(bag: i64, slot1: u32) -> Option<(u8, u8)> {
     wire_pos_for(bag, slot1)
+}
+
+/// A backpack whose slot 1 holds an item object, so a bag click reaches App's arms.
+#[cfg(test)]
+pub(crate) fn backpack_with_slot_1() -> wrathplus_ui::script::ContainerState {
+    let slots = [(1, wrathplus_ui::script::ContainerSlot::default())].into();
+    wrathplus_ui::script::ContainerState {
+        name: None,
+        num_slots: 16,
+        slots,
+    }
 }
 
 /// One inventory refusal off the wire, with the fills of the only two reasons that format one.

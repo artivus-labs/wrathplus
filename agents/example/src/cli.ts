@@ -24,6 +24,7 @@ import {
   findAgent,
   loadAgents,
   markRunning,
+  needsRestart,
   runningOf,
   startClient,
   stateHome,
@@ -96,10 +97,39 @@ async function run(argv: string[]): Promise<void> {
     });
   }
   process.on("exit", () => client?.kill());
+
+  // A client we started is kept up: dropped back to the login screen (a disconnect) or exited, it
+  // is restarted into the same character, so the planner carries on instead of waiting on a dead
+  // session it has no credentials to revive.
+  async function keepClient(): Promise<void> {
+    let character = values.character;
+    let wasInWorld = false;
+    while (!abortController.signal.aborted && client) {
+      await Bun.sleep(15_000);
+      if (abortController.signal.aborted || !client) return;
+      const status = await answering(agent!, token);
+      if (status?.in_world) {
+        wasInWorld = true;
+        character = (status.player as { name?: string } | undefined)?.name ?? character;
+      }
+      const exited = client.exitCode !== null || client.signalCode !== null;
+      if (!needsRestart(status, wasInWorld, exited)) continue;
+      console.log(`${agent!.name}'s client ${exited ? "exited" : "was disconnected"}; restarting it...`);
+      client.kill();
+      await client.exited;
+      client = startClient(home, agent!, character);
+      try {
+        await waitReady(agent!, token, client, log);
+      } catch (error) {
+        console.log(`Restart did not reach the world: ${(error as Error).message}`);
+      }
+    }
+  }
+  const log = join(agentDir(home, agent.account), "client.log");
   if (client) {
-    const log = join(agentDir(home, agent.account), "client.log");
     console.log(`Starting ${agent.name}'s client (${clientBinary(home)})...`);
     await waitReady(agent, token, client, log);
+    void keepClient();
   } else {
     console.log(`${agent.name}'s client is already running; driving it.`);
   }

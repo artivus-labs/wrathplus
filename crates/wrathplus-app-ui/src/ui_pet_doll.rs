@@ -22,7 +22,13 @@ pub struct UiPetDollPlugin;
 impl Plugin for UiPetDollPlugin {
     fn build(&self, app: &mut App) {
         // In the unit feed, so the page repaints in the pass that pushes the pet's health.
-        app.add_systems(Update, feed_pet_doll.in_set(UnitFeed));
+        // Synchronous stat handlers resolve "pet" through the aura feed's guid table.
+        app.add_systems(
+            Update,
+            feed_pet_doll
+                .in_set(UnitFeed)
+                .after(crate::app_core::schedule::AuraEvents),
+        );
     }
 }
 
@@ -151,6 +157,12 @@ mod tests {
     #[test]
     fn the_feeds_composition_answers_the_pet_bindings() {
         let mut s = wrathplus_ui::script::UiScript::new().unwrap();
+        // The guid table the aura feed seats, which the verbs' resolver reads (`0x60c1f0`).
+        s.set_unit_guids(&wrathplus_ui::script::UnitGuids {
+            player: 1,
+            pet: 2,
+            ..Default::default()
+        });
         s.set_pet_combat_stats(Some(unit_combat_stats(&boar())));
 
         // `PetPaperDollFrame.lua:149`'s read; stamina is the third, 1-based.

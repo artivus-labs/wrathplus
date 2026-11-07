@@ -82,7 +82,7 @@ pub struct UnitState {
     pub tapped_by_player: bool,
     /// `UnitName`'s name; `None` until the name query answers, which reads as [`unknownobject`].
     pub name: Option<String>,
-    /// Current health (`UnitHealth`).
+    /// Current health, raw; `UnitHealth` applies the feign gate ([`feign_masked`]).
     pub health: u32,
     /// Maximum health (`UnitHealthMax`).
     pub max_health: u32,
@@ -97,7 +97,7 @@ pub struct UnitState {
     pub max_power: u32,
     /// All seven Wrath resources on the raw wire scale; absent for Vanilla snapshots.
     pub powers: Option<[UnitPowerState; 7]>,
-    /// `UnitIsDead`; a released ghost is not dead by it, as its health is 1.
+    /// Health <= 0 (`0x60f4fe`), or the unheld record's bit; `UnitIsDead` adds [`feign_masked`].
     pub dead: bool,
     /// `UnitIsCharmed` (`0x516cf0`): `UNIT_FIELD_CHARMEDBY` (fields 10-11) is non-zero.
     /// `UNIT_FIELD_CHARM` is never read, so a charmer answers nil, as does a summoned pet.
@@ -539,5 +539,5 @@ pub(crate) mod wrath_verbs;
 pub(crate) use resolve::token_recognised;
 pub use resolve::{parse_unit_token, UnitBase, UnitGuids, UnitTokenParse};
 
-pub(super) use bindings::class_pair;
-pub(super) use bindings::install;
+pub(in crate::script) use bindings::feign_masked;
+pub(super) use bindings::{class_pair, install};

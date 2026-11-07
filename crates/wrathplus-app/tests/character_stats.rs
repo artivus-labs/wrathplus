@@ -5,7 +5,7 @@
 
 mod common;
 
-use wrathplus_ui::script::{UiScript, UnitCombatStats, UnitState};
+use wrathplus_ui::script::{UiScript, UnitCombatStats, UnitGuids, UnitState};
 
 /// The paper doll's load prefix, in the production order. `CharacterFrame.xml` is left
 /// out: the rows are repainted directly and the window never opens. Every row formats a global
@@ -98,6 +98,11 @@ fn seated() -> UiScript {
     let mut script = UiScript::new().expect("a UI VM");
     load_ui(&mut script);
     script.set_unit("player", Some(player()));
+    // The guid table the aura feed seats each frame, which the stat verbs' resolver reads.
+    script.set_unit_guids(&UnitGuids {
+        player: 1,
+        ..Default::default()
+    });
     script.set_player_combat_stats(Some(stats()));
     script
 }
