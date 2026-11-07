@@ -83,51 +83,6 @@ impl RangeCell {
     }
 }
 
-/// `007fe1b0`: 1 when the spell aims at friends (its column pick for a ranged row's minimum), 2 at
-/// enemies, 0 neither.
-fn target_kind(d: &SpellDisplay) -> u8 {
-    if d.targets & 0x100 != 0 {
-        return 1;
-    }
-    if d.targets & 0x80 != 0 {
-        return 2;
-    }
-    let pairs =
-        || (0..3).flat_map(|i| [d.effect_implicit_target_a[i], d.effect_implicit_target_b[i]]);
-    if pairs().any(|t| matches!(t, 2 | 6 | 15 | 16 | 24 | 28 | 53 | 54 | 93)) {
-        return 2;
-    }
-    for i in 0..3 {
-        for t in [d.effect_implicit_target_a[i], d.effect_implicit_target_b[i]] {
-            let friendly = matches!(
-                t,
-                3 | 4
-                    | 5
-                    | 20
-                    | 21
-                    | 27
-                    | 29
-                    | 30
-                    | 31
-                    | 33
-                    | 34
-                    | 35
-                    | 45
-                    | 56
-                    | 57
-                    | 58
-                    | 59
-                    | 61
-                    | 62
-            );
-            if friendly || (t == 1 && d.effect_radius_index[i] != 4) {
-                return 1;
-            }
-        }
-    }
-    0
-}
-
 /// The integer yards: `"%d"` (`0x9e289c`) or `"%d-%d"` (`0x854fb4`), `fistp` rounding to nearest.
 /// Which form is picked by `pick_min`, the enemy minimum on both cells (`0x62429b` reads it).
 fn yards(pick_min: f32, min: f32, max: f32) -> String {
@@ -204,9 +159,10 @@ pub(super) fn range_cell(
         (min, mods.apply_float(d, OP_RANGE, max) + pad)
     };
     let (mut enemy, mut friend) = (column(false), column(true));
-    // `007ff3c0`/`007ff400`: a ranged row's two minimums both read 5 yd past one column's.
+    // `007ff3c0`/`007ff400`: both minimums read 5 yd past the column `0x7fe1b0` picks;
+    // its caster-target arm reads EffectApplyAuraName (+0x17c), never EffectRadiusIndex.
     if row.flags & RANGE_FLAG_RANGED != 0 && !row.is_melee() {
-        let min = MELEE_RANGE_FLOOR + pair(target_kind(d) == 1).0;
+        let min = MELEE_RANGE_FLOOR + pair(d.is_helpful()).0;
         enemy.0 = min;
         friend.0 = min;
     }

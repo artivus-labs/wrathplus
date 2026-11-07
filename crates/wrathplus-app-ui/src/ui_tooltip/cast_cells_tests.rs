@@ -141,13 +141,67 @@ fn the_ranged_minimum_column_follows_the_spells_target_kind() {
         RangeCell::One("5-30 yd range".into())
     );
     d.effect_implicit_target_a = [21, 0, 0];
-    assert_eq!(target_kind(&d), 1);
+    assert!(d.is_helpful());
     assert_eq!(
         range(&d, &shot, None),
         RangeCell::One("13-30 yd range".into())
     );
     d.effect_implicit_target_b = [6, 0, 0];
-    assert_eq!(target_kind(&d), 2, "an enemy target type wins");
+    assert!(d.is_harmful(), "an enemy target type wins");
+}
+
+/// `0x7fe1b0` reads the aura at `+0x17c`, not the radius at `+0x170`, for either
+/// caster-target arm. Exercise the rendered range cell, with distinct column minimums.
+#[test]
+fn caster_target_range_uses_the_aura_name_not_the_radius_index() {
+    let shot = ranges(0.0, 30.0, 2, (8.0, 30.0));
+    for effect in 0..3 {
+        for secondary in [false, true] {
+            for (aura, radius, expected) in [(4, 0, "5-30 yd range"), (0, 4, "13-30 yd range")] {
+                let mut d = spell(0);
+                if secondary {
+                    d.effect_implicit_target_b[effect] = 1;
+                } else {
+                    d.effect_implicit_target_a[effect] = 1;
+                }
+                d.effect_apply_aura[effect] = aura;
+                d.effect_radius_index[effect] = radius;
+                assert_eq!(
+                    range(&d, &shot, None),
+                    RangeCell::One(expected.into()),
+                    "effect={effect} secondary={secondary} aura={aura} radius={radius}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn caster_aura_range_keeps_explicit_target_and_enemy_precedence() {
+    let shot = ranges(0.0, 30.0, 2, (8.0, 30.0));
+    let mut d = spell(0);
+    d.effect_implicit_target_a[0] = 1;
+    d.effect_apply_aura[0] = 4;
+    d.effect_implicit_target_b[2] = 21;
+    assert_eq!(
+        range(&d, &shot, None),
+        RangeCell::One("13-30 yd range".into())
+    );
+    d.effect_implicit_target_a[1] = 6;
+    assert_eq!(
+        range(&d, &shot, None),
+        RangeCell::One("5-30 yd range".into())
+    );
+    d.targets = 0x180;
+    assert_eq!(
+        range(&d, &shot, None),
+        RangeCell::One("13-30 yd range".into())
+    );
+    d.targets = 0x80;
+    assert_eq!(
+        range(&d, &shot, None),
+        RangeCell::One("5-30 yd range".into())
+    );
 }
 
 fn spells_with(row: SpellCastTime) -> Spells {
