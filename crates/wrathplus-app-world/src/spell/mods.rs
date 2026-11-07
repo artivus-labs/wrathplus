@@ -21,7 +21,7 @@
 
 use bevy::prelude::*;
 
-use wrathplus_formats::{SpellDisplay, SpellRange};
+use wrathplus_formats::SpellDisplay;
 
 use crate::app_core::session::ObjectStore;
 use crate::app_core::session::SelfPlayer;
@@ -227,27 +227,6 @@ impl SpellModifiers {
         self.modifiers(d, op).map_or(value, |m| {
             wrathplus_formats::soft_modify(value, m.flat, m.pct)
         })
-    }
-
-    /// `GetMinMaxRange` modifies only the maximum at its common tail, after the moving bonus
-    /// (`0x6e3648`-`0x6e36a2`, then op 5 at `0x6e3746`). The on-next-swing `Attributes & 0x404` arm
-    /// returns before that tail (`0x6e350f`).
-    pub fn min_max_range(
-        &self,
-        d: &SpellDisplay,
-        row: Option<&SpellRange>,
-        caster: wrathplus_formats::RangeUnit,
-        targets: wrathplus_formats::RangeTargets,
-    ) -> Option<(f32, f32)> {
-        let (min, max) = wrathplus_formats::min_max_range(d, row, caster, targets)?;
-        Some((
-            min,
-            if d.on_next_swing() {
-                max
-            } else {
-                self.apply_float(d, OP_RANGE, max)
-            },
-        ))
     }
 }
 
@@ -564,70 +543,5 @@ mod tests {
         assert!(base > 0);
         mods.set(false, 5, OP_CAST_TIME, -100);
         assert_eq!(spells.cast_time_ms(frostbolt, 60, &mods), 0);
-    }
-
-    #[test]
-    fn range_modifier_changes_only_the_maximum_after_reach() {
-        let mut mods = mage_tables();
-        let d = mage(&[5]);
-        let row = SpellRange {
-            min: 8.0,
-            max: 35.0,
-            flags: 0,
-        };
-        mods.set(false, 5, OP_RANGE, 20);
-        let caster = wrathplus_formats::RangeUnit::still(1.5);
-        let target = wrathplus_formats::RangeTargets {
-            target: Some(wrathplus_formats::RangeUnit::still(1.5)),
-            attack_target: None,
-        };
-        let (min, max) = mods.min_max_range(&d, Some(&row), caster, target).unwrap();
-        assert_eq!(min, 11.0);
-        assert!((max - 45.6).abs() < 0.001, "38 yards with +20% range");
-        assert_eq!(mods.min_max_range(&d, None, caster, target), None);
-
-        let on_next_swing = SpellDisplay {
-            attributes: 0x404,
-            ..d
-        };
-        assert_eq!(
-            mods.min_max_range(&on_next_swing, Some(&row), caster, target),
-            wrathplus_formats::min_max_range(&on_next_swing, Some(&row), caster, target),
-            "the reference's early return bypasses op 5"
-        );
-    }
-
-    /// The moving bonus is part of the max before op 5 scales it (`0x6e3648`-`0x6e36a2`, then
-    /// `0x6e3746`): a +20% talent on the melee row of two running units scales 5 + 2.6667.
-    #[test]
-    fn range_modifier_scales_the_moving_bonus() {
-        let mut mods = mage_tables();
-        let d = mage(&[5]);
-        let melee = SpellRange {
-            min: 0.0,
-            max: 5.0,
-            flags: 1,
-        };
-        mods.set(false, 5, OP_RANGE, 20);
-        let runner = wrathplus_formats::RangeUnit {
-            motion: wrathplus_formats::UnitMotion {
-                flags: 1,
-                speed: 7.0,
-                walk_speed: 2.5,
-            },
-            ..wrathplus_formats::RangeUnit::still(1.5)
-        };
-        let targets = wrathplus_formats::RangeTargets {
-            target: Some(runner),
-            attack_target: None,
-        };
-        let (_, max) = mods
-            .min_max_range(&d, Some(&melee), runner, targets)
-            .unwrap();
-        let bonus = wrathplus_formats::MOVING_RANGE_BONUS;
-        assert!(
-            (max - (5.0 + bonus) * 1.2).abs() < 1e-4,
-            "the modifier scales the bonused max, not the bare 5.0: {max}"
-        );
     }
 }

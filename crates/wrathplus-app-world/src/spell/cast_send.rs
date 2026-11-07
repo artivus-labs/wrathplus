@@ -528,8 +528,8 @@ fn send_spell_cast(
     // self-bind is distance 0.
     if let Some(d) = def {
         if target.is_some() && target == ctx.selection_guid && target != ctx.self_guid {
-            let row = spells.and_then(|s| s.ranges.get(d.range_index));
-            if let Some(reason) = ctx.range.refusal(d, row, spell_mods) {
+            let ranges = spells.map(|s| &s.ranges);
+            if let Some(reason) = ranges.and_then(|r| ctx.range.refusal(d, r, spell_mods)) {
                 debug!("ui_action: cast {spell_id} refused locally — range ({reason:#x})");
                 cast_errors.push_local(spell_id, reason);
                 return;

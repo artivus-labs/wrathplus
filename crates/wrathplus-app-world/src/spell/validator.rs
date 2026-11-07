@@ -1,46 +1,15 @@
 //! The requirement validator `0x6094f0`: the press-time gates `TryCast 0x6e4b60` runs between
-//! the target bind and the commit, plus the range compare `IsTargetInRange 0x6e47b0` that
-//! `CanTargetUnit 0x6e4440` runs before it. Pure predicates answering the reference's reason codes,
+//! the target bind and the commit, plus build-12340 range compare `0x803850` that
+//! press preflight `0x809610` runs before it. Pure predicates answering the reference's reason codes,
 //! called by [`super::cast_send`]'s ladder in its order. Only `TryCast` reaches `0x6094f0`, never
 //! the greying walk `0x6e3d60`.
 
-use super::SpellModifiers;
 use crate::spell::cast_fail_keys::reason;
-use wrathplus_formats::{RangeUnit, SpellDisplay, SpellRange};
+use wrathplus_formats::SpellDisplay;
 
-/// The range refusals `CanTargetUnit 0x6e4440` emits: "Out of range." and "Target too close".
+/// Build-12340 `0x809610` / `0x80bc80` range failures (`0x61` / `0x80`): "Out of range." and "Target too close".
 pub(super) const ERR_OUT_OF_RANGE: u8 = reason::OUT_OF_RANGE;
 pub(super) const ERR_TOO_CLOSE: u8 = reason::TOO_CLOSE;
-
-/// The range refusal, before `ArmCast`/`SendCast`, so an out-of-range press never runs the commit
-/// tail (the ranged sheath snap `0x6e5930` included): squared 3D distance against
-/// [`wrathplus_formats::min_max_range`], beyond max² out of range, inside a nonzero min² too close.
-/// `target` is the bound unit, the target `IsTargetInRange 0x6e47b0` hands `GetMinMaxRange`
-/// (`0x6e47ca`): its reach pads a ranged row and its motion, with the caster's, earns the moving
-/// bonus. The function looks the auto-attack target up only when that target is no unit, which a
-/// bound unit never is, so none is passed. No range row or no distance passes; the server judges.
-pub(super) fn cast_range_refusal(
-    spell: &SpellDisplay,
-    row: Option<&SpellRange>,
-    caster: RangeUnit,
-    target: Option<RangeUnit>,
-    dist_sq: Option<f32>,
-    mods: &SpellModifiers,
-) -> Option<u8> {
-    let targets = wrathplus_formats::RangeTargets {
-        target,
-        attack_target: None,
-    };
-    let (min, max) = mods.min_max_range(spell, row, caster, targets)?;
-    let d2 = dist_sq?;
-    if d2 > max * max {
-        return Some(ERR_OUT_OF_RANGE);
-    }
-    if min > 0.0 && d2 < min * min {
-        return Some(ERR_TOO_CLOSE);
-    }
-    None
-}
 
 /// `PreventionType` (`Spell.dbc` column 165): 1 silence, 2 pacify, 0 neither.
 const PREVENTION_SILENCE: u32 = 1;
@@ -233,6 +202,35 @@ pub(super) fn cast_moving_refusal(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::spell::SpellModifiers;
+    use wrathplus_formats::{RangeUnit, SpellRange};
+
+    fn cast_range_refusal(
+        spell: &SpellDisplay,
+        row: Option<&SpellRange>,
+        caster: RangeUnit,
+        target: Option<RangeUnit>,
+        dist: Option<f32>,
+        mods: &SpellModifiers,
+    ) -> Option<u8> {
+        let r = row?;
+        let row = wrathplus_ui::script::RangeRow {
+            flags: r.flags,
+            min: [r.min; 2],
+            max: [r.max; 2],
+        };
+        let inputs = super::super::cast_target::RangeInputs {
+            caster,
+            target: target
+                .map(super::super::cast_range::RangeTarget::Unit)
+                .unwrap_or_default(),
+            ..Default::default()
+        };
+        super::super::cast_range::refusal(
+            super::super::cast_range::limits(spell, Some(row), &inputs, mods),
+            dist,
+        )
+    }
 
     fn spell_with_range(range_index: u32, attributes: u32) -> SpellDisplay {
         SpellDisplay {
@@ -242,7 +240,7 @@ mod tests {
         }
     }
 
-    /// `IsTargetInRange 0x6e47b0`'s two compares, on Auto Shot's {8, 35} row plus the reach pad.
+    /// Build-12340 `0x803850`'s two compares, on Auto Shot's {8, 35} row plus the reach pad.
     #[test]
     fn cast_range_refusal_follows_the_two_compares() {
         let mods = SpellModifiers::default();
@@ -269,7 +267,7 @@ mod tests {
         let refuse = |d2: f32| cast_range_refusal(&d, Some(&fireball), me, reach, Some(d2), &mods);
         assert_eq!(refuse(0.1), None);
         assert_eq!(refuse(60.0 * 60.0), Some(ERR_OUT_OF_RANGE));
-        // The bound target is the pad's second reach (`0x6e47ca`): 35 + 1.5 + 1.5 = 38.
+        // The bound target is the pad's second reach (`0x80386b`): 35 + 1.5 + 1.5 = 38.
         assert_eq!(refuse(37.0 * 37.0), None);
         assert_eq!(refuse(39.0 * 39.0), Some(ERR_OUT_OF_RANGE));
         // With no unit bound the row stands as it is: 35.
@@ -313,7 +311,7 @@ mod tests {
     }
 
     /// A warrior running after a running mob presses Hamstring (the melee row) at 7 yards:
-    /// `GetMinMaxRange` adds the moving bonus to the 5.0 floor (`0x6e3648`-`0x6e36a2`), so the
+    /// `GetMinMaxRange` adds the moving bonus to the 5.0 floor (build 12340 `0x7ff63b`–`0x7ff68e`), so the
     /// press goes out to 7.667, and a standing pair is refused at the same distance.
     #[test]
     fn cast_range_refusal_lets_two_running_units_reach_the_moving_bonus() {

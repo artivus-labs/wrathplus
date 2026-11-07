@@ -85,6 +85,7 @@ fn verdict(flags: u32, friendly: bool, talent: bool, distance: f32) -> i64 {
     ));
     let store = |id| {
         ObjectStore(ObjectFields::from_fields(&[
+            (Field::ObjectType, 0x19),
             (Field::UnitHealth, 100),
             (Field::UnitFactionTemplate, id),
         ]))
