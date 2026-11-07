@@ -93,6 +93,12 @@ impl AttackPress<'_, '_> {
             "attack {} at {guid:#x}",
             if engaged { "toggled off" } else { "swing" }
         );
+        if seam.auto_repeat.1.attacking {
+            seam.stop_controller(engaged);
+            return;
+        } else if !engaged && seam.request_ranged(false) {
+            return;
+        }
         crate::creature_anim::toggle_attack_local(
             e,
             guid,
@@ -119,6 +125,9 @@ impl AttackPress<'_, '_> {
         let Ok(e) = seam.me.single() else {
             return;
         };
+        if seam.request_ranged(false) {
+            return;
+        }
         crate::creature_anim::start_attack_local(
             e,
             guid,
@@ -136,7 +145,7 @@ impl AttackPress<'_, '_> {
     pub(crate) fn stop_attack(&mut self) {
         let engaged = self.pick.engaged();
         let seam = &mut self.seam;
-        crate::creature_anim::stop_attack_local(engaged, &mut seam.queued_melee, &seam.net);
+        seam.stop_controller(engaged);
     }
 
     /// TryCast's attack pick (`0x6e4efb`) for a spell press held there

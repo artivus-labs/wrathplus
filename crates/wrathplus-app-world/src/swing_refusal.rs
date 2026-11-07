@@ -62,7 +62,7 @@ pub(crate) enum SwingRefusalEdge {
 /// The latched refusal: the reference's `[0xc4d758]` (the code) and `[0xc4c270]` (the absolute
 /// time the next line is due). `None` is code 0, whose timestamp the tick never reads.
 #[derive(Resource, Default)]
-struct SwingRefusal(Option<(Latched, Duration)>);
+pub(crate) struct SwingRefusal(Option<(Latched, Duration)>);
 
 /// The two refusals that latch; arm 4 writes no latch.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -97,7 +97,7 @@ impl SwingRefusal {
 
 /// Consume this frame's edges in packet order: latch a refusal, clear on a landing, and stop the
 /// attack for the silent arm.
-fn apply_swing_refusals(
+pub(crate) fn apply_swing_refusals(
     mut edges: MessageReader<SwingRefusalEdge>,
     time: Res<Time>,
     mut refusal: ResMut<SwingRefusal>,

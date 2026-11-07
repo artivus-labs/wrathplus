@@ -100,7 +100,7 @@ impl Plugin for CharSelectPlugin {
                         back_on_disconnect,
                         // Last and ungated: it mirrors the pick the frame ended with, and world
                         // entry is reached from the create screen too.
-                        persist_last_character,
+                        persist_last_character.before(crate::spell::auto_ranged::tick),
                     )
                         .chain(),
                     (

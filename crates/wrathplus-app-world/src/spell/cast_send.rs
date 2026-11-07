@@ -32,46 +32,7 @@ use crate::app_core::errors::CastErrors;
 use crate::app_core::state::Spells;
 use crate::spell::reagents::reagent_totem_refusal;
 
-/// What the commit sends: `SendCast 0x6e54f0` branches on whether the pending-cast guid
-/// (`0xceac48`, the item's when TryCast got one, else the caster's) is the caster's; the item arm
-/// sends `CMSG_USE_ITEM` (`0x6e57d8 push 0xab`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CastCommit {
-    /// `CMSG_CAST_SPELL` (0x12e).
-    Spell,
-    /// Build 12340's `CMSG_PET_CAST_SPELL` (0x1f0): our pet's, charm's or possessed unit's spell,
-    /// raised to the cursor by its bar ([`super::cast_target::pet_cursor_word`]).
-    Pet { caster: u64 },
-    /// `CMSG_USE_ITEM` (0xab): the item's wire position, plus a caller-bound
-    /// GameObject.
-    Item {
-        bag_index: u8,
-        slot: u8,
-        /// The item's template entry: the not-ready rung queries the `(use_spell, entry)` record.
-        entry: u32,
-        /// The item's GUID: build 12340's `CMSG_USE_ITEM` names it, and AC refuses a mismatch.
-        item_guid: u64,
-        /// `CGItem::Use`'s own target argument, set only for a key in a lock; it bypasses the
-        /// binder, as TryCast's target resolve (`6e4ef4`) takes the pair it was passed.
-        on_object: Option<u64>,
-    },
-}
-
-impl CastCommit {
-    /// Whether this commit carries an item: what every forked rung reads.
-    pub(crate) fn is_item(self) -> bool {
-        matches!(self, CastCommit::Item { .. })
-    }
-
-    /// The local not-ready reason for this commit (`0x6094f0`'s forked first rung).
-    fn not_ready_reason(self) -> u8 {
-        if self.is_item() {
-            reason::ITEM_NOT_READY
-        } else {
-            reason::NOT_READY
-        }
-    }
-}
+pub use super::cast_commit::CastCommit;
 
 /// The class byte TryCast's finisher rung tests (`6e4e98`).
 const CLASS_ROGUE: u8 = 4;
@@ -110,6 +71,7 @@ pub struct CastLadder<'w, 's> {
     pub(crate) combo: Res<'w, crate::net::wrath_combo_points::NativeComboPoints>,
     pub(crate) cast_errors: ResMut<'w, CastErrors>,
     pub(crate) auto_repeat: ResMut<'w, AutoRepeatActive>,
+    pub(crate) book: Option<Res<'w, crate::app_core::state::PlayerActions>>,
     pub(crate) trade_skill_opens: ResMut<'w, crate::app_core::interaction::TradeSkillOpens>,
     pub ground: ResMut<'w, super::targeting::SpellTargeting>,
     pub(crate) held_for_pick: ResMut<'w, HeldForPick>,
@@ -262,6 +224,11 @@ impl CastLadder<'_, '_> {
         self.send_bound(spell_id, ctx, commit, None, None);
     }
 
+    /// Automatic `modalNextSpell` continuation, not an action-button re-press.
+    pub fn send_continuation(&mut self, spell_id: u32, ctx: &cast_target::CastContext) {
+        self.send_inner(spell_id, ctx, CastCommit::Spell, None, None, true);
+    }
+
     /// A player's spell press (`UseAction`, `CastSpell`, `CastSpellByName`): the ladder with
     /// TryCast's attack pick, where the cast may stop in [`HeldForPick`].
     pub fn send_spell(&mut self, spell_id: u32, ctx: &cast_target::CastContext, on_self: bool) {
@@ -295,6 +262,18 @@ impl CastLadder<'_, '_> {
         on_object: Option<u64>,
         hold: Option<HeldCast>,
     ) {
+        self.send_inner(spell_id, ctx, commit, on_object, hold, false);
+    }
+
+    fn send_inner(
+        &mut self,
+        spell_id: u32,
+        ctx: &cast_target::CastContext,
+        commit: CastCommit,
+        on_object: Option<u64>,
+        hold: Option<HeldCast>,
+        continuation: bool,
+    ) {
         send_spell_cast(
             spell_id,
             ctx,
@@ -318,6 +297,8 @@ impl CastLadder<'_, '_> {
             &mut self.trade_skill_opens,
             &mut self.ground,
             &mut self.held_for_pick,
+            self.book.as_deref(),
+            continuation,
         );
     }
 }
@@ -374,6 +355,8 @@ fn send_spell_cast(
     trade_skill_opens: &mut crate::app_core::interaction::TradeSkillOpens,
     ground: &mut super::targeting::SpellTargeting,
     held_for_pick: &mut HeldForPick,
+    book: Option<&crate::app_core::state::PlayerActions>,
+    continuation: bool,
 ) {
     let now = Instant::now();
     let def = spells.and_then(|s| s.catalog.get(spell_id));
@@ -386,7 +369,12 @@ fn send_spell_cast(
     }
     // The re-press toggle (`0x4e60da`): pressing the running auto-repeat spell cancels it. The
     // reference does this in the action-button handler, before TryCast is called.
-    if def.is_some_and(|d| d.auto_repeat()) && auto_repeat.0 == Some(spell_id) {
+    if !continuation
+        && !auto_repeat.1.attempting
+        && def.is_some_and(|d| d.auto_repeat())
+        && (auto_repeat.0 == Some(spell_id) || auto_repeat.1.queued == Some(spell_id))
+    {
+        auto_repeat.clear_intent();
         debug!("ui_action: cast {spell_id} re-pressed — auto-repeat toggles off");
         let self_e = self_player.single().ok().map(|(e, _)| e);
         crate::creature_anim::cancel_auto_repeat_local(self_e, auto_repeat, ecs, commands);
@@ -394,6 +382,16 @@ fn send_spell_cast(
     }
     if caster_dead_refusal(spell_id, def, ctx.rel.self_store, cast_errors) {
         return;
+    }
+    // The learned repeat enters the controller before TryCast's movement/range refusals.
+    // Its tick alone attempts the shot; queued intention must survive those waiting states.
+    if !auto_repeat.1.attempting {
+        let known = spells
+            .zip(book)
+            .and_then(|(s, b)| auto_repeat.learned(s, b));
+        if known == Some(spell_id) && super::auto_ranged::request(auto_repeat, known, false) {
+            return;
+        }
     }
     // TryCast's IsTargeting leg (`6e4d62`): a new press while the cursor is up clears the word,
     // with no packet, and continues down the ladder.
@@ -800,6 +798,11 @@ fn send_spell_cast(
                 // `0x5eccda` would still reach the repeat cancel `0x5ecd8c`; this route never
                 // gets there.
                 if !engaged {
+                    // `0x80d90a`: an idle combat initiator registers the ranged controller too.
+                    let known = spells
+                        .zip(book)
+                        .and_then(|(s, b)| auto_repeat.learned(s, b));
+                    super::auto_ranged::request(auto_repeat, known, false);
                     debug!("ui_action: cast {spell_id} initiates auto-attack at {guid:#x}");
                     // No stop is in flight: the gate above guarantees the lock is clear.
                     crate::creature_anim::start_attack_local(

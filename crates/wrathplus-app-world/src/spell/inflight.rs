@@ -238,7 +238,7 @@ impl ActiveChannel {
 /// failure. `IsAutoRepeatAction` and the button flash read it; the sticky
 /// `creature_anim::AutoRepeatArmed` is the idle gate.
 #[derive(Resource, Default)]
-pub struct AutoRepeatActive(pub Option<u32>);
+pub struct AutoRepeatActive(pub Option<u32>, pub super::auto_ranged::AutoRanged);
 
 /// The per-spell movement gates of the local self-cancel, tested at `0x51511e` and `0x515175`.
 /// The move keybinds' dispatcher `0x515090` cancels on mask `0x10f0` (forward, back, strafe,
@@ -311,7 +311,8 @@ impl SelfCancel<'_, '_> {
         let now = Instant::now();
         let self_e = self_guid.0.as_ref().and_then(|g| index.0.get(g)).copied();
         // Esc stops one thing, auto-repeat first (`0x6e6e80`).
-        let esc = if esc && auto_repeat.0.is_some() {
+        let esc = if esc && auto_repeat.any() {
+            auto_repeat.clear_intent();
             if *crate::net::CAST_TRACE {
                 info!("cast-trace: LOCAL auto-repeat self-cancel (esc), CMSG_CANCEL_AUTO_REPEAT_SPELL");
             }
