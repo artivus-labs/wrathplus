@@ -22,6 +22,7 @@ mod feed;
 #[cfg(test)]
 mod feed_tests;
 mod net;
+mod range;
 mod ranks;
 pub(crate) mod spell_use;
 mod state;

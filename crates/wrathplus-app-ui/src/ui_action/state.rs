@@ -12,7 +12,6 @@ use std::time::Instant;
 
 use bevy::prelude::*;
 
-use wrathplus_formats::RangeTargets;
 use wrathplus_protocol::types::{ACTION_KIND_ITEM, ACTION_KIND_SPELL};
 use wrathplus_ui::script::{ActionState, UiScript};
 
@@ -170,6 +169,19 @@ pub(super) fn feed_action_state(
     let target_unit = target_entity
         .filter(|_| target.is_some())
         .and_then(|e| range_units.unit(e));
+    let friendly_target = crate::target::can_assist(
+        target.map(|(s, _)| s),
+        factions.as_deref(),
+        &reputations,
+        me.map(|(s, _, _, _)| s),
+        relations.context(),
+    );
+    let ranged_mod = me
+        .and_then(|(s, _, _, _)| s.0.player_inv_slot(17))
+        .and_then(|g| objects.object(g))
+        .and_then(|o| o.object_entry())
+        .and_then(|entry| items.template_cached(entry))
+        .map(|t| t.ranged_mod_range);
     let dist_sq = match (self_pos, target) {
         (Some(a), Some((_, t))) => Some(a.distance_squared(t.translation)),
         _ => None,
@@ -253,27 +265,20 @@ pub(super) fn feed_action_state(
                 } else {
                     st.usable = true;
                 }
-                let row = spells.as_ref().and_then(|s| s.ranges.get(d.range_index));
-                // `ActionHasRange 0x4e5810` asks `GetMinMaxRange` with a null target (`0x4e5852`)
-                // and tests `|min|` and `|max|` against `FLT_EPSILON`. The auto-attack target the
-                // melee arm falls back to cannot move that: its max is at least the 5.0 floor.
-                st.has_range = spell_mods
-                    .min_max_range(d, row, caster, RangeTargets::default())
-                    .is_some_and(|(min, max)| min.abs() > f32::EPSILON || max.abs() > f32::EPSILON);
-                // `IsActionInRange 0x4e56f0` runs `CanTargetUnit 0x6e4440`, which binds the selected
-                // target, then `IsTargetInRange 0x6e47b0`, which hands `GetMinMaxRange` that target
-                // (`0x6e47ca`): its reach pads a ranged row, and its motion with the caster's earns
-                // the moving bonus. Nil without a target.
+                // `0x801650` → `0x7ff480`: the same evaluator as spell/item Lua queries,
+                // including friendly columns, ranged minimum and op5 before the reach pad.
+                let limits = |target, friendly| {
+                    let ranges = &spells.as_ref()?.ranges;
+                    Some(super::range::limits(
+                        d, ranges, spell_mods, caster, target, friendly, ranged_mod,
+                    ))
+                };
+                st.has_range = limits(None, d.is_helpful()).is_some_and(|(min, max)| {
+                    min.abs() >= f32::EPSILON || max.abs() >= f32::EPSILON
+                });
                 st.in_range = match dist_sq {
-                    Some(d2) if st.has_range => {
-                        let targets = RangeTargets {
-                            target: target_unit,
-                            attack_target: None,
-                        };
-                        spell_mods
-                            .min_max_range(d, row, caster, targets)
-                            .map(|(min, max)| d2 >= min * min && d2 <= max * max)
-                    }
+                    Some(d2) if st.has_range => limits(target_unit, friendly_target)
+                        .map(|(min, max)| d2 >= min * min && d2 <= max * max),
                     _ => None,
                 };
                 let info = cooldowns.info(button.action, 0, Some(d), now);
@@ -846,3 +851,7 @@ mod tests {
 #[cfg(test)]
 #[path = "state_cooldown_tests.rs"]
 mod cooldown_tests;
+
+#[cfg(test)]
+#[path = "state_range_tests.rs"]
+mod range_tests;

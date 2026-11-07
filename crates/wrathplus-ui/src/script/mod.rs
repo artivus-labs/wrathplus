@@ -466,7 +466,7 @@ pub use worldmap::{
 pub use worldstate::WorldStateUiView;
 pub use worn_display::WornDisplay;
 pub use wrath_item_use::{ItemUseFacts, ItemUseSpellFacts, ItemUseView};
-pub use wrath_spell_range::{RangeRow, RangeUnitFacts, SpellRangeFacts};
+pub use wrath_spell_range::{range_limits, RangeRow, RangeUnitFacts, SpellRangeFacts};
 pub use wrath_spell_use::SpellUseView;
 pub use wrath_surface::wrath_group::{Group as WrathGroup, Member as WrathGroupMember};
 pub use zone_text::ZoneTexts;
