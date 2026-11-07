@@ -92,20 +92,18 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // BankButtonIDToInvSlotID(id, isBag) (`0x4f8530`): `id + 39` for an item button, `id + 59`
-    // for a bag button, whose id is the container id 5..=10 (`BankFrame.xml:372`), the same
-    // arithmetic as `ContainerIDToInventoryID`'s bank-bag arm (`0x4f94e0`). There is no range
-    // check. `isBag` is `lua_isnumber(L, 2)` (`0x4f8576`), not truthiness: `true` takes the item
-    // arm, `0` and `"1"` the bag arm; stock sets `this.isBag = 1` (`BankFrame.lua:24`). Argument 1
-    // truncates toward zero (`0x40a2b0`), and its usage string names only `buttonID`.
+    // BankButtonIDToInvSlotID(id, isBag) (`0x57b940`): `id + 39` for an item button, `id + 63`
+    // for a bag button, whose id is the container id 5..=11 (`BankFrame.xml:420`), the same
+    // arithmetic as `ContainerIDToInventoryID`'s bank-bag arm (`0x5d6fb7`). There is no range
+    // check. `isBag` is `lua_isnumber(L, 2)` (`0x57b982`), not truthiness: `true` takes the item
+    // arm, `0` and `"1"` the bag arm; stock sets `self.isBag = 1` (`BankFrame.lua:20`). Argument 1
+    // goes through `__ftol2_sse` (`0x57b975`), and its usage string (`0xa1183c`) names only
+    // `buttonID`.
     g.set(
         "BankButtonIDToInvSlotID",
         lua.create_function(|lua, (id, is_bag): (Value, Option<Value>)| {
-            let n = super::binding_abi::number_arg(
-                lua,
-                id,
-                "Usage: BankButtonIDToInvSlotID(buttonID)",
-            )?;
+            let n =
+                super::binding_abi::ftol_arg(lua, id, "Usage: BankButtonIDToInvSlotID(buttonID)")?;
             let is_bag = is_bag
                 .and_then(|v| lua.coerce_number(v).ok().flatten())
                 .is_some();
@@ -342,7 +340,7 @@ mod tests {
             );
         }
 
-        // No range check: the only compares in `0x4f8530` test `lua_isnumber`'s result.
+        // No range check: the only compares in `0x57b940` test `lua_isnumber`'s result.
         assert_eq!(
             s.eval::<i64>("return BankButtonIDToInvSlotID(25)").unwrap(),
             64
@@ -353,14 +351,33 @@ mod tests {
             -61
         );
 
-        // Argument 1 truncates toward zero (`0x40a2b0`), and the usage string names only
-        // `buttonID`.
+        // Argument 1 goes through `__ftol2_sse`, which truncates toward zero and turns anything
+        // outside `i32` into `i32::MIN`; the usage string names only `buttonID`.
         assert_eq!(
             s.eval::<i64>("return BankButtonIDToInvSlotID(-2.9)")
                 .unwrap(),
             37,
             "trunc toward zero gives -2, not -3"
         );
+        for input in ["2^32", "1e300", "-1e300", "1/0", "-1/0", "0/0"] {
+            for (bag, offset) in [("nil", 39), ("1", 63)] {
+                let call = format!("return BankButtonIDToInvSlotID({input}, {bag})");
+                assert_eq!(
+                    s.eval::<i64>(&call).unwrap(),
+                    i64::from(i32::MIN + offset),
+                    "{call}"
+                );
+            }
+        }
+        // Conversion and offset arithmetic are separate: valid i32 values wrap on addition.
+        for (bag, offset) in [("nil", 39_i32), ("1", 63)] {
+            let call = format!("return BankButtonIDToInvSlotID(2147483647, {bag})");
+            assert_eq!(
+                s.eval::<i64>(&call).unwrap(),
+                i64::from(i32::MAX.wrapping_add(offset)),
+                "{call}"
+            );
+        }
         assert_eq!(
             s.eval::<i64>("return BankButtonIDToInvSlotID(\"7\")")
                 .unwrap(),

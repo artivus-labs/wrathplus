@@ -134,13 +134,15 @@ pub(in crate::script) fn install(lua: &Lua) -> mlua::Result<()> {
                 token,
                 r#"Usage: UnitName("unit")"#,
             )?);
-            // Two values (`0x5170ae`, `0x517289`): the name, and the realm, nil for a same-realm
-            // player or a non-player (`0x609210`), so always nil in single-realm wrathplus. A second
-            // argument (stock `UnitPopup.lua:106` passes `true`) is not read. The name is nil only
-            // for an empty `"player"` buffer (`0x51708c`, `0x6f3895`) or GUID 0 (`0x5170c0`);
-            // otherwise a string, `UNKNOWNOBJECT` until the name cache answers (`0x60e740`,
-            // `0x609324`), as for a new pet. A seated snapshot answers even where `exists` is
-            // false; the `"player"` arm reads the local name buffer (`0xc27d88`), never the unit.
+            // Two values (`0x60e95b`, `0x60e965`): the name, and the realm, which the getter
+            // returns only when non-empty (`0x72a12d`), so nil for a same-realm player or a
+            // non-player and always nil in single-realm wrathplus. A second argument is not read.
+            // The name is nil only for an empty `"player"` buffer (`0x6b1060`, then
+            // `lua_pushstring(NULL)`, `0x84e356`), GUID 0 (`0x60e7da`) or the GUID
+            // `0xffffffff_fffffffe` (`0x60e7e0`), which wrathplus never models; otherwise a string,
+            // `UNKNOWNOBJECT` until the name cache answers (`0x60e951`, `0x72a24d`), as for a new
+            // pet. A seated snapshot answers even where `exists` is false; the `"player"` arm
+            // (`0x60e78b`) reads the local name buffer (`0xc79d18`), never the unit.
             if let Some(seeded) = player_record_arm(lua, &token, |r| r.name.clone()) {
                 let name = if seeded.is_empty() {
                     Value::Nil

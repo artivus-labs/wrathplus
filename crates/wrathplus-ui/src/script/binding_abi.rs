@@ -187,10 +187,10 @@ fn trim_g(s: &str) -> &str {
 /// the strings `"0"` and `"1"`.
 ///
 /// Build 12340's twin is `0x815500(L, idx, default)`, by `lua_type`: nil 0, boolean itself, number
-/// through `0x88b9c0` (the same truncation, low dword), string through `0x815400` (the same byte
+/// through [`ftol`] (`0x88b9c0`) then `!= 0` (`0x815544`), string through `0x815400` (the same byte
 /// switch, then `_strnicmp` (`0x76e780`) against `"off"` (`0xa09e84`), `"disabled"`, `"on"`
 /// (`0xa09e88`) and `"enabled"`), any other type `default`. `GetShapeshiftForm`'s flag
-/// is one. A number past ±2^63 stores the x87 integer indefinite, whose low dword is 0: false.
+/// is one. NaN or a number outside `i32` converts to `i32::MIN`: true.
 pub(crate) fn bool_or_default(v: Option<&Value>, default: bool) -> bool {
     let Some(v) = v else {
         return default; // LUA_TNONE
@@ -199,9 +199,9 @@ pub(crate) fn bool_or_default(v: Option<&Value>, default: bool) -> bool {
         Value::Nil => false,
         Value::Boolean(b) => *b,
         Value::LightUserData(_) => default,
-        // Truncated like `0x40a2b0`, testing only the low dword.
-        Value::Integer(i) => (*i as i32) != 0,
-        Value::Number(n) => n.abs() < -(i64::MIN as f64) && (*n as i64 as i32) != 0,
+        // Truncated by `__ftol2_sse` (`0x88b9c0`), then `!= 0` (`0x815544`).
+        Value::Integer(i) => ftol(*i as f64) != 0,
+        Value::Number(n) => ftol(*n) != 0,
         Value::String(s) => {
             let bytes = s.as_bytes();
             match bytes.first() {
@@ -320,7 +320,7 @@ mod tests {
         assert!(bool_or_default(Some(&Value::Boolean(true)), false));
         assert!(!bool_or_default(Some(&Value::Boolean(false)), true));
 
-        // A number truncates toward zero, then tests the low dword.
+        // A number truncates toward zero through `cvttsd2si`, then tests `!= 0`.
         for (n, want) in [
             (1.0, true),
             (-1.0, true),
@@ -331,9 +331,13 @@ mod tests {
             assert_eq!(bool_or_default(Some(&Value::Number(n)), true), want, "{n}");
         }
         assert!(bool_or_default(Some(&Value::Integer(7)), false));
-        assert!(!bool_or_default(Some(&Value::Integer(1 << 32)), true));
-        for n in [4_294_967_296.0, 1e19, f64::INFINITY, f64::NAN] {
-            assert!(!bool_or_default(Some(&Value::Number(n)), true), "{n}");
+        // NaN and anything outside `i32` convert to `i32::MIN`, which is true.
+        assert!(bool_or_default(Some(&Value::Integer(1 << 32)), false));
+        for n in [4_294_967_296.0, 1e300, f64::INFINITY, f64::NAN]
+            .into_iter()
+            .flat_map(|n| [n, -n])
+        {
+            assert!(bool_or_default(Some(&Value::Number(n)), false), "{n}");
         }
 
         // A string by its first byte, then the four keywords, else the default.

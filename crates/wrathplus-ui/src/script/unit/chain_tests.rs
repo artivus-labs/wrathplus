@@ -134,7 +134,7 @@ fn a_chain_answers_the_snapshot_of_the_unit_it_ends_on() {
 
 /// A chain that names nobody answers what the getter answers for no unit: nil, 0 and nil. A chain
 /// to a guid nothing holds reads 0 and nil too, but its name is the reference's name-cache leg
-/// (`0x5171eb`, else `UNKNOWNOBJECT` at `0x517216`), which is not built, so it is not asserted.
+/// (`0x60e8c5`-`0x60e93d`, else `UNKNOWNOBJECT` at `0x60e951`), not built and so not asserted.
 #[test]
 fn a_chain_to_a_unit_nobody_holds_answers_nothing() {
     let s = world();

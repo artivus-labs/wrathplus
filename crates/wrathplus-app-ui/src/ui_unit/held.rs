@@ -111,9 +111,9 @@ pub(super) struct ChainMemo {
 /// guids are the resolver's own inputs ([`UiScript::chain_end_guids`]), which the aura feed pushes
 /// each frame, so this runs after it. A guid the object manager does not hold, or holds as
 /// anything but a unit, gets no snapshot. The reference still answers such a guid: `UnitExists`
-/// from the roster (`0x491900`), `UnitHealth` from the roster or pet record (`0x496400`,
-/// `0x496420`), and `UnitName` from the pet record or the name cache, else `UNKNOWNOBJECT`
-/// (`0x5171da`-`0x517216`); those legs are not built for a chain's end. A token without a hop reads its own push, not these.
+/// through `0x512a30`, `UnitHealth` from the roster or pet record (`0x513c30`, `0x513cb0`), and
+/// `UnitName` from the pet record or the name caches, else `UNKNOWNOBJECT` (`0x60e8c5`-`0x60e951`);
+/// those legs are not built for a chain's end. A token without a hop reads its own push, not these.
 pub(super) fn feed_chain_units(
     script: Option<NonSendMut<UiScript>>,
     tables: super::SnapshotTables,

@@ -422,8 +422,8 @@ fn a_dead_unit_reports_dead_and_zero_health() {
 }
 
 /// `UnitName` (`0x60e740`) is nil only for a zero guid or an empty `"player"` record, else a
-/// string: the name, or `UNKNOWNOBJECT` while it is in flight (`0x609324`). `PetStable.lua:129`
-/// concatenates it on `UNIT_PET`, before a called pet's name arrives.
+/// string: the name, or `UNKNOWNOBJECT` while it is in flight (`0x72a24d`), as for a pet just
+/// called: on `UNIT_PET`, `PetStable.lua:130` reads it, `or ""`, for the line it formats at `:134`.
 #[test]
 fn unitname_reads_unknownobject_for_a_resolved_unit_whose_name_is_in_flight() {
     let mut s = UiScript::new().unwrap();
@@ -437,7 +437,7 @@ fn unitname_reads_unknownobject_for_a_resolved_unit_whose_name_is_in_flight() {
     };
     s.set_unit("pet", Some(pending.clone()));
 
-    // No GlobalStrings: the literal fallback (`0x860fa4`).
+    // No GlobalStrings: the literal fallback (`0xa34c60`).
     assert_eq!(
         s.eval::<String>(r#"return UnitName("pet")"#).unwrap(),
         "Unknown Being"
@@ -1044,8 +1044,8 @@ fn no_unit_token_raises() {
     // empty guard.
     assert!(s.run(r#"UnitName("")"#).is_ok());
 
-    // An absent or nil argument raises `Usage: UnitName("unit")` (`0x850ee0`) from `UnitName`'s
-    // own gate (`0x517048`).
+    // An absent or nil argument raises `Usage: UnitName("unit")` (`0xa23130`) through `luaL_error`
+    // (`0x84f280`) from `UnitName`'s own `lua_isstring` gate (`0x60e74d`).
     assert!(s.run("UnitName()").is_err(), "absent argument raises");
     assert!(s.run("UnitName(nil)").is_err(), "nil argument raises");
     // A number passes the gate as "5", a token naming nobody.
