@@ -15,7 +15,7 @@ extend-exclude = [
 # Level of detail.
 lod = "lod"
 # Blizzard API names: `ButtonHilight`/`Hilight` textures, `GetNextCompleatedTutorial`,
-# `SetInventoryPortaitTexture`, `SMSG_SUPERCEDED_SPELL`.
+# 1.12's `Portait` (absent from 12340), `SMSG_SUPERCEDED_SPELL`.
 hilight = "hilight"
 compleated = "compleated"
 portait = "portait"

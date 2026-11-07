@@ -204,7 +204,7 @@ mod tests {
             helpful,
             cancelable,
             until_cancelled: false,
-            channeled: false,
+            ..Default::default()
         }
     }
 

@@ -222,8 +222,8 @@ impl ScriptItemUse<'_, '_> {
         );
     }
 
-    /// `UseContainerItem(bag, slot)` outside repair mode: a sale with a merchant open, a bank
-    /// move with the bank open, else the reference's equip-vs-use fork and use dispatcher.
+    /// `UseContainerItem(bag, slot)` outside repair mode: a bank move with the bank open, a sale
+    /// with a merchant open (`0x5d881a`'s order), else the equip-vs-use fork and use dispatcher.
     pub(crate) fn use_container_item(&mut self, script: &mut UiScript, bag: i64, slot: u32) {
         let Self {
             self_q,
@@ -239,32 +239,13 @@ impl ScriptItemUse<'_, '_> {
             gate,
         } = self;
         let slot0 = u8::try_from(slot.saturating_sub(1)).ok();
-        // With a merchant open, the click sells the whole stack (`CMSG_SELL_ITEM`, count 0).
-        if let (true, Some(vendor)) = (merchant.is_open(), merchant.vendor) {
-            let item_guid = self_q
-                .iter()
-                .next()
-                .and_then(|store| slot_guid(&store.0, bag, slot0.unwrap_or(0), &ladder.objects));
-            match item_guid {
-                Some(guid) => {
-                    debug!("ui_items: sell lua bag {bag} slot {slot} (item {guid:#x})");
-                    let _ = ladder.commands.0.send(ClientCommand::SellItem {
-                        vendor,
-                        item_guid: guid,
-                        count: 0,
-                    });
-                }
-                None => debug!("ui_items: sell on empty slot (bag {bag} slot {slot}) — ignored"),
-            }
-            return;
-        }
         let Some((bag_index, wire_slot)) = wire_pos_for(bag, slot) else {
             debug!("ui_items: UseContainerItem({bag}, {slot}) out of range — ignored");
             return;
         };
         // With the bank open, a vault or bank-bag item withdraws (`CMSG_AUTOSTORE_BANK_ITEM`) and
-        // any other deposits (`CMSG_AUTOBANK_ITEM`): the reference's bank flag, set for bags -1
-        // and 5..10 (`0x4f9820`), picks the opcode (`0x4fa2f2`). Doll clicks come through
+        // any other deposits (`CMSG_AUTOBANK_ITEM`): the resolver's bank flag, set for bags -1
+        // and 5..11 (`0x5d7380`), picks the opcode (`0x5d881a`). Doll clicks come through
         // `use_inventory_item`, so worn gear keeps its plain use.
         if bank.is_open() {
             let withdrawing = bag == super::BANK_CONTAINER
@@ -281,6 +262,25 @@ impl ScriptItemUse<'_, '_> {
                     bag: bag_index,
                     slot: wire_slot,
                 });
+            }
+            return;
+        }
+        // With a merchant open, the click sells the whole stack (`CMSG_SELL_ITEM`, count 0).
+        if let (true, Some(vendor)) = (merchant.is_open(), merchant.vendor) {
+            let item_guid = self_q
+                .iter()
+                .next()
+                .and_then(|store| slot_guid(&store.0, bag, slot0.unwrap_or(0), &ladder.objects));
+            match item_guid {
+                Some(guid) => {
+                    debug!("ui_items: sell lua bag {bag} slot {slot} (item {guid:#x})");
+                    let _ = ladder.commands.0.send(ClientCommand::SellItem {
+                        vendor,
+                        item_guid: guid,
+                        count: 0,
+                    });
+                }
+                None => debug!("ui_items: sell on empty slot (bag {bag} slot {slot}) — ignored"),
             }
             return;
         }
@@ -843,7 +843,8 @@ mod tests {
             }),
         );
 
-        let script = UiScript::new().unwrap();
+        let mut script = UiScript::new().unwrap();
+        script.set_container(0, Some(super::super::backpack_with_slot_1()));
         script.run("UseContainerItem(0, 1)").unwrap();
         app.insert_non_send_resource(script);
         run_container_clicks(app.world_mut());

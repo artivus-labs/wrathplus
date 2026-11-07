@@ -169,17 +169,12 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                         tooltip_name(lua, &this)?
                     )));
                 };
-                let filter = if matches!(which, Value::String(_)) { b } else { a };
-                let filter = lua.coerce_string(filter)?.map(|s| s.to_string_lossy());
+                // Gated above, so the shared parser (`0x608390`) cannot raise.
+                let args = MultiValue::from_vec(vec![Value::String(token.clone()), which, a, b]);
+                let query = super::aura::wrath::parse(lua, &args, "")?;
                 let hit = {
                     let model = lua.app_data_ref::<Model>().expect("model app_data");
-                    super::aura::wrath::find_aura(
-                        &model,
-                        &token.to_string_lossy(),
-                        &which,
-                        filter.as_deref(),
-                        true,
-                    )?
+                    super::aura::wrath::find_aura(&model, &query)?
                 };
                 let (spell_id, name) = hit.map_or((0, None), |a| (a.spell_id, a.name));
                 super::tooltip_spell::set_spell_by_id(

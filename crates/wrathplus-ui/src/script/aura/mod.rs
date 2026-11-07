@@ -32,7 +32,7 @@ pub struct AuraState {
     pub name: Option<String>,
     /// The icon's extensionless MPQ path (`Interface\Icons\…`).
     pub icon: Option<String>,
-    /// Stack count, at least 1; the reference shows it only above 1.
+    /// Stack count, the record's raw byte (`+0xe`): 0 for an aura that does not stack.
     pub count: u8,
     /// `"Magic"`, `"Curse"`, `"Disease"`, `"Poison"` or `None`; the debuff border tints by it.
     pub debuff_type: Option<String>,
@@ -50,6 +50,16 @@ pub struct AuraState {
     pub until_cancelled: bool,
     /// `AttributesEx & 0x4` (`SPELL_ATTR_EX_IS_CHANNELED`), [`cancel_authorized`]'s second arm.
     pub channeled: bool,
+    /// The record's caster (`+0`); `AFLAG_CASTER` stores the unit's own guid (`0x716558`).
+    pub caster: u64,
+    /// A held caster's `CHARMEDBY`-else-`CREATEDBY` and `CHARM`-else-`SUMMON` (`0x60b6c0`).
+    pub caster_links: [u64; 2],
+    /// The rank text, record `+0x224`; `None` reads `""`.
+    pub rank: Option<String>,
+    /// `AttributesEx7 & 0x10000000`, `shouldConsolidate` (`0x6149c1`).
+    pub consolidate: bool,
+    /// In the `RAID` list (`0x72c8a1`): a buff the player can cast or a debuff it can dispel.
+    pub raid: bool,
 }
 
 /// The player's active tracking aura, 12340's `[0xbeba68]`: an aura of one of the book's tracking
@@ -283,6 +293,7 @@ mod tests {
             cancelable,
             until_cancelled: false,
             channeled: false,
+            ..Default::default()
         }
     }
 

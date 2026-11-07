@@ -1,8 +1,10 @@
 //! The paper doll's skill verbs, `UnitAttackBothHands`, `UnitRangedAttack` and `UnitDefense`,
 //! over the combat-stats snapshots `char_stats` reads.
 
-use mlua::Lua;
+use mlua::{Lua, Value};
 
+use super::binding_abi::string_arg;
+use super::stat_unit::StatUnit;
 use super::Model;
 
 /// The clamp `UnitDefense` (`0x610e7f`) and each hand of `UnitAttackBothHands` (`0x6104ef`) apply:
@@ -38,10 +40,11 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     // hand, so both pairs are `(level * 5, 0)`.
     g.set(
         "UnitAttackBothHands",
-        lua.create_function(|lua, token: Option<String>| {
+        lua.create_function(|lua, token: Value| {
+            let token = string_arg(lua, token, r#"Usage: UnitAttackBothHands("unit")"#)?;
             let model = lua.app_data_ref::<Model>().expect("model app_data");
-            Ok(match token.as_deref() {
-                Some("player") => model
+            Ok(match model.stat_unit(&token) {
+                StatUnit::Player => model
                     .player_combat_stats
                     .as_ref()
                     .map_or((0, 0, 0, 0), |s| {
@@ -51,7 +54,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                         let ((mb, mm), (ob, om)) = (skill_clamped(main), skill_clamped(off));
                         (mb, mm, ob, om)
                     }),
-                Some("pet") => {
+                StatUnit::Pet => {
                     let base = cgunit_skill(&model, "pet");
                     (base, 0, base, 0)
                 }
@@ -65,10 +68,13 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     // `0x71b740` answers 0, 0 for a non-player.
     g.set(
         "UnitRangedAttack",
-        lua.create_function(|lua, token: Option<String>| {
+        lua.create_function(|lua, token: Value| {
+            let token = string_arg(lua, token, r#"Usage: UnitRangedAttack("unit")"#)?;
             let model = lua.app_data_ref::<Model>().expect("model app_data");
-            let pair = match (token.as_deref(), &model.player_combat_stats) {
-                (Some("player"), Some(s)) => with_ratings(&model, s.ranged_weapon_skill, &[0, 22]),
+            let pair = match (model.stat_unit(&token), &model.player_combat_stats) {
+                (StatUnit::Player, Some(s)) => {
+                    with_ratings(&model, s.ranged_weapon_skill, &[0, 22])
+                }
                 _ => (0, 0),
             };
             Ok((i64::from(pair.0), i64::from(pair.1)))
@@ -81,14 +87,15 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     // and 0. Any other token gets the gate's zeros.
     g.set(
         "UnitDefense",
-        lua.create_function(|lua, token: Option<String>| {
+        lua.create_function(|lua, token: Value| {
+            let token = string_arg(lua, token, r#"Usage: UnitDefense("unit")"#)?;
             let model = lua.app_data_ref::<Model>().expect("model app_data");
-            Ok(match token.as_deref() {
-                Some("player") => model.player_combat_stats.as_ref().map_or((0, 0), |s| {
+            Ok(match model.stat_unit(&token) {
+                StatUnit::Player => model.player_combat_stats.as_ref().map_or((0, 0), |s| {
                     // `0x6de6d0`: CR_DEFENSE_SKILL (1).
                     skill_clamped(with_ratings(&model, s.defense_skill, &[1]))
                 }),
-                Some("pet") => (cgunit_skill(&model, "pet"), 0),
+                StatUnit::Pet => (cgunit_skill(&model, "pet"), 0),
                 _ => (0, 0),
             })
         })?,

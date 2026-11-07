@@ -13,7 +13,7 @@
 //! pushed set names, such as an `enchant:` link's, always meets it. A talent or tracking miss shows
 //! its view on the next hover.
 
-use mlua::{Lua, Table, Value};
+use mlua::{Lua, MultiValue, ObjectLike, Table, Value};
 
 use super::object::{frame_handle_of, frame_wrapper};
 use super::tooltip::{append_line, clear_content, fire_cleared, tip_mut};
@@ -618,48 +618,49 @@ pub(super) fn install_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
             )
         })?,
     )?;
-    // GameTooltip:SetUnitBuff/SetUnitDebuff(unit, index): the aura variant with no time line; the
-    // 1-based index counts within the helpful or harmful list, as `UnitBuff` does.
+    // SetUnitBuff/SetUnitDebuff (`0x6262c0`/`0x626350`): the shared `0x6110a0`
+    // parser, then a forced sign and `0x625f00`, just like SetUnitAura's search/render path.
     for (verb, helpful) in [("SetUnitBuff", true), ("SetUnitDebuff", false)] {
         m.set(
             verb,
-            // `index` is a `Value`: the reference's `lua_tonumber` reads nil as 0, which finds no
-            // aura, where an `i64` would raise.
-            lua.create_function(move |lua, (this, token, index): (Table, String, Value)| {
-                let index = match &index {
-                    Value::Integer(i) => *i,
-                    Value::Number(n) => *n as i64,
-                    Value::String(s) => s
-                        .to_str()
-                        .ok()
-                        .and_then(|t| t.parse::<i64>().ok())
-                        .unwrap_or(0),
-                    _ => 0,
-                };
-                // The token resolves as `UnitBuff`'s does (`0x6110a0` → `0x60abf0`, from
-                // `0x6262c0` and `0x626350`).
-                let hit = {
-                    let model = lua.app_data_ref::<Model>().expect("model app_data");
-                    let idx = usize::try_from(index.max(1) - 1).unwrap_or(0);
-                    crate::script::aura::auras_of(&model, &token)?
-                        .and_then(|a| a.iter().filter(|a| a.helpful == helpful).nth(idx))
-                        .map(|a| (a.spell_id, a.name.clone()))
-                };
-                // A miss goes through with spell id 0, which clears and hides the plate and
-                // records no ask.
-                let (spell_id, name) = hit.unwrap_or((0, None));
-                set_spell_by_id(
-                    lua,
-                    &this,
-                    spell_id,
-                    name,
-                    SpellRenderOpts {
-                        aura: true,
-                        ..Default::default()
-                    },
-                    None,
-                )
-            })?,
+            lua.create_function(
+                move |lua, (this, token, which, a, b): (Table, Value, Value, Value, Value)| {
+                    if !matches!(
+                        token,
+                        Value::String(_) | Value::Integer(_) | Value::Number(_)
+                    ) || !matches!(
+                        which,
+                        Value::String(_) | Value::Integer(_) | Value::Number(_)
+                    ) {
+                        let name: Option<String> = this.call_method("GetName", ())?;
+                        return Err(mlua::Error::runtime(format!(
+                            "Usage: {}:{}(\"unit\", [index] or [\"name\", \"rank\"][, \"filter\"])",
+                            name.as_deref().unwrap_or("<unnamed>"),
+                            verb
+                        )));
+                    };
+                    let args = MultiValue::from_vec(vec![token, which, a, b]);
+                    let mut query = super::aura::wrath::parse(lua, &args, "")?;
+                    query.force_helpful(helpful);
+                    let hit = {
+                        let model = lua.app_data_ref::<Model>().expect("model app_data");
+                        super::aura::wrath::find_aura(&model, &query)?
+                    };
+                    // A miss clears and hides the plate, without requesting a spell.
+                    let (spell_id, name) = hit.map_or((0, None), |a| (a.spell_id, a.name));
+                    set_spell_by_id(
+                        lua,
+                        &this,
+                        spell_id,
+                        name,
+                        SpellRenderOpts {
+                            aura: true,
+                            ..Default::default()
+                        },
+                        None,
+                    )
+                },
+            )?,
         )?;
     }
     // GameTooltip:SetTrackingSpell(): the tracking icon's hover, the name gold over the white
