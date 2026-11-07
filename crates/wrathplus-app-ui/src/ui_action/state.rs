@@ -33,7 +33,7 @@ pub(super) struct StateMemory {
     pushed: HashMap<u32, ActionState>,
     last_generation: Option<u64>,
     engaged: bool,
-    auto_repeat: Option<u32>,
+    auto_repeat: bool,
     last_cd_trace: Option<Instant>,
 }
 
@@ -237,7 +237,8 @@ pub(super) fn feed_action_state(
                         || targeting.spell() == Some(button.action)
                         || (form_byte != 0 && d.shapeshift_form == Some(u32::from(form_byte)))
                 };
-                st.auto_repeat = auto_repeat.0 == Some(button.action);
+                st.auto_repeat = auto_repeat.0 == Some(button.action)
+                    || auto_repeat.1.queued == Some(button.action);
                 // The usable walk (`0x6e3d60`); only its power gate sets `notEnoughMana`.
                 if let (Some((store, _, _, _)), Some(sp)) = (me, spells.as_deref()) {
                     let ctx = usable::UsableCtx {
@@ -416,10 +417,11 @@ pub(super) fn feed_action_state(
             vec![],
         );
     }
-    if auto_repeat.0 != memory.auto_repeat {
-        memory.auto_repeat = auto_repeat.0;
+    let repeat = auto_repeat.any();
+    if repeat != memory.auto_repeat {
+        memory.auto_repeat = repeat;
         script.fire_event(
-            if auto_repeat.0.is_some() {
+            if repeat {
                 "START_AUTOREPEAT_SPELL"
             } else {
                 "STOP_AUTOREPEAT_SPELL"

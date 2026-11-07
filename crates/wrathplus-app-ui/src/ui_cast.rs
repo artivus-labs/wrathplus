@@ -37,8 +37,7 @@ pub(crate) fn push_casting_flag(
         .and_then(|&e| casting.get(e).ok())
         .map(|c| c.spell_id);
     script.set_casting(
-        auto_repeat.0.is_some()
-            || inflight(&pending, &queued_melee, started, Instant::now()).is_some(),
+        auto_repeat.any() || inflight(&pending, &queued_melee, started, Instant::now()).is_some(),
     );
 }
 

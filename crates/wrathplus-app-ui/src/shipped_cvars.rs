@@ -15,6 +15,7 @@ pub const FEATURE_ROWS: &[&[Registered]] = &[
     crate::player::camera_view::CVARS,
     crate::portrait::CVARS,
     crate::realmlist::CVARS,
+    crate::spell::auto_ranged::CVARS,
     crate::spell::secure_toggle::CVARS,
     crate::text_filter::CVARS,
     crate::ui_chat::combat::CVARS,

@@ -13,8 +13,7 @@ use wrathplus_protocol::types::{ActionButton, SpellCooldown};
 
 use super::cast_target::CastTargeting;
 use super::{
-    ActiveChannel, AutoRepeatActive, CastCommit, CastLadder, Cooldowns, PendingCast,
-    QueuedMeleeSpell,
+    ActiveChannel, AutoRepeatActive, CastLadder, Cooldowns, PendingCast, QueuedMeleeSpell,
 };
 use crate::app_core::errors::{CastErrors, UiError, UiErrorKeys};
 use crate::app_core::state::{AuraDurations, LearnedInTab, PlayerActions, Spells};
@@ -176,7 +175,7 @@ pub(crate) struct Reply<'w, 's> {
 /// The chained cast goes out at the null target guid (`0x6e74a6 push ebx; push ebx`, `ebx = 0`),
 /// so it binds through `ArmCast 0x6e5250`'s ordinary walk ([`CastTargeting::context`]) and takes
 /// every rung a press takes.
-fn on_cast_result(
+pub(super) fn on_cast_result(
     In(ev): In<SessionEvent>,
     mut ladder: CastLadder,
     targeting: CastTargeting,
@@ -224,7 +223,7 @@ fn on_cast_result(
         );
         if let Some(next) = chained {
             let ctx = targeting.context();
-            ladder.send(next, &ctx, CastCommit::Spell);
+            ladder.send_continuation(next, &ctx);
         }
     }
 }

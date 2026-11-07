@@ -3,6 +3,61 @@
 use super::*;
 
 #[test]
+fn queued_repeat_lights_the_action_before_a_running_spell_exists() {
+    use wrathplus_formats::{SpellCatalog, SpellDisplay};
+    use wrathplus_protocol::types::ActionButton;
+    let (tx, _rx) = crossbeam_channel::unbounded();
+    let mut app = App::new();
+    let mut actions = PlayerActions::default();
+    actions.buttons.insert(
+        0,
+        ActionButton {
+            slot: 0,
+            action: 75,
+            kind: ACTION_KIND_SPELL,
+        },
+    );
+    let mut spells = Spells::empty_for_tests();
+    spells.catalog = SpellCatalog::from_displays([(75, SpellDisplay::default())].into());
+    app.insert_resource(actions)
+        .insert_resource(spells)
+        .init_resource::<crate::ui_macro::MacroBoundSpells>()
+        .init_resource::<Cooldowns>()
+        .init_resource::<crate::spell::SpellModifiers>()
+        .init_resource::<crate::net::wrath_combo_points::NativeComboPoints>()
+        .init_resource::<crate::app_core::ui_flags::UiClock>()
+        .init_resource::<AutoRepeatActive>()
+        .init_resource::<crate::spell::PendingCast>()
+        .init_resource::<crate::spell::QueuedMeleeSpell>()
+        .init_resource::<crate::spell::ActiveChannel>()
+        .init_resource::<crate::spell::SpellTargeting>()
+        .init_resource::<crate::spell::HeldForPick>()
+        .init_resource::<Selection>()
+        .init_resource::<crate::net::GuidIndex>()
+        .init_resource::<crate::net::Reputations>()
+        .init_resource::<Items>()
+        .insert_resource(NetCommands(tx));
+    app.world_mut().resource_mut::<AutoRepeatActive>().1.queued = Some(75);
+    app.insert_non_send_resource(UiScript::new().unwrap());
+    app.add_systems(Update, feed_action_state);
+    app.update();
+    assert!(app
+        .world()
+        .non_send_resource::<UiScript>()
+        .eval::<bool>("return IsAutoRepeatAction(1) == 1")
+        .unwrap());
+    app.world_mut()
+        .resource_mut::<AutoRepeatActive>()
+        .clear_intent();
+    app.update();
+    assert!(app
+        .world()
+        .non_send_resource::<UiScript>()
+        .eval::<bool>("return IsAutoRepeatAction(1) == nil")
+        .unwrap());
+}
+
+#[test]
 fn the_feed_pushes_a_bare_macro_as_usable() {
     use crate::ui_macro::{BoundSpell, MacroBoundSpells};
     use wrathplus_protocol::types::{ActionButton, ACTION_KIND_MACRO};

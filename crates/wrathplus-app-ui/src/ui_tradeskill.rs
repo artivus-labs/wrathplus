@@ -180,7 +180,9 @@ impl Plugin for UiTradeSkillPlugin {
                 (
                     // Opens before the feed, so an opener shows the window this frame; the
                     // drain after the input pass, so a Create click casts this frame.
-                    open_trade_skill.before(feed_trade_skill),
+                    open_trade_skill
+                        .after(crate::spell::auto_ranged::tick)
+                        .before(feed_trade_skill),
                     feed_trade_skill.in_set(UnitFeed),
                     drain_trade_skill.after(UiInput),
                 ),

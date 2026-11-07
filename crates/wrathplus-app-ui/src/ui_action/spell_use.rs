@@ -260,9 +260,8 @@ pub(super) fn feed_spell_use(
     let range = (units, range_mods, ranged_mod);
 
     let (auto_repeat, last_item, channel, casting, _, pending) = &casts;
-    // `0xd397cc` is the autoRangedCombat queue (`0x7fe140` from `0x6e2be0`), which the client
-    // does not run, so it stays empty.
-    let auto = [auto_repeat.0, None];
+    // Build 12340 `IsAutoRepeatSpell` reads the running and controller-queued words.
+    let auto = [auto_repeat.0, auto_repeat.1.queued];
     let current = casting
         .iter()
         .next()

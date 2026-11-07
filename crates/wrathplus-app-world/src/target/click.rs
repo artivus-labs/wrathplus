@@ -1583,6 +1583,7 @@ pub(super) fn clear(
         seam.stop(engaged);
         // 12340 `0x524bf0`'s zero selection and `0x71ee70`'s selected death stop repeat
         // through `0x807560(1)`; a nonzero living target switch does not take this path.
+        seam.auto_repeat.clear_intent();
         crate::creature_anim::cancel_auto_repeat_local(
             seam.me.single().ok(),
             &mut seam.auto_repeat,
