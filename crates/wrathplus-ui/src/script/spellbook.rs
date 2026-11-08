@@ -481,20 +481,23 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         Ok(())
     })?;
 
-    // CastSpellByName(name [, onSelf]) (`0x4b4ab0`) shares the dispatcher `0x4b3300` with
-    // `CastSpell`, so it queues the same call; `SlashCmdList["CAST"]` calls it. The target guid
-    // defaults to the selection (`0x4b4adb`), and a nonzero `GetBoolOrDefault(L, 2, 0)`
-    // (`0x4b4aea`-`0x4b4af1`) swaps it for the active player's (`0x4b4afa`).
+    // Build 12340 CastSpellByName (0x540310) resolves an optional unit string;
+    // CastSpell (0x541250) independently retains its boolean onSelf argument.
     g.set(
         "CastSpellByName",
-        lua.create_function(|lua, (name, on_self): (String, Option<Value>)| {
-            let on_self = bool_or_default(on_self.as_ref(), false);
+        lua.create_function(|lua, (name, target): (String, Option<Value>)| {
+            let unit = super::unit::token::token_text(lua, &target.unwrap_or(Value::Nil))
+                .filter(|t| !t.is_empty());
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
             if let Some(slot) = resolve_spell_by_name(&model.spellbook, &name) {
                 let spell_id = slot.spell_id;
-                model
-                    .script_calls
-                    .push(ScriptCall::CastSpell { spell_id, on_self });
+                model.script_calls.push(
+                    ScriptCall::CastSpell {
+                        spell_id,
+                        on_self: false,
+                    }
+                    .at_unit(unit),
+                );
             }
             Ok(())
         })?,
@@ -864,35 +867,30 @@ mod tests {
             .unwrap());
     }
 
-    /// `CastSpellByName`'s second argument goes through `GetBoolOrDefault(L, 2, 0)`
-    /// (`0x4b4aea`-`0x4b4af1`), which is not Lua truthiness: `"0"`, `"false"` and `0.5` are false.
+    /// Build 12340 0x540310 converts optional targets to strings, not bools.
     #[test]
-    fn cast_spell_by_name_reads_on_self_as_the_reference_coerces_it() {
+    fn cast_spell_by_name_retains_unit_intent() {
         let mut s = UiScript::new().unwrap();
         s.set_spellbook(book());
-        for (arg, on_self) in [
-            ("", false),
-            (", nil", false),
-            (", false", false),
-            (", 0", false),
-            (", 0.5", false),
-            (r#", "0""#, false),
-            (r#", "false""#, false),
-            (r#", "off""#, false),
-            (", 1", true),
-            (", true", true),
-            (", 1, 0", true),
-            (r#", "1""#, true),
-            (r#", "yes""#, true),
-            (r#", "on""#, true),
-            (r#", "enabled""#, true),
+        for (arg, unit) in [
+            ("", None),
+            (", nil", None),
+            (", false", None),
+            (", true", None),
+            (r#", """#, None),
+            (r#", "focus""#, Some("focus")),
+            (r#", "player""#, Some("player")),
+            (", 1", Some("1")),
         ] {
             s.run(&format!(r#"CastSpellByName("Fireball"{arg})"#))
                 .unwrap();
             assert_eq!(
-                s.take_spell_casts(),
-                vec![(133, on_self)],
-                "CastSpellByName(\"Fireball\"{arg})"
+                s.take_script_calls(),
+                vec![crate::script::ScriptCall::CastSpell {
+                    spell_id: 133,
+                    on_self: false,
+                }
+                .at_unit(unit.map(str::to_string))]
             );
         }
     }

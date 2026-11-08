@@ -433,10 +433,18 @@ fn leading_number(s: &str) -> u32 {
         .unwrap_or(0)
 }
 
-/// `CastSpell(id, "spell", onSelf)` and `CastSpellByName(name, onSelf)` (`0x4b3300`'s player leg),
-/// through the cast tail the action bar uses, at the selection as the calls before it left it, or
-/// with `onSelf` at the caster.
+/// The ordinary player press: indexed CastSpell keeps boolean onSelf (12340 0x541250).
 pub(crate) fn cast_spell(cast: &mut crate::spell::ScriptCast, spell_id: u32, on_self: bool) {
+    cast_spell_at(cast, spell_id, on_self, None);
+}
+
+/// Explicit candidates use the same press, toggle and deferred retry as implicit casts.
+pub(crate) fn cast_spell_at(
+    cast: &mut crate::spell::ScriptCast,
+    spell_id: u32,
+    on_self: bool,
+    explicit: Option<u64>,
+) {
     if crate::ui_action::toggle::cast_spell_cancels(cast, spell_id) {
         return;
     }
@@ -448,7 +456,12 @@ pub(crate) fn cast_spell(cast: &mut crate::spell::ScriptCast, spell_id: u32, on_
         targeting.selection.guid,
         if on_self { ", on self" } else { "" }
     );
-    ladder.send_spell(spell_id, &targeting.context().self_bound(on_self), on_self);
+    ladder.send_spell_at(
+        spell_id,
+        &targeting.context_at(explicit.map(Some)).self_bound(on_self),
+        on_self,
+        explicit,
+    );
 }
 
 #[cfg(test)]

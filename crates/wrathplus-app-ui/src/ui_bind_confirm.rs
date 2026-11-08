@@ -77,7 +77,10 @@ impl PendingEquips {
 /// the item guid (`0xc4c240`) and target guid (`0xc4c1d0`) and `ConfirmBindOnUse()` re-issues
 /// `CGItem::Use(&target, suppress = 1)` off them.
 #[derive(Resource, Default)]
-pub(crate) struct PendingBindOnUse(pub(crate) Option<PendingUse>);
+pub(crate) struct PendingBindOnUse(
+    pub(crate) Option<PendingUse>,
+    pub(crate) Option<Option<u64>>,
+);
 
 /// The deferred use: the [`crate::app_core::state::ItemUse`] call about to be made, which carries what
 /// the reference's item and target guids do.
@@ -163,12 +166,18 @@ impl BindGate<'_> {
 
     /// Files the deferred use and raises `USE_BIND`, with no argument: a second deferred use
     /// replaces the first.
-    pub(crate) fn defer_use(&mut self, script: &mut UiScript, pending: PendingUse) {
+    pub(crate) fn defer_use(
+        &mut self,
+        script: &mut UiScript,
+        pending: PendingUse,
+        target: Option<u64>,
+    ) {
         debug!(
             "ui_bind_confirm: USE_BIND_CONFIRM for wire {}/{}",
             pending.bag_index, pending.slot
         );
         self.on_use.0 = Some(pending);
+        self.on_use.1 = Some(target);
         // Queued like the equip arms, though `CURSOR_UPDATE` does not hide `USE_BIND`.
         script.queue_event("USE_BIND_CONFIRM", vec![]);
     }

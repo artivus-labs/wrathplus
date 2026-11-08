@@ -152,6 +152,13 @@ impl AttackPress<'_, '_> {
     /// ([`crate::spell::HeldForPick`]): the validator alone, with no swing after it. Whether the
     /// cast goes on, at the unit the pick left selected.
     pub(crate) fn pick_for_cast(&mut self, held: crate::spell::HeldCast) -> bool {
+        if let Some(guid) = held.explicit {
+            let (me, my_guid) = self.pick.player();
+            if attack_actor_refusal(me, my_guid, &mut self.ui_errors) {
+                return false;
+            }
+            return self.pick.bound_target(guid, &mut self.ui_errors).is_some();
+        }
         let caster = self.pick.player().1.filter(|_| held.on_self);
         self.validate(caster).is_some()
     }

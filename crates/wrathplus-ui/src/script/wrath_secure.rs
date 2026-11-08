@@ -57,12 +57,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             let on_self = target
                 .as_deref()
                 .is_some_and(|t| t.eq_ignore_ascii_case("player"));
-            let call = match target {
-                // The selection is the default bind; `target` names it too.
-                None => Some((false, None)),
-                Some(t) if on_self || t.eq_ignore_ascii_case("target") => Some((on_self, None)),
-                Some(t) => Some((false, Some(t))),
-            };
+            let call = Some((on_self, target));
             match (call, player, pet) {
                 (Some((on_self, None)), true, _) => push(
                     lua,
@@ -225,9 +220,9 @@ mod tests {
                     spell_id: 133,
                     on_self: false
                 },
-                ScriptCall::CastSpell {
+                ScriptCall::CastSpellAt {
                     spell_id: 133,
-                    on_self: true
+                    unit: "player".into()
                 },
                 ScriptCall::CastSpellAt {
                     spell_id: 133,

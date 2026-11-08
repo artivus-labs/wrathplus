@@ -398,11 +398,9 @@ mod tests {
             press_as(&player(&[]), def, target, selection_is_self, auto_self_cast)
         }
 
-        /// A dead friendly player selected with a heal: the selection binds nothing. With
-        /// `autoSelfCast` on the player is bound instead; with it off the assist word is left for
-        /// the cursor, as for any relation failure.
+        /// 12340 0x80cbab: an assistable corpse fails binding without enabling auto-self.
         #[test]
-        fn a_dead_friendly_selection_falls_to_you_or_the_cursor() {
+        fn a_dead_friendly_selection_leaves_the_cursor() {
             let alive = player(&[]);
             let dead = player(&[(HEALTH, 0)]);
             for auto in [false, true] {
@@ -414,8 +412,8 @@ mod tests {
             }
             assert_eq!(
                 press(&heal(), &dead, false, true),
-                CastWireTarget::Unit(ME),
-                "the corpse is skipped and the player takes the heal"
+                CastWireTarget::Targeting(WORD_ASSIST),
+                "12340 autoSelfCast does not replace an assistable corpse"
             );
             assert_eq!(
                 press(&heal(), &dead, false, false),
@@ -505,8 +503,7 @@ mod tests {
             );
         }
 
-        /// `UNIT_FIELD_FLAGS & 0x10000` binds nothing: a flagged selection falls to the player
-        /// behind `autoSelfCast`, and a flagged player has no fallback left.
+        /// A flagged assistable candidate binds nothing and does not enable auto-self (0x80cbab).
         #[test]
         fn a_unit_flagged_0x10000_binds_nothing() {
             let flagged = || player(&[(FLAGS, 0x0001_0008)]);
@@ -516,8 +513,8 @@ mod tests {
             );
             assert_eq!(
                 press(&heal(), &flagged(), false, true),
-                CastWireTarget::Unit(ME),
-                "the selection is skipped, the player binds"
+                CastWireTarget::Targeting(WORD_ASSIST),
+                "12340 autoSelfCast does not replace an assistable flagged unit"
             );
             assert_eq!(
                 press_as(&flagged(), &heal(), &flagged(), true, true),

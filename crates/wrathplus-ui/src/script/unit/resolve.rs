@@ -328,6 +328,19 @@ fn target_hops(base: UnitBase, mut rest: &[u8]) -> UnitTokenParse {
     UnitTokenParse::Unit { base, hops }
 }
 
+impl super::super::UiScript {
+    /// Resolve with the ordered app selection, using the VM's build-12340 grammar.
+    pub fn cast_unit_guid(&mut self, token: &str, selection: Option<u64>) -> Option<u64> {
+        let mut model = self.model_mut();
+        let old = model.unit_guids.target;
+        model.unit_guids.target = selection.unwrap_or(0);
+        let resolved = model.resolve_token(token);
+        let guid = resolved.ok.then_some(resolved.guid);
+        model.unit_guids.target = old;
+        guid
+    }
+}
+
 impl UnitGuids {
     /// The guids a `target` hop can end on: each held unit's target, when it names one. `held`
     /// holds the bases' units and each unit a hop reaches from them, so a token with a hop names

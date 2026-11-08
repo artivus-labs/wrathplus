@@ -469,7 +469,7 @@ fn unlocked_bag_item(model: &Model, bag: i64, slot: u32) -> Option<CursorItem> {
 /// with `[0xbfa5d8]` set, the trade stages an item with an enchant, temporary or prismatic enchant
 /// or open-lock effect (`0x707c60`: 0x35, 0x36, 0x9c, 0x21) as its enchant item (`0x586c00`),
 /// where this offers it as a slot.
-fn use_bag_item(model: &mut Model, item: CursorItem) {
+fn use_bag_item(model: &mut Model, item: CursorItem, unit: Option<String>) {
     let (bag, slot) = (item.bag, item.slot);
     if model.item_pick_armed {
         model.item_picks.push((bag, slot));
@@ -482,7 +482,7 @@ fn use_bag_item(model: &mut Model, item: CursorItem) {
             model.container_repairs.push((bag, slot));
         }
     } else if bank_flag || model.bank.is_some() || model.merchant.is_some() {
-        let call = super::ScriptCall::UseContainerItem { bag, slot };
+        let call = super::ScriptCall::UseContainerItem { bag, slot }.at_unit(unit);
         model.script_calls.push(call);
     } else if model.wrath_mail_family.send_showing
         && (model.wrath_mail.is_some() || model.mail.is_some())
@@ -512,7 +512,7 @@ fn use_bag_item(model: &mut Model, item: CursorItem) {
         let tab = model.wrath_friends.current_tab;
         model.guild_bank_deposits.push((tab, bag, slot));
     } else {
-        let call = super::ScriptCall::UseContainerItem { bag, slot };
+        let call = super::ScriptCall::UseContainerItem { bag, slot }.at_unit(unit);
         model.script_calls.push(call);
     }
 }
@@ -715,8 +715,6 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     // (`0x5d73ca`, `0x5d73e2`), then the target token (`0x60abf0` with flag 1: an absent or empty
     // one is the selection, `0x60b029`; one the resolver rejects ends the call, `0x5d86e0`), the
     // cursor clear, and a present, unlocked item. The first open window then takes it.
-    // Labelled: a resolved token is not carried into the use, which casts at the selection (the
-    // cast tail has no unit-bound context, as `CastSpellByID`'s unit leg).
     lua.globals().set(
         "UseContainerItem",
         lua.create_function(|lua, args: mlua::MultiValue| {
@@ -730,7 +728,9 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             let token = super::unit::token::token_text(lua, &arg(2)).filter(|t| !t.is_empty());
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
             // A bank bag with the banker away is no container to `0x5d7380` (`0x5d86bc`).
-            if bank_bag_closed(&model, bag) || token.is_some_and(|t| !model.resolve_token(&t).ok) {
+            if bank_bag_closed(&model, bag)
+                || token.as_ref().is_some_and(|t| !model.resolve_token(t).ok)
+            {
                 return Ok(());
             }
             cursor::clear_cursor(&mut model);
@@ -738,7 +738,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             let Some(item) = unlocked_bag_item(&model, bag, slot) else {
                 return Ok(());
             };
-            use_bag_item(&mut model, item);
+            use_bag_item(&mut model, item, token);
             Ok(())
         })?,
     )?;

@@ -112,7 +112,7 @@ pub enum CastWireTarget {
 /// fallback (`0x6e53d7`).
 #[derive(Clone, Copy, Debug, Default)]
 pub struct CastCandidates {
-    /// The current selection (the client's `0xb4e2d8`); WrathPlus never passes an explicit guid.
+    /// The selected or explicit candidate; explicit nobody retains the build-12340 -2 sentinel.
     pub selection: Option<u64>,
     pub caster: Option<u64>,
     /// The equipped main hand's item guid (`[player+0x1d3c][15]`), only when it resolves to a
@@ -179,6 +179,7 @@ impl TargetRelations<'_> {
 /// The targeting inputs [`super::send_spell_cast`] resolves with, built by both cast callers.
 pub struct CastContext<'a> {
     pub(crate) selection_guid: Option<u64>,
+    pub(crate) explicit_guid: Option<u64>,
     pub(crate) self_guid: Option<u64>,
     pub(crate) auto_self_cast: bool,
     pub rel: TargetRelations<'a>,
@@ -193,10 +194,14 @@ pub struct CastContext<'a> {
 }
 
 impl CastContext<'_> {
+    /// Candidate identity retained by bind-on-use confirmation (12340 0xc4c1d0).
+    pub fn candidate_guid(&self) -> Option<u64> {
+        self.selection_guid
+    }
+
     /// Applies the self-cast modifier, `onSelf`: the caster replaces the selection as the bind
     /// candidate, guid and store both, the pair the autoSelfCast fallback swaps (`0x6e53d7`). It
-    /// is the explicit guid `CastSpell` and `CastSpellByName` hand `ArmCast 0x6e5250` (`0x4b4345`,
-    /// `0x4b4afa`, bound at `0x6e5393`); where `UseAction 0x4e5ee0` applies its own is untraced.
+    /// is the indexed CastSpell boolean argument in build 12340 (0x541296).
     pub fn self_bound(mut self, on_self: bool) -> Self {
         if on_self {
             self.selection_guid = self.self_guid;
@@ -245,63 +250,8 @@ impl crate::target::StoreLookup for CastTargeting<'_, '_> {
     }
 }
 
-impl CastTargeting<'_, '_> {
-    /// This frame's [`CastContext`].
-    pub fn context(&self) -> CastContext<'_> {
-        let target_store = self.selection.target.and_then(|e| self.stores.get(e).ok());
-        let owner_store = |store| owner_store(store, self.index.as_deref(), &self.stores);
-        let self_store = self.self_store.iter().next();
-        let rel = TargetRelations {
-            target_store,
-            target_owner_store: owner_store(target_store),
-            self_store,
-            relations: RelationContext::new(self.names.as_deref(), self),
-            factions: self.factions.as_deref(),
-            reputations: &self.reputations,
-            types: CreatureTypeSources {
-                names: self.names.as_deref(),
-                forms: self.spells.as_deref().map(|s| &s.forms),
-            },
-            group: GroupInputs {
-                self_guid: self.self_guid.0,
-                target_guid: self.selection.guid,
-                self_owner_store: owner_store(self_store),
-                roster: self.roster.as_deref(),
-            },
-        };
-        CastContext {
-            selection_guid: self.selection.guid,
-            self_guid: self.self_guid.0,
-            auto_self_cast: self.auto_self_cast.0,
-            rel,
-            range: RangeInputs {
-                friendly: rel.assistable(self.selection.guid == self.self_guid.0),
-                ranged_mod: self.range_units.ranged_mod(),
-                attack_target: self.range_units.caster_attack_target(),
-                self_pos: self.self_transform.iter().next().map(|t| t.translation),
-                target_pos: self
-                    .selection
-                    .target
-                    .and_then(|e| self.transforms.get(e).ok())
-                    .map(|t| t.translation),
-                caster: self.range_units.caster(),
-                target: self
-                    .selection
-                    .target
-                    .and_then(|e| self.range_units.unit(e))
-                    .map(super::cast_range::RangeTarget::Unit)
-                    .unwrap_or_default(),
-            },
-            main_hand_item: self
-                .self_store
-                .iter()
-                .next()
-                .and_then(|s| s.0.player_inv_slot(EQUIPMENT_SLOT_MAINHAND))
-                .filter(|&g| g != 0),
-            self_move_flags: self.player.as_deref().map_or(0, |p| p.move_flags()),
-        }
-    }
-}
+#[path = "cast_context.rs"]
+mod context;
 
 /// `EQUIPMENT_SLOT_MAINHAND` (the client reads it at `0x6e538b`, offset `0x78 == 15 * 8`).
 const EQUIPMENT_SLOT_MAINHAND: u8 = 15;
@@ -428,6 +378,9 @@ pub fn resolve_cast_target(
     rel: &TargetRelations,
 ) -> CastWireTarget {
     let Some(def) = def else {
+        if cand.selection.is_some_and(|g| g >= 0xffff_ffff_ffff_fffe) {
+            return CastWireTarget::Refused(ERR_INVALID_TARGET);
+        }
         return match cand.selection {
             Some(guid) => CastWireTarget::Unit(guid),
             None => CastWireTarget::SelfImplicit,
@@ -436,6 +389,13 @@ pub fn resolve_cast_target(
     let word = cast_target_mask(def);
     if word == 0 {
         return CastWireTarget::SelfImplicit;
+    }
+    // 12340 0x80cce0: -2 refuses; -1 skips fallback but may enter the hand cursor.
+    if cand.selection == Some(u64::MAX - 1) {
+        return CastWireTarget::Refused(ERR_INVALID_TARGET);
+    }
+    if cand.selection == Some(u64::MAX) {
+        return CastWireTarget::Targeting(word);
     }
     // Implicit target 16 enters the cursor before any candidate bind (`0x6e535b`), but after the
     // word-0 commit above (`0x6e5338` comes first).
@@ -483,7 +443,18 @@ pub fn resolve_cast_target(
         }
     }
     // The fallback: the active player (`0x6e53d7`), behind autoSelfCast, through the same gates.
-    if auto_self_cast {
+    // 12340 0x80cbab: only zero or a resolved unit failing CanAssist permits auto-self.
+    let auto_self_candidate = cand.selection.is_none()
+        || rel.target_store.is_some_and(|s| {
+            matches!(
+                s.0.object_type(),
+                Some(
+                    wrathplus_protocol::types::ObjectType::Unit
+                        | wrathplus_protocol::types::ObjectType::Player
+                )
+            ) && !rel.assistable(cand.selection == cand.caster)
+        });
+    if auto_self_cast && auto_self_candidate {
         if let Some(guid) = cand.caster {
             let self_rel = TargetRelations {
                 target_store: rel.self_store,

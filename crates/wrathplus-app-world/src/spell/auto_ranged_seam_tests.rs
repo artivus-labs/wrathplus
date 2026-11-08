@@ -311,3 +311,67 @@ fn issue95_queued_continuation_does_not_toggle_off_waiting_controller() {
     f.tick();
     assert!(f.rx.is_empty(), "continuation commits the repeat only once");
 }
+
+#[test]
+fn explicit_repeat_retains_candidate_during_wait_and_suppresses_nobody() {
+    const OTHER: u64 = 0xf130_0000_0000_00f2;
+    for guid in [OTHER, u64::MAX - 1] {
+        let mut f = Fixture::new(20.0);
+        f.world.resource_mut::<AutoRepeatActive>().clear_intent();
+        let e = f
+            .world
+            .spawn((
+                crate::net::Guid(OTHER),
+                Transform::from_xyz(0.0, 0.0, -22.0),
+                crate::app_core::session::ObjectStore(
+                    wrathplus_protocol::ObjectFields::from_fields(&[
+                        (wrathplus_protocol::types::Field::ObjectType, 9),
+                        (wrathplus_protocol::types::Field::UnitHealth, 100),
+                        (
+                            wrathplus_protocol::types::Field::UnitCombatreach,
+                            1.5f32.to_bits(),
+                        ),
+                    ]),
+                ),
+            ))
+            .id();
+        f.world
+            .resource_mut::<crate::net::GuidIndex>()
+            .0
+            .insert(OTHER, e);
+        f.world
+            .run_system_once(
+                move |targeting: cast_target::CastTargeting, mut ladder: CastLadder| {
+                    ladder.send_spell_at(
+                        AUTO_SHOT,
+                        &targeting.context_at(Some(Some(guid))),
+                        false,
+                        Some(guid),
+                    );
+                },
+            )
+            .unwrap();
+        if guid == u64::MAX - 1 {
+            assert!(!f.world.resource::<AutoRepeatActive>().1.attacking);
+            f.tick();
+            assert!(f.rx.is_empty());
+        } else {
+            f.world.resource_mut::<Player>().move_flags = 1;
+            f.tick();
+            assert!(f.rx.is_empty());
+            f.world.resource_mut::<Player>().move_flags = 0;
+            f.tick();
+            assert!(matches!(
+                f.rx.try_recv(),
+                Ok(ClientCommand::CastSpell {
+                    target: Some(OTHER),
+                    ..
+                })
+            ));
+        }
+        assert_eq!(
+            f.world.resource::<crate::app_core::state::Selection>().guid,
+            Some(MOB)
+        );
+    }
+}

@@ -9,6 +9,8 @@ pub const CVARS: &[crate::cvars::Registered] = &[crate::cvars::same("autoRangedC
 #[derive(Debug)]
 pub struct AutoRanged {
     pub queued: Option<u32>,
+    /// A supplied cast candidate, independent of the selection-following attack controller.
+    pub(crate) explicit: Option<u64>,
     pub enabled: bool,
     pub attacking: bool,
     pub(crate) close_only: bool,
@@ -20,6 +22,7 @@ impl Default for AutoRanged {
     fn default() -> Self {
         Self {
             queued: None,
+            explicit: None,
             enabled: true,
             attacking: false,
             close_only: false,
@@ -37,6 +40,7 @@ impl AutoRepeatActive {
     /// `0x6cf2a0`: unregister and clear intention, not the independently running repeat.
     pub fn clear_intent(&mut self) {
         self.1.queued = None;
+        self.1.explicit = None;
         self.1.attacking = false;
         self.1.close_only = false;
         self.1.last_failure = None;
@@ -77,6 +81,7 @@ pub fn request(active: &mut AutoRepeatActive, known: Option<u32>, close_only: bo
     if !active.1.enabled || known.is_none() {
         return false;
     }
+    active.1.explicit = None;
     active.1.attacking = true;
     active.1.close_only = close_only;
     true
@@ -107,7 +112,7 @@ pub fn tick(
         ladder.auto_repeat.clear_intent();
         return;
     };
-    let ctx = targeting.context();
+    let ctx = targeting.context_at(ladder.auto_repeat.1.explicit.map(Some));
     let Some(target) = ctx.rel.target_store else {
         if ctx.selection_guid.is_none() {
             stop(&mut ladder);

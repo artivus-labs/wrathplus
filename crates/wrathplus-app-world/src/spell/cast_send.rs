@@ -48,6 +48,8 @@ pub struct HeldCast {
     /// Pressed with the self-cast modifier: TryCast's guid argument is then the caster
     /// (`0x4e610e`), which the pick tries before the selection.
     pub on_self: bool,
+    /// The supplied build-12340 GUID, including explicit nobody; never replaced by a pick.
+    pub explicit: Option<u64>,
 }
 
 /// Everything the cast-send path reads, as one [`SystemParam`]: [`CastLadder::send`] is the only
@@ -229,24 +231,6 @@ impl CastLadder<'_, '_> {
         self.send_inner(spell_id, ctx, CastCommit::Spell, None, None, true);
     }
 
-    /// A player's spell press (`UseAction`, `CastSpell`, `CastSpellByName`): the ladder with
-    /// TryCast's attack pick, where the cast may stop in [`HeldForPick`].
-    pub fn send_spell(&mut self, spell_id: u32, ctx: &cast_target::CastContext, on_self: bool) {
-        let held = HeldCast { spell_id, on_self };
-        self.send_bound(spell_id, ctx, CastCommit::Spell, None, Some(held));
-    }
-
-    /// The press held at the attack pick, if one is.
-    pub fn take_held(&mut self) -> Option<HeldCast> {
-        self.held_for_pick.0.take()
-    }
-
-    /// A held press after its pick, at the unit the pick left selected. The rungs above the pick
-    /// run again; none reads the selection, so each passes as it did.
-    pub fn resume_after_pick(&mut self, held: HeldCast, ctx: &cast_target::CastContext) {
-        self.send_bound(held.spell_id, ctx, CastCommit::Spell, None, None);
-    }
-
     /// The ladder for a cast the caller already bound to a GameObject (a lock opener): TryCast
     /// takes the guid pair it is passed (`6e4ef4` → `0x612df0`), and the GameObject use-sender
     /// passes one (`0x5f35c0 → 0x6e5a90 → 0x6e4b60`).
@@ -389,7 +373,15 @@ fn send_spell_cast(
         let known = spells
             .zip(book)
             .and_then(|(s, b)| auto_repeat.learned(s, b));
-        if known == Some(spell_id) && super::auto_ranged::request(auto_repeat, known, false) {
+        if known == Some(spell_id) && ctx.explicit_guid.is_some_and(|g| g == u64::MAX - 1) {
+            cast_errors.push_local(spell_id, reason::BAD_TARGETS);
+            return;
+        }
+        if known == Some(spell_id)
+            && ctx.explicit_guid != Some(u64::MAX)
+            && super::auto_ranged::request(auto_repeat, known, false)
+        {
+            auto_repeat.1.explicit = ctx.explicit_guid;
             return;
         }
     }
@@ -802,7 +794,9 @@ fn send_spell_cast(
                     let known = spells
                         .zip(book)
                         .and_then(|(s, b)| auto_repeat.learned(s, b));
-                    super::auto_ranged::request(auto_repeat, known, false);
+                    if super::auto_ranged::request(auto_repeat, known, false) {
+                        auto_repeat.1.explicit = ctx.explicit_guid;
+                    }
                     debug!("ui_action: cast {spell_id} initiates auto-attack at {guid:#x}");
                     // No stop is in flight: the gate above guarantees the lock is clear.
                     crate::creature_anim::start_attack_local(
@@ -857,6 +851,7 @@ mod tests {
     fn ctx() -> cast_target::CastContext<'static> {
         cast_target::CastContext {
             selection_guid: None,
+            explicit_guid: None,
             self_guid: Some(0x0000_0000_0000_0007),
             auto_self_cast: false,
             rel: cast_target::TargetRelations {
@@ -1247,7 +1242,8 @@ mod tests {
             press(&mut world, RAPTOR_STRIKE),
             Some(HeldCast {
                 spell_id: RAPTOR_STRIKE,
-                on_self: false
+                on_self: false,
+                explicit: None
             })
         );
         assert!(rx.try_recv().is_err(), "a held press sends nothing");
@@ -1723,3 +1719,6 @@ mod tests {
         ));
     }
 }
+
+#[path = "cast_press.rs"]
+mod press;

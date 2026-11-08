@@ -348,7 +348,7 @@ pub(crate) fn send_item_use(
                     gate.use_binds(&ladder.objects, &ladder.items, &ladder.commands, g)
                 }) =>
         {
-            gate.defer_use(script, it);
+            gate.defer_use(script, it, ctx.candidate_guid());
             false
         }
         ItemUseRoute::Nothing => {
@@ -1214,3 +1214,10 @@ mod count_of_tests;
 #[cfg(test)]
 #[path = "storage_tests.rs"]
 mod storage_tests;
+
+/// Apply accepted bind-on-use dialogs through the ordinary item cast ladder.
+pub fn confirm_bind_on_use(world: &mut World) {
+    world
+        .run_system_cached(drain::drain_bind_on_use_confirms)
+        .expect("bind-on-use confirmation resources");
+}
