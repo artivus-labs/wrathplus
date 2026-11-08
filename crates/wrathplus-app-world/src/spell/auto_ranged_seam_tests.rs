@@ -232,6 +232,7 @@ fn issue95_melee_initiator_send_tail_preserves_registered_controller() {
         (
             STRIKE,
             SpellDisplay {
+                range_index: 2,       // A real melee row; missing rows have zero native bounds.
                 attributes_ex: 0x200, // INITIATES_COMBAT: runs the real post-send melee tail.
                 implicit_target_a1: 6,
                 ..Default::default()

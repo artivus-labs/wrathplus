@@ -548,6 +548,7 @@ mod tests {
                 .spawn((
                     Transform::from_xyz(2.0, 0.0, 0.0),
                     ObjectStore(ObjectFields::from_pairs(&[
+                        (Field::ObjectType.index(), 0x09),
                         (22, 100),
                         (REACH, 4.0f32.to_bits()),
                     ])),
@@ -558,6 +559,7 @@ mod tests {
                 Engaged(SWUNG_AT),
                 Transform::default(),
                 ObjectStore(ObjectFields::from_fields(&[
+                    (Field::ObjectType, 0x19),
                     (Field::UnitHealth, 100),
                     (Field::UnitPower, 500),
                 ])),
@@ -567,7 +569,10 @@ mod tests {
                 .world_mut()
                 .spawn((
                     Transform::from_xyz(distance, 0.0, 0.0),
-                    ObjectStore(ObjectFields::from_fields(&[(Field::UnitHealth, 100)])),
+                    ObjectStore(ObjectFields::from_fields(&[
+                        (Field::ObjectType, 0x09),
+                        (Field::UnitHealth, 100),
+                    ])),
                 ))
                 .id();
             let mut index = app.world_mut().resource_mut::<crate::net::GuidIndex>();
@@ -687,6 +692,7 @@ mod tests {
                 speeds,
                 Transform::default(),
                 ObjectStore(ObjectFields::from_fields(&[
+                    (Field::ObjectType, 0x19),
                     (Field::UnitHealth, 100),
                     (Field::UnitPower, 500),
                 ])),
@@ -697,7 +703,10 @@ mod tests {
                 .spawn((
                     speeds,
                     Transform::from_xyz(distance, 0.0, 0.0),
-                    ObjectStore(ObjectFields::from_fields(&[(Field::UnitHealth, 100)])),
+                    ObjectStore(ObjectFields::from_fields(&[
+                        (Field::ObjectType, 0x09),
+                        (Field::UnitHealth, 100),
+                    ])),
                 ))
                 .id();
             if mob_runs {

@@ -107,7 +107,7 @@ impl super::SpellTargeting {
             checks
                 .corpse_facts(entity)
                 .is_some_and(|f| bind_arm(t.word, f).is_some())
-                && checks.corpse_range_refusal(t.spell_id, entity).is_none()
+                && checks.hover_in_range(t.spell_id, entity, true)
         })
     }
 }
@@ -188,6 +188,7 @@ pub mod fixture {
     #[cfg(test)]
     pub(crate) fn caster(reach: f32) -> ObjectStore {
         ObjectStore(ObjectFields::from_fields(&[
+            (wrathplus_protocol::types::Field::ObjectType, 0x19),
             (wrathplus_protocol::types::Field::UnitFactionTemplate, 1),
             (
                 wrathplus_protocol::types::Field::UnitCombatreach,

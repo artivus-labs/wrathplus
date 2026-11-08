@@ -66,14 +66,24 @@ impl Fixture {
                 ..Default::default()
             },
         )]));
-        spells.ranges = SpellRangeCatalog::from_rows(HashMap::from([(
-            114,
-            SpellRange {
-                min: 8.0,
-                max: 35.0,
-                flags: 0,
-            },
-        )]));
+        spells.ranges = SpellRangeCatalog::from_rows(HashMap::from([
+            (
+                2,
+                SpellRange {
+                    min: 0.0,
+                    max: 0.0,
+                    flags: 1,
+                },
+            ),
+            (
+                114,
+                SpellRange {
+                    min: 8.0,
+                    max: 35.0,
+                    flags: 0,
+                },
+            ),
+        ]));
         world.insert_resource(spells);
         let mut book = PlayerActions::default();
         book.spells.insert(AUTO_SHOT);
@@ -374,6 +384,7 @@ fn issue95_idle_combat_initiator_registers_controller_and_later_shoots_at_distan
         (
             STRIKE,
             SpellDisplay {
+                range_index: 2,       // A real melee row; missing rows have zero native bounds.
                 attributes_ex: 0x200, // INITIATES_COMBAT: the normal post-send melee tail.
                 implicit_target_a1: 6,
                 ..Default::default()

@@ -182,7 +182,7 @@ pub struct CastContext<'a> {
     pub(crate) self_guid: Option<u64>,
     pub(crate) auto_self_cast: bool,
     pub rel: TargetRelations<'a>,
-    /// The local range gate's inputs (`IsTargetInRange 0x6e47b0`).
+    /// The local range gate's inputs (build 12340 `0x803850`).
     pub(crate) range: RangeInputs,
     /// The main hand's item guid off the player descriptor (`PLAYER_FIELD_INV_SLOT_HEAD + 2*15`);
     /// the send path checks that it names a streamed item.
@@ -201,54 +201,17 @@ impl CastContext<'_> {
         if on_self {
             self.selection_guid = self.self_guid;
             self.rel.target_store = self.rel.self_store;
+            self.rel.target_owner_store = self.rel.group.self_owner_store;
+            self.range.target_pos = self.range.self_pos;
+            self.range.target = super::cast_range::RangeTarget::Unit(self.range.caster);
+            self.range.friendly = true;
             self.rel.group.target_guid = self.self_guid;
         }
         self
     }
 }
 
-/// Positions and the two units for the pre-send range refusal: the client's cast runs
-/// `CanTargetUnit 0x6e4440` and `IsTargetInRange 0x6e47b0` before the commit, so an out-of-range
-/// press refuses locally and none of the commit tail runs.
-#[derive(Clone, Copy)]
-pub(crate) struct RangeInputs {
-    pub(crate) self_pos: Option<Vec3>,
-    pub(crate) target_pos: Option<Vec3>,
-    /// The caster's combat reach and motion.
-    pub(crate) caster: wrathplus_formats::RangeUnit,
-    /// The bound unit, which `GetMinMaxRange` reads for the ranged pad and the moving bonus.
-    pub(crate) target: Option<wrathplus_formats::RangeUnit>,
-}
-
-impl RangeInputs {
-    /// The one range compare: the squared 3D distance against `GetMinMaxRange 0x7ff480`'s bounds,
-    /// "Out of range." (0x59) past max², "Target too close" (0x76) inside a nonzero min². The
-    /// pre-send gate (`IsTargetInRange 0x6e47b0`) and the targeting cursor's unit leg (`0x6e6460`,
-    /// `6e677c`–`6e6802`) both ask it. No row or no position passes; the server judges.
-    pub(crate) fn refusal(
-        &self,
-        def: &SpellDisplay,
-        row: Option<&wrathplus_formats::SpellRange>,
-        mods: &super::SpellModifiers,
-    ) -> Option<u8> {
-        let dist_sq = self
-            .self_pos
-            .zip(self.target_pos)
-            .map(|(a, b)| a.distance_squared(b));
-        super::validator::cast_range_refusal(def, row, self.caster, self.target, dist_sq, mods)
-    }
-}
-
-impl Default for RangeInputs {
-    fn default() -> Self {
-        Self {
-            self_pos: None,
-            target_pos: None,
-            caster: wrathplus_formats::RangeUnit::still(super::DEFAULT_REACH),
-            target: None,
-        }
-    }
-}
+pub(crate) use super::cast_range::RangeInputs;
 
 /// Everything a cast-sending system needs to build a [`CastContext`].
 #[derive(SystemParam)]
@@ -288,29 +251,33 @@ impl CastTargeting<'_, '_> {
         let target_store = self.selection.target.and_then(|e| self.stores.get(e).ok());
         let owner_store = |store| owner_store(store, self.index.as_deref(), &self.stores);
         let self_store = self.self_store.iter().next();
+        let rel = TargetRelations {
+            target_store,
+            target_owner_store: owner_store(target_store),
+            self_store,
+            relations: RelationContext::new(self.names.as_deref(), self),
+            factions: self.factions.as_deref(),
+            reputations: &self.reputations,
+            types: CreatureTypeSources {
+                names: self.names.as_deref(),
+                forms: self.spells.as_deref().map(|s| &s.forms),
+            },
+            group: GroupInputs {
+                self_guid: self.self_guid.0,
+                target_guid: self.selection.guid,
+                self_owner_store: owner_store(self_store),
+                roster: self.roster.as_deref(),
+            },
+        };
         CastContext {
             selection_guid: self.selection.guid,
             self_guid: self.self_guid.0,
             auto_self_cast: self.auto_self_cast.0,
-            rel: TargetRelations {
-                target_store,
-                target_owner_store: owner_store(target_store),
-                self_store,
-                relations: RelationContext::new(self.names.as_deref(), self),
-                factions: self.factions.as_deref(),
-                reputations: &self.reputations,
-                types: CreatureTypeSources {
-                    names: self.names.as_deref(),
-                    forms: self.spells.as_deref().map(|s| &s.forms),
-                },
-                group: GroupInputs {
-                    self_guid: self.self_guid.0,
-                    target_guid: self.selection.guid,
-                    self_owner_store: owner_store(self_store),
-                    roster: self.roster.as_deref(),
-                },
-            },
+            rel,
             range: RangeInputs {
+                friendly: rel.assistable(self.selection.guid == self.self_guid.0),
+                ranged_mod: self.range_units.ranged_mod(),
+                attack_target: self.range_units.caster_attack_target(),
                 self_pos: self.self_transform.iter().next().map(|t| t.translation),
                 target_pos: self
                     .selection
@@ -318,7 +285,12 @@ impl CastTargeting<'_, '_> {
                     .and_then(|e| self.transforms.get(e).ok())
                     .map(|t| t.translation),
                 caster: self.range_units.caster(),
-                target: self.selection.target.and_then(|e| self.range_units.unit(e)),
+                target: self
+                    .selection
+                    .target
+                    .and_then(|e| self.range_units.unit(e))
+                    .map(super::cast_range::RangeTarget::Unit)
+                    .unwrap_or_default(),
             },
             main_hand_item: self
                 .self_store

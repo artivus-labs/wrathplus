@@ -2,8 +2,8 @@
 //! targeting mode is a nonzero flag_word (`IsTargeting 0x6e48a0`); [`SpellTargeting`] holds that
 //! word and each click seam asks it its own mask test ([`TargetingWants`]).
 //!
-//! - [`cursor`]: the hover verdict per seam. Terrain is `0x4820f0`'s `CheckGroundPointInRange
-//!   0x6e6810`, a GameObject, a unit or a corpse is `0x4828d0`'s `0x6e6460` (the spell-vs-lock
+//! - [`cursor`]: build-12340 terrain hover is `0x4f66c0 → 0x803ee0`; objects, units and
+//!   corpses use `0x803a50` (the spell-vs-lock
 //!   predicate `0x5f8260`, [`SpellTargeting::can_target_unit`] or
 //!   [`SpellTargeting::can_target_corpse`], then range), and a word no seam handles is UnableCast.
 //! - [`world`]: the world-click dispatcher `0x492ce0`, its terrain leg (`0x492580` → `BindLocation
@@ -31,6 +31,7 @@
 
 mod corpse;
 mod cursor;
+mod cursor_range;
 pub mod glyph;
 mod item;
 mod pick;
@@ -51,7 +52,7 @@ use bevy::prelude::*;
 use wrathplus_world::interact::WorldRightPress;
 
 /// The inputs of `BindTarget 0x6e5b40`'s unit and corpse arms and of their read-only mirror
-/// `0x6e6460` ([`SpellTargeting::can_target_unit`], [`bind_target_unit`],
+/// build-12340 `0x803a50` ([`SpellTargeting::can_target_unit`], [`bind_target_unit`],
 /// [`SpellTargeting::can_target_corpse`], [`corpse::bind_target_corpse`]): the gates and relation
 /// checks the cast arm's selection bind runs ([`super::cast_target::unit_binds`]), the corpse's two
 /// facts, and the pre-send range gate's inputs ([`super::cast_target::RangeInputs`]), read as
@@ -133,23 +134,43 @@ impl BindChecks<'_, '_> {
         super::cast_target::unit_binds(def, word, self.is_self(entity), &rel)
     }
 
-    /// The spell's min/max range against this unit, through the one compare the pre-send gate
-    /// asks ([`super::cast_target::RangeInputs::refusal`]); our own body is distance 0. An
-    /// unknown spell or a missing row passes.
+    /// Press/bind refusal (`12340 0x803850`); hover uses the separate inclusive interval.
     fn range_refusal(&self, spell_id: u32, entity: Entity) -> Option<u8> {
-        let mut range = self.range_inputs(entity);
-        range.target = self.range_units.unit(entity);
+        let range = self.object_range_inputs(entity, false);
         self.refusal(spell_id, range)
     }
 
-    /// The same compare against a corpse. `GetMinMaxRange 0x7ff480` pads a corpse's bounds as a
-    /// unit's (`6e35fe`), but with no unit to read the second reach from it reads the caster's
-    /// again (`6e3605`–`6e361e`). On the ranged arm, which the corpse spells use, no unit means no
-    /// moving bonus; a melee row would fall back to the auto-attack target (`0x6e3580`).
+    /// A corpse is not a Unit: polarity selects columns, melee resolves the auto-attack unit.
     fn corpse_range_refusal(&self, spell_id: u32, entity: Entity) -> Option<u8> {
+        self.refusal(spell_id, self.object_range_inputs(entity, true))
+    }
+
+    fn object_range_inputs(&self, entity: Entity, corpse: bool) -> super::cast_target::RangeInputs {
+        use super::cast_range::RangeTarget;
         let mut range = self.range_inputs(entity);
-        range.target = Some(wrathplus_formats::RangeUnit::still(range.caster.reach));
-        self.refusal(spell_id, range)
+        range.target = if corpse {
+            RangeTarget::Corpse
+        } else {
+            self.range_units
+                .unit(entity)
+                .map(RangeTarget::Unit)
+                .unwrap_or_default()
+        };
+        range
+    }
+
+    fn hover_in_range(&self, spell_id: u32, entity: Entity, corpse: bool) -> bool {
+        let Some(spells) = self.spells.as_deref() else {
+            return true;
+        };
+        let Some(def) = spells.catalog.get(spell_id) else {
+            return true;
+        };
+        self.object_range_inputs(entity, corpse).hover_in_range(
+            def,
+            &spells.ranges,
+            &self.spell_mods,
+        )
     }
 
     /// Our position, reach and motion and the candidate's position, each position the pose the
@@ -157,6 +178,16 @@ impl BindChecks<'_, '_> {
     fn range_inputs(&self, entity: Entity) -> super::cast_target::RangeInputs {
         let me = self.self_q.iter().next();
         super::cast_target::RangeInputs {
+            friendly: self.is_self(entity)
+                || crate::target::can_assist(
+                    self.stores.get(entity).ok(),
+                    self.factions.as_deref(),
+                    &self.reputations,
+                    me.and_then(|(_, s)| s),
+                    crate::target::RelationContext::new(self.names.as_deref(), self),
+                ),
+            ranged_mod: self.range_units.ranged_mod(),
+            attack_target: self.range_units.caster_attack_target(),
             self_pos: me
                 .and_then(|(e, _)| self.poses.get(e).ok())
                 .map(GlobalTransform::translation),
@@ -166,14 +197,14 @@ impl BindChecks<'_, '_> {
                 .ok()
                 .map(GlobalTransform::translation),
             caster: self.range_units.caster(),
-            target: None,
+            target: super::cast_range::RangeTarget::None,
         }
     }
 
     fn refusal(&self, spell_id: u32, range: super::cast_target::RangeInputs) -> Option<u8> {
         let spells = self.spells.as_deref()?;
         let def = spells.catalog.get(spell_id)?;
-        range.refusal(def, spells.ranges.get(def.range_index), &self.spell_mods)
+        range.refusal(def, &spells.ranges, &self.spell_mods)
     }
 
     /// What the corpse legs read of this corpse: `CORPSE_FLAG_BONES` and the reaction gate
@@ -261,15 +292,12 @@ impl SpellTargeting {
         self.0.as_ref().is_some_and(|t| wants.matches(t.word))
     }
 
-    /// `SpellCanTargetUnit`'s predicate `0x6e6460`, its unit leg, with the range flag both callers
-    /// pass (the world hover `0x4828d0` at `48290b`, the Lua `SpellCanTargetUnit 0x6e6d00`):
-    /// `BindTarget`'s gates and relation checks (`6e6507`–`6e65ab`), then min² ≤ d² ≤ max²
-    /// (`6e677c`–`6e6802`), so a unit inside the minimum is out too. There is no line-of-sight
-    /// test.
+    /// Build-12340 hover `0x803a50`: binding eligibility, then the inclusive, NaN-rejecting
+    /// interval at `0x803e84`. The press/bind comparator `0x803850` is separate.
     pub fn can_target_unit(&self, entity: Entity, checks: &BindChecks) -> bool {
         self.0.as_ref().is_some_and(|t| {
             checks.unit_binds(t.spell_id, t.word, entity)
-                && checks.range_refusal(t.spell_id, entity).is_none()
+                && checks.hover_in_range(t.spell_id, entity, false)
         })
     }
 
@@ -419,8 +447,7 @@ fn bind_target_unit(
     );
 }
 
-/// `BindTarget`'s merge (`6e602c`–`6e60d7`): a bind whose mask is in `0x8202`, a unit or a corpse,
-/// runs the range test `0x6e47b0` (`6e6063`). Out of range raises "Out of range." or "Target too
+/// Build-12340 binder `0x80bc80`: unit/corpse binds gated by `0x18202` run `0x803850`. Out of range raises "Out of range." or "Target too
 /// close" and binds nothing; otherwise the emptied word commits (`SendCast 0x6e54f0`). The
 /// reference's range failure also aborts the cast (`6e6089`), which sends CMSG_CANCEL_CAST and
 /// strands the cursor (`6e5b93`) until a cancel: a bug, not copied; targeting stays armed and

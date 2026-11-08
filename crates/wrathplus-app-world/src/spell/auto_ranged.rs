@@ -123,8 +123,10 @@ pub fn tick(
     };
     let delta = b - a;
     let distance = delta.length_squared();
-    let reach =
-        (ctx.range.caster.reach + ctx.range.target.map_or(1.5, |u| u.reach) + 1.333_333_4).max(5.0);
+    let reach = (ctx.range.caster.reach
+        + ctx.range.target.as_unit().map_or(1.5, |u| u.reach)
+        + 1.333_333_4)
+        .max(5.0);
     let Ok((entity, engaged)) = ladder.self_player.single() else {
         return;
     };
@@ -224,7 +226,7 @@ fn limits(
         d.attributes,
         row,
         &unit(ctx.range.caster),
-        ctx.range.target.map(unit).as_ref(),
+        ctx.range.target.as_unit().map(unit).as_ref(),
         false,
         ladder
             .spell_mods
@@ -289,3 +291,7 @@ mod tests {
         assert!(!state.any());
     }
 }
+
+#[cfg(test)]
+#[path = "cast_range_tests.rs"]
+mod cast_range_tests;

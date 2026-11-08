@@ -291,11 +291,23 @@ const FORTITUDE: u32 = 1243;
 fn with_fortitude(f: &mut Frame) {
     let world = f.app.world_mut();
     let display = wrathplus_formats::SpellDisplay {
+        range_index: 4,
         implicit_target_a1: 21,
         ..Default::default()
     };
     world.insert_resource(crate::app_core::state::Spells {
         catalog: wrathplus_formats::SpellCatalog::from_displays([(FORTITUDE, display)].into()),
+        ranges: wrathplus_formats::SpellRangeCatalog::from_rows(
+            [(
+                4,
+                wrathplus_formats::SpellRange {
+                    min: 0.0,
+                    max: 30.0,
+                    flags: 0,
+                },
+            )]
+            .into(),
+        ),
         ..crate::app_core::state::Spells::empty_for_tests()
     });
     world
@@ -645,12 +657,24 @@ const SINISTER_STRIKE: u32 = 1752;
 fn with_strike(f: &mut Frame) {
     let world = f.app.world_mut();
     let strike = wrathplus_formats::SpellDisplay {
+        range_index: 2,
         attributes_ex: 0x200,
         implicit_target_a1: 6,
         ..Default::default()
     };
     world.insert_resource(crate::app_core::state::Spells {
         catalog: wrathplus_formats::SpellCatalog::from_displays([(SINISTER_STRIKE, strike)].into()),
+        ranges: wrathplus_formats::SpellRangeCatalog::from_rows(
+            [(
+                2,
+                wrathplus_formats::SpellRange {
+                    min: 0.0,
+                    max: 5.0,
+                    flags: 1,
+                },
+            )]
+            .into(),
+        ),
         ..crate::app_core::state::Spells::empty_for_tests()
     });
     world

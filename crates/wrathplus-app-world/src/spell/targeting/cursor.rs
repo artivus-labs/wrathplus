@@ -1,71 +1,17 @@
 //! The cursor while a cast waits for its click: the ground point's range verdict
-//! (`CheckGroundPointInRange 0x6e6810`, in `0x4820f0`), the hovered object's validity (`0x6e6460`,
+//! (`0x803ee0`, in `0x4f66c0`), the hovered object's validity (`0x803a50`,
 //! in `0x4828d0`: a GameObject, a unit or a corpse) and the reticle's radius
 //! (`GetCurrentCastRadius 0x6e6350`).
 
 use bevy::prelude::*;
 
-use wrathplus_formats::{RangeTargets, RangeUnit, SpellDisplay, SpellRange};
-
 use crate::app_core::session::SelfPlayer;
 use crate::app_core::state::Spells;
-use crate::spell::SpellModifiers;
 use crate::target::{CursorKind, PickOcclusion, WorldCursor};
 
 use super::{SpellTargeting, TargetingWants};
 
-/// What `GetMinMaxRange 0x7ff480` reads for the cursor's two range verdicts: the ground point
-/// (`CheckGroundPointInRange 0x6e6810`, a null target at `0x6e6879`) and the GameObject leg of
-/// `0x6e6460` (the object as target at `0x6e679b`). Neither passes a unit, which the function
-/// tests for at `0x6e34e1`-`0x6e34f9`: the ranged arm pads nothing and takes no moving bonus,
-/// and the melee arm sums the caster's reach with its auto-attack target's and asks that unit's
-/// motion, with the caster's, for the bonus.
-#[derive(Clone, Copy)]
-struct RangeCall<'a> {
-    spell: &'a SpellDisplay,
-    row: &'a SpellRange,
-    mods: &'a SpellModifiers,
-    caster: RangeUnit,
-    attack_target: Option<RangeUnit>,
-}
-
-/// The call's inputs, or `None` where the data is absent (no catalog, an unknown spell, a row
-/// missing from `SpellRange`), which is permissive: the server judges every send.
-fn range_call<'a>(checks: &'a super::BindChecks, spell_id: u32) -> Option<RangeCall<'a>> {
-    let spells = checks.spells.as_deref()?;
-    let spell = spells.catalog.get(spell_id)?;
-    Some(RangeCall {
-        spell,
-        row: spells.ranges.get(spell.range_index)?,
-        mods: &checks.spell_mods,
-        caster: checks.range_units.caster(),
-        attack_target: checks.range_units.caster_attack_target(),
-    })
-}
-
-/// `CheckGroundPointInRange 0x6e6810`: the squared caster-to-point distance against
-/// `GetMinMaxRange`'s bounds, whose max carries spell-mod op 5 (`0x6e3744`), so a range talent
-/// moves the verdict. The compare fails on min² > d² (`0x6e68b5`-`0x6e68c3`) and on max² < d²
-/// (`0x6e68c5`-`0x6e68d3`), a NaN failing both; the min has no `> 0` guard, a zero one is inert.
-/// Its one caller is the hover classifier `0x4820f0`, so it colours the cursor and the click never
-/// asks.
-fn ground_point_in_range(call: Option<RangeCall>, self_pos: Vec3, point: Vec3) -> bool {
-    let Some(call) = call else {
-        return true;
-    };
-    let targets = RangeTargets {
-        target: None,
-        attack_target: call.attack_target,
-    };
-    // The self row is `{0, 0}` (`0x6e35dd`, `0x6e35ea`) and `min_max_range` answers `None` for it:
-    // only the caster's own spot passes it here.
-    let (min, max) = call
-        .mods
-        .min_max_range(call.spell, Some(call.row), call.caster, targets)
-        .unwrap_or_default();
-    let dist_sq = self_pos.distance_squared(point);
-    min * min <= dist_sq && dist_sq <= max * max
-}
+use super::cursor_range::{ground_point_in_range, range_call, RangeCall};
 
 /// `GetCurrentCastRadius 0x6e6350`: per effect `radius + casterLevel × perLevel` over
 /// `EffectRadiusIndex[0]` and `[1]` only, the larger with slot 1 winning ties and NaN, clamped to
@@ -107,15 +53,15 @@ pub fn ground_cast_radius(
 ///
 /// | pick state | handler | verdict |
 /// |---|---|---|
-/// | 1, terrain | `0x4820f0` | `CheckGroundPointInRange 0x6e6810` on the ground point |
-/// | 2, object | `0x4828d0` → `0x6e6460` | the hovered object's validity |
+/// | 1, terrain | `0x4f66c0` | `0x803ee0` on the ground point |
+/// | 2, object | `0x4828d0` → `0x803a50` | the hovered object's validity |
 /// | 0, nothing | `0x481790`'s tail | `CursorSetMode(0x16)`, UnableCast |
 ///
 /// A word without `& 0x60` sets no terrain pick bit, so an armed lockpick is grey except over a
 /// GameObject it can open. An item-only word (`0x0010`) sets no pick flags, the pick bails before
 /// its ray (`0x4812c8`) and the world cursor stays grey.
 ///
-/// The object arm is `0x6e6460`'s GameObject leg: `word & 0x4800`, the lock predicate `0x5f8260`,
+/// The object arm is `0x803a50`'s GameObject leg: `word & 0x4800`, the lock predicate `0x5f8260`,
 /// then the same min/max range test through `GetMinMaxRange 0x7ff480`, its range modifier included.
 /// Its unit leg is
 /// [`SpellTargeting::can_target_unit`] and its corpse leg [`SpellTargeting::can_target_corpse`],
@@ -170,7 +116,7 @@ pub fn drive_targeting_cursor(
     {
         targeting.can_target_corpse(corpse, &checks)
     } else if targeting.wants(TargetingWants::Location) {
-        // `0x4820f0`. No ground hit (sky, mouselook) is state 0, UnableCast.
+        // `0x4f66c0`. No ground hit (sky, mouselook) is state 0, UnableCast.
         match (occlusion.point, me) {
             (Some(point), Some(me)) => ground_point_in_range(range, me, point),
             _ => false,
@@ -185,7 +131,7 @@ pub fn drive_targeting_cursor(
     };
 }
 
-/// `0x6e6460`'s GameObject leg past the `& 0x4800` test: the lock predicate `0x5f8260`, then range.
+/// `0x803a50`'s GameObject leg past the `& 0x4800` test: the lock predicate `0x5f8260`, then range.
 fn object_arm(
     hovered_object: &crate::target::HoveredObject,
     stores: &Query<(
@@ -238,6 +184,16 @@ fn object_arm(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::spell::SpellModifiers;
+    use wrathplus_formats::SpellRange;
+    use wrathplus_formats::{RangeUnit, SpellDisplay};
+    fn range_row(r: &SpellRange) -> wrathplus_ui::script::RangeRow {
+        wrathplus_ui::script::RangeRow {
+            flags: r.flags,
+            min: [r.min; 2],
+            max: [r.max; 2],
+        }
+    }
 
     /// The call for a spell and row under these tables, with the default combat reach and no
     /// auto-attack target.
@@ -248,7 +204,9 @@ mod tests {
     ) -> Option<RangeCall<'a>> {
         Some(RangeCall {
             spell,
-            row,
+            row: Some(range_row(row)),
+            friendly: false,
+            ranged_mod: None,
             mods,
             caster: RangeUnit::still(1.5),
             attack_target: None,
@@ -272,7 +230,7 @@ mod tests {
         let banded = row(8.0, 35.0);
         assert!(!ground(&banded, 5.0));
         assert!(ground(&banded, 20.0));
-        // Both bounds are inclusive (`min² > d²` and `max² < d²` fail, `0x6e68c3`, `0x6e68d3`), and
+        // Both bounds are inclusive (`min² > d²` and `max² < d²` fail, 12340 `0x803fb7`–`0x803fe0`), and
         // a NaN distance fails both.
         assert!(ground(&banded, 8.0));
         assert!(ground(&banded, 35.0));
@@ -336,7 +294,7 @@ mod tests {
     }
 
     /// With no unit passed, the melee arm sums the caster's reach with its auto-attack target's, else
-    /// its own, and the max is floored at 5.0 (`0x6e3552`-`0x6e35bf`).
+    /// its own, and the max is floored at 5.0 (build 12340 `0x7ff502`–`0x7ff559`).
     #[test]
     fn the_melee_row_reads_the_casters_reaches() {
         let melee = SpellRange {
@@ -349,7 +307,9 @@ mod tests {
         let ground = |self_reach: f32, attack_target_reach: Option<f32>, d: f32| {
             let call = RangeCall {
                 spell: &spell,
-                row: &melee,
+                row: Some(range_row(&melee)),
+                friendly: false,
+                ranged_mod: None,
                 mods: &mods,
                 caster: RangeUnit::still(self_reach),
                 attack_target: attack_target_reach.map(RangeUnit::still),
@@ -367,7 +327,7 @@ mod tests {
         assert!(!ground(1.5, Some(4.0), 7.0));
     }
 
-    /// The moving bonus (`0x6e3648`-`0x6e36a2`) on the ground verdict: with no unit passed, only
+    /// The moving bonus (build 12340 `0x7ff63b`–`0x7ff68e`) on the ground verdict: with no unit passed, only
     /// the melee arm has a unit for it, the auto-attack target, and both must run. The ranged arm
     /// has none, whoever the caster's auto-attack target is.
     #[test]
@@ -397,7 +357,9 @@ mod tests {
         let ground = |row: &SpellRange, caster, attack_target, d: f32| {
             let call = RangeCall {
                 spell: &spell,
-                row,
+                row: Some(range_row(row)),
+                friendly: false,
+                ranged_mod: None,
                 mods: &mods,
                 caster,
                 attack_target,
@@ -609,12 +571,15 @@ mod tests {
                     targets: 0x40,
                     spell_family: 3,
                     spell_family_flags: flags,
+                    attributes: 2,
+                    implicit_target_a1: 1,
+                    effect_implicit_target_a: [1, 0, 0],
                     ..SpellDisplay::default()
                 };
                 let mut spells = Spells::empty_for_tests();
                 spells.catalog = wrathplus_formats::SpellCatalog::from_displays(HashMap::from([
                     (BLIZZARD, display(4, 0x8_0080)),
-                    (MELEE_GROUND, display(2, 0)),
+                    (MELEE_GROUND, display(2, 1 << 5)),
                 ]));
                 spells.ranges = wrathplus_formats::SpellRangeCatalog::from_rows(HashMap::from([
                     (
@@ -634,6 +599,9 @@ mod tests {
                         },
                     ),
                 ]));
+                spells.ranges = spells
+                    .ranges
+                    .with_friendly(HashMap::from([(4, (0.0, 40.0))]));
                 world.insert_resource(spells);
                 let mut index = HashMap::new();
                 let mut me =
@@ -657,10 +625,23 @@ mod tests {
                 !world.resource::<WorldCursor>().unable
             };
 
-        // 30 yd without the talent, 36 with it.
-        assert!(!verdict(BLIZZARD, false, 1.5, None, 33.0), "past 30 yd");
-        assert!(verdict(BLIZZARD, true, 1.5, None, 33.0), "inside 36 yd");
-        assert!(!verdict(BLIZZARD, true, 1.5, None, 37.0), "past 36 yd");
+        // Helpful null-target calls use the friendly 40 yd column, 48 with the talent.
+        assert!(
+            !verdict(BLIZZARD, false, 1.5, None, 41.0),
+            "past friendly 40 yd"
+        );
+        assert!(
+            verdict(BLIZZARD, true, 1.5, None, 33.0),
+            "inside friendly 48 yd"
+        );
+        assert!(
+            !verdict(BLIZZARD, true, 1.5, None, 49.0),
+            "past friendly 48 yd"
+        );
+        assert!(
+            !verdict(MELEE_GROUND, true, 1.5, None, 5.5),
+            "op5 must not scale the melee pad"
+        );
         // The melee row's 5.0 floor; the caster's own reach twice, 3.0 + 3.0 + 1.3333; an auto-attack
         // target's 4.0 in place of the second, 1.5 + 4.0 + 1.3333.
         assert!(!verdict(MELEE_GROUND, false, 1.5, None, 7.0));
@@ -669,7 +650,7 @@ mod tests {
         assert!(!verdict(MELEE_GROUND, false, 1.5, Some(4.0), 7.0));
     }
 
-    /// `0x6e6460`'s GameObject leg asks the same range through the same call: a chest a lock spell
+    /// `0x803a50`'s GameObject leg asks the same range through the same call: a chest a lock spell
     /// opens, `d` yd out, on a family-3 lock spell (fixture) with row 12, 0 to 5 yd.
     #[test]
     fn the_object_leg_reads_the_range_talent() {
@@ -702,6 +683,8 @@ mod tests {
                 OPENER,
                 SpellDisplay {
                     range_index: 12,
+                    implicit_target_a1: 1,
+                    effect_implicit_target_a: [1, 0, 0],
                     targets: 0x4000,
                     spell_family: 3,
                     spell_family_flags: 1 << 7,
@@ -720,6 +703,9 @@ mod tests {
                     flags: 0,
                 },
             )]));
+            spells.ranges = spells
+                .ranges
+                .with_friendly(HashMap::from([(12, (0.0, 10.0))]));
             world.insert_resource(spells);
             let mut slots = [LockSlot::default(); wrathplus_formats::MAX_LOCK_SLOTS];
             slots[0] = LockSlot {
@@ -756,15 +742,15 @@ mod tests {
             !world.resource::<WorldCursor>().unable
         };
 
-        // 5 yd without the talent, 6 with it.
+        // Helpful object calls choose the friendly 10 yd column, 12 with the talent.
         assert!(verdict(false, 4.5));
-        assert!(!verdict(false, 5.5), "past 5 yd");
-        assert!(verdict(true, 5.5), "inside 6 yd");
-        assert!(!verdict(true, 6.5), "past 6 yd");
+        assert!(!verdict(false, 10.5), "past friendly 10 yd");
+        assert!(verdict(true, 11.5), "inside friendly 12 yd");
+        assert!(!verdict(true, 12.5), "past friendly 12 yd");
     }
 
-    /// `0x6e6460`'s unit leg over a hovered unit: the relation checks, then min² ≤ d² ≤ max²
-    /// (`6e677c`–`6e6802`). Row 5 is 0 to 30 yd and row 114 is 8 to 35 yd, both padded by the two
+    /// `0x803a50`'s unit leg over a hovered unit: the relation checks, then min² ≤ d² ≤ max²
+    /// (build 12340 `0x803e84`). Row 5 is 0 to 30 yd and row 114 is 8 to 35 yd, both padded by the two
     /// 1.5 combat reaches: 0 to 33 and 11 to 38.
     #[test]
     fn the_unit_leg_is_grey_out_of_range_or_off_relation() {
@@ -802,10 +788,10 @@ mod tests {
             // `UNIT_FIELD_HEALTH` 100: a store with no health reads dead to `BindTarget`'s gates.
             let live = || {
                 crate::app_core::session::ObjectStore(
-                    wrathplus_protocol::ObjectFields::from_fields(&[(
-                        wrathplus_protocol::types::Field::UnitHealth,
-                        100,
-                    )]),
+                    wrathplus_protocol::ObjectFields::from_fields(&[
+                        (wrathplus_protocol::types::Field::ObjectType, 0x9),
+                        (wrathplus_protocol::types::Field::UnitHealth, 100),
+                    ]),
                 )
             };
             world.spawn((
@@ -857,7 +843,7 @@ mod tests {
         );
     }
 
-    /// The unit leg's range compare, the tail of `SpellCanTargetUnit 0x6e6460`, hands
+    /// The unit leg's range compare, the tail of `build-12340 hover 0x803a50`, hands
     /// `GetMinMaxRange` the hovered unit (`0x6e679b`, `0x6e67d1`): a melee spell is in range to
     /// 7.667 yards while the caster and that unit both run, and to the 5.0 floor otherwise.
     #[test]
@@ -914,10 +900,10 @@ mod tests {
             });
             let live = || {
                 crate::app_core::session::ObjectStore(
-                    wrathplus_protocol::ObjectFields::from_fields(&[(
-                        wrathplus_protocol::types::Field::UnitHealth,
-                        100,
-                    )]),
+                    wrathplus_protocol::ObjectFields::from_fields(&[
+                        (wrathplus_protocol::types::Field::ObjectType, 0x9),
+                        (wrathplus_protocol::types::Field::UnitHealth, 100),
+                    ]),
                 )
             };
             world.spawn((
@@ -970,9 +956,9 @@ mod tests {
         assert!(verdict(false, false, 4.9), "the floor");
     }
 
-    /// `0x6e6460`'s corpse leg over a hovered corpse: bones, a hostile corpse under the ally bit
+    /// `0x803a50`'s corpse leg over a hovered corpse: bones, a hostile corpse under the ally bit
     /// and a corpse out of range are grey. The range pads a corpse by the caster's reach twice
-    /// (`6e3605`–`6e361e`): Resurrection's 30 yd with a 3.0 reach is 36.
+    /// (build 12340 `0x7ff5f8`–`0x7ff637`): Resurrection's 30 yd with a 3.0 reach is 36.
     #[test]
     fn the_corpse_leg_is_grey_for_bones_a_hostile_corpse_or_out_of_range() {
         use super::super::corpse_fixture as fx;

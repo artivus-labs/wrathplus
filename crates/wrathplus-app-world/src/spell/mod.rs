@@ -17,6 +17,7 @@ pub mod auto_ranged;
 mod bind_gates;
 mod cast_commit;
 pub mod cast_fail_keys;
+mod cast_range;
 mod cast_send;
 pub mod cast_target;
 pub mod cooldowns;
