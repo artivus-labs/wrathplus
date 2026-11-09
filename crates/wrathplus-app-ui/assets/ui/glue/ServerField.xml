@@ -5,34 +5,24 @@
 	tooltip says so). Stock 3.3.5 has no such control; its realmlist is realmlist.wtf.
 	Leaving the field after an edit keeps it in $WRATHPLUS_HOME/realmlist.wtf, searched before the
 	install's; an address the client cannot use is refused with a dialog and the field reverts.
-	A launch with the server flag (or WOW_HOST) pins the address for the session: the field then
-	shows it, greyed and read-only.
+	A launch with the server flag (or WOW_HOST) only sets the address the field starts at; the
+	field stays editable, and an edit points this session (and the next launch without the flag) at it.
 -->
 <Ui xmlns="http://www.blizzard.com/wow/ui/">
 	<Script>
 		-- The field's tooltip: a colon and a port are allowed, for servers off the default port.
 		WRATHPLUS_SERVER_FIELD_HINT = "Logon server: host or host:port\n(the port defaults to 3724)";
 
-		-- The saved address, and whether the launch pins it, into the field.
+		-- The current address into the field.
 		function WrathPlusServerField_Refresh(self)
-			local address, pinned = WrathPlusGetRealmlist();
+			local address = WrathPlusGetRealmlist();
 			self:SetText(address or "");
 			self.committed = address;
-			-- Read-only while pinned: the field takes no focus, greyed (an EditBox has no Disable).
-			self.pinned = pinned;
-			if ( pinned ) then
-				self:ClearFocus();
-				self:SetTextColor(0.5, 0.5, 0.5);
-				AccountLoginServerEditLabel:SetText("Server (set by the launch)");
-			else
-				self:SetTextColor(1, 1, 1);
-				AccountLoginServerEditLabel:SetText("Server");
-			end
 		end
 		-- Leaving the field commits an edit; the host answers with WRATHPLUS_REALMLIST_CHANGED.
 		function WrathPlusServerField_Commit(self)
 			local text = self:GetText();
-			if ( not self.pinned and text ~= self.committed ) then
+			if ( text ~= self.committed ) then
 				WrathPlusSetRealmlist(text);
 			end
 		end
@@ -108,10 +98,6 @@
 				self:ClearFocus();
 			</OnEscapePressed>
 			<OnEditFocusGained>
-				if ( self.pinned ) then
-					self:ClearFocus();
-					return;
-				end
 				self:HighlightText();
 			</OnEditFocusGained>
 			<OnEditFocusLost>

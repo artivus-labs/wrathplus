@@ -546,20 +546,11 @@ fn login_input(
                 // `gsLoginNewAccount`, which the reference plays for this corner's other buttons
                 // (`AccountLogin_ManageAccount`, `AccountLogin_LaunchCommunitySite`).
                 sounds.write(GlueSound("gsLoginNewAccount"));
-                if attempt.realmlist.pinned_by_env() {
-                    // `$WOW_HOST` owns the address for the session; say so rather than open an
-                    // editor whose Okay would do nothing.
-                    dialog.open_error(&format!(
-                        "--server or $WOW_HOST is set for this session, so the realmlist is fixed at {}.",
-                        attempt.realmlist.address(),
-                    ));
-                } else {
-                    dialog.open_realmlist(
-                        // The reference's registered help text for the `realmList` CVar.
-                        "Address of realm list server",
-                        attempt.realmlist.address(),
-                    );
-                }
+                dialog.open_realmlist(
+                    // The reference's registered help text for the `realmList` CVar.
+                    "Address of realm list server",
+                    attempt.realmlist.address(),
+                );
             }
             LoginAction::ToggleSave => {
                 form.save = !form.save;
@@ -838,7 +829,7 @@ mod tests {
             .init_resource::<GlueDialog>()
             .init_resource::<crate::app_core::ui_flags::Realms>()
             // Not `Realmlist::default()`, which reads `$WOW_HOST` from the shell.
-            .insert_resource(crate::realmlist::Realmlist::unpinned(
+            .insert_resource(crate::realmlist::Realmlist::at(
                 crate::realmlist::DEFAULT_REALMLIST,
             ))
             .insert_resource(LoginSubmit(tx))
@@ -977,9 +968,7 @@ mod tests {
     fn a_submitted_attempt_carries_the_configured_realmlist() {
         let (mut app, requests) = policy_app();
         app.world_mut()
-            .insert_resource(crate::realmlist::Realmlist::unpinned(
-                "logon.example.org:3725",
-            ));
+            .insert_resource(crate::realmlist::Realmlist::at("logon.example.org:3725"));
         {
             let mut intent = app.world_mut().resource_mut::<LoginIntent>();
             intent.creds = Some(("player".into(), "secret".into()));
@@ -995,9 +984,7 @@ mod tests {
         );
 
         app.world_mut()
-            .insert_resource(crate::realmlist::Realmlist::unpinned(
-                "elsewhere.example.org",
-            ));
+            .insert_resource(crate::realmlist::Realmlist::at("elsewhere.example.org"));
         {
             let mut intent = app.world_mut().resource_mut::<LoginIntent>();
             intent.in_flight = false;
@@ -1013,7 +1000,7 @@ mod tests {
     /// A pasted `realmlist.wtf` line becomes the session's address; with no VM, nothing persists.
     #[test]
     fn the_realmlist_dialog_takes_what_was_typed() {
-        let mut realmlist = crate::realmlist::Realmlist::unpinned("localhost");
+        let mut realmlist = crate::realmlist::Realmlist::at("localhost");
         assert!(accept_realmlist(
             r#"  SET realmlist "logon.example.org"  "#,
             &mut realmlist,
@@ -1024,7 +1011,7 @@ mod tests {
 
     #[test]
     fn a_bad_address_leaves_the_realmlist_alone() {
-        let mut realmlist = crate::realmlist::Realmlist::unpinned("localhost");
+        let mut realmlist = crate::realmlist::Realmlist::at("localhost");
         for typed in ["", "   ", "logon.example.org and more", "host:notaport"] {
             assert!(
                 !accept_realmlist(typed, &mut realmlist, None),
@@ -1043,7 +1030,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .init_resource::<LoginIntent>()
             .init_resource::<GlueDialog>()
-            .insert_resource(crate::realmlist::Realmlist::unpinned("localhost"))
+            .insert_resource(crate::realmlist::Realmlist::at("localhost"))
             .insert_resource(LoginAbandon(std::sync::Arc::new(
                 std::sync::atomic::AtomicU64::new(0),
             )))

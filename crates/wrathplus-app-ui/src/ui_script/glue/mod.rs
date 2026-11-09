@@ -123,12 +123,12 @@ fn ensure_glue_vm(world: &mut World) -> bool {
     }
     super::lifecycle::seat_raster_seam_for_load(world, &mut script);
     script.set_glue_saved_account(&crate::login::load_saved_account());
-    let (server, pinned) = world
+    let server = world
         .get_resource::<crate::realmlist::Realmlist>()
-        .map(|r| (r.address().to_string(), r.pinned_by_env()))
+        .map(|r| r.address().to_string())
         .unwrap_or_default();
     script.set_glue_connection(false, &server);
-    script.set_glue_realmlist(&server, pinned);
+    script.set_glue_realmlist(&server);
     super::manifest::silenced_ui_load(&mut script, |script| {
         for failure in load_glue_ui(script) {
             warn!("ui_script: GlueXML load: {failure}");

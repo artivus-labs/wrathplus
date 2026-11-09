@@ -113,9 +113,10 @@ pub(crate) fn realmlist_wtf() -> Option<String> {
 }
 
 /// At startup, after `config.toml` is folded in: the override file wins, as 12340's does over
-/// `Config.wtf`. A `--server`/`$WOW_HOST` pin outranks both for the session.
+/// `Config.wtf`. A `--server`/`$WOW_HOST` address outranks both as the session's starting
+/// address (the launcher's default); the login screen can still change it.
 fn apply_realmlist_wtf(mut realmlist: ResMut<Realmlist>) {
-    if realmlist.pinned_by_env() {
+    if realmlist.from_launch {
         return;
     }
     if let Some(address) = realmlist_wtf() {
@@ -153,8 +154,9 @@ pub const MAX_LETTERS: usize = 64;
 #[derive(Resource, Debug, Clone, PartialEq, Eq)]
 pub struct Realmlist {
     address: String,
-    /// `$WOW_HOST` owns this session: the address shows, the control is disabled, nothing persists.
-    pinned_by_env: bool,
+    /// `--server`/`$WOW_HOST` gave the starting address, so `realmlist.wtf` does not replace it at
+    /// startup. It is only a default: the login screen's edits still apply.
+    from_launch: bool,
 }
 
 impl Default for Realmlist {
@@ -164,23 +166,24 @@ impl Default for Realmlist {
             // Verbatim, not normalized.
             Some(host) => Realmlist {
                 address: host,
-                pinned_by_env: true,
+                from_launch: true,
             },
             _ => Realmlist {
                 address: DEFAULT_REALMLIST.to_string(),
-                pinned_by_env: false,
+                from_launch: false,
             },
         }
     }
 }
 
 impl Realmlist {
-    /// A realmlist with no env pin, for tests, since [`Default`] reads `$WOW_HOST`.
+    /// A realmlist at `address` with no launch default, for tests, since [`Default`] reads
+    /// `$WOW_HOST`.
     #[cfg(any(test, feature = "test-support"))]
-    pub fn unpinned(address: &str) -> Self {
+    pub fn at(address: &str) -> Self {
         Realmlist {
             address: address.to_string(),
-            pinned_by_env: false,
+            from_launch: false,
         }
     }
 
@@ -188,15 +191,8 @@ impl Realmlist {
         &self.address
     }
 
-    pub fn pinned_by_env(&self) -> bool {
-        self.pinned_by_env
-    }
-
-    /// Points at an already normalized `address`; ignored while pinned by the env.
+    /// Points at an already normalized `address`.
     pub fn set(&mut self, address: &str) {
-        if self.pinned_by_env || self.address == address {
-            return;
-        }
         self.address = address.to_string();
     }
 }
@@ -285,19 +281,19 @@ mod tests {
             app.update();
             app.world().resource::<Realmlist>().address().to_string()
         };
-        let address = startup(Realmlist::unpinned(DEFAULT_REALMLIST));
+        let address = startup(Realmlist::at(DEFAULT_REALMLIST));
         assert_eq!(address, "192.168.1.1:1337");
         assert_eq!(
             wrathplus_protocol::host_port(&address, wrathplus_protocol::AUTH_PORT),
             ("192.168.1.1", 1337)
         );
-        // `--server vps.example.org:2337` outranks the file, port and all.
-        let pinned = startup(Realmlist {
+        // `--server vps.example.org:2337` outranks the file at startup, port and all.
+        let launched = startup(Realmlist {
             address: "vps.example.org:2337".into(),
-            pinned_by_env: true,
+            from_launch: true,
         });
         assert_eq!(
-            wrathplus_protocol::host_port(&pinned, wrathplus_protocol::AUTH_PORT),
+            wrathplus_protocol::host_port(&launched, wrathplus_protocol::AUTH_PORT),
             ("vps.example.org", 2337)
         );
         let _ = std::fs::remove_dir_all(&dir);
@@ -385,22 +381,18 @@ mod tests {
     }
 
     #[test]
-    fn an_env_pinned_realmlist_ignores_writes() {
+    fn a_launch_address_is_a_default_the_login_screen_can_change() {
         let mut r = Realmlist {
-            address: "harness.example.org".into(),
-            pinned_by_env: true,
+            address: "127.0.0.1:13724".into(),
+            from_launch: true,
         };
-        r.set("somewhere.else.org");
-        assert_eq!(r.address(), "harness.example.org");
-        assert!(r.pinned_by_env());
+        r.set("wrathplus.artivus.com.au");
+        assert_eq!(r.address(), "wrathplus.artivus.com.au");
     }
 
     #[test]
-    fn an_unpinned_realmlist_takes_writes() {
-        let mut r = Realmlist {
-            address: DEFAULT_REALMLIST.into(),
-            pinned_by_env: false,
-        };
+    fn a_realmlist_takes_writes() {
+        let mut r = Realmlist::at(DEFAULT_REALMLIST);
         r.set("logon.example.org");
         assert_eq!(r.address(), "logon.example.org");
     }

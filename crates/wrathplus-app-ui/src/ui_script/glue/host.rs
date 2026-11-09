@@ -108,7 +108,7 @@ pub(crate) fn stock_glue(
                 let realmlist = attempt.realmlist_mut();
                 if crate::login::accept_realmlist(&text, realmlist, Some(&mut *script)) {
                     let address = realmlist.address().to_string();
-                    script.set_glue_realmlist(&address, realmlist.pinned_by_env());
+                    script.set_glue_realmlist(&address);
                     script.set_glue_connection(false, &address);
                 } else {
                     open_status(

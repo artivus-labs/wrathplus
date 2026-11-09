@@ -320,14 +320,10 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     // ── AzerothBench's own, not stock 3.3.5: the login screen's Server field
     // (`assets/ui/glue/ServerField.xml`) reads and sets the address through these. ──
     set(lua, "WrathPlusGetRealmlist", |lua, _| {
-        let (address, pinned) = {
-            let m = glue(lua);
-            (m.realmlist.clone(), m.realmlist_pinned)
-        };
-        Ok(MultiValue::from_vec(vec![
-            Value::String(lua.create_string(&address)?),
-            crate::script::binding_abi::flag(pinned),
-        ]))
+        let address = glue(lua).realmlist.clone();
+        Ok(MultiValue::from_vec(vec![Value::String(
+            lua.create_string(&address)?,
+        )]))
     })?;
     set(lua, "WrathPlusSetRealmlist", |lua, args| {
         let text = text(lua, args.front())?;

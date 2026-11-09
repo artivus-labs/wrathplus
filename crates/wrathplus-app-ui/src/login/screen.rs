@@ -393,7 +393,7 @@ fn spawn_screen(
             ..default()
         },))
             .with_children(|c| {
-                let btn = glue_button(
+                glue_button(
                     c,
                     art,
                     &font,
@@ -404,13 +404,6 @@ fn spawn_screen(
                     GlueBtnKind::Small,
                     s,
                 );
-                // Disabled while `$WOW_HOST` owns the session; a click still explains why
-                // ([`super::login_input`]).
-                if realmlist.pinned_by_env() {
-                    c.commands()
-                        .entity(btn)
-                        .insert(crate::glue::widgets::GlueDisabled(true));
-                }
             });
         outlined_text(
             ui,

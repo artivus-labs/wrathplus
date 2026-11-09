@@ -141,9 +141,8 @@ pub(crate) struct GlueState {
     pub(crate) realm_tabs: Vec<GlueRealmTab>,
     pub(crate) realm_selected_category: usize,
     pub(crate) realm_update_rate: f32,
-    /// The realmlist the login dials, and whether `--server`/`$WOW_HOST` pins it this session.
+    /// The realmlist the login dials.
     pub(crate) realmlist: String,
-    pub(crate) realmlist_pinned: bool,
     /// Character select's rows, and the stage an empty or out-of-range index stands on.
     pub(crate) characters: Vec<GlueCharacter>,
     pub(crate) empty_stage: String,
@@ -236,10 +235,9 @@ impl super::UiScript {
     }
 
     /// `WrathPlusGetRealmlist`'s answer.
-    pub fn set_glue_realmlist(&mut self, address: &str, pinned: bool) {
+    pub fn set_glue_realmlist(&mut self, address: &str) {
         if let Some(mut m) = self.glue_mut() {
             m.realmlist = address.to_string();
-            m.realmlist_pinned = pinned;
         }
     }
 

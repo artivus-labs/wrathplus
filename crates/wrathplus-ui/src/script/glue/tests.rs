@@ -162,7 +162,7 @@ fn a_vm_without_the_glue_api_answers_nothing() {
     s.set_glue_saved_account("Bob");
     s.set_glue_connection(true, "x");
     s.set_glue_num_characters(2);
-    s.set_glue_realmlist("127.0.0.1", false);
+    s.set_glue_realmlist("127.0.0.1");
     assert!(s.take_glue_requests().is_empty());
     assert_eq!(s.glue_current_screen(), None);
 }
