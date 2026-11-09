@@ -33,18 +33,17 @@ fn the_stock_account_login_opens_and_submits_on_the_installed_data() {
     );
     // AzerothBench's Server field (`assets/ui/glue/ServerField.xml`): it shows the address,
     // and leaving it after an edit asks the host to keep the new one.
-    script.set_glue_realmlist("127.0.0.1", false);
+    script.set_glue_realmlist("127.0.0.1");
     script.fire_event("WRATHPLUS_REALMLIST_CHANGED", vec![]);
     let field = |script: &UiScript| {
         script
             .eval::<String>(
                 "return tostring(AccountLoginServerEdit:IsVisible())..' '..\
-                 tostring(not AccountLoginServerEdit.pinned)..' '..\
                  AccountLoginServerEdit:GetText()..' '..AccountLoginServerEditLabel:GetText()",
             )
             .unwrap()
     };
-    assert_eq!(field(&script), "1 true 127.0.0.1 Server");
+    assert_eq!(field(&script), "1 127.0.0.1 Server");
     script
         .run(
             "AccountLoginServerEdit:SetFocus() AccountLoginServerEdit:SetText('10.0.0.5:3724') \
@@ -55,32 +54,30 @@ fn the_stock_account_login_opens_and_submits_on_the_installed_data() {
         script.take_glue_requests(),
         vec![GlueRequest::SetRealmlist("10.0.0.5:3724".into())]
     );
-    // The host keeps it and says so; a launch pin shows, disabled.
-    script.set_glue_realmlist("10.0.0.5:3724", false);
+    // The host keeps it and says so.
+    script.set_glue_realmlist("10.0.0.5:3724");
     script.fire_event("WRATHPLUS_REALMLIST_CHANGED", vec![]);
-    assert_eq!(field(&script), "1 true 10.0.0.5:3724 Server");
-    script.set_glue_realmlist("vps.example:3724", true);
+    assert_eq!(field(&script), "1 10.0.0.5:3724 Server");
+    // A launch's address is only where the field starts: it stays editable, and an edit is sent.
+    script.set_glue_realmlist("127.0.0.1:13724");
     script.fire_event("WRATHPLUS_REALMLIST_CHANGED", vec![]);
-    assert_eq!(
-        field(&script),
-        "1 false vps.example:3724 Server (set by the launch)"
-    );
+    assert_eq!(field(&script), "1 127.0.0.1:13724 Server");
     script
         .run(
-            "AccountLoginServerEdit:SetFocus() AccountLoginServerEdit:SetText('x') \
+            "AccountLoginServerEdit:SetFocus() AccountLoginServerEdit:SetText('wrathplus.artivus.com.au') \
              AccountLoginServerEdit:ClearFocus()",
         )
         .unwrap();
-    assert!(
-        script.take_glue_requests().is_empty(),
-        "a pinned field sends nothing"
+    assert_eq!(
+        script.take_glue_requests(),
+        vec![GlueRequest::SetRealmlist("wrathplus.artivus.com.au".into())]
     );
     assert!(
         script.errors().is_empty(),
         "script errors: {:?}",
         script.errors()
     );
-    script.set_glue_realmlist("127.0.0.1", false);
+    script.set_glue_realmlist("127.0.0.1");
     script.fire_event("WRATHPLUS_REALMLIST_CHANGED", vec![]);
     // `--fill-only`: the launch's credentials wait in the boxes; nothing submits until Login.
     script.fill_login("Bob", "hunter2").unwrap();
@@ -346,7 +343,7 @@ fn a_server_field_address_keeps_its_port_from_field_to_file_to_dial() {
     script.fire_event("FRAMES_LOADED", vec![]);
     script.fire_event("SET_GLUE_SCREEN", vec![ScriptValue::Str("login".into())]);
     script.tick(0.1);
-    script.set_glue_realmlist("127.0.0.1", false);
+    script.set_glue_realmlist("127.0.0.1");
     script.fire_event("WRATHPLUS_REALMLIST_CHANGED", vec![]);
 
     // Hovering the field explains the syntax.
@@ -379,7 +376,7 @@ fn a_server_field_address_keeps_its_port_from_field_to_file_to_dial() {
     let dir = std::env::temp_dir().join(format!("azb-server-port-{}", std::process::id()));
     let _home =
         crate::local_state::test_env::EnvGuard::set("WRATHPLUS_HOME", dir.to_str().unwrap());
-    let mut realmlist = crate::realmlist::Realmlist::unpinned("127.0.0.1");
+    let mut realmlist = crate::realmlist::Realmlist::at("127.0.0.1");
     assert!(crate::login::accept_realmlist(
         &typed,
         &mut realmlist,
@@ -396,7 +393,7 @@ fn a_server_field_address_keeps_its_port_from_field_to_file_to_dial() {
         wrathplus_protocol::host_port(realmlist.address(), wrathplus_protocol::AUTH_PORT),
         ("192.168.1.1", 1337)
     );
-    script.set_glue_realmlist(realmlist.address(), false);
+    script.set_glue_realmlist(realmlist.address());
     script.fire_event("WRATHPLUS_REALMLIST_CHANGED", vec![]);
     assert_eq!(
         script

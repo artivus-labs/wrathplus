@@ -146,7 +146,7 @@ fn character_select_enters_the_clicked_character() {
         .init_resource::<crate::app_core::ui_flags::LoginIntent>()
         .insert_resource(crate::net::LoginSubmit(login_tx))
         .insert_resource(crate::net::LoginAbandon(Default::default()))
-        .insert_resource(crate::realmlist::Realmlist::unpinned("127.0.0.1"))
+        .insert_resource(crate::realmlist::Realmlist::at("127.0.0.1"))
         .init_resource::<crate::app_core::ui_flags::Realms>()
         .insert_resource(crate::net::RealmChoice(realm_tx))
         .init_resource::<Roster>()

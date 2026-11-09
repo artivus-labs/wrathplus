@@ -844,7 +844,7 @@ pub(super) fn cvar_app() -> App {
         // Literal, not Default: RenderScale::default() reads $WOW_RENDER_SCALE.
         .insert_resource(RenderScale(1.0))
         // Literal: `Realmlist::default()` reads `$WOW_HOST`.
-        .insert_resource(crate::realmlist::Realmlist::unpinned(
+        .insert_resource(crate::realmlist::Realmlist::at(
             crate::realmlist::DEFAULT_REALMLIST,
         ))
         .init_resource::<PaneRate>()

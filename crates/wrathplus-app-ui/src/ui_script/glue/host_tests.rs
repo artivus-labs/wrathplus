@@ -26,7 +26,7 @@ fn app() -> (App, crossbeam_channel::Receiver<crate::net::LoginRequest>) {
         .init_resource::<crate::app_core::ui_flags::LoginIntent>()
         .insert_resource(LoginSubmit(tx))
         .insert_resource(LoginAbandon(Default::default()))
-        .insert_resource(crate::realmlist::Realmlist::unpinned("127.0.0.1"))
+        .insert_resource(crate::realmlist::Realmlist::at("127.0.0.1"))
         .init_resource::<crate::app_core::ui_flags::Realms>()
         .insert_resource(crate::net::RealmChoice(realm_tx))
         .init_resource::<crate::app_core::state::Roster>()
