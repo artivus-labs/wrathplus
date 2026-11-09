@@ -12,6 +12,8 @@ export interface AccountLink {
   handle: string;
   createdAt: number;
   updatedAt: number;
+  /** The game password, encrypted (PasswordCipher); absent for links made before v2. */
+  passwordEnc?: string;
 }
 
 export interface KeyValueStore<V> {
@@ -52,28 +54,96 @@ export class Store {
         value TEXT NOT NULL,
         updated_at INTEGER NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS web_session (
+        id_hash TEXT PRIMARY KEY,
+        did TEXT NOT NULL,
+        handle TEXT NOT NULL,
+        csrf TEXT NOT NULL,
+        expires_at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS client_code (
+        code_hash TEXT PRIMARY KEY,
+        did TEXT NOT NULL,
+        handle TEXT NOT NULL,
+        challenge TEXT NOT NULL,
+        redirect TEXT NOT NULL,
+        expires_at INTEGER NOT NULL
+      );
     `);
+    // v2: the game password, AES-256-GCM (see secrets.ts). Added to databases made by v1.
+    const columns = this.db.query<{ name: string }, []>("PRAGMA table_info(account_link)").all();
+    if (!columns.some((c) => c.name === "password_enc")) this.db.exec("ALTER TABLE account_link ADD COLUMN password_enc TEXT");
   }
 
   linkByDid(did: string): AccountLink | undefined {
     const row = this.db
-      .query<{ did: string; account: string; handle: string; created_at: number; updated_at: number }, [string]>(
-        "SELECT did, account, handle, created_at, updated_at FROM account_link WHERE did = ?",
+      .query<{ did: string; account: string; handle: string; created_at: number; updated_at: number; password_enc: string | null }, [string]>(
+        "SELECT did, account, handle, created_at, updated_at, password_enc FROM account_link WHERE did = ?",
       )
       .get(did);
-    return row ? { did: row.did, account: row.account, handle: row.handle, createdAt: row.created_at, updatedAt: row.updated_at } : undefined;
+    return row
+      ? {
+          did: row.did,
+          account: row.account,
+          handle: row.handle,
+          createdAt: row.created_at,
+          updatedAt: row.updated_at,
+          ...(row.password_enc ? { passwordEnc: row.password_enc } : {}),
+        }
+      : undefined;
   }
 
   accountTaken(account: string): boolean {
     return this.db.query<{ n: number }, [string]>("SELECT 1 AS n FROM account_link WHERE account = ?").get(account) !== null;
   }
 
-  insertLink(did: string, account: string, handle: string, now = Date.now()): void {
-    this.db.query("INSERT INTO account_link (did, account, handle, created_at, updated_at) VALUES (?, ?, ?, ?, ?)").run(did, account, handle, now, now);
+  insertLink(did: string, account: string, handle: string, passwordEnc: string, now = Date.now()): void {
+    this.db
+      .query("INSERT INTO account_link (did, account, handle, created_at, updated_at, password_enc) VALUES (?, ?, ?, ?, ?, ?)")
+      .run(did, account, handle, now, now, passwordEnc);
   }
 
   touchLink(did: string, handle: string, now = Date.now()): void {
     this.db.query("UPDATE account_link SET handle = ?, updated_at = ? WHERE did = ?").run(handle, now, did);
+  }
+
+  setPassword(did: string, passwordEnc: string, now = Date.now()): void {
+    this.db.query("UPDATE account_link SET password_enc = ?, updated_at = ? WHERE did = ?").run(passwordEnc, now, did);
+  }
+
+  // --- web sessions (ids and codes are stored hashed) ---------------------------------------------
+
+  insertWebSession(idHash: string, did: string, handle: string, csrf: string, expiresAt: number, now = Date.now()): void {
+    this.db.query("DELETE FROM web_session WHERE expires_at < ?").run(now);
+    this.db.query("INSERT INTO web_session (id_hash, did, handle, csrf, expires_at) VALUES (?, ?, ?, ?, ?)").run(idHash, did, handle, csrf, expiresAt);
+  }
+
+  webSession(idHash: string): { did: string; handle: string; csrf: string; expiresAt: number } | undefined {
+    const row = this.db
+      .query<{ did: string; handle: string; csrf: string; expires_at: number }, [string]>("SELECT did, handle, csrf, expires_at FROM web_session WHERE id_hash = ?")
+      .get(idHash);
+    return row ? { did: row.did, handle: row.handle, csrf: row.csrf, expiresAt: row.expires_at } : undefined;
+  }
+
+  deleteWebSession(idHash: string): void {
+    this.db.query("DELETE FROM web_session WHERE id_hash = ?").run(idHash);
+  }
+
+  insertClientCode(codeHash: string, did: string, handle: string, challenge: string, redirect: string, expiresAt: number, now = Date.now()): void {
+    this.db.query("DELETE FROM client_code WHERE expires_at < ?").run(now);
+    this.db
+      .query("INSERT INTO client_code (code_hash, did, handle, challenge, redirect, expires_at) VALUES (?, ?, ?, ?, ?, ?)")
+      .run(codeHash, did, handle, challenge, redirect, expiresAt);
+  }
+
+  /** Remove and return a code in one statement: a code can be taken once, whatever happens next. */
+  takeClientCode(codeHash: string): { did: string; handle: string; challenge: string; redirect: string; expiresAt: number } | undefined {
+    const row = this.db
+      .query<{ did: string; handle: string; challenge: string; redirect: string; expires_at: number }, [string]>(
+        "DELETE FROM client_code WHERE code_hash = ? RETURNING did, handle, challenge, redirect, expires_at",
+      )
+      .get(codeHash);
+    return row ? { did: row.did, handle: row.handle, challenge: row.challenge, redirect: row.redirect, expiresAt: row.expires_at } : undefined;
   }
 
   /** The OAuth library's in-flight login state; entries older than an hour are dropped. */

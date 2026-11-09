@@ -131,3 +131,5 @@ export function addIdentity(net: FakeNet, opts: { did: string; handle: string; p
   };
   net.routes[`POST ${pds}/xrpc/com.atproto.server.deleteSession`] = () => new Response(null, { status: 200 });
 }
+
+export const TEST_KEY = Buffer.alloc(32, 7);

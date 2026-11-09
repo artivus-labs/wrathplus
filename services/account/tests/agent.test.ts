@@ -1,13 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { Accounts } from "../src/accounts.ts";
 import { AgentLoginError, proveAgentIdentity } from "../src/agent.ts";
-import { createApp, type OAuthPort } from "../src/app.ts";
-import { Store } from "../src/db.ts";
 import { GAME_PASSWORD } from "../src/password.ts";
-import { RateLimiter } from "../src/ratelimit.ts";
-import { addIdentity, ALICE_DID, BOB_DID, depsFor, fakeNet, FakeRealm } from "./fakes.ts";
-
-const APP_PASSWORD = "aaaa-bbbb-cccc-dddd";
+import { addIdentity, ALICE_DID, BOB_DID, depsFor, fakeNet } from "./fakes.ts";
+import { APP_PASSWORD, harness } from "./harness.ts";
 
 describe("proveAgentIdentity", () => {
   test("app password on the resolved PDS proves the DID; the session is revoked", async () => {
@@ -64,109 +59,65 @@ describe("proveAgentIdentity", () => {
   });
 });
 
-const noOAuth: OAuthPort = {
-  clientMetadata: {},
-  jwks: { keys: [] },
-  authorize: async () => new URL("https://auth.example.com/authorize"),
-  callback: async () => {
-    throw new Error("unused");
-  },
-};
-
-function app(opts: { perIp?: number; perDid?: number } = {}) {
-  const net = fakeNet();
-  addIdentity(net, { did: ALICE_DID, handle: "alice.bsky.social" });
-  const realm = new FakeRealm();
-  const accounts = new Accounts({ store: new Store(":memory:"), soap: realm.run, wait: async () => {}, log: () => {} });
-  const handle = createApp({
-    accounts,
-    identity: depsFor(net),
-    oauth: noOAuth,
-    scope: "atproto",
-    realmAddress: "wrathplus.artivus.com.au:3724",
-    loginsPerIp: new RateLimiter({ max: opts.perIp ?? 20, windowMs: 60_000 }),
-    issuesPerDid: new RateLimiter({ max: opts.perDid ?? 10, windowMs: 60_000 }),
-    log: () => {},
-  });
-  const login = (body: unknown, ip = "198.51.100.7") =>
-    handle(
-      new Request("https://wrathplus.artivus.com.au/api/agent/login", {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-forwarded-for": ip },
-        body: JSON.stringify(body),
-      }),
-      "127.0.0.1",
-    );
-  return { handle, login, realm, net };
-}
-
 describe("POST /api/agent/login", () => {
+  const body = { handle: "alice.bsky.social", app_password: APP_PASSWORD };
+
   test("returns account, password and realm; the realm has the account", async () => {
-    const { login, realm } = app();
-    const res = await login({ handle: "alice.bsky.social", app_password: APP_PASSWORD });
+    const { postJson, realm } = harness();
+    const res = await postJson("/api/agent/login", body);
     expect(res.status).toBe(200);
     expect(res.headers.get("cache-control")).toBe("no-store");
-    const body = (await res.json()) as { account: string; password: string; realm: string };
-    expect(body.account).toBe("ALICE");
-    expect(body.password).toMatch(GAME_PASSWORD);
-    expect(body.realm).toBe("wrathplus.artivus.com.au:3724");
-    expect(realm.accounts.get("ALICE")!.password).toBe(body.password);
+    const out = (await res.json()) as { account: string; password: string; realm: string };
+    expect(out.account).toBe("ALICE");
+    expect(out.password).toMatch(GAME_PASSWORD);
+    expect(out.realm).toBe("wrathplus.artivus.com.au:3724");
+    expect(realm.accounts.get("ALICE")!.password).toBe(out.password);
+  });
+
+  test("signing in again returns the stored password; reset: true issues a new one", async () => {
+    const { postJson, realm } = harness();
+    const first = (await (await postJson("/api/agent/login", body)).json()) as { password: string };
+    const again = (await (await postJson("/api/agent/login", body)).json()) as { password: string };
+    expect(again.password).toBe(first.password);
+    expect(realm.commands.filter((c) => c.startsWith(".account set password")).length).toBe(0);
+    const reset = (await (await postJson("/api/agent/login", { ...body, reset: true })).json()) as { password: string };
+    expect(reset.password).not.toBe(first.password);
+    expect(realm.accounts.get("ALICE")!.password).toBe(reset.password);
+    expect((await postJson("/api/agent/login", { ...body, reset: "yes" })).status).toBe(400);
   });
 
   test("the app password is never sent to the realm", async () => {
-    const { login, realm } = app();
-    await login({ handle: "alice.bsky.social", app_password: APP_PASSWORD });
+    const { postJson, realm } = harness();
+    await postJson("/api/agent/login", body);
     expect(realm.commands.some((c) => c.includes(APP_PASSWORD))).toBe(false);
   });
 
   test("wrong password -> 401 and no account", async () => {
-    const { login, realm } = app();
-    const res = await login({ handle: "alice.bsky.social", app_password: "nope" });
-    expect(res.status).toBe(401);
+    const { postJson, realm } = harness();
+    expect((await postJson("/api/agent/login", { ...body, app_password: "nope" })).status).toBe(401);
     expect(realm.accounts.size).toBe(0);
   });
 
   test("rate limited per IP before any lookup", async () => {
-    const { login, net } = app({ perIp: 2 });
-    await login({ handle: "alice.bsky.social", app_password: "nope" });
-    await login({ handle: "alice.bsky.social", app_password: "nope" });
+    const { postJson, net } = harness({ perIp: 2 });
+    await postJson("/api/agent/login", { ...body, app_password: "nope" });
+    await postJson("/api/agent/login", { ...body, app_password: "nope" });
     const before = net.requests.length;
-    const res = await login({ handle: "alice.bsky.social", app_password: APP_PASSWORD });
+    const res = await postJson("/api/agent/login", body);
     expect(res.status).toBe(429);
     expect(Number(res.headers.get("retry-after"))).toBeGreaterThan(0);
     expect(net.requests.length).toBe(before);
-    // Another address is unaffected.
-    expect((await login({ handle: "alice.bsky.social", app_password: APP_PASSWORD }, "198.51.100.8")).status).toBe(200);
+    expect((await postJson("/api/agent/login", body, "198.51.100.8")).status).toBe(200);
   });
 
   test("rate limited per DID across addresses", async () => {
-    const { login } = app({ perDid: 1 });
-    expect((await login({ handle: "alice.bsky.social", app_password: APP_PASSWORD }, "198.51.100.1")).status).toBe(200);
-    expect((await login({ handle: "alice.bsky.social", app_password: APP_PASSWORD }, "198.51.100.2")).status).toBe(429);
+    const { postJson } = harness({ perDid: 1 });
+    expect((await postJson("/api/agent/login", body, "198.51.100.1")).status).toBe(200);
+    expect((await postJson("/api/agent/login", body, "198.51.100.2")).status).toBe(429);
   });
 
   test("requires JSON", async () => {
-    const { handle } = app();
-    const res = await handle(new Request("https://x/api/agent/login", { method: "POST", body: "handle=a" }));
-    expect(res.status).toBe(415);
-  });
-});
-
-describe("other routes", () => {
-  test("home page and unknown routes", async () => {
-    const { handle } = app();
-    const home = await handle(new Request("https://x/"));
-    expect(home.status).toBe(200);
-    expect(home.headers.get("content-security-policy")).toContain("default-src 'none'");
-    expect((await handle(new Request("https://x/nope"))).status).toBe(404);
-  });
-
-  test("OAuth login redirects to the authorization server", async () => {
-    const { handle } = app();
-    const res = await handle(new Request("https://x/oauth/login", { method: "POST", body: new URLSearchParams({ handle: "alice.bsky.social" }) }));
-    expect(res.status).toBe(303);
-    expect(res.headers.get("location")).toBe("https://auth.example.com/authorize");
-    const bad = await handle(new Request("https://x/oauth/login", { method: "POST", body: new URLSearchParams({ handle: "<script>" }) }));
-    expect(bad.status).toBe(400);
+    const { handle } = harness();
+    expect((await handle(new Request("https://x/api/agent/login", { method: "POST", body: "handle=a" }))).status).toBe(415);
   });
 });

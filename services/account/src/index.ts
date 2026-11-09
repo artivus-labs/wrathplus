@@ -8,12 +8,16 @@ import { nodeIdentityDeps } from "./identity.ts";
 import { createOAuthClient, loadOrCreateKeys, OAUTH_SCOPE } from "./oauth.ts";
 import { RateLimiter } from "./ratelimit.ts";
 import { EventPump, oauthPublisher } from "./records.ts";
+import { ClientCodes } from "./client.ts";
+import { loadOrCreateServiceKeys, PasswordCipher } from "./secrets.ts";
+import { WebSessions } from "./sessions.ts";
 import { readSoapCredentials, soapClient } from "./soap.ts";
 
 process.umask(0o077);
 const config = loadConfig();
 const store = new Store(config.dbPath);
 const keys = await loadOrCreateKeys(config.keysPath);
+const serviceKeys = loadOrCreateServiceKeys(config.serviceKeysPath);
 const identity = await nodeIdentityDeps(config.plcUrl);
 const oauth = createOAuthClient(config.publicUrl, keys, store, identity);
 // Read per call so a rotated credential file takes effect without a restart.
@@ -23,11 +27,15 @@ readSoapCredentials(config.soapCredentialsFile); // fail fast on a missing or wo
 const accounts = new Accounts({
   store,
   soap,
+  cipher: new PasswordCipher(serviceKeys.password),
   naming: { reservedPrefixes: config.reservedPrefixes, hostedSuffixes: config.hostedSuffixes },
 });
 
 const app = createApp({
+  publicUrl: config.publicUrl,
   accounts,
+  sessions: new WebSessions(store, serviceKeys.cookie),
+  codes: new ClientCodes(store),
   identity,
   oauth,
   scope: OAUTH_SCOPE,

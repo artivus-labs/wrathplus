@@ -31,6 +31,11 @@ const STYLE = `
   dd { margin: 0; font-family: ui-monospace, "SF Mono", Menlo, monospace; word-break: break-all; }
   .secret { font-size: 1.15rem; color: var(--gold); user-select: all; }
   .note { margin-top: 1.25rem; padding: .75rem .9rem; border-left: 3px solid var(--gold); background: #e3b3410f; color: var(--fg); font-size: .92rem; }
+  button.quiet { background: transparent; color: var(--dim); border: 1px solid var(--line); }
+  .row { display: flex; gap: .75rem; }
+  .row form { flex: 1; }
+  details { margin-top: .25rem; }
+  summary { cursor: pointer; color: var(--ice); }
   a { color: var(--ice); }
   small { color: var(--dim); }
 `;
@@ -42,35 +47,84 @@ function page(title: string, body: string): string {
 <body><main>${body}</main></body></html>`;
 }
 
-export function homePage(): string {
+const hidden = (name: string, value: string) => `<input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(value)}">`;
+
+/** Sign in. `next` is where to continue afterwards (only the client sign-in uses it). */
+export function homePage(next?: string, intro?: string): string {
   return page(
     "WrathPlus beta: sign in",
     `<h1>WrathPlus</h1>
-<p>Open beta realm. Sign in with your Bluesky / ATProto account to get your game account.</p>
+<p>${escapeHtml(intro ?? "Open beta realm. Sign in with your Bluesky / ATProto account to get your game account.")}</p>
 <form method="post" action="/oauth/login">
   <label for="handle">Your handle</label>
   <input id="handle" name="handle" placeholder="alice.bsky.social" autocomplete="username" autocapitalize="none" spellcheck="false" required>
+  ${next ? hidden("next", next) : ""}
   <button type="submit">Sign in</button>
 </form>
 <p><small>Agents: <code>POST /api/agent/login</code> with your handle and an app password. See the project README.</small></p>`,
   );
 }
 
-export function accountPage(handle: string, account: string, password: string, realm: string): string {
+export interface AccountView {
+  handle: string;
+  account: string;
+  password: string;
+  realm: string;
+  csrf: string;
+  notice?: string;
+}
+
+export function accountPage(v: AccountView): string {
   return page(
     "WrathPlus beta: your account",
-    `<h1>Welcome, @${escapeHtml(handle)}</h1>
-<p>Your game account is ready.</p>
+    `<h1>@${escapeHtml(v.handle)}</h1>
+<p>Your game account on the beta realm.</p>
+${v.notice ? `<div class="note">${escapeHtml(v.notice)}</div>` : ""}
 <dl>
-  <dt>Account</dt><dd>${escapeHtml(account)}</dd>
-  <dt>Password</dt><dd class="secret">${escapeHtml(password)}</dd>
-  <dt>Realm</dt><dd>${escapeHtml(realm)}</dd>
+  <dt>Account</dt><dd>${escapeHtml(v.account)}</dd>
+  <dt>Password</dt><dd><details><summary>Show</summary><span class="secret">${escapeHtml(v.password)}</span></details></dd>
+  <dt>Realm</dt><dd>${escapeHtml(v.realm)}</dd>
 </dl>
-<div class="note">This password is shown once. Copy it now. Signing in here again issues a new one, and the old one stops working.</div>
-<p><small>Passwords are not case-sensitive in game.</small></p>`,
+<p><small>Passwords are not case-sensitive in game.</small></p>
+<div class="row">
+  <form method="post" action="/account/reset">${hidden("csrf", v.csrf)}<button type="submit">Reset password</button></form>
+  <form method="post" action="/logout">${hidden("csrf", v.csrf)}<button class="quiet" type="submit">Sign out</button></form>
+</div>`,
+  );
+}
+
+export function clientConfirmPage(handle: string, fields: Record<string, string>, csrf: string): string {
+  const all = Object.entries({ ...fields, csrf })
+    .map(([k, val]) => hidden(k, val))
+    .join("");
+  return page(
+    "WrathPlus beta: sign in the client",
+    `<h1>Sign in the client</h1>
+<p>Sign in WrathPlus client as <strong>@${escapeHtml(handle)}</strong>?</p>
+<p><small>The client on this computer receives your game account and password. Continue only if you just started a sign-in from the WrathPlus client or launcher.</small></p>
+<div class="row">
+  <form method="post" action="/client/approve">${all}${hidden("decision", "approve")}<button type="submit">Sign in</button></form>
+  <form method="post" action="/client/approve">${all}${hidden("decision", "deny")}<button class="quiet" type="submit">Cancel</button></form>
+</div>
+<p><small>Not @${escapeHtml(handle)}? <a href="/">Sign out</a> first.</small></p>`,
+  );
+}
+
+/**
+ * Hands the browser to the client's loopback listener. A meta refresh rather than a redirect from
+ * the form's POST: CSP form-action would otherwise have to allow http://127.0.0.1:* and [::1].
+ */
+export function clientHandoffPage(url: string, approved: boolean): string {
+  const u = escapeHtml(url);
+  return page(
+    "WrathPlus beta: back to the client",
+    `<meta http-equiv="refresh" content="0;url=${u}">
+<h1>${approved ? "Signed in" : "Cancelled"}</h1>
+<p>${approved ? "Returning to the WrathPlus client. You can close this tab." : "The client was not signed in."}</p>
+<p><a href="${u}">Continue to the client</a></p>`,
   );
 }
 
 export function errorPage(message: string): string {
-  return page("WrathPlus beta: sign-in failed", `<h1>Sign-in failed</h1><p>${escapeHtml(message)}</p><p><a href="/">Try again</a></p>`);
+  return page("WrathPlus beta: sign-in failed", `<h1>Sign-in failed</h1><p>${escapeHtml(message)}</p><p><a href="/">Back</a></p>`);
 }

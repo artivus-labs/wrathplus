@@ -1,24 +1,31 @@
-// One game account per DID. After an identity is proven, `issue` makes the DID's account (first
-// time) or finds it (afterwards), sets a fresh random password, and returns it. The password is
-// never stored: the caller shows it once. Every sign-in therefore issues a new password.
+// One game account per DID, with its password kept encrypted at rest (secrets.ts).
+//
+//   ensure(did, handle): the DID's account and current password. Makes the account the first
+//     time; afterwards only reads, so looking at your account never changes the password.
+//   reset(did, handle): sets a new random password on the realm and stores it.
 //
 // Realm account creation is asynchronous (the worldserver queues the insert), so the commands
-// that follow it retry briefly while the realm reports the account missing.
+// that follow a create retry briefly while the realm reports the account missing.
 
 import type { Store } from "./db.ts";
 import { accountNameCandidates, type NamingOptions } from "./naming.ts";
 import { generateGamePassword } from "./password.ts";
+import type { PasswordCipher } from "./secrets.ts";
 import { commands, SoapError, type SoapRun } from "./soap.ts";
 
 export interface IssuedAccount {
   account: string;
   password: string;
+  /** The account was made just now. */
   created: boolean;
+  /** The password was set just now (new account, reset, or an unreadable stored one). */
+  passwordChanged: boolean;
 }
 
 export interface AccountsDeps {
   store: Store;
   soap: SoapRun;
+  cipher: PasswordCipher;
   naming?: NamingOptions;
   password?: () => string;
   wait?: (ms: number) => Promise<void>;
@@ -47,8 +54,68 @@ export class Accounts {
     this.newPassword = deps.password ?? (() => generateGamePassword());
   }
 
-  issue(did: string, handle: string): Promise<IssuedAccount> {
-    return this.one(() => this.issueNow(did, handle));
+  ensure(did: string, handle: string): Promise<IssuedAccount> {
+    return this.one(() => this.ensureNow(did, handle));
+  }
+
+  reset(did: string, handle: string): Promise<IssuedAccount> {
+    return this.one(() => this.resetNow(did, handle));
+  }
+
+  private async ensureNow(did: string, handle: string): Promise<IssuedAccount> {
+    const { store, cipher } = this.deps;
+    const link = store.linkByDid(did);
+    if (!link) return this.createNow(did, handle);
+    const password = link.passwordEnc ? cipher.decrypt(did, link.passwordEnc) : undefined;
+    // A link from before passwords were stored, or a lost key: the only way forward is a new one.
+    if (password === undefined) return this.resetNow(did, handle);
+    if (link.handle !== handle) store.touchLink(did, handle);
+    // Every sign-in refreshes the realm's copy (new handle, or a module installed since).
+    await this.linkInRealm(link.account, did, handle, false);
+    return { account: link.account, password, created: false, passwordChanged: false };
+  }
+
+  private async resetNow(did: string, handle: string): Promise<IssuedAccount> {
+    const { store, soap, cipher } = this.deps;
+    const link = store.linkByDid(did);
+    if (!link) return this.createNow(did, handle);
+    const password = this.newPassword();
+    let created = false;
+    try {
+      await soap(commands.setPassword(link.account, password));
+    } catch (e) {
+      // The realm lost the account (restored backup, manual delete): make it again, same name.
+      if (!(e instanceof SoapError && e.notExists)) throw redact(e, password);
+      await soap(commands.createAccount(link.account, password)).catch((err) => {
+        throw redact(err, password);
+      });
+      created = true;
+    }
+    store.setPassword(did, cipher.encrypt(did, password));
+    if (link.handle !== handle) store.touchLink(did, handle);
+    if (created) await this.whileMissing(commands.setAddon(link.account));
+    await this.linkInRealm(link.account, did, handle, created);
+    return { account: link.account, password, created, passwordChanged: true };
+  }
+
+  private async createNow(did: string, handle: string): Promise<IssuedAccount> {
+    const { store, soap, cipher } = this.deps;
+    const password = this.newPassword();
+    for (const name of accountNameCandidates(handle, did, this.deps.naming)) {
+      if (store.accountTaken(name)) continue;
+      try {
+        await soap(commands.createAccount(name, password));
+      } catch (e) {
+        if (e instanceof SoapError && e.alreadyExists) continue; // not ours: never take it over
+        throw redact(e, password);
+      }
+      store.insertLink(did, name, handle, cipher.encrypt(did, password));
+      this.log(`account: created ${name} for ${did}`);
+      await this.whileMissing(commands.setAddon(name));
+      await this.linkInRealm(name, did, handle, true);
+      return { account: name, password, created: true, passwordChanged: true };
+    }
+    throw new Error("no free game account name for this identity; ask the realm owner");
   }
 
   /** Retry `command` while the realm says the account does not exist yet. */
@@ -63,55 +130,11 @@ export class Accounts {
     }
   }
 
-  private async issueNow(did: string, handle: string): Promise<IssuedAccount> {
-    const { store, soap } = this.deps;
-    const password = this.newPassword();
-    const existing = store.linkByDid(did);
-    let account: string;
-    let created = false;
-    if (existing) {
-      account = existing.account;
-      try {
-        await soap(commands.setPassword(account, password));
-      } catch (e) {
-        // The realm lost the account (restored backup, manual delete): make it again, same name.
-        if (!(e instanceof SoapError && e.notExists)) throw redact(e, password);
-        await soap(commands.createAccount(account, password)).catch((err) => {
-          throw redact(err, password);
-        });
-        created = true;
-      }
-      store.touchLink(did, handle);
-    } else {
-      account = await this.createFresh(did, handle, password);
-      created = true;
-    }
-    if (created) await this.whileMissing(commands.setAddon(account));
-    await this.linkInRealm(account, did, handle);
-    return { account, password, created };
-  }
-
-  private async createFresh(did: string, handle: string, password: string): Promise<string> {
-    const { store, soap } = this.deps;
-    for (const name of accountNameCandidates(handle, did, this.deps.naming)) {
-      if (store.accountTaken(name)) continue;
-      try {
-        await soap(commands.createAccount(name, password));
-      } catch (e) {
-        if (e instanceof SoapError && e.alreadyExists) continue; // not ours: never take it over
-        throw redact(e, password);
-      }
-      store.insertLink(did, name, handle);
-      this.log(`account: created ${name} for ${did}`);
-      return name;
-    }
-    throw new Error("no free game account name for this identity; ask the realm owner");
-  }
-
   /** Tell the realm module who this account is (welcome message, progress events). */
-  private async linkInRealm(account: string, did: string, handle: string): Promise<void> {
+  private async linkInRealm(account: string, did: string, handle: string, justCreated: boolean): Promise<void> {
     try {
-      await this.whileMissing(commands.link(account, did, handle));
+      const command = commands.link(account, did, handle);
+      await (justCreated ? this.whileMissing(command) : this.deps.soap(command));
     } catch (e) {
       // The account works without the module; only the in-game handle and records are missing.
       this.log(`account: realm link for ${account} failed: ${(e as Error).message}`);

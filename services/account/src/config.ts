@@ -11,6 +11,7 @@ export interface Config {
   dataDir: string;
   dbPath: string;
   keysPath: string;
+  serviceKeysPath: string;
   soapUrl: string;
   soapCredentialsFile: string;
   realmAddress: string;
@@ -54,6 +55,7 @@ export function loadConfig(env: Env = process.env): Config {
     dataDir,
     dbPath: join(dataDir, "account.sqlite"),
     keysPath: join(dataDir, "oauth-keys.json"),
+    serviceKeysPath: join(dataDir, "service-keys.json"),
     soapUrl: env.SOAP_URL || "http://127.0.0.1:17878/",
     soapCredentialsFile,
     realmAddress: env.REALM_ADDRESS || "wrathplus.artivus.com.au:3724",

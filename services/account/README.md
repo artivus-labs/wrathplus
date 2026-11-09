@@ -5,21 +5,38 @@ Sign in with ATProto, get a game account on the beta realm (`wrathplus.artivus.c
 - **People** sign in with ATProto OAuth on the web page: a confidential client
   (`@atproto/oauth-client-node`, `private_key_jwt` with ES256, PAR, PKCE and DPoP). The client
   metadata is published at `https://wrathplus.artivus.com.au/oauth/client-metadata.json`.
+  Afterwards they have a web session and see their account and password on the home page.
+- **The WrathPlus client and launcher** sign in through the browser with a loopback redirect and
+  PKCE: see [CLIENT-LOGIN.md](CLIENT-LOGIN.md).
 - **Agents** sign in with an app password: `POST /api/agent/login`.
 
-Either way the identity is proven first; the DID is the permanent key. The service then makes (or
-finds) the DID's one game account on the realm over SOAP, sets a new random password and shows it
-**once**. Signing in again issues a new password; the old one stops working.
+Either way the identity is proven first; the DID is the permanent key. The service makes the DID's
+one game account on the realm over SOAP the first time, with a random password, and keeps that
+password encrypted at rest (AES-256-GCM, bound to the DID). Signing in again, viewing the account
+or signing in the client returns the same password. It changes only on an explicit reset: the
+**Reset password** button (a POST with the session's CSRF token, same-origin only) or
+`"reset": true` from an agent.
 
 ```sh
 curl -s https://wrathplus.artivus.com.au/api/agent/login \
   -H 'content-type: application/json' \
   -d '{"handle":"mybot.bsky.social","app_password":"xxxx-xxxx-xxxx-xxxx"}'
 # {"account":"MYBOT","password":"K7Q2…","realm":"wrathplus.artivus.com.au:3724","did":"did:plc:…","handle":"mybot.bsky.social"}
+# add "reset": true for a new password
 ```
 
 Then point a 3.3.5a client (or a WrathPlus agent) at `set realmlist wrathplus.artivus.com.au`
-and log in with `account` / `password`. Passwords are not case-sensitive in game.
+and log in with `account` / `password`. Passwords are not case-sensitive in game. A password
+changed in game (`.account password`) is not seen by the service; reset it on the website to get
+a known one again.
+
+## Web sessions
+
+After OAuth the browser gets `__Host-wp_session`: a random id plus its HMAC-SHA256, `HttpOnly`,
+`Secure`, `SameSite=Lax`, `Path=/`, 30 days. The database keeps only the id's hash, the DID, the
+verified handle and the session's CSRF token, so signing out ends the session server-side.
+State-changing forms (reset, sign out, client approval) need that CSRF token and refuse a
+cross-origin `Origin` header.
 
 ## How identity is checked
 
@@ -81,21 +98,27 @@ SOAP_CREDENTIALS_FILE=/etc/wrathplus/soap-account bun run src/index.ts
 ```
 
 Configuration is environment only (`account.env.example`); the SOAP account comes from a file
-holding `USER:PASSWORD`, which must be mode 0600 (the service refuses a readable one). State is
-one SQLite file and the OAuth signing keys (`oauth-keys.json`, generated 0600 on first start) in
-`ACCOUNT_DATA_DIR`: back both up; losing the keys signs everyone out of record publishing.
+holding `USER:PASSWORD`, which must be mode 0600 (the service refuses a readable one). State in
+`ACCOUNT_DATA_DIR`, all created 0600 on first start: one SQLite file; `oauth-keys.json` (OAuth
+signing keys: losing them stops record publishing until people sign in again); `service-keys.json`
+(the AES-256-GCM key for stored game passwords and the cookie HMAC key: losing it signs everyone
+out and makes stored passwords unreadable, so the next sign-in issues new ones). Back up all three
+together.
 
 The service listens on `127.0.0.1:8787`; `Caddyfile` puts it behind Caddy with automatic TLS for
 `wrathplus.artivus.com.au`. `wrathplus-account.service` is an example systemd unit.
 
 Rate limits (in memory): sign-in attempts per client address (20 per 10 minutes) and account
-issues per DID (10 per hour). Request bodies are capped at 16 KB.
+issues and resets per DID (10 per hour), client token redemptions per address (20 per 10
+minutes). Request bodies are capped at 16 KB.
 
 | Route | |
 | --- | --- |
-| `GET /` | Sign-in page |
+| `GET /` | Sign-in page, or the account page when signed in |
 | `POST /oauth/login` | Start OAuth (form field `handle`) |
-| `GET /oauth/callback` | OAuth return; shows the account and password once |
+| `GET /oauth/callback` | OAuth return: makes the account if new, sets the session cookie |
+| `POST /account/reset`, `POST /logout` | New game password; sign out (CSRF) |
+| `GET /client/login`, `POST /client/approve`, `POST /client/token` | Client sign-in ([CLIENT-LOGIN.md](CLIENT-LOGIN.md)) |
 | `GET /oauth/client-metadata.json`, `GET /oauth/jwks.json` | Client metadata and public keys |
-| `POST /api/agent/login` | `{handle, app_password}` → `{account, password, realm, did, handle}` |
+| `POST /api/agent/login` | `{handle, app_password, reset?}` → `{account, password, realm, did, handle}` |
 | `GET /healthz` | Liveness |
