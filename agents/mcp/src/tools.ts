@@ -32,7 +32,7 @@ export interface ToolOptions {
   longPoll?: boolean;
 }
 
-const STATUS_DESCRIPTION = `Report the WrathPlus game client's state: {state, in_world, ui_ready, time, player}. state is the client phase (login, character select, in world, ...); in world, player summarises name, level, class, race, health, power, dead, combat, zone, subzone, map position and target.`;
+const STATUS_DESCRIPTION = `Report the WrathPlus game client's state: {state, in_world, ui_ready, time, player}. state is the client phase (login, character select, in world, ...); ui_ready means its Lua answers, and out of the world that the login and character-select API (GetNumCharacters, CreateCharacter, EnterWorld...) is installed, so wait for it before calling those; in world, player summarises name, level, class, race, health, power, dead, combat, zone, subzone, map position and target.`;
 
 function text(value: unknown, isError = false): CallToolResult {
   return {
