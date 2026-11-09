@@ -579,8 +579,8 @@ mod tests {
     }
 
     /// Power Word: Shield (implicit target 57, the raid word) on the press: a party member binds
-    /// and goes on the wire, a friendly player in no group does not, and the fallback to ourselves
-    /// is `autoSelfCast`'s.
+    /// and goes on the wire; a friendly player in no group does not. Native autoSelfCast
+    /// does not replace a valid assistable candidate after a group refusal.
     #[test]
     fn a_raid_word_spell_pressed_on_a_party_member_binds_him() {
         let factions = fx::factions();
@@ -632,8 +632,8 @@ mod tests {
         );
         assert_eq!(
             press((STRANGER, &stranger), true),
-            CastWireTarget::Unit(ME),
-            "and autoSelfCast falls back to the caster"
+            CastWireTarget::Targeting(RAID_WORD),
+            "12340 autoSelfCast does not replace an assistable stranger"
         );
     }
 

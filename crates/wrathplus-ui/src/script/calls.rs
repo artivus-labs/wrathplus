@@ -33,8 +33,8 @@ pub enum ScriptCall {
     SpellStopTargeting,
     /// `SpellStopCasting()` (`0x6e6e80`), made with something to stop.
     SpellStopCasting,
-    /// `CastSpell(id, "spell", onSelf)` and `CastSpellByName(name, onSelf)`, through `0x4b3300`'s
-    /// player leg; `onSelf` swaps the target guid for the active player's (`0x4b4afa`, `0x4b4345`).
+    /// Build 12340 `CastSpell(index, "spell", onSelf)` (0x541250), or an implicit by-name cast.
+    /// `onSelf` swaps the candidate for the active player, not the selection.
     CastSpell { spell_id: u32, on_self: bool },
     /// `CastSpell(id, "pet", onSelf)`, `0x4b3300`'s `CMSG_PET_ACTION` fork (`0x4b34ce`), with the
     /// same guid swap.
@@ -67,6 +67,8 @@ pub enum ScriptCall {
     /// Build 12340 `CastSpellByID(id, unit)` (`0x53e060`) at a unit token other than the
     /// selection or the player.
     CastSpellAt { spell_id: u32, unit: String },
+    /// Explicit unit intent for an item use; the inner call retains its ordinary routing.
+    AtUnit { unit: String, call: Box<ScriptCall> },
     /// Build 12340 `RunMacro(index or name[, button])` (`0x566e80`): the macro's lines, as a macro
     /// slot, with `button` for `GetRunningMacroButton` (`0x564db0` keeps it in `[0xbeaf48]`).
     RunMacro { index: u32, button: Option<String> },
@@ -137,5 +139,18 @@ impl UiScript {
             None => true,
         });
         taken
+    }
+}
+
+impl ScriptCall {
+    /// Compose explicit unit intent without changing the item routing operation.
+    pub(crate) fn at_unit(self, unit: Option<String>) -> Self {
+        match unit {
+            Some(unit) => Self::AtUnit {
+                unit,
+                call: Box::new(self),
+            },
+            None => self,
+        }
     }
 }

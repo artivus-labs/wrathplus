@@ -66,6 +66,37 @@ pub fn apply_script_calls(
         return;
     };
     in_call_order(&mut script, |script, call| {
+        let mut call = call;
+        let mut unit = None;
+        loop {
+            match call {
+                ScriptCall::CastSpellAt {
+                    spell_id,
+                    unit: token,
+                } => {
+                    unit = Some(token);
+                    call = ScriptCall::CastSpell {
+                        spell_id,
+                        on_self: false,
+                    };
+                }
+                ScriptCall::AtUnit {
+                    unit: token,
+                    call: inner,
+                } => {
+                    unit = Some(token);
+                    call = *inner;
+                }
+                _ => break,
+            }
+        }
+        let explicit = unit.map(|unit| {
+            let selection = appliers.p3().targeting.selection.guid;
+            script.cast_unit_guid(&unit, selection)
+        });
+        if explicit == Some(None) {
+            return;
+        }
         match call {
             ScriptCall::Select(request) => appliers.p0().select(request),
             ScriptCall::TargetByName { name, exact } => appliers.p0().target_by_name(&name, exact),
@@ -79,7 +110,12 @@ pub fn apply_script_calls(
             ScriptCall::SpellStopTargeting => appliers.p1().stop_targeting(),
             ScriptCall::SpellStopCasting => appliers.p2().stop_casting(),
             ScriptCall::CastSpell { spell_id, on_self } => {
-                crate::ui_spellbook::cast_spell(&mut appliers.p3(), spell_id, on_self);
+                crate::ui_spellbook::cast_spell_at(
+                    &mut appliers.p3(),
+                    spell_id,
+                    on_self,
+                    explicit.flatten(),
+                );
             }
             ScriptCall::CastShapeshiftForm(spell_id) => {
                 crate::ui_shapeshift::cast_form(&mut appliers.p3(), spell_id);
@@ -91,9 +127,13 @@ pub fn apply_script_calls(
                 }
             }
             ScriptCall::UseContainerItem { bag, slot } => {
-                appliers.p5().use_container_item(script, bag, slot);
+                appliers
+                    .p5()
+                    .use_container_item_at(script, bag, slot, explicit);
             }
-            ScriptCall::UseInventoryItem(id) => appliers.p5().use_inventory_item(script, id),
+            ScriptCall::UseInventoryItem(id) => {
+                appliers.p5().use_inventory_item_at(script, id, explicit)
+            }
             ScriptCall::CastPetSpell { spell_id, on_self } => {
                 crate::ui_pet_book::cast_pet_spell(&mut appliers.p6(), spell_id, on_self);
             }
@@ -167,10 +207,8 @@ pub fn apply_script_calls(
                     interact.0.write(crate::target::Interact(entity));
                 }
             }
-            // `CastSpellByID` at a unit token other than the selection or the player needs a
-            // cast context bound to that unit, which the cast tail does not build: capture-only.
-            other @ ScriptCall::CastSpellAt { .. } => {
-                debug!("script call {other:?} not applied yet: capture-only");
+            ScriptCall::CastSpellAt { .. } | ScriptCall::AtUnit { .. } => {
+                unreachable!("unit intent unwrapped")
             }
         }
         // TryCast's attack pick can move the selection mid-cast (`0x6e4efb`), so a press held
@@ -180,7 +218,10 @@ pub fn apply_script_calls(
         };
         if appliers.p7().pick_for_cast(held) {
             let mut cast = appliers.p3();
-            let ctx = cast.targeting.context();
+            let ctx = cast
+                .targeting
+                .context_at(held.explicit.map(Some))
+                .self_bound(held.on_self);
             cast.ladder.resume_after_pick(held, &ctx);
         }
     });

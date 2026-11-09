@@ -161,7 +161,14 @@ fn use_container_item_queues_intents() {
     s.set_container(0, Some(backpack()));
     s.run("UseContainerItem(0, 1)").unwrap();
     s.run("UseContainerItem(0, 3, 'target')").unwrap();
-    assert_eq!(s.take_container_uses(), vec![(0, 1), (0, 3)]);
+    assert_eq!(
+        s.take_script_calls(),
+        vec![
+            crate::script::ScriptCall::UseContainerItem { bag: 0, slot: 1 },
+            crate::script::ScriptCall::UseContainerItem { bag: 0, slot: 3 }
+                .at_unit(Some("target".into())),
+        ]
+    );
     assert!(s.take_container_uses().is_empty(), "drained");
 }
 

@@ -131,6 +131,14 @@ fn frame(selected: bool) -> Frame {
             }),
         );
     }
+    script.set_unit_guids(&wrathplus_ui::script::UnitGuids {
+        player: ME,
+        target: if selected { OLD } else { 0 },
+        party: [NEW, 0, 0, 0],
+        focus: NEW,
+        held: [(ME, 0), (OLD, 0), (NEW, 0)].into(),
+        ..Default::default()
+    });
     world.insert_non_send_resource(script);
     Frame { app, rx }
 }
@@ -254,110 +262,6 @@ fn errors(f: &Frame) -> Vec<&'static str> {
         .iter()
         .map(|e| e.key)
         .collect()
-}
-
-/// `CastSpellByName(name, onSelf)` (`0x4b4ab0`) and `CastSpell(slot, book, onSelf)` (`0x4b42f0`)
-/// swap the target guid for the active player's (`0x4b4afa`, `0x4b4345`) when
-/// `GetBoolOrDefault` reads the flag true, so the cast goes to us whoever is selected, and the
-/// selection stays where it was. Without the flag it goes to the selection.
-#[test]
-fn on_self_casts_at_the_player_and_leaves_the_selection() {
-    for (lua, target, selection) in [
-        (r#"CastSpellByName("Heal", 1)"#, ME, OLD),
-        (r#"CastSpellByName("Heal", "yes")"#, ME, OLD),
-        (r#"CastSpell(1, "spell", 1)"#, ME, OLD),
-        (
-            r#"TargetUnit("party1") CastSpellByName("Heal", 1)"#,
-            ME,
-            NEW,
-        ),
-        (r#"CastSpellByName("Heal")"#, OLD, OLD),
-        (r#"CastSpellByName("Heal", 0.5)"#, OLD, OLD),
-        (r#"CastSpellByName("Heal", "false")"#, OLD, OLD),
-        (r#"CastSpell(1, "spell")"#, OLD, OLD),
-        (r#"CastSpell(1, "spell", "0")"#, OLD, OLD),
-    ] {
-        let mut f = frame(true);
-        run(&mut f, lua);
-        assert_eq!(casts(&f), vec![(HEAL, Some(target))], "{lua}");
-        assert_eq!(selected(&f), Some(selection), "{lua}");
-    }
-}
-
-/// Power Word: Fortitude's word, an assist unit (implicit target 21), in the catalog and
-/// the book.
-const FORTITUDE: u32 = 1243;
-
-fn with_fortitude(f: &mut Frame) {
-    let world = f.app.world_mut();
-    let display = wrathplus_formats::SpellDisplay {
-        range_index: 4,
-        implicit_target_a1: 21,
-        ..Default::default()
-    };
-    world.insert_resource(crate::app_core::state::Spells {
-        catalog: wrathplus_formats::SpellCatalog::from_displays([(FORTITUDE, display)].into()),
-        ranges: wrathplus_formats::SpellRangeCatalog::from_rows(
-            [(
-                4,
-                wrathplus_formats::SpellRange {
-                    min: 0.0,
-                    max: 30.0,
-                    flags: 0,
-                },
-            )]
-            .into(),
-        ),
-        ..crate::app_core::state::Spells::empty_for_tests()
-    });
-    world
-        .non_send_resource_mut::<UiScript>()
-        .set_spellbook(SpellBookState {
-            tabs: vec![SpellTabView {
-                name: "Priest".into(),
-                texture: None,
-                offset: 0,
-                num_spells: 1,
-            }],
-            slots: vec![SpellSlotView {
-                spell_id: FORTITUDE,
-                name: "Fortitude".into(),
-                ..Default::default()
-            }],
-        });
-}
-
-/// The bind runs the ordinary relation chain over the player: with a unit we cannot assist
-/// selected and `autoSelfCast` off, the plain call binds nothing (the cursor comes up), while
-/// `onSelf` binds us; with a friendly player selected the plain call binds that player.
-#[test]
-fn on_self_binds_the_player_where_the_selection_is_not_assistable() {
-    for (selected_template, lua, target) in [
-        (FOE, r#"CastSpellByName("Fortitude")"#, None),
-        (FOE, r#"CastSpellByName("Fortitude", 1)"#, Some(ME)),
-        (FOE, r#"CastSpell(1, "spell", 1)"#, Some(ME)),
-        (FRIEND, r#"CastSpellByName("Fortitude")"#, Some(OLD)),
-        (FRIEND, r#"CastSpellByName("Fortitude", 1)"#, Some(ME)),
-    ] {
-        let mut f = frame(true);
-        // `CanAssist` passes a friendly player-controlled unit (`UNIT_FLAG_PLAYER_CONTROLLED`).
-        with_factions(&mut f, selected_template, &[(FLAGS, 0x8)]);
-        with_fortitude(&mut f);
-        // Off, as the doc says: build 12340 registers it "1".
-        let world = f.app.world_mut();
-        let events = {
-            let mut cvars = world.resource_mut::<crate::cvars::Cvars>();
-            cvars.set("autoSelfCast", "0");
-            cvars.take_events()
-        };
-        for event in events {
-            world.trigger(event);
-        }
-        run(&mut f, lua);
-        let sent: Vec<_> = target.into_iter().map(|t| (FORTITUDE, Some(t))).collect();
-        assert_eq!(casts(&f), sent, "{lua} at template {selected_template}");
-        assert_eq!(selected(&f), Some(OLD), "{lua}");
-    }
 }
 
 /// The pet's guid, and the pet book's Growl (`CMSG_PET_ACTION`'s type-1 word, `0x4b34ce`).
@@ -821,3 +725,6 @@ fn start_attack_and_target_last_friend_apply_in_call_order() {
 
 #[path = "script_calls_service_tests.rs"]
 mod service_tests;
+
+#[path = "explicit_cast.rs"]
+mod explicit_cast;

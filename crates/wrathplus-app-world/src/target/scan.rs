@@ -669,6 +669,29 @@ impl AttackPick<'_, '_> {
         Some(guid)
     }
 
+    /// A supplied cast GUID runs the final attack gate without selecting or acquiring a unit.
+    pub fn bound_target(
+        &self,
+        guid: u64,
+        errors: &mut crate::app_core::errors::UiErrorKeys,
+    ) -> Option<u64> {
+        let store = self.scan.store_of(guid)?;
+        if attack_target_valid(
+            Some(store),
+            self.scan.factions.as_deref(),
+            &self.scan.reputations,
+            self.scan.self_store(),
+            self.scan.relations(),
+        ) {
+            Some(guid)
+        } else {
+            errors.0.push(crate::app_core::errors::UiError::key(
+                "ERR_INVALID_ATTACK_TARGET",
+            ));
+            None
+        }
+    }
+
     /// `0x6130a3`'s keep test: the actor's reaction to the held unit alone (`0x61309b`), not the
     /// final gate's `CanAttack`, so a neutral mob is kept, and an unresolved guid (`0x613099`) too.
     /// Actor → target is [`reaction_from_player_in`] (the at-war bit), never `ring_reaction`. The

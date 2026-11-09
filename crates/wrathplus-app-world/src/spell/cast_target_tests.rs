@@ -63,6 +63,7 @@ fn resolution_wire_shapes() {
         (wrathplus_protocol::types::Field::UnitFlags, 1 << 3),
     ]));
     let it = crate::app_core::session::ObjectStore(ObjectFields::from_fields(&[
+        (wrathplus_protocol::types::Field::ObjectType, 9),
         (wrathplus_protocol::types::Field::UnitHealth, 100),
         (wrathplus_protocol::types::Field::UnitFactionTemplate, 0),
     ]));

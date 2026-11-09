@@ -154,9 +154,9 @@ fn cast_spell(lua: &Lua, name: &str) -> mlua::Result<()> {
 
 /// `ITEM name` on the press, with a player (`0x4038f0`): the first carried copy by name
 /// (`0x754af0`; inferred order: the equipped slots, then the backpack and bags), used as a click
-/// on its slot uses it. Not wired: the `SELFCAST`/`FOCUSCAST` target (`0x708c20`'s guid), since
-/// the item-use calls carry no target; the use aims as a slot click does.
+/// on its slot uses it, retaining `SELFCAST`/`FOCUSCAST` intent (`0x708c20`).
 fn use_item(lua: &Lua, name: &str) -> mlua::Result<()> {
+    let target = form_target(lua)?.map(|unit| unit.unwrap_or("player").to_string());
     let mut model = lua.app_data_mut::<Model>().expect("model app_data");
     if model.unit_guids.player == 0 {
         return Ok(());
@@ -178,7 +178,9 @@ fn use_item(lua: &Lua, name: &str) -> mlua::Result<()> {
             Some(super::ScriptCall::UseContainerItem { bag, slot: *slot })
         }),
     };
-    model.script_calls.extend(call);
+    model
+        .script_calls
+        .extend(call.map(|call| call.at_unit(target)));
     Ok(())
 }
 

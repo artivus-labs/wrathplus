@@ -313,9 +313,18 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     )?;
     g.set(
         "UseInventoryItem",
-        lua.create_function(|lua, id: u32| {
+        lua.create_function(|lua, (id, target): (u32, Option<Value>)| {
+            let unit = crate::script::unit::token::token_text(lua, &target.unwrap_or(Value::Nil))
+                .filter(|t| !t.is_empty());
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
+            if unit.as_ref().is_some_and(|t| !model.resolve_token(t).ok) {
+                return Ok(());
+            }
+            let start = model.script_calls.len();
             use_inventory_item(&mut model, id);
+            for call in &mut model.script_calls[start..] {
+                *call = call.clone().at_unit(unit.clone());
+            }
             Ok(())
         })?,
     )?;
