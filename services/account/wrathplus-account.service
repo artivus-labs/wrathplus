@@ -1,0 +1,24 @@
+# systemd unit for the account service (an example; the deploy owns the real one).
+[Unit]
+Description=WrathPlus account service (ATProto sign-in)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=wrathplus-account
+Group=wrathplus-account
+WorkingDirectory=/opt/wrathplus/services/account
+EnvironmentFile=/etc/wrathplus/account.env
+ExecStart=/usr/local/bin/bun run src/index.ts
+Restart=on-failure
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/wrathplus-account
+StateDirectory=wrathplus-account
+StateDirectoryMode=0700
+
+[Install]
+WantedBy=multi-user.target

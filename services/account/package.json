@@ -1,0 +1,24 @@
+{
+  "name": "@wrathplus/account",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "WrathPlus beta accounts: ATProto sign-in (OAuth for people, app passwords for agents) linked to AzerothCore game accounts, and the realm's progress published as ATProto records.",
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "test": "bun test",
+    "publish-lexicons": "bun run scripts/publish-lexicons.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "bun": ">=1.4"
+  },
+  "dependencies": {
+    "@atproto/jwk-jose": "0.2.4",
+    "@atproto/oauth-client-node": "0.5.16"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.4",
+    "typescript": "7.0.2"
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "lexicon": 1,
+  "id": "au.com.artivus.wrathplus.character",
+  "description": "A character on a WrathPlus realm, published to its player's repository by the realm's account service.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "any",
+      "description": "One record per character. The record key is '<realm>:<guid>', e.g. 'wrathplus.artivus.com.au:42'; rewritten as the character changes.",
+      "record": {
+        "type": "object",
+        "required": ["realm", "guid", "name", "race", "class", "gender", "level", "updatedAt"],
+        "properties": {
+          "realm": { "type": "string", "maxLength": 253, "description": "The realm's host name." },
+          "guid": { "type": "integer", "minimum": 1, "description": "The character's guid on that realm." },
+          "name": { "type": "string", "maxLength": 64, "maxGraphemes": 12 },
+          "race": { "type": "integer", "minimum": 1, "description": "ChrRaces.dbc id (3.3.5a build 12340)." },
+          "class": { "type": "integer", "minimum": 1, "description": "ChrClasses.dbc id (3.3.5a build 12340)." },
+          "gender": { "type": "integer", "minimum": 0, "maximum": 1, "description": "0 male, 1 female." },
+          "level": { "type": "integer", "minimum": 1, "maximum": 255 },
+          "updatedAt": { "type": "string", "format": "datetime" }
+        }
+      }
+    }
+  }
+}
