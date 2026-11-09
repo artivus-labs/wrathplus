@@ -1,0 +1,42 @@
+# Beta override of packaging/server/compose.yaml (the Manager's recipe), applied with
+# `-f compose.yaml -f compose.beta.yaml` by lib.sh. Only what differs on the public box:
+# an amd64 image, public auth/world ports, loopback-only SOAP, restart after reboot, log caps.
+# MySQL keeps no published port, as in the base recipe.
+x-beta-server: &beta-server
+  image: ${BETA_IMAGE:?Set BETA_IMAGE}
+  platform: linux/amd64
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options: {max-size: "50m", max-file: "5"}
+services:
+  playerbots-build:
+    image: ${BETA_IMAGE:?Set BETA_IMAGE}
+    platform: linux/amd64
+    build:
+      args:
+        BUILD_JOBS: ${BETA_BUILD_JOBS:-4}
+  credentials:
+    image: ${BETA_IMAGE:?Set BETA_IMAGE}
+    platform: linux/amd64
+  mysql:
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: {max-size: "20m", max-file: "3"}
+  bootstrap:
+    <<: *beta-server
+    restart: "no"
+  authserver:
+    <<: *beta-server
+    # Public on every interface (IPv4 and IPv6); the Hetzner firewall allows 3724 and 8085.
+    ports: !override ["3724:3724"]
+  worldserver:
+    <<: *beta-server
+    # SOAP on the host's loopback only (port as the local realm), never public: account service + admin.
+    ports: !override ["8085:8085", "127.0.0.1:17878:7878"]
+    # Logs on disk, not in the /state tmpfs (RAM) the base recipe uses for a short local session.
+    volumes:
+      - world-logs:/state/logs
+volumes:
+  world-logs:
