@@ -1,5 +1,6 @@
-// The three pages people see: sign in, your account (password shown once), and an error.
-// Plain server-rendered HTML, no scripts.
+// The pages people see: sign in, your account, the client sign-in, and an error. Server-rendered
+// HTML; the one script is COPY_JS below (served at /copy.js, no inline script anywhere), for the
+// copy buttons on the account page.
 
 export function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
@@ -13,8 +14,30 @@ export const PAGE_HEADERS = {
   "x-frame-options": "DENY",
   // form-action allows https: because the sign-in form's redirect goes to the person's own
   // authorization server.
-  "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self' https:; frame-ancestors 'none'; base-uri 'none'",
+  // script-src 'self' admits only /copy.js: no inline script, no other origin.
+  "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; form-action 'self' https:; frame-ancestors 'none'; base-uri 'none'",
 };
+
+/** The copy buttons: each copies the text of the element its data-copy names, without showing a
+ *  hidden password, and says so for a moment. Buttons are hidden until this runs. */
+export const COPY_JS = `for (const b of document.querySelectorAll("button[data-copy]")) {
+  b.hidden = false;
+  b.addEventListener("click", async () => {
+    const el = document.getElementById(b.dataset.copy);
+    if (!el) return;
+    try {
+      await navigator.clipboard.writeText(el.textContent.trim());
+      b.textContent = "Copied";
+    } catch {
+      b.textContent = "Copy failed";
+    }
+    setTimeout(() => { b.textContent = "Copy"; }, 1500);
+  });
+}
+`;
+
+const copyButton = (target: string, what: string) =>
+  `<button type="button" class="copy" data-copy="${escapeHtml(target)}" aria-label="Copy ${escapeHtml(what)}" hidden>Copy</button>`;
 
 const STYLE = `
   :root { color-scheme: dark; --bg: #0d1117; --card: #161b22; --line: #30363d; --fg: #e6edf3; --dim: #8b949e; --gold: #e3b341; --ice: #79c0ff; }
@@ -35,6 +58,9 @@ const STYLE = `
   .row { display: flex; gap: .75rem; }
   .row form { flex: 1; }
   details { margin-top: .25rem; }
+  dd.copyable { display: flex; align-items: flex-start; gap: .6rem; justify-content: space-between; }
+  button.copy { margin: 0; width: auto; flex: none; padding: .2rem .6rem; font-size: .8rem; font-weight: 500; background: transparent; color: var(--ice); border: 1px solid var(--line); border-radius: 6px; }
+  button.copy:hover { border-color: var(--ice); }
   summary { cursor: pointer; color: var(--ice); }
   a { color: var(--ice); }
   small { color: var(--dim); }
@@ -81,10 +107,11 @@ export function accountPage(v: AccountView): string {
 <p>Your game account on the beta realm.</p>
 ${v.notice ? `<div class="note">${escapeHtml(v.notice)}</div>` : ""}
 <dl>
-  <dt>Account</dt><dd>${escapeHtml(v.account)}</dd>
-  <dt>Password</dt><dd><details><summary>Show</summary><span class="secret">${escapeHtml(v.password)}</span></details></dd>
-  <dt>Realm</dt><dd>${escapeHtml(v.realm)}</dd>
+  <dt>Account</dt><dd class="copyable"><span id="account">${escapeHtml(v.account)}</span>${copyButton("account", "account name")}</dd>
+  <dt>Password</dt><dd class="copyable"><details><summary>Show</summary><span class="secret" id="password">${escapeHtml(v.password)}</span></details>${copyButton("password", "password")}</dd>
+  <dt>Realm</dt><dd class="copyable"><span id="realm">${escapeHtml(v.realm)}</span>${copyButton("realm", "realm address")}</dd>
 </dl>
+<script src="/copy.js" defer></script>
 <p><small>Passwords are not case-sensitive in game.</small></p>
 <div class="row">
   <form method="post" action="/account/reset">${hidden("csrf", v.csrf)}<button type="submit">Reset password</button></form>
