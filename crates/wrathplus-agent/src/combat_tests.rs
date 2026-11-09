@@ -74,10 +74,11 @@ fn a_kill_is_looted_before_the_fight_is_over() {
     let mut script = combat();
     script
         .run(
-            "looted = {} closed = false \
+            "looted = {} closed = false open = false \
+             LootFrame = { IsShown = function() return open end } \
              GetNumLootItems = function() return 2 end \
              LootSlot = function(i) looted[#looted + 1] = i end \
-             CloseLoot = function() closed = true wolf.lootable = false end \
+             CloseLoot = function() closed, open, wolf.lootable = true, false, false end \
              Combat.engage('0xW') wolf.dead, wolf.lootable, wolf.distance = true, true, 8",
         )
         .unwrap();
@@ -86,19 +87,46 @@ fn a_kill_is_looted_before_the_fight_is_over() {
     assert_eq!(calls(&script), "target 0xW | move 20");
     let state: String = script.eval("return Combat.state").unwrap();
     assert_eq!(state, "walking to loot Mangy Wolf");
-    // Beside it: open it; the opened window is emptied and closed.
+    // Beside it: open it, and take every slot as the window opens.
     script.run("wolf.distance, walking = 2, false").unwrap();
     script.tick(0.25);
     assert_eq!(calls(&script), "target 0xW | move 20 | swing 0xW");
+    script.run("open = true").unwrap();
     script.fire_event("LOOT_OPENED", vec![]);
-    let (taken, closed): (String, bool) = script
-        .eval("return table.concat(looted, ','), closed")
-        .unwrap();
-    assert_eq!((taken.as_str(), closed), ("2,1", true));
-    // Emptied: the kill is over.
+    let taken: String = script.eval("return table.concat(looted, ',')").unwrap();
+    assert_eq!(taken, "2,1");
+    // The picks land on a later frame: no close straight away, and no second open meanwhile.
+    script.tick(0.25);
+    assert!(!script.eval::<bool>("return closed").unwrap());
+    assert_eq!(calls(&script), "target 0xW | move 20 | swing 0xW");
+    // A second on, still open: close it; emptied, the kill is over.
+    for _ in 0..4 {
+        script.tick(0.25);
+    }
+    assert!(script.eval::<bool>("return closed").unwrap());
     script.tick(0.25);
     let (over, won): (bool, bool) = script.eval("return Combat.engaged('0xW')").unwrap();
     assert!(over && won);
+}
+
+#[test]
+fn a_corpse_that_stays_lootable_is_left_after_three_opens() {
+    let mut script = combat();
+    script
+        .run(
+            "LootFrame = { IsShown = function() return false end } \
+             Combat.engage('0xW') wolf.dead, wolf.lootable, wolf.distance = true, true, 2",
+        )
+        .unwrap();
+    for _ in 0..30 {
+        script.tick(0.25);
+    }
+    let (over, won): (bool, bool) = script.eval("return Combat.engaged('0xW')").unwrap();
+    assert!(over && won);
+    assert_eq!(
+        calls(&script),
+        "target 0xW | swing 0xW | swing 0xW | swing 0xW | stop"
+    );
 }
 
 #[test]

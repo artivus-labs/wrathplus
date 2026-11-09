@@ -46,7 +46,8 @@ local C = {
 
 local name_of, started, hp_at_start, faced
 -- Looting a kill: when it died, and when the corpse was last opened.
-local died_at, opened_at
+local died_at, opened_at, emptied_at
+local opens = 0
 
 local aimed, swung, seen_at
 
@@ -90,7 +91,7 @@ local function done(outcome)
   local seconds = started and math.floor(GetTime() - started) or 0
   local hp_lost = (hp_at_start or 0) - (UnitHealth("player") or 0)
   C.active, C.state, aimed, swung, seen_at, faced = nil, nil, nil, nil, nil, nil
-  died_at, opened_at = nil, nil
+  died_at, opened_at, emptied_at, opens = nil, nil, nil, 0
   C.last = { guid = guid, outcome = outcome }
   if outcome ~= "stopped" then
     C.history[#C.history + 1] = { name = name_of, outcome = outcome, seconds = seconds, hp_lost = hp_lost }
@@ -166,8 +167,14 @@ local function loot_kill(u, now)
     C.state = "walking to loot " .. (u.name or "the kill")
     return
   end
-  if not opened_at or now - opened_at >= 2 then
-    opened_at = now
+  -- Still lootable after three opens: something on it we cannot take (bags full, a quest item we
+  -- do not need). Leave it rather than open it forever.
+  if opens >= 3 then return done("killed") end
+  if LootFrame and LootFrame:IsShown() then
+    -- The picks went out when it opened; they land on a later frame. Close only after that.
+    if emptied_at and now - emptied_at >= 1 then CloseLoot() end
+  elseif not opened_at or now - opened_at >= 2 then
+    opened_at, opens = now, opens + 1
     AgentInteract(C.active)
   end
   C.state = "looting " .. (u.name or "the kill")
@@ -233,11 +240,13 @@ frame:RegisterEvent("UI_ERROR_MESSAGE")
 frame:RegisterEvent("LOOT_OPENED")
 frame:RegisterEvent("LOOT_BIND_CONFIRM")
 frame:SetScript("OnEvent", function(_, event, message)
-  -- Our kill's corpse is open: take everything, as autoloot would, then close it.
+  -- Our kill's corpse is open: take everything, as autoloot would.
   if event == "LOOT_OPENED" then
     if C.active and died_at then
+      -- Picks are queued for a later frame: closing now would release the corpse before they
+      -- land. loot_kill closes it a second later if it is still open.
       for slot = GetNumLootItems(), 1, -1 do LootSlot(slot) end
-      CloseLoot()
+      emptied_at = GetTime()
     end
     return
   end
