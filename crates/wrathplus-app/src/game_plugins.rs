@@ -338,11 +338,13 @@ pub(crate) mod schedule_tests {
         app
     }
 
-    /// One system as the schedule graph knows it: its name, every set it is under
-    /// (transitively), and every run condition on it or on one of those sets, by name.
+    /// One system as the schedule graph knows it: its name, the type it runs under (a name-free
+    /// handle: `System::type_id`), every set it is under (transitively), and every run condition
+    /// on it or on one of those sets, by name.
     #[derive(Debug, Clone)]
     pub(crate) struct SystemInfo {
         pub name: String,
+        pub type_id: TypeId,
         pub sets: Vec<String>,
         pub conditions: Vec<String>,
     }
@@ -370,10 +372,7 @@ pub(crate) mod schedule_tests {
 
     impl Census {
         pub fn name(&self, key: SystemKey) -> &str {
-            self.systems
-                .get(&key)
-                .map(|s| s.name.as_str())
-                .unwrap_or("?")
+            self.systems.get(&key).map_or("?", |s| s.name.as_str())
         }
 
         pub fn component(&self, id: ComponentId) -> &str {
@@ -461,6 +460,7 @@ pub(crate) mod schedule_tests {
                     key,
                     SystemInfo {
                         name: system.name().to_string(),
+                        type_id: System::type_id(&**system),
                         sets,
                         conditions,
                     },
@@ -506,6 +506,7 @@ pub(crate) mod schedule_tests {
                 // count them.
                 systems.entry(key).or_insert_with(|| SystemInfo {
                     name: system.name().to_string(),
+                    type_id: System::type_id(&**system),
                     sets: Vec::new(),
                     conditions: Vec::new(),
                 });

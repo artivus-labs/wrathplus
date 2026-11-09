@@ -20,6 +20,8 @@ use crate::names::NameCache;
 use crate::net::{FieldChanged, FieldEdges, Guid, NetCommands, NetHandlerApp, Reputations};
 use crate::ui_script::gate;
 
+#[cfg(any(test, feature = "test-support"))]
+pub mod aura_readers;
 pub(crate) mod held;
 
 pub(crate) use crate::app_core::schedule::UnitFeed;
