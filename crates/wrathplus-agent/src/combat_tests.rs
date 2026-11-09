@@ -54,13 +54,63 @@ fn it_chases_a_moving_target_swings_in_reach_and_reports_the_kill() {
     );
     let state: String = script.eval("return Combat.state").unwrap();
     assert_eq!(state, "fighting Mangy Wolf");
-    // Dead: the fight ends, signalled, and `engaged` says it was won.
+    // Dead, and nothing on it for us: the fight ends once the loot flag has had time to arrive,
+    // signalled, and `engaged` says it was won.
     script.run("wolf.dead = true").unwrap();
     script.tick(0.25);
+    let over: bool = script.eval("return Combat.engaged('0xW')").unwrap();
+    assert!(!over, "waits for the corpse to turn lootable");
+    for _ in 0..7 {
+        script.tick(0.25);
+    }
     let (over, won): (bool, bool) = script.eval("return Combat.engaged('0xW')").unwrap();
     assert!(over && won);
     let signals: String = script.eval("return table.concat(signals, ' | ')").unwrap();
     assert_eq!(signals, "COMBAT_DONE 0xW killed");
+}
+
+#[test]
+fn a_kill_is_looted_before_the_fight_is_over() {
+    let mut script = combat();
+    script
+        .run(
+            "looted = {} closed = false \
+             GetNumLootItems = function() return 2 end \
+             LootSlot = function(i) looted[#looted + 1] = i end \
+             CloseLoot = function() closed = true wolf.lootable = false end \
+             Combat.engage('0xW') wolf.dead, wolf.lootable, wolf.distance = true, true, 8",
+        )
+        .unwrap();
+    // Out of reach: walk to the corpse first.
+    script.tick(0.25);
+    assert_eq!(calls(&script), "target 0xW | move 20");
+    let state: String = script.eval("return Combat.state").unwrap();
+    assert_eq!(state, "walking to loot Mangy Wolf");
+    // Beside it: open it; the opened window is emptied and closed.
+    script.run("wolf.distance, walking = 2, false").unwrap();
+    script.tick(0.25);
+    assert_eq!(calls(&script), "target 0xW | move 20 | swing 0xW");
+    script.fire_event("LOOT_OPENED", vec![]);
+    let (taken, closed): (String, bool) = script
+        .eval("return table.concat(looted, ','), closed")
+        .unwrap();
+    assert_eq!((taken.as_str(), closed), ("2,1", true));
+    // Emptied: the kill is over.
+    script.tick(0.25);
+    let (over, won): (bool, bool) = script.eval("return Combat.engaged('0xW')").unwrap();
+    assert!(over && won);
+}
+
+#[test]
+fn loot_off_leaves_the_corpse() {
+    let mut script = combat();
+    script
+        .run("Combat.loot = false Combat.engage('0xW') wolf.dead, wolf.lootable = true, true")
+        .unwrap();
+    script.tick(0.25);
+    let over: bool = script.eval("return Combat.engaged('0xW')").unwrap();
+    assert!(over);
+    assert_eq!(calls(&script), "target 0xW | stop");
 }
 
 #[test]
@@ -123,6 +173,9 @@ fn a_walk_a_defensive_fight_broke_off_is_walked_on_after_it() {
     script.tick(0.25);
     script.tick(0.25);
     script.run("calls = {} wolf.dead = true").unwrap();
-    script.tick(0.25);
+    // Nothing to loot on it: the fight ends once the loot flag has had time to arrive.
+    for _ in 0..7 {
+        script.tick(0.25);
+    }
     assert_eq!(calls(&script), "stop | move -8880");
 }
