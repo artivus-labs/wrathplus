@@ -1,0 +1,10 @@
+[Unit]
+Description=WrathPlus beta realm: MySQL dump to /var/backups/wrathplus (7-day retention)
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+Nice=10
+IOSchedulingClass=idle
+ExecStart=/usr/local/sbin/wrathplus-realm backup

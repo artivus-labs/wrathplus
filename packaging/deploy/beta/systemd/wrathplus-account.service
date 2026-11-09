@@ -1,0 +1,29 @@
+# WrathPlus account service (services/account): ATProto sign-in on 127.0.0.1:8787 behind Caddy.
+# Installed by realm.sh account-service; based on services/account/wrathplus-account.service.
+[Unit]
+Description=WrathPlus account service (ATProto sign-in)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+User=wrathplus-account
+Group=wrathplus-account
+WorkingDirectory=/srv/wrathplus/repo/services/account
+EnvironmentFile=/etc/wrathplus/account.env
+Environment=HOME=/var/lib/wrathplus-account
+Environment=BUN_RUNTIME_TRANSPILER_CACHE_PATH=0
+ExecStart=/usr/local/bin/bun run src/index.ts
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ReadWritePaths=/var/lib/wrathplus-account
+StateDirectory=wrathplus-account
+StateDirectoryMode=0700
+
+[Install]
+WantedBy=multi-user.target
