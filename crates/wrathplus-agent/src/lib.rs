@@ -273,10 +273,20 @@ fn serve_jobs(
                     }
                     _ => Value::Null,
                 };
+                // Out of the world the glue API (GetNumCharacters, CreateCharacter...) installs a
+                // few seconds after the VM: ready only once it is there, so an agent never calls
+                // a character-select function that is still nil.
+                let ui_ready = match &script {
+                    Some(script) if !in_world => script
+                        .eval::<bool>("return type(GetNumCharacters) == 'function'")
+                        .unwrap_or(false),
+                    Some(_) => true,
+                    None => false,
+                };
                 let _ = reply.send(json!({
                     "state": state.map(|s| format!("{s:?}")),
                     "in_world": in_world,
-                    "ui_ready": script.is_some(),
+                    "ui_ready": ui_ready,
                     "time": link.started.elapsed().as_secs_f64(),
                     "player": player,
                 }));
