@@ -172,25 +172,20 @@ fn trim_g(s: &str) -> &str {
     s.trim_end_matches('0').trim_end_matches('.')
 }
 
-/// `GetBoolOrDefault` (`0x6f1c10`, jump table `0x6f1ce8`), the reference's boolean argument
-/// coercion, which is not Lua truthiness:
+/// `0x815500(L, idx, default)`, the reference's boolean argument coercion, which is not Lua
+/// truthiness. It switches on `lua_type` (`0x84deb0`, jump table `0x815574`):
 ///
-/// - absent (`None`, `LUA_TNONE`) takes `default`, but nil is false; a binding whose default is
-///   true takes a `MultiValue`, since mlua turns a missing argument into nil
-/// - a boolean is itself; a number truncates toward zero (`0x40a2b0`), then `!= 0`
-/// - a string goes by its first byte, through the remap table at `0x6f1d08`: `'0' 'F' 'N' 'f' 'n'`
-///   false, `'1'..='9' 'T' 'Y' 't' 'y'` true; any other is compared whole, case-insensitively
-///   (`0x64a4c0`): `"off"`/`"disabled"` false, `"on"`/`"enabled"` true, anything else `default`
+/// - absent (`None`, `LUA_TNONE`) takes `default`, but nil is false (`0x815521`); a binding whose
+///   default is true takes a `MultiValue`, since mlua turns a missing argument into nil
+/// - a boolean is itself; a number goes through [`ftol`] (`__ftol2_sse`, `0x88b9c0`), then `!= 0`
+///   (`0x815544`), so NaN or a number outside `i32` converts to `i32::MIN`: true
+/// - a string goes through `0x815400`, by its first byte through the remap table at `0x81548c`
+///   (jump table `0x815480`): `'0' 'F' 'N' 'f' 'n'` false, `'1'..='9' 'T' 'Y' 't' 'y'` true; any
+///   other is compared whole, case-insensitively (`_strnicmp`, `0x76e780`): `"off"` (`0xa09e84`) or
+///   `"disabled"` false, `"on"` (`0xa09e88`) or `"enabled"` true, anything else `default`
 /// - lightuserdata, a table, function, userdata or thread takes `default`
 ///
-/// So `"0"` is false and `"0.5"` goes by its first byte: the Interface panel passes its options
-/// the strings `"0"` and `"1"`.
-///
-/// Build 12340's twin is `0x815500(L, idx, default)`, by `lua_type`: nil 0, boolean itself, number
-/// through [`ftol`] (`0x88b9c0`) then `!= 0` (`0x815544`), string through `0x815400` (the same byte
-/// switch, then `_strnicmp` (`0x76e780`) against `"off"` (`0xa09e84`), `"disabled"`, `"on"`
-/// (`0xa09e88`) and `"enabled"`), any other type `default`. `GetShapeshiftForm`'s flag
-/// is one. NaN or a number outside `i32` converts to `i32::MIN`: true.
+/// So `"0"` is false and `"0.5"` goes by its first byte. `GetShapeshiftForm`'s flag is one.
 pub(crate) fn bool_or_default(v: Option<&Value>, default: bool) -> bool {
     let Some(v) = v else {
         return default; // LUA_TNONE
