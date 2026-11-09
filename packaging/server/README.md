@@ -160,6 +160,9 @@ page, and Add registers the folder from this checkout.
 
 - `mod-quest-minimap-points` fills the quest points AzerothCore's world database lacks, so a
   3.3.5a client shows the quest marker and its arrow on the minimap again.
+- `mod-atproto-identity` links game accounts to ATProto identities for the open beta, with
+  `services/account`: "Signed in as @handle" in game, and progress queued for publishing as
+  ATProto records.
 
 ## Bundled Chatter companion
 

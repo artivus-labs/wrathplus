@@ -1,0 +1,14 @@
+# wrathplus.artivus.com.au: the account service behind Caddy (automatic HTTPS via Let's Encrypt;
+# ports 80 and 443 are open in the Hetzner firewall). The service listens on loopback only.
+# Merge into /etc/caddy/Caddyfile, or `import` this file from it.
+wrathplus.artivus.com.au {
+	encode zstd gzip
+	request_body {
+		max_size 16KB
+	}
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+	reverse_proxy 127.0.0.1:8787
+}

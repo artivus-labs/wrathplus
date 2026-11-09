@@ -1,0 +1,26 @@
+{
+  "lexicon": 1,
+  "id": "au.com.artivus.wrathplus.milestone",
+  "description": "A moment of progress for a WrathPlus character: a level reached, an achievement earned, a quest completed.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "any",
+      "description": "The record key is '<realm>:<guid>:<kind>:<value>' (quests add ':<unix time>', since daily quests repeat), so publishing the same moment twice overwrites one record.",
+      "record": {
+        "type": "object",
+        "required": ["realm", "guid", "characterName", "kind", "value", "achievedAt"],
+        "properties": {
+          "realm": { "type": "string", "maxLength": 253, "description": "The realm's host name." },
+          "guid": { "type": "integer", "minimum": 1, "description": "The character's guid on that realm (see au.com.artivus.wrathplus.character)." },
+          "characterName": { "type": "string", "maxLength": 64, "maxGraphemes": 12 },
+          "kind": { "type": "string", "knownValues": ["level", "achievement", "quest"], "maxLength": 32 },
+          "value": { "type": "integer", "minimum": 0, "description": "The level reached, the Achievement.dbc id, or the quest id." },
+          "title": { "type": "string", "maxLength": 1024, "maxGraphemes": 256, "description": "The achievement's or quest's name, in the realm's language." },
+          "level": { "type": "integer", "minimum": 1, "maximum": 255, "description": "The character's level at the time." },
+          "achievedAt": { "type": "string", "format": "datetime" }
+        }
+      }
+    }
+  }
+}

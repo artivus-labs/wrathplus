@@ -1,0 +1,33 @@
+[worldserver]
+
+########################################
+# mod-atproto-identity
+########################################
+#
+#    AtprotoIdentity.Enable
+#        Description: Load account links, greet linked players and queue their progress.
+#        Default:     1
+#
+AtprotoIdentity.Enable = 1
+
+#
+#    AtprotoIdentity.Welcome
+#        Description: Say "Signed in as @handle" when a linked player enters the world.
+#        Default:     1
+#
+AtprotoIdentity.Welcome = 1
+
+#
+#    AtprotoIdentity.Events.Quests
+#        Description: Queue quest completions (the account service decides whether to publish them).
+#        Default:     1
+#
+AtprotoIdentity.Events.Quests = 1
+
+#
+#    AtprotoIdentity.Events.MaxQueued
+#        Description: Most unacknowledged events kept; newer ones are dropped (and logged) past it,
+#                     so a stopped account service cannot grow the queue without bound.
+#        Default:     20000
+#
+AtprotoIdentity.Events.MaxQueued = 20000
