@@ -11,6 +11,11 @@
 --                        and while chasing a target out of reach, turn on one already hitting you.
 --                        Set it false to run away (Combat.stop() alone would be re-engaged). A
 --                        walk such a fight broke off is walked on once it is won.
+--   Combat.loot          (default true) loot a kill as a player would, money and every item,
+--                        before the fight counts as over: walk to the corpse, open it, take all.
+--                        A corpse that is not ours to loot (another's tap, nothing on it) is left
+--                        once `loot_wait` seconds pass without it turning lootable. False leaves
+--                        corpses to your own code.
 --
 -- The end of a fight is signalled as AGENT_COMBAT_DONE (guid, "killed" | "lost" | "stopped" |
 -- "died"). Combat.history keeps the last fights ({ name, outcome, seconds, hp_lost }); every
@@ -34,9 +39,15 @@ local C = {
   -- a reach of your own.
   auto_reach = true,
   defend = true,
+  loot = true,
+  -- How long a fresh corpse may take to turn lootable (the flag follows the death).
+  loot_wait = 1.5,
 }
 
 local name_of, started, hp_at_start, faced
+-- Looting a kill: when it died, and when the corpse was last opened.
+local died_at, opened_at, emptied_at
+local opens = 0
 
 local aimed, swung, seen_at
 
@@ -80,6 +91,7 @@ local function done(outcome)
   local seconds = started and math.floor(GetTime() - started) or 0
   local hp_lost = (hp_at_start or 0) - (UnitHealth("player") or 0)
   C.active, C.state, aimed, swung, seen_at, faced = nil, nil, nil, nil, nil, nil
+  died_at, opened_at, emptied_at, opens = nil, nil, nil, 0
   C.last = { guid = guid, outcome = outcome }
   if outcome ~= "stopped" then
     C.history[#C.history + 1] = { name = name_of, outcome = outcome, seconds = seconds, hp_lost = hp_lost }
@@ -140,6 +152,34 @@ local function attacker(yards, except)
   return best
 end
 
+-- The kill is down: loot it (walk over, open it; LOOT_OPENED below takes everything), then end.
+local function loot_kill(u, now)
+  died_at = died_at or now
+  if not C.loot or attacker(30) then return done("killed") end
+  if not u.lootable then
+    -- Opened and emptied, or never ours: done once the flag has had time to arrive.
+    if opened_at or now - died_at >= C.loot_wait then return done("killed") end
+    C.state = "waiting to loot " .. (u.name or "the kill")
+    return
+  end
+  if u.distance > C.reach then
+    if AgentWalk().status ~= "walking" then AgentMoveTo(u.x, u.y, u.z) end
+    C.state = "walking to loot " .. (u.name or "the kill")
+    return
+  end
+  -- Still lootable after three opens: something on it we cannot take (bags full, a quest item we
+  -- do not need). Leave it rather than open it forever.
+  if opens >= 3 then return done("killed") end
+  if LootFrame and LootFrame:IsShown() then
+    -- The picks went out when it opened; they land on a later frame. Close only after that.
+    if emptied_at and now - emptied_at >= 1 then CloseLoot() end
+  elseif not opened_at or now - opened_at >= 2 then
+    opened_at, opens = now, opens + 1
+    AgentInteract(C.active)
+  end
+  C.state = "looting " .. (u.name or "the kill")
+end
+
 local function tick(now)
   if UnitIsDeadOrGhost("player") then return done("died") end
   local u = find(C.active)
@@ -149,7 +189,7 @@ local function tick(now)
     return
   end
   seen_at = now
-  if u.dead then return done("killed") end
+  if u.dead then return loot_kill(u, now) end
   if u.distance > C.reach and C.defend and not C.ranged then
     -- Something else is already hitting us while we chase: fight that one first.
     local other = attacker(C.reach + 1, C.active)
@@ -197,7 +237,24 @@ end
 local frame = CreateFrame("Frame")
 local since = 0
 frame:RegisterEvent("UI_ERROR_MESSAGE")
-frame:SetScript("OnEvent", function(_, _, message)
+frame:RegisterEvent("LOOT_OPENED")
+frame:RegisterEvent("LOOT_BIND_CONFIRM")
+frame:SetScript("OnEvent", function(_, event, message)
+  -- Our kill's corpse is open: take everything, as autoloot would.
+  if event == "LOOT_OPENED" then
+    if C.active and died_at then
+      -- Picks are queued for a later frame: closing now would release the corpse before they
+      -- land. loot_kill closes it a second later if it is still open.
+      for slot = GetNumLootItems(), 1, -1 do LootSlot(slot) end
+      emptied_at = GetTime()
+    end
+    return
+  end
+  -- A bind-on-pickup item from our own kill is still ours to take.
+  if event == "LOOT_BIND_CONFIRM" then
+    if C.active and died_at then ConfirmLootSlot(message) end
+    return
+  end
   -- The server says too far or facing away: take it as a cue to close in and face again.
   if C.active and type(message) == "string" and (message:find("too far") or message:find("in front")) then
     aimed, swung = nil, nil
