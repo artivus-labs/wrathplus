@@ -7,6 +7,7 @@
   "scripts": {
     "start": "bun run src/index.ts",
     "test": "bun test",
+    "publish-lexicons": "bun run scripts/publish-lexicons.ts",
     "typecheck": "tsc --noEmit"
   },
   "engines": {

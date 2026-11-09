@@ -83,8 +83,14 @@ publishes nothing for them in v1; their events are acknowledged and dropped. An 
 records writes them itself with its own app-password session (`com.atproto.repo.putRecord`, same
 collections and keys).
 
-Publishing the lexicons (the `_lexicon.wrathplus.artivus.com.au` TXT record and
-`com.atproto.lexicon.schema` records) is a separate step that needs the DNS owner.
+The schemas are published from the account that owns the NSID authority (Vulcan's Delve Town
+identity, Skein). `scripts/publish-lexicons.ts` signs in with that account's app password (from
+`LEXICON_PUBLISH_CREDENTIALS_FILE`, a 0600 file holding `handle:app-password`, or
+`LEXICON_PUBLISH_HANDLE` and `LEXICON_PUBLISH_APP_PASSWORD`; never argv), puts each schema as a
+`com.atproto.lexicon.schema` record with key = NSID, signs out, and prints the DNS record to
+create, `_lexicon.wrathplus.artivus.com.au TXT "did=<DID>"`. It does not create the record.
+`--dry-run` only validates and lists the schemas. Fields may only be added to a published
+schema, and only as optional ones.
 
 ## Run
 

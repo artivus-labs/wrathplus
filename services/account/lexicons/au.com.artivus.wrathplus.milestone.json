@@ -9,7 +9,7 @@
       "description": "The record key is '<realm>:<guid>:<kind>:<value>' (quests add ':<unix time>', since daily quests repeat), so publishing the same moment twice overwrites one record.",
       "record": {
         "type": "object",
-        "required": ["realm", "guid", "characterName", "kind", "value", "achievedAt"],
+        "required": ["realm", "guid", "characterName", "kind", "value", "level", "achievedAt"],
         "properties": {
           "realm": { "type": "string", "maxLength": 253, "description": "The realm's host name." },
           "guid": { "type": "integer", "minimum": 1, "description": "The character's guid on that realm (see au.com.artivus.wrathplus.character)." },

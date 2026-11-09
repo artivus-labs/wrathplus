@@ -9,7 +9,7 @@
       "description": "One record per character. The record key is '<realm>:<guid>', e.g. 'wrathplus.artivus.com.au:42'; rewritten as the character changes.",
       "record": {
         "type": "object",
-        "required": ["realm", "guid", "name", "race", "class", "level", "updatedAt"],
+        "required": ["realm", "guid", "name", "race", "class", "gender", "level", "updatedAt"],
         "properties": {
           "realm": { "type": "string", "maxLength": 253, "description": "The realm's host name." },
           "guid": { "type": "integer", "minimum": 1, "description": "The character's guid on that realm." },
