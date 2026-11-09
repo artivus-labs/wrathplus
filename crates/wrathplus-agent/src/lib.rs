@@ -13,7 +13,7 @@
 //!
 //! In Lua, besides the stock API: `AgentNearby([yards])`, `AgentFindNpc(service [, yards])`,
 //! `AgentPosition()`, `AgentTarget(guid)`, `AgentInteract(guid)` (`world`), `AgentQuestPOI(quest)`
-//! (`quest_poi`), `AgentPath`, `AgentMoveTo`, `AgentStop`, `AgentWalk` (`nav`,
+//! (`quest_poi`), `AgentZones()` (`zones`), `AgentPath`, `AgentMoveTo`, `AgentStop`, `AgentWalk` (`nav`,
 //! over the realm's mmaps from `WOW_NAV_MMAPS`), and the module functions (`env`).
 //!
 //! With the port open, the UI's movement verbs run from any Lua (stock gates them on a key
@@ -33,6 +33,7 @@ mod nav;
 mod quest_poi;
 mod server;
 mod world;
+mod zones;
 
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, ScreenshotCaptured};
@@ -99,10 +100,12 @@ impl Plugin for AgentPlugin {
         let started = Instant::now();
         let (nav, nav_link) = nav::link(events.clone(), started, world.orders.clone());
         let (pois, poi_link) = quest_poi::link();
+        let (zones, zone_link) = zones::link();
         app.insert_resource(Link {
             world,
             nav,
             pois,
+            zones,
             queue,
             events,
             started,
@@ -113,6 +116,7 @@ impl Plugin for AgentPlugin {
         .insert_resource(world_link)
         .insert_resource(nav_link)
         .insert_resource(poi_link)
+        .insert_resource(zone_link)
         .add_systems(Update, (pump_events, serve_jobs).chain())
         .add_systems(
             Update,
@@ -121,6 +125,7 @@ impl Plugin for AgentPlugin {
                 world::apply_orders,
                 nav::walk,
                 quest_poi::mirror,
+                zones::load,
             ),
         );
     }
@@ -143,6 +148,8 @@ struct Link {
     nav: nav::Handles,
     /// The quests' map areas (`quest_poi`).
     pois: quest_poi::Handles,
+    /// The zones and their levels (`zones`).
+    zones: zones::Handles,
 }
 
 /// Keep the VM's agent hooks on (a relog or `ReloadUI()` builds a fresh VM) and move this
@@ -168,6 +175,9 @@ fn pump_events(
         }
         if let Err(e) = quest_poi::install(script.lua(), &link.pois) {
             error!("agent port: quest POIs: {e}");
+        }
+        if let Err(e) = zones::install(script.lua(), &link.zones) {
+            error!("agent port: zones: {e}");
         }
         if let Err(e) = nav::install(script.lua(), &link.nav, &link.world) {
             error!("agent port: navigation functions: {e}");
@@ -204,6 +214,17 @@ fn pump_events(
     );
 }
 
+/// The askers of the screenshot in flight: its scale, encoding and reply each.
+type Shots = std::sync::Arc<
+    std::sync::Mutex<
+        Vec<(
+            f32,
+            Format,
+            crossbeam_channel::Sender<Result<Vec<u8>, String>>,
+        )>,
+    >,
+>;
+
 fn serve_jobs(
     mut commands: Commands,
     link: Res<Link>,
@@ -212,6 +233,8 @@ fn serve_jobs(
     headless: Option<Res<wrathplus_world::headless::HeadlessFrame>>,
     time: Res<Time<bevy::time::Real>>,
     mut idle: Option<ResMut<wrathplus_app_ui::ui_chat::idle::LastInput>>,
+    shots: Local<Shots>,
+    mut shot_at: Local<Option<f64>>,
 ) {
     for job in link.queue.try_iter() {
         match job {
@@ -263,18 +286,35 @@ fn serve_jobs(
                 format,
                 reply,
             } => {
+                // One capture at a time serves everyone who asks while it is in flight: a second
+                // capture of the same target is dropped by the renderer ("Duplicate render target
+                // for screenshot"), and its asker would wait out the port's timeout.
+                // A capture that never lands (2 s is many frames) must not hold the rest: ask again.
+                let now = link.started.elapsed().as_secs_f64();
+                let mut waiting = shots.lock().unwrap_or_else(|p| p.into_inner());
+                let in_flight = !waiting.is_empty() && shot_at.is_some_and(|at| now - at < 2.0);
+                waiting.push((scale, format, reply));
+                if in_flight {
+                    continue;
+                }
+                drop(waiting);
+                *shot_at = Some(now);
                 // A headless client draws into an image, not a window.
                 let shot = match &headless {
                     Some(frame) => Screenshot::image(frame.0.clone()),
                     None => Screenshot::primary_window(),
                 };
+                let shots = shots.clone();
                 commands
                     .spawn(shot)
                     .observe(move |captured: On<ScreenshotCaptured>| {
                         let image = captured.image.clone();
-                        let reply = reply.clone();
+                        let waiting =
+                            std::mem::take(&mut *shots.lock().unwrap_or_else(|p| p.into_inner()));
                         std::thread::spawn(move || {
-                            let _ = reply.send(encode(image, scale, format));
+                            for (scale, format, reply) in waiting {
+                                let _ = reply.send(encode(image.clone(), scale, format));
+                            }
                         });
                     });
             }

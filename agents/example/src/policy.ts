@@ -6,7 +6,10 @@
 // choices; the slow tier (the planner) sets the plan and hears when it stalls, looks complete, or
 // an intent keeps failing.
 
-import { choice, chosen, Jev, noul, yes, type Question } from "./jev.ts";
+import { choice, chosen, Jev, noul, yes, type Answer, type Question } from "./jev.ts";
+import { holdLua, luaString } from "./goals.ts";
+
+export { luaString };
 import type { GameEvent } from "./watch.ts";
 
 /** A planner intent: when it applies (Jev reads this), the Lua that starts it, and optionally the
@@ -77,7 +80,112 @@ const WAKE: Record<string, { reason: string; interrupt: boolean }> = {
   QUEST_COMPLETE: { reason: "quest turn-in window", interrupt: false },
   PLAYER_LEVEL_UP: { reason: "level up", interrupt: false },
   PARTY_INVITE_REQUEST: { reason: "party invite", interrupt: false },
+  AGENT_HOLD_EXPIRED: { reason: "a hold ran out", interrupt: true },
+  AGENT_GOAL_DONE: { reason: "goal finished", interrupt: false },
+  AGENT_GOAL_BLOCKED: { reason: "goal blocked", interrupt: false },
+  AGENT_ACTION_FAILED: { reason: "goal action failed", interrupt: false },
 };
+
+/** What `wait` means depends on what is going on: only a running activity or a bounded hold makes
+ *  it a real choice. With nothing running it is offered for a grace period (the goal runner starts
+ *  the next action by itself), then not at all. */
+export const WAIT_WHEN = {
+  busy: "Nothing needs a new choice: the current activity or the character's own behaviour is handling things.",
+  hold: "A hold is active (state.game.hold: why, and the seconds left): keep it unless something needs doing now.",
+  idle: "Nothing is running and there is no hold: the goal runner is about to start the top goal's next action by itself. Choose this only if that is the right thing; the character must not stand idle.",
+};
+
+/** The choices on a hold that has run out (AGENT_HOLD_EXPIRED). */
+export const HOLD_CHOICES = {
+  keep_waiting: "Keep waiting: what it waits for is really coming (whoever it waits for is online and on the way, or said to wait), and waiting longer is worth more than getting on.",
+  stop_waiting: "Stop waiting and get on with its goals: whoever it waits for is offline, not here and not coming, or it has waited long enough.",
+};
+
+/** How much longer a kept hold lasts, as choices for Jev. */
+export const HOLD_LENGTHS: Record<string, { seconds: number; when: string }> = {
+  minute: { seconds: 60, when: "About a minute: it is nearly here." },
+  few_minutes: { seconds: 180, when: "A few minutes." },
+  ten_minutes: { seconds: 600, when: "Up to ten minutes: they said they would be a while." },
+};
+
+/** A hold that ran out, as the client signalled it. */
+export interface HoldExpiry {
+  reason: string;
+  /** Seconds this hold lasted. */
+  waited: number;
+}
+
+interface PartyMember {
+  name: string;
+  online?: boolean;
+  yards?: number;
+}
+
+export interface Goal {
+  name: string;
+  why?: string;
+  priority?: number;
+  status?: string;
+  plan?: string[];
+  note?: string;
+}
+
+/** What Jev reads to decide on an expired hold: the reason, how long in all, who is actually here. */
+export interface HoldContext {
+  reason: string;
+  minutes_waited: number;
+  party: { here: string[]; online_elsewhere: string[]; offline: string[] };
+  goals: Goal[];
+}
+
+export function holdContext(expiry: HoldExpiry, totalSeconds: number, game: { party?: unknown; goals?: unknown }): HoldContext {
+  const party = Array.isArray(game.party) ? (game.party as PartyMember[]) : [];
+  const goals = Array.isArray(game.goals) ? (game.goals as Goal[]) : [];
+  return {
+    reason: expiry.reason,
+    minutes_waited: Math.round(totalSeconds / 6) / 10,
+    party: {
+      // In sight (within 100 yards) and online: actually here.
+      here: party.filter((p) => p.online !== false && p.yards !== undefined).map((p) => p.name),
+      online_elsewhere: party.filter((p) => p.online !== false && p.yards === undefined).map((p) => p.name),
+      offline: party.filter((p) => p.online === false).map((p) => p.name),
+    },
+    goals: goals.map((g) => ({ name: g.name, priority: g.priority, status: g.status, ...(g.why ? { why: g.why } : {}) })),
+  };
+}
+
+export function holdQuestions(): Record<string, Question> {
+  const lengths: Record<string, string> = {};
+  for (const [name, l] of Object.entries(HOLD_LENGTHS)) lengths[name] = l.when;
+  return {
+    hold: choice(
+      "The agent paused its goals to wait, for the reason in state.hold_expired.reason, and that wait has run out. It has waited state.hold_expired.minutes_waited minutes in all. Who it might wait for is in state.hold_expired.party: here (online and in sight), online_elsewhere, offline. Should it keep waiting, or stop and get on with its goals (state.hold_expired.goals)? An agent must never wait indefinitely.",
+      HOLD_CHOICES,
+    ),
+    hold_for: choice("If it keeps waiting, for how much longer?", lengths),
+  };
+}
+
+/** A hold decision, kept for fast_loop_status and the reflection digest. */
+export interface HoldDecision {
+  at: number;
+  reason: string;
+  minutes_waited: number;
+  here: string[];
+  choice: keyof typeof HOLD_CHOICES;
+  seconds?: number;
+  confidence: number;
+  result?: string;
+}
+
+/** Where the time goes, from the state read at each wake (ms). */
+export interface TimeShares {
+  busy: number;
+  idle: number;
+  hold: number;
+  /** Dead (or a ghost): neither busy nor idle. */
+  other: number;
+}
 
 /** A compact state for Jev, read through the client's Lua in one call. */
 export const STATE_LUA = `local V = require("wp.values")
@@ -109,6 +217,17 @@ for i, o in ipairs(AgentNearby(60)) do
       health = o.health_max and o.health_max > 0 and math.floor(100 * o.health / o.health_max) or nil }
   end
 end
+local goals, hold
+if Goals then
+  goals = {}
+  for _, g in ipairs(Goals.list()) do
+    goals[#goals + 1] = { name = g.name, why = g.why, priority = g.priority, status = g.status,
+      plan = g.plan, note = g.note }
+  end
+  local reason, waited, remaining
+  if Goals.holding then reason, waited, remaining = Goals.holding() end
+  if reason then hold = { reason = reason, waited = waited, remaining = remaining } end
+end
 return { level = UnitLevel("player"), health = V.health("player"), power = V.power("player"),
   combat = UnitAffectingCombat("player") and true or false,
   dead = UnitIsDeadOrGhost("player") and true or false,
@@ -121,16 +240,7 @@ return { level = UnitLevel("player"), health = V.health("player"), power = V.pow
   loot_open = LootFrame and LootFrame:IsShown() and true or false,
   activity = Agent and Agent.activity() or nil, walk = AgentWalk and AgentWalk().status or nil,
   registered = Agent and Agent.available() or {}, decisions = Agent and Agent.questions() or {},
-  nearby = near }`;
-
-/** Lua source as a long-bracket string literal that cannot be closed by its own contents. */
-export function luaString(text: string): string {
-  let level = 0;
-  while (text.includes(`]${"=".repeat(level)}]`)) level++;
-  const eq = "=".repeat(level);
-  // A newline right after the opening bracket is dropped by Lua, so one is added on purpose.
-  return `[${eq}[\n${text}]${eq}]`;
-}
+  goals = goals, hold = hold, nearby = near }`;
 
 /** The Lua that registers the planner's intents (and removes ones it no longer lists). */
 export function registerLua(intents: Intent[], steps: Step[] = []): string {
@@ -161,6 +271,12 @@ export interface PolicyOptions {
   jev: Jev;
   /** With nothing happening, check anyway this often (ms). */
   heartbeatMs?: number;
+  /** Idle (no activity, no hold) for this long, `wait` is no longer offered (ms, default 60 s). */
+  idleGraceMs?: number;
+  /** Idle for this long, the planner is told (ms, default 3 min; once per idle stretch). */
+  idleNotifyMs?: number;
+  /** A test clock. */
+  now?: () => number;
   /** The operator's goal, which Jev reads beside the planner's plan. */
   goal?: string;
   /** Told when the plan stalls, looks complete, or an intent keeps failing. */
@@ -181,6 +297,15 @@ export class Policy {
   #doneStreak = 0;
   #failures = new Map<string, number>();
   #told = new Set<string>();
+  holds: HoldDecision[] = [];
+  #expired: HoldExpiry[] = [];
+  /** Seconds waited so far on a hold kept going, by reason. */
+  #holdTotals = new Map<string, number>();
+  #blockedTold = new Map<string, number>();
+  #idleSince: number | undefined;
+  #idleTold = false;
+  #last: { at: number; kind: keyof TimeShares } | undefined;
+  time: TimeShares = { busy: 0, idle: 0, hold: 0, other: 0 };
 
   constructor(readonly options: PolicyOptions) {}
 
@@ -209,6 +334,8 @@ export class Policy {
     for (const e of events) {
       const wake = WAKE[e.event];
       if (e.event === "AGENT_INTENT_DONE") this.#activityEnded(String(e.args[0]), e.args[1] === true, e.args[2]);
+      if (e.event === "AGENT_HOLD_EXPIRED") this.#expired.push({ reason: String(e.args[0] ?? "?"), waited: Number(e.args[1] ?? 0) || 0 });
+      if (e.event === "AGENT_GOAL_BLOCKED") this.#goalBlocked(String(e.args[0] ?? "?"), e.args[1]);
       if (wake) {
         this.wake(wake.reason, wake.interrupt);
         this.note(`${wake.reason}${e.args.length ? ` (${e.args.filter((a) => a !== null).join(", ")})` : ""}`);
@@ -236,18 +363,53 @@ export class Policy {
     const count = (this.#failures.get(name) ?? 0) + 1;
     this.#failures.set(name, count);
     if (count === 3) {
-      this.options.onNotify(`The intent "${name}" has failed 3 times in a row (last: ${String(why)}). Fix its Lua or change the plan.`);
+      this.options.onNotify(
+        name.startsWith("goal:")
+          ? `The goal action "${name.slice(5)}" has failed 3 times in a row (last: ${String(why)}). Fix the action (Goals.action: its pre, run or done), teach a better one, or change the goal.`
+          : `The intent "${name}" has failed 3 times in a row (last: ${String(why)}). Fix its Lua or change the plan.`,
+      );
     }
   }
 
-  questions(registered: Registered[], decisions: OpenDecision[], choose: boolean) {
+  #goalBlocked(name: string, why: unknown): void {
+    const now = this.#now();
+    if (now - (this.#blockedTold.get(name) ?? -Infinity) < 600_000) return;
+    this.#blockedTold.set(name, now);
+    this.options.onNotify(
+      `Your goal "${name}" is blocked${why ? `: ${String(why)}` : ""}. The runner has moved on to the next goal. Teach an action that gets there (Goals.action, or a Goals.fact it needs), or drop or change the goal.`,
+    );
+  }
+
+  #now(): number {
+    return this.options.now?.() ?? Date.now();
+  }
+
+  /** Charge the time since the last state read to what the character was doing then. */
+  #account(kind: keyof TimeShares, now: number): void {
+    if (this.#last) this.time[this.#last.kind] += Math.max(0, now - this.#last.at);
+    this.#last = { at: now, kind };
+  }
+
+  /** How long the character has been idle (no activity, no hold), in ms; 0 when it is not. */
+  get idleMs(): number {
+    return this.#idleSince === undefined ? 0 : this.#now() - this.#idleSince;
+  }
+
+  /** `wait`'s description now, or null when it is not offered. */
+  #wait(game: { activity?: unknown; hold?: unknown }): string | null {
+    if (game.activity) return WAIT_WHEN.busy;
+    if (game.hold) return WAIT_WHEN.hold;
+    return this.idleMs < (this.options.idleGraceMs ?? 60_000) ? WAIT_WHEN.idle : null;
+  }
+
+  questions(registered: Registered[], decisions: OpenDecision[], choose: boolean, wait: string | null = WAIT.when, hold = false) {
     const questions: Record<string, Question> = {};
     if (choose) {
       const criteria: Record<string, string> = {};
       for (const intent of registered) criteria[intent.name] = intent.when;
-      criteria[WAIT.name] = WAIT.when;
+      if (wait !== null) criteria[WAIT.name] = wait;
       questions.next = choice(
-        "A game-playing agent is following the plan in state.plan. Given the game state and what just happened (state.woke_because), which intent should it start now?",
+        "A game-playing agent is working toward its goals (state.game.goals, highest first) and following the plan in state.plan. Given the game state and what just happened (state.woke_because), which intent should it start now?",
         criteria,
       );
       questions.stuck = noul(
@@ -261,6 +423,7 @@ export class Policy {
         d.options,
       );
     }
+    if (hold) Object.assign(questions, holdQuestions());
     return questions;
   }
 
@@ -272,22 +435,49 @@ export class Policy {
       registered?: Registered[];
       decisions?: OpenDecision[];
       activity?: { name: string; seconds: number } | null;
+      hold?: { reason: string; waited: number; remaining: number } | null;
+      goals?: Goal[];
+      party?: unknown;
+      dead?: boolean;
+      combat?: boolean;
     };
     const registered = Array.isArray(game.registered) ? game.registered : [];
     const decisions = Array.isArray(game.decisions) ? game.decisions : [];
+    const now = this.#now();
+    // Where the time goes, and how long the character has stood idle.
+    const kind: keyof TimeShares = game.dead ? "other" : game.activity || game.combat ? "busy" : game.hold ? "hold" : "idle";
+    this.#account(kind, now);
+    if (kind === "idle") this.#idleSince ??= now;
+    else {
+      this.#idleSince = undefined;
+      this.#idleTold = false;
+    }
+    if (kind === "idle" && !this.#idleTold && this.idleMs >= (this.options.idleNotifyMs ?? 180_000)) {
+      this.#idleTold = true;
+      const goals = (game.goals ?? []).map((g) => `${g.name} (${g.status ?? "?"}${g.note ? `: ${g.note}` : ""})`).join(", ");
+      this.options.onNotify(
+        `The character has stood idle for ${Math.round(this.idleMs / 1000)}s: no activity, no hold, and nothing started. Goals: ${goals || "none (is wp.goals loaded?)"}. Find out why the runner has nothing to do (the goals tool shows each goal's plan and the facts), then push a goal it can act on or teach the missing action.`,
+      );
+    }
+    // A hold that ran out: Jev decides whether to keep waiting (the latest one; older ones are moot).
+    const expiry = this.#expired.at(-1);
+    this.#expired = [];
     // While an activity runs, only an interrupting event makes Jev reconsider it.
     const choose = registered.length > 0 && (!game.activity || interrupt);
-    if (!choose && !decisions.length) return null;
+    if (!choose && !decisions.length && !expiry) return null;
+    const total = expiry ? (this.#holdTotals.get(expiry.reason) ?? 0) + expiry.waited : 0;
+    const context = expiry ? holdContext(expiry, total, game) : undefined;
     const response = await this.options.jev.ask(
       {
         goal: this.options.goal,
-        plan: this.plan || "No plan from the planner yet: follow the agent's own registered intents.",
+        plan: this.plan || "No plan from the planner: work toward the top goal in state.game.goals, and never stand idle.",
         woke_because: reasons,
         game: game as never,
         recent_events: this.events,
         recent_decisions: this.decisions.slice(-5).map((d) => d.choice),
+        ...(context ? { hold_expired: context } : {}),
       },
-      this.questions(registered, decisions, choose),
+      this.questions(registered, decisions, choose, this.#wait(game), expiry !== undefined),
     );
     this.calls++;
     for (const d of decisions) {
@@ -298,10 +488,11 @@ export class Policy {
         `[jev] decision ${d.name}: ${answer.choice} (${answer.confidence.toFixed(2)})${result.ok ? "" : ` → error: ${result.error}`}`,
       );
     }
+    if (expiry && context) await this.#decideHold(expiry, total, context, response.answers.hold, response.answers.hold_for);
     if (!choose) return null;
     const next = chosen(response.answers.next);
     const decision: Decision = {
-      at: Date.now(),
+      at: now,
       reasons,
       choice: next.choice,
       confidence: next.confidence,
@@ -324,6 +515,36 @@ export class Policy {
     if (this.#stuckStreak === 3) this.#tell("stalled", `The fast loop judges the plan has stalled (3 choices in a row). Recent: ${this.#recent()}. Review the game and update the plan or your Lua.`);
     if (this.#doneStreak === 2) this.#tell("done", `The fast loop judges the plan's goal achieved. Recent: ${this.#recent()}. Confirm it and set the next plan, or say you are done.`);
     return decision;
+  }
+
+  /** Keep waiting (a new bounded hold) or stop waiting (the runner carries on), as Jev chose. */
+  async #decideHold(expiry: HoldExpiry, total: number, context: HoldContext, answer: Answer | undefined, length: Answer | undefined): Promise<void> {
+    // No usable answer: stop waiting. The agent must never be left waiting on a silence.
+    const keep = answer?.type === "choice" && answer.choice === "keep_waiting";
+    const decision: HoldDecision = {
+      at: this.#now(),
+      reason: expiry.reason,
+      minutes_waited: context.minutes_waited,
+      here: context.party.here,
+      choice: keep ? "keep_waiting" : "stop_waiting",
+      confidence: answer?.type === "choice" ? answer.confidence : 0,
+    };
+    if (keep) {
+      const name = length?.type === "choice" && HOLD_LENGTHS[length.choice] ? length.choice : "minute";
+      decision.seconds = HOLD_LENGTHS[name]?.seconds ?? 60;
+      const result = await this.#lua(holdLua(expiry.reason, decision.seconds));
+      decision.result = result.ok ? "held" : `error: ${result.error}`;
+      this.#holdTotals.set(expiry.reason, total);
+    } else {
+      this.#holdTotals.delete(expiry.reason);
+      decision.result = "released";
+    }
+    this.holds.push(decision);
+    if (this.holds.length > 50) this.holds.shift();
+    this.note(`hold "${expiry.reason}" ran out after ${context.minutes_waited} min: ${decision.choice}${decision.seconds ? ` ${decision.seconds}s` : ""}`);
+    this.options.log?.(
+      `[jev] hold "${expiry.reason}" (${context.minutes_waited} min, here: ${context.party.here.join(", ") || "nobody"}) → ${decision.choice}${decision.seconds ? ` for ${decision.seconds}s` : ""} (${decision.confidence.toFixed(2)})${decision.result?.startsWith("error") ? `: ${decision.result}` : ""}`,
+    );
   }
 
   #recent(): string {
@@ -383,6 +604,9 @@ export class Policy {
           result: d.result,
           stuck: Number(d.stuck.toFixed(2)),
         })),
+        holds: this.holds.slice(-5).map((h) => ({ reason: h.reason, minutes_waited: h.minutes_waited, here: h.here, choice: h.choice, seconds: h.seconds })),
+        idle_seconds: Math.round(this.idleMs / 1000),
+        time_share: shares(this.time),
       },
       null,
       2,
@@ -398,4 +622,12 @@ export class Policy {
     if (!response.ok) return { ok: false, values: [], error: `HTTP ${response.status}` };
     return (await response.json()) as { ok: boolean; values: unknown[]; error?: string };
   }
+}
+
+/** Time shares as whole percentages, or null before anything has been measured. */
+export function shares(time: TimeShares): Record<keyof TimeShares, number> | null {
+  const total = time.busy + time.idle + time.hold + time.other;
+  if (total <= 0) return null;
+  const pct = (ms: number) => Math.round((100 * ms) / total);
+  return { busy: pct(time.busy), idle: pct(time.idle), hold: pct(time.hold), other: pct(time.other) };
 }

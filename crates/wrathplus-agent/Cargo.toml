@@ -18,6 +18,9 @@ wrathplus-app-world = { path = "../wrathplus-app-world", default-features = fals
 wrathplus-app-ui = { path = "../wrathplus-app-ui", default-features = false }
 wrathplus-protocol = { path = "../wrathplus-protocol" }
 wrathplus-nav = { path = "../wrathplus-nav" }
+# The area and world-map tables behind `AgentZones` (`zones`).
+wrathplus-assets = { path = "../wrathplus-assets", default-features = false }
+wrathplus-formats = { path = "../wrathplus-formats", default-features = false }
 mlua = { version = "0.11", features = ["lua51", "vendored"] }
 # A small blocking HTTP server on its own threads; the game loop only answers queued requests.
 tiny_http = "0.12"

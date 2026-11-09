@@ -142,11 +142,14 @@ export class Waker {
 
 export const WAKE_TOOLS = ["mcp__wake__wake_me"];
 
+/** Tools that act on the game (the client's, goals, a module rollback): refused while asleep. */
+const GAME_TOOL = /^mcp__(wrathplus__|goals__|harness__rollback_module$)/;
+
 /** A PreToolUse hook: once the planner has asked to be woken, it may still write its notes, but
  *  the game tools are refused until it ends the turn (a reply with no tool call). */
 export function sleepGuard(waker: Waker): HookCallback {
   return async (input) => {
-    if (!waker.asleep || input.hook_event_name !== "PreToolUse" || !input.tool_name.startsWith("mcp__wrathplus__")) {
+    if (!waker.asleep || input.hook_event_name !== "PreToolUse" || !GAME_TOOL.test(input.tool_name)) {
       return {};
     }
     return {

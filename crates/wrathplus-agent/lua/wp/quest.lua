@@ -11,7 +11,8 @@
 --                      AGENT_QUESTS_DONE (kind, picked up, handed in), so wait on that, not the log.
 --   Quests.state       what it is doing; Quests.busy() for an intent's `until`.
 --   Quests.list()      the quest log: { { id, title, level, complete, objectives = { { text,
---                      done }, ... } }, ... }, headers skipped (GetQuestLogTitle's 3.3.5 order is
+--                      kind, done }, ... } }, ... } (kind: "monster", "item", "object", "event"
+--                      ...), headers skipped (GetQuestLogTitle's 3.3.5 order is
 --                      title, level, tag, suggestedGroup, isHeader, ..., questID).
 --   Quests.where(id)   where a logged quest's objectives are and where it is handed in, from the
 --                      quest's map areas: { objectives = { { index, x, y }, ... }, hand_in = { x, y } }
@@ -95,8 +96,8 @@ function Q.list()
     if title and not header then
       local objectives = {}
       for j = 1, GetNumQuestLeaderBoards(i) or 0 do
-        local text, _, done = GetQuestLogLeaderBoard(j, i)
-        objectives[#objectives + 1] = { text = text, done = done and true or false }
+        local text, kind, done = GetQuestLogLeaderBoard(j, i)
+        objectives[#objectives + 1] = { text = text, kind = kind, done = done and true or false }
       end
       out[#out + 1] = { id = id, title = title, level = level, complete = complete == 1, objectives = objectives }
     end
