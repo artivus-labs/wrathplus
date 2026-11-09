@@ -7,15 +7,19 @@
 //
 // Runs on the Claude Code login of this machine (a Claude subscription works); no API key needed.
 
+import { appendFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Inbox, summarize, think } from "./brain.ts";
+import { controlLua } from "./goals.ts";
 import { Jev } from "./jev.ts";
+import { controlFiles, ModuleVersions } from "./modules.ts";
 import { claudeAuth, loadEnv } from "./env.ts";
 import { Notes } from "./notes.ts";
 import { Policy } from "./policy.ts";
 import { kickoff } from "./prompt.ts";
+import { Reflection, XP_LUA, type XpSample } from "./reflect.ts";
 import { Triage } from "./triage.ts";
 import { statusLine, Waker } from "./wake.ts";
 import { watch } from "./watch.ts";
@@ -108,15 +112,50 @@ export async function runAgent(config: Config, options: RunOptions): Promise<voi
       })
     : undefined;
   if (policy) void policy.run(abortController.signal);
+  const lua = controlLua(config.url, config.token);
+  // The goal runner (wp.goals) is off in a bare client, so a manual MCP session never plays by
+  // itself; the example agent turns it on (WRATHPLUS_AGENT_GOALS=0 leaves it off) and off on exit.
+  if (process.env.WRATHPLUS_AGENT_GOALS !== "0") {
+    const on = await lua("if Goals then Goals.on = true return true end return false").catch(() => undefined);
+    console.log(on?.ok && on.values?.[0] === true ? "Goal runner: on" : "Goal runner: unavailable (this client has no wp.goals)");
+    abortController.signal.addEventListener("abort", () => void lua("if Goals then Goals.on = false end return true").catch(() => undefined));
+  }
+  // Every module the planner saves is kept as a version in its notes, for rollback (`modules.ts`).
+  const versions = new ModuleVersions(notes.home);
+  const files = controlFiles(config.url, config.token);
+  // The reflection loop (`reflect.ts`): a review of how it is doing, between the planner's turns.
+  let inTurn = false;
+  const reflection =
+    process.env.WRATHPLUS_AGENT_REFLECT === "0"
+      ? undefined
+      : new Reflection({
+          onReflect: (text, score) => {
+            appendFileSync(join(notes.home, "reflections.jsonl"), `${JSON.stringify({ at: new Date().toISOString(), score })}\n`);
+            console.log(`[reflection] ${JSON.stringify(score)}`);
+            tell("reflection", text);
+          },
+          quiet: () => !inTurn,
+          fast: () => (policy ? { decisions: policy.decisions, holds: policy.holds, time: policy.time } : undefined),
+          versions,
+          periodMs: Number(process.env.WRATHPLUS_AGENT_REFLECT_MINUTES ?? 30) * 60_000,
+        });
+  if (reflection) {
+    // Experience every minute for the scoreboard; whether a review is due every 15 s.
+    let ticks = 0;
+    const timer = setInterval(() => {
+      if (ticks++ % 4 === 0) {
+        void lua(XP_LUA)
+          .then((r) => {
+            const xp = r.ok ? (r.values?.[0] as XpSample | undefined) : undefined;
+            if (xp && typeof xp.level === "number") reflection.sample(xp);
+          })
+          .catch(() => undefined);
+      }
+      reflection.check();
+    }, 15_000);
+    abortController.signal.addEventListener("abort", () => clearInterval(timer));
+  }
   // Requests from the party, sorted by Jev before the planner hears them (`triage.ts`).
-  const lua = async (code: string) => {
-    const response = await fetch(`${config.url}/lua`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${config.token}` },
-      body: code,
-    });
-    return (await response.json()) as { ok: boolean; values?: unknown[]; error?: string };
-  };
   const triage =
     policy && process.env.TYPESAFE_API_KEY && process.env.WRATHPLUS_AGENT_TRIAGE !== "0"
       ? new Triage(
@@ -167,6 +206,7 @@ export async function runAgent(config: Config, options: RunOptions): Promise<voi
     signal: abortController.signal,
     onEvents: (events) => {
       policy?.notice(events);
+      reflection?.notice(events);
       // Our own chat echoing back is not news to wake on.
       waker.notice(events.filter((e) => !(e.event.startsWith("CHAT_MSG_") && self !== undefined && e.args[1] === self)));
     },
@@ -190,7 +230,7 @@ export async function runAgent(config: Config, options: RunOptions): Promise<voi
   console.log(`Notes: ${notes.home}`);
   const compactAt = Number(process.env.WRATHPLUS_AGENT_COMPACT_AT ?? 400_000);
   let begun = false;
-  for await (const message of think(inbox, { ...config, mcpEntry, abortController, notes, waker, compactAt, ...(policy ? { policy } : {}) })) {
+  for await (const message of think(inbox, { ...config, mcpEntry, abortController, notes, waker, compactAt, ...(policy ? { policy } : {}), lua, modules: { versions, files } })) {
     if (message.type === "system" && message.subtype === "init") {
       console.log(`[session ${message.session_id}]`);
       if (!begun) {
@@ -224,6 +264,7 @@ export async function runAgent(config: Config, options: RunOptions): Promise<voi
     }
     if (message.type === "result") {
       waker.turnEnded();
+      inTurn = false;
       // A smoke run (a turn limit) ends with its first turn; a real run waits for news.
       if (config.maxTurns) {
         abortController.abort();
@@ -238,6 +279,7 @@ export async function runAgent(config: Config, options: RunOptions): Promise<voi
         );
       }
     } else if (message.type === "assistant") {
+      inTurn = true;
       clearTimeout(checkIn);
     }
     // Learn the character's name from the first status call that returns one.

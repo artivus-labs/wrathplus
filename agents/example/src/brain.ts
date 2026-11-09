@@ -5,6 +5,7 @@ import {
   createSdkMcpServer,
   query,
   tool,
+  type HookCallbackMatcher,
   type Options,
   type SDKMessage,
   type SDKUserMessage,
@@ -15,6 +16,8 @@ import { claudeEnv } from "./env.ts";
 import { NOTE_TOOLS, notesServer, type Notes } from "./notes.ts";
 import { sleepGuard, WAKE_TOOLS, wakeServer, type Waker } from "./wake.ts";
 import { SYSTEM_PROMPT } from "./prompt.ts";
+import { dropGoalLua, GOAL_NAME, GOALS_LUA, holdLua, DEFAULT_HOLD_SECONDS, MAX_HOLD_SECONDS, outcome, pushGoalLua, type Lua } from "./goals.ts";
+import { harnessServer, MODULE_TOOLS, SAVE_MODULE_TOOL, versionHooks, type ModuleFiles, type ModuleVersions } from "./modules.ts";
 
 /** The MCP tools the planner may use, all from the wrathplus server; nothing else. */
 export const TOOLS = ["lua", "screenshot", "events", "status", "modules", "save_module"].map(
@@ -82,6 +85,34 @@ export interface BrainOptions {
   compactAt?: number;
   /** The planner's alarm clock (wake_me); with it, the events tool does not long-poll. */
   waker?: Waker;
+  /** Lua over the control port: with it, the planner gets the goal tools. */
+  lua?: Lua;
+  /** Versions of its saved modules (in its notes folder): with them, the history and rollback tools. */
+  modules?: { versions: ModuleVersions; files: ModuleFiles };
+}
+
+/** Every tool the planner may call: the client's, and those of the parts it was given. */
+export function allowedTools(options: Pick<BrainOptions, "policy" | "notes" | "waker" | "lua" | "modules">): string[] {
+  return [
+    ...TOOLS,
+    ...(options.policy ? ["mcp__plan__set_plan", "mcp__plan__fast_loop_status"] : []),
+    ...(options.notes ? NOTE_TOOLS : []),
+    ...(options.waker ? WAKE_TOOLS : []),
+    ...(options.lua ? GOAL_TOOLS : []),
+    ...(options.lua && options.modules ? MODULE_TOOLS : []),
+  ];
+}
+
+/** The sleep guard (after wake_me), and module versions kept around every save_module. */
+function hooks(options: BrainOptions): Options["hooks"] {
+  const pre: HookCallbackMatcher[] = options.waker ? [{ hooks: [sleepGuard(options.waker)] }] : [];
+  const post: HookCallbackMatcher[] = [];
+  if (options.modules) {
+    const kept = versionHooks(options.modules.versions, options.modules.files);
+    pre.push({ matcher: SAVE_MODULE_TOOL, hooks: [kept.pre] });
+    post.push({ matcher: SAVE_MODULE_TOOL, hooks: [kept.post] });
+  }
+  return { PreToolUse: pre, PostToolUse: post };
 }
 
 /** Start the planner on the inbox; yields every SDK message for the caller to log. */
@@ -96,12 +127,7 @@ export function think(inbox: Inbox, options: BrainOptions): AsyncIterable<SDKMes
       systemPrompt: SYSTEM_PROMPT,
       // No built-in tools (files, shell, web): the agent acts only through the game client.
       tools: [],
-      allowedTools: [
-        ...TOOLS,
-        ...(options.policy ? ["mcp__plan__set_plan", "mcp__plan__fast_loop_status"] : []),
-        ...(options.notes ? NOTE_TOOLS : []),
-        ...(options.waker ? WAKE_TOOLS : []),
-      ],
+      allowedTools: allowedTools(options),
       // Compaction well inside the window: recall degrades long before the window fills.
       settings: { autoCompactEnabled: true, autoCompactWindow: options.compactAt ?? 400_000 },
       permissionMode: "dontAsk",
@@ -111,7 +137,7 @@ export function think(inbox: Inbox, options: BrainOptions): AsyncIterable<SDKMes
       // user settings, hooks or MCP servers. It works in its own notes folder.
       settingSources: [],
       ...(options.notes ? { cwd: options.notes.home } : {}),
-      ...(options.waker ? { hooks: { PreToolUse: [{ hooks: [sleepGuard(options.waker)] }] } } : {}),
+      hooks: hooks(options),
       mcpServers: {
         wrathplus: {
           type: "stdio",
@@ -127,6 +153,8 @@ export function think(inbox: Inbox, options: BrainOptions): AsyncIterable<SDKMes
         ...(options.policy ? { plan: planServer(options.policy) } : {}),
         ...(options.notes ? { notes: notesServer(options.notes) } : {}),
         ...(options.waker ? { wake: wakeServer(options.waker) } : {}),
+        ...(options.lua ? { goals: goalsServer(options.lua) } : {}),
+        ...(options.lua && options.modules ? { harness: harnessServer(options.modules.versions, options.modules.files, options.lua) } : {}),
       },
       ...(options.maxTurns ? { maxTurns: options.maxTurns } : {}),
       abortController: options.abortController,
@@ -144,7 +172,7 @@ export function summarize(message: SDKMessage): string | null {
         if (block.type === "text" && block.text.trim()) parts.push(block.text.trim());
         if (block.type === "tool_use") {
           const input = JSON.stringify(block.input);
-          parts.push(`→ ${block.name.replace(/^mcp__(wrathplus|plan|notes|wake)__/, "")} ${input.length > 300 ? input.slice(0, 300) + "…" : input}`);
+          parts.push(`→ ${block.name.replace(/^mcp__(wrathplus|plan|notes|wake|goals|harness)__/, "")} ${input.length > 300 ? input.slice(0, 300) + "…" : input}`);
         }
       }
       return parts.length ? parts.join("\n") : null;
@@ -201,6 +229,69 @@ export function planServer(policy: Policy) {
         "What the fast loop has decided recently: why it woke, what it chose (with confidence), whether that started a new activity, how stalled it judges the plan, and how many Jev calls it has made.",
         {},
         async () => ({ content: [{ type: "text", text: policy.describe() }] }),
+      ),
+    ],
+  });
+}
+
+export const GOAL_TOOLS = ["push_goal", "drop_goal", "goals", "hold"].map((name) => `mcp__goals__${name}`);
+
+const reply = (value: string) => ({ content: [{ type: "text" as const, text: value }] });
+
+/** The planner's goals: the client's GOAP runner plans and runs actions toward the top one. */
+export function goalsServer(lua: Lua) {
+  return createSdkMcpServer({
+    name: "goals",
+    version: "0.1.0",
+    tools: [
+      tool(
+        "push_goal",
+        "Set a goal for the client's goal runner (Goals.push): it plans actions toward the highest-priority achievable goal and runs them, one activity after another, without you. A goal of the same name is replaced. The standing goal `progress` (quests, training, upkeep, grinding, travel to a better zone) is always there at the lowest priority, so push goals for what matters more now: a quest chain, a zone, a level, gear, a profession, staying with your companion. done_lua says when it is achieved; teach the actions it needs with Goals.action in your modules.",
+        {
+          name: z.string().regex(GOAL_NAME).describe("snake_case name"),
+          why: z.string().describe("Why this goal, in a sentence: the runner shows it, and you will read it back at your reviews."),
+          priority: z.number().int().min(1).max(1000).optional().describe("Higher comes first (default 50; progress is lowest)."),
+          done_lua: z.string().optional().describe("Lua returning finished[, ok]; for example `return UnitLevel(\"player\") >= 10`. Without it the goal stays until dropped."),
+          standing: z.boolean().optional().describe("Never finished: kept as an ongoing aim (like progress) rather than done once."),
+          want: z
+            .record(z.string(), z.union([z.boolean(), z.number(), z.string()]))
+            .optional()
+            .describe(
+              "The facts the goal wants, which the planner plans toward: built-in facts (the goals tool lists them, e.g. { quest_ready: true }, { zone_fit: \"ok\" }) or ones you add with Goals.fact. Without want, the goal wants a fact of its own name; if no action's effects reach what it wants, it shows as blocked: teach one (Goals.action) or want existing facts.",
+            ),
+        },
+        async (goal) => reply(outcome(await lua(pushGoalLua(goal)), `Goal ${goal.name} set. The goals tool shows its plan.`)),
+      ),
+      tool(
+        "drop_goal",
+        "Remove a goal (Goals.drop). The runner moves on to the next.",
+        { name: z.string().regex(GOAL_NAME) },
+        async ({ name }) => reply(outcome(await lua(dropGoalLua(name)), `Goal ${name} dropped.`)),
+      ),
+      tool(
+        "goals",
+        "The goals, highest first, each with its status (active, blocked, done, failed), the plan of actions toward it and a note; the facts the planner plans over (quest_ready, bags_full, zone_fit, mobs_for_xp...); any hold; the running activity. Read it to see why the runner does what it does, or why it is stuck.",
+        {},
+        async () => {
+          const result = await lua(GOALS_LUA);
+          return reply(result.ok && result.values?.[0] !== false ? JSON.stringify(result.values?.[0] ?? null, null, 2) : outcome(result, ""));
+        },
+      ),
+      tool(
+        "hold",
+        `Pause the goal runner for a while (Goals.hold), with the reason: waiting for your companion, for a respawn, for a group to form. Keep it short: ${DEFAULT_HOLD_SECONDS} s unless you give seconds, a few minutes at most (hard limit ${MAX_HOLD_SECONDS} s); when it runs out, the fast loop decides whether to keep waiting or get on, from who is actually there. seconds 0 ends the current hold.`,
+        {
+          reason: z.string().describe("What you are waiting for, plainly: the fast loop reads it."),
+          seconds: z
+            .number()
+            .int()
+            .min(0)
+            .max(MAX_HOLD_SECONDS)
+            .optional()
+            .describe(`Default ${DEFAULT_HOLD_SECONDS}; 0 ends the current hold.`),
+        },
+        async ({ reason, seconds = DEFAULT_HOLD_SECONDS }) =>
+          reply(outcome(await lua(holdLua(reason, seconds)), seconds > 0 ? `Holding for ${seconds}s: ${reason}.` : "Hold released; the runner carries on.")),
       ),
     ],
   });

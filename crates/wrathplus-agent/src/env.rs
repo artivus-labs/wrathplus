@@ -3,13 +3,16 @@
 //!
 //! The UI VM is sandboxed (no `require`, `io`, `os`), as addons expect. This adds back exactly one
 //! door: `require(name)` reads `<scripts>/<name with dots as slashes>.lua`, or a built-in module
-//! (`wp.engine`, `wp.values`, `wp.agent`, `wp.revive`, `wp.upkeep`, `wp.rotation`, `wp.combat`, `wp.move`, `wp.quest`), and nothing else. `wp.agent` is preloaded as
-//! the global `Agent`: the registry of intents and decisions the fast tier chooses among; `wp.revive`
-//! as `Revive`, which gets a dead character back up; `wp.upkeep` as `Upkeep`, which wears upgrades,
-//! sells junk and trains; `wp.rotation` as `Rotation`, a
-//! fight's priority list; `wp.combat` as `Combat`, fighting a target kept in range; `wp.move` as
-//! `Move`, going to a unit, following one and holding a spot; `wp.quest` as `Quests`, quest givers'
-//! dialogs and the party's quests. `AgentReload(name)` forgets a module and loads it
+//! (`wp.engine`, `wp.values`, `wp.agent`, `wp.revive`, `wp.upkeep`, `wp.rotation`, `wp.combat`,
+//! `wp.move`, `wp.quest`, `wp.avoid`, `wp.goals`), and nothing else. `wp.agent` is preloaded as
+//! the global `Agent`: the registry of intents and decisions the fast tier chooses among;
+//! `wp.revive` as `Revive`, which gets a dead character back up; `wp.upkeep` as `Upkeep`, which
+//! wears upgrades, sells junk and trains; `wp.rotation` as `Rotation`, a fight's priority list;
+//! `wp.combat` as `Combat`, fighting a target kept in range; `wp.move` as `Move`, going to a unit,
+//! following one and holding a spot; `wp.quest` as `Quests`, quest givers' dialogs and the party's
+//! quests; `wp.avoid` as `Avoid`, walks kept clear of hostiles; `wp.goals` as `Goals`, the goals,
+//! a GOAP planner over facts and actions toward the top one, and the runner that keeps the agent
+//! busy with them. `AgentReload(name)` forgets a module and loads it
 //! again; `AgentModules()` lists the agent's files. If `autoexec.lua` exists, every new in-game
 //! VM runs it, so an agent's logic comes back after `ReloadUI()` or a restart.
 
@@ -29,6 +32,7 @@ const BUILT_IN: &[(&str, &str)] = &[
     ("wp.move", include_str!("../lua/wp/move.lua")),
     ("wp.quest", include_str!("../lua/wp/quest.lua")),
     ("wp.avoid", include_str!("../lua/wp/avoid.lua")),
+    ("wp.goals", include_str!("../lua/wp/goals.lua")),
 ];
 
 /// Where the agent's modules live: `WOW_AGENT_SCRIPTS`, else `<client home>/Agent/scripts`.
@@ -136,6 +140,9 @@ pub(crate) fn install(script: &UiScript, dir: PathBuf) -> mlua::Result<bool> {
     // Walks kept clear of hostile mobs in sight, unless the fast tier says to fight through.
     let avoid = load_module(lua, &dir, "wp.avoid")?;
     lua.globals().set("Avoid", avoid)?;
+    // Goals, the plan toward the top one, and the runner that keeps the agent busy (`Goals.on`).
+    let goals = load_module(lua, &dir, "wp.goals")?;
+    lua.globals().set("Goals", goals)?;
     Ok(module_path(&dir, "autoexec").is_file())
 }
 
@@ -196,6 +203,10 @@ mod rotation_tests;
 #[cfg(test)]
 #[path = "avoid_tests.rs"]
 mod avoid_tests;
+
+#[cfg(test)]
+#[path = "goals_tests.rs"]
+mod goals_tests;
 
 #[cfg(test)]
 mod tests {

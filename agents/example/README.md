@@ -29,6 +29,23 @@ Code login (a Claude subscription works; no API key), with **Claude Haiku 5.5** 
     It is woken by the fast tier when the plan stalls, looks complete, or an intent fails three
     times running, and reads `fast_loop_status`. An idle check-in is off by default
     (`WRATHPLUS_AGENT_CHECKIN_SECONDS`).
+- **Goals** (`src/goals.ts`, the client's `Goals` API in `wp.goals`): the planner sets goals
+  (`push_goal`, `drop_goal`, `goals`) and teaches actions and facts in its modules; the client's
+  GOAP runner plans and runs actions toward the top goal, with the standing goal `progress` always
+  underneath, so the agent is never idle. Waits are bounded: `hold` takes a reason and seconds,
+  and when one runs out (`AGENT_HOLD_EXPIRED`) Jev decides `keep_waiting` (for a minute, a few, or
+  ten) or `stop_waiting`, from the reason, the minutes waited, who in the party is actually here,
+  and the goals. Idle with no hold, Jev is offered `wait` for a minute, then not at all; after three
+  minutes the planner is told (`idleGraceMs`, `idleNotifyMs`).
+- **Reflection** (`src/reflect.ts`): after a death, a level-up, three failed actions in ten
+  minutes, fifteen minutes without progress, or a quiet moment every half hour
+  (`WRATHPLUS_AGENT_REFLECT_MINUTES`; `WRATHPLUS_AGENT_REFLECT=0` turns it off), the planner gets
+  a digest of the window (deaths and causes, fight reviews, goals, failed actions, Jev's choices
+  and holds, idle time, Lua and game errors) with a scoreboard (XP/hour, deaths, quests, idle %),
+  and works on its harness like a coding agent: small change, test, deploy, watch, roll back.
+  Scores go to `<notes>/reflections.jsonl`. Every `save_module` is kept as a version in
+  `<notes>/modules/<name>/` with `changelog.jsonl` (`src/modules.ts`); `module_versions`,
+  `note_change` and `rollback_module` are its tools.
 
 ## Run it
 

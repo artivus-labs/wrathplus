@@ -8787,6 +8787,8 @@ dependencies = [
  "wrathplus-app-net",
  "wrathplus-app-ui",
  "wrathplus-app-world",
+ "wrathplus-assets",
+ "wrathplus-formats",
  "wrathplus-nav",
  "wrathplus-protocol",
  "wrathplus-ui",
