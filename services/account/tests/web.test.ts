@@ -128,3 +128,32 @@ describe("account page", () => {
     expect((await harness().get("/nope")).status).toBe(404);
   });
 });
+
+describe("copy buttons", () => {
+  test("the account page has a copy button for the account, password and realm, from /copy.js only", async () => {
+    const { signIn, get } = harness();
+    const { cookie } = await signIn();
+    const res = await get("/", cookie);
+    const page = await res.text();
+    for (const id of ["account", "password", "realm"]) {
+      expect(page).toContain(`id="${id}"`);
+      expect(page).toContain(`data-copy="${id}"`);
+    }
+    expect(page).toContain('<script src="/copy.js" defer></script>');
+    // No inline script: every <script> has a src.
+    expect(page.match(/<script(?![^>]*\bsrc=)[^>]*>/g)).toBeNull();
+    const csp = res.headers.get("content-security-policy") ?? "";
+    expect(csp).toContain("script-src 'self'");
+    expect(csp.split(";").find((d) => d.trim().startsWith("script-src"))).not.toContain("unsafe-inline");
+  });
+
+  test("/copy.js is served as JavaScript and copies the target's text", async () => {
+    const { get } = harness();
+    const res = await get("/copy.js");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/javascript");
+    const js = await res.text();
+    expect(js).toContain("navigator.clipboard.writeText");
+    expect(js).toContain("data-copy");
+  });
+});

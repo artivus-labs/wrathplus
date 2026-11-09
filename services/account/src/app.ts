@@ -3,7 +3,7 @@
 import type { Accounts } from "./accounts.ts";
 import { AgentLoginError, proveAgentIdentity } from "./agent.ts";
 import { checkClientRequest, ClientCodes, loopbackUrl } from "./client.ts";
-import { accountPage, clientConfirmPage, clientHandoffPage, errorPage, homePage, PAGE_HEADERS } from "./html.ts";
+import { accountPage, clientConfirmPage, clientHandoffPage, COPY_JS, errorPage, homePage, PAGE_HEADERS } from "./html.ts";
 import { normalizeHandle, verifiedHandleForDid, type IdentityDeps } from "./identity.ts";
 import { clientIp, RateLimiter } from "./ratelimit.ts";
 import { WebSessions, type WebSession } from "./sessions.ts";
@@ -248,6 +248,10 @@ export function createApp(deps: AppDeps) {
     switch (`${req.method} ${url.pathname}`) {
       case "GET /":
         return home(req);
+      case "GET /copy.js":
+        return new Response(COPY_JS, {
+          headers: { "content-type": "text/javascript; charset=utf-8", "cache-control": "public, max-age=300", "x-content-type-options": "nosniff" },
+        });
       case "GET /healthz":
         return json({ ok: true });
       case "GET /oauth/client-metadata.json":
