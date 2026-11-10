@@ -41,7 +41,7 @@ limit caps how many come back (default 100, oldest first); when it cuts a read s
 /** The longest wait the tool passes on: under the 30 s at which hosts time a tool call out. */
 export const MAX_WAIT_MS = 25_000;
 
-const EVENTS_WAIT = `\nwait_ms long-polls until an event arrives (with names or exclude: one that matches), for at most ${MAX_WAIT_MS} ms; a longer wait is cut to that, because hosts time a tool call out at about 30 s. No event in time is an empty read: call again with \`next\`.`;
+const EVENTS_WAIT = `\nwait_ms long-polls until an event arrives (with names or exclude: one that matches), for at most ${MAX_WAIT_MS} ms; a longer wait is cut to that, because hosts time a tool call out at about 30 s. No event in time is an empty read: call again with \`next\`. To wait for the end of something you start (a walk, a fight), read \`next\` first, start it, then wait with since=next and names=["AGENT_"]: an event that fires before a from-now read begins is not in it.`;
 
 export interface ToolOptions {
   /** Offer events' wait_ms long-poll (default true). A host that wakes its agent on events itself
