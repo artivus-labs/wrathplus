@@ -23,7 +23,8 @@ pub(super) fn build(app: &mut App) {
     );
 }
 
-/// Raise it in a windowed client; never in a capture, which runs no menagerie, nor headless.
+/// Raise it wherever a warm pass runs: not in a capture or, by default, a headless client
+/// ([`crate::pipe_warm::runs_a_menagerie`]), which have nothing to wait for.
 fn raise_startup_cover(
     mut screen: ResMut<LoadingScreen>,
     window: Query<(), With<PrimaryWindow>>,

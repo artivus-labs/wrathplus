@@ -613,6 +613,7 @@
 - `WOW_PIN_TILE` — wrathplus-world/src/wmo_portal/audit/pin/site.rs
 - `WOW_PIN_UID` — wrathplus-world/src/wmo_portal/audit/pin/site.rs
 - `WOW_PIN_WMO` — wrathplus-world/src/wmo_portal/audit/pin/site.rs
+- `WOW_PIPE_WARM` — wrathplus-app-world/src/pipe_warm/gate.rs
 - `WOW_PIPE_TRACE` — wrathplus-app-world/src/pipe_warm/mod.rs
 - `WOW_POINTS_DUMP` — wrathplus-world/src/lighting/global_light.rs
 - `WOW_PORTRAIT_TEST` — wrathplus-app-world/src/portrait/mod.rs, wrathplus-app-world/src/portrait/test_bake.rs, wrathplus-world/src/bgwin.rs
