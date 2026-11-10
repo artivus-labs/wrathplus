@@ -236,6 +236,13 @@ mod tests {
         );
         s.run("for i = 1, 5 do M:AddMessage(i) end").unwrap();
         check(&s, &["M:GetCurrentLine() == 1"]);
+        // Two lines back from the newest: `(count - cursor + head) mod count` (`0x9690c0`).
+        s.run("M:ScrollUp() M:ScrollUp()").unwrap();
+        check(
+            &s,
+            &["M:GetCurrentScroll() == 2 and M:GetCurrentLine() == 1"],
+        );
+        s.run("M:ScrollToBottom()").unwrap();
         s.run("M:AddMessage('old', 1, 1, 1, 0, true) M:SetHyperlinksEnabled(false)")
             .unwrap();
         check(
