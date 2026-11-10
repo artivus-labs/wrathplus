@@ -47,6 +47,17 @@ fn guild_bank_tabs_money_and_staged_rank_rights() {
             3
         )
     );
+    // The guild master's unlimited item limit and allowance read -1, not 0 or 4294967295.
+    {
+        let mut m = s.model_mut();
+        m.wrath_friends.bank.rank_rights[0].tabs[1].1 = u32::MAX;
+        m.wrath_friends.bank.remaining_withdrawals = -1;
+    }
+    assert_eq!(
+        s.eval::<(i64, i64)>("return select(5, GetGuildBankTabInfo(2))")
+            .unwrap(),
+        (-1, -1)
+    );
     assert_eq!(
         s.eval::<String>("return (GetGuildBankTabInfo(2))").unwrap(),
         "Tab 2"

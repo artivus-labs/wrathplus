@@ -395,7 +395,7 @@ pub(crate) fn feed_guild_bank(
                     }
                 })
                 .collect(),
-            remaining_withdrawals: bank.remaining_withdrawals.max(0) as u32,
+            remaining_withdrawals: bank.remaining_withdrawals,
             rank_rights: native_guild
                 .ranks()
                 .iter()

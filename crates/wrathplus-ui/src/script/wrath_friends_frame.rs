@@ -42,8 +42,8 @@ pub struct WrathGuildBankView {
     pub money: u64,
     /// Purchased tabs in order (`0xc1dc0c` of them).
     pub tabs: Vec<WrathGuildBankTab>,
-    /// Item withdrawals the player has left today (`0xc1dc30`).
-    pub remaining_withdrawals: u32,
+    /// Item withdrawals the player has left today (`0xc1dc30`), signed: -1 is unlimited.
+    pub remaining_withdrawals: i32,
     /// Each rank's rights, rank 0 (the guild master) first, from the roster and our own row from
     /// `MSG_GUILD_PERMISSIONS`; the rank being edited is staged from these.
     pub rank_rights: Vec<WrathGuildBankRankRights>,
@@ -330,7 +330,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             Value::String(lua.create_string(format!("Interface\\Icons\\{icon}"))?),
             flag(rights.0 & 1 != 0),
             flag(rights.0 & 2 != 0),
-            int(rights.1),
+            // Both signed (`fild` at `0x5a69a2`, `0x5a69ae`): -1 is unlimited.
+            int(rights.1 as i32),
             int(remaining),
         ]))
     })?;
