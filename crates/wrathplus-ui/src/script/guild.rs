@@ -338,14 +338,16 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     )?;
 
     // ── The roster ───────────────────────────────────────────────────────────────────────────
-    // GetNumGuildMembers() (`0x5ca130`): the loop bound (`FriendsFrame.lua:446`), the whole roster
-    // (`0xc22ab0`) with show-offline on, else the online tally (`0xc22ab4`).
+    // GetNumGuildMembers([includeOffline]) (`0x5ca130`): the loop bound (`FriendsFrame.lua:446`),
+    // the whole roster (`0xc22ab0`) with show-offline on or the argument true
+    // (`0x815500(L, 1, 0)`), else the online tally (`0xc22ab4`).
     g.set(
         "GetNumGuildMembers",
-        lua.create_function(|lua, ()| {
+        lua.create_function(|lua, args: MultiValue| {
+            let include_offline = binding_abi::bool_or_default(args.front(), false);
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             let roster = &model.guild.roster;
-            Ok(if show_offline(&model) {
+            Ok(if include_offline || show_offline(&model) {
                 roster.len()
             } else {
                 roster.iter().filter(|m| m.online).count()

@@ -191,4 +191,7 @@ fn show_offline_is_the_guild_show_offline_cvar() {
     assert_eq!(s.cvar("guildShowOffline").as_deref(), Some("1"));
     s.run("SetGuildRosterShowOffline('0')").unwrap();
     assert_eq!(read(&s), (None, 1), "a \"0\" string is off");
+    // The optional argument counts the offline members too (`0x5ca13d`).
+    assert_eq!(s.eval::<i64>("return GetNumGuildMembers(true)").unwrap(), 2);
+    assert_eq!(s.eval::<i64>("return GetNumGuildMembers(nil)").unwrap(), 1);
 }
