@@ -90,7 +90,7 @@ fn fixture() -> String {
         format!("26 0 1 510 0 0 2 0 0 {ALLIANCE} Pair_B"),
         format!("30 0 1 2 0 0 0x80 0 0 {MONSTER} Kobold"),
         // Friendly by mask, but at war with the player's faction.
-        format!("31 0 1 4 0 0 0x80 0 0 99 2 0 0 Renegade"),
+        "31 0 1 4 0 0 0x80 0 0 99 2 0 0 Renegade".to_string(),
         // Profession trainers, the profession read off their spells; a weapon master has none.
         format!("40 0 1 8 0 0 0x50 0 185:Cooking {ALLIANCE} Cook"),
         format!("41 0 1 9 0 0 0x50 0 129:First_Aid {ALLIANCE} Medic"),
