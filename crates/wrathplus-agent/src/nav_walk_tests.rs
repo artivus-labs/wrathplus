@@ -266,13 +266,15 @@ fn agent_path_asks_the_realm_and_the_next_call_reads_the_answer() {
 
 #[test]
 fn realm_lines_are_taken_out_of_the_event_stream() {
-    use wrathplus_ui::script::ScriptValue::{Int, Str};
+    use wrathplus_ui::script::ScriptValue::{Bytes, Int, Str};
+    // As the client fires an addon line: prefix and body as bytes (`addon_args`). The beta's
+    // first live probe got its answers, but as strings-only matching left them on the stream.
     let addon = |prefix: &str, text: &str| {
         (
             "CHAT_MSG_ADDON".to_string(),
             vec![
-                Str(prefix.into()),
-                Str(text.into()),
+                Bytes(prefix.as_bytes().to_vec()),
+                Bytes(text.as_bytes().to_vec()),
                 Str("WHISPER".into()),
                 Str("Me".into()),
             ],
@@ -283,12 +285,23 @@ fn realm_lines_are_taken_out_of_the_event_stream() {
         addon("WPNAV", HELLO),
         addon("MBOT", "HELLO~4.0"),
         addon("WPNAV", "r 1 1 1 c 1,2,3"),
+        // A script firing the event itself passes strings.
+        (
+            "CHAT_MSG_ADDON".to_string(),
+            vec![
+                Str("WPNAV".into()),
+                Str("e 2 rate".into()),
+                Str("WHISPER".into()),
+                Str("Me".into()),
+            ],
+        ),
     ];
     assert_eq!(
         take_lines(&mut events),
         [
             (HELLO.to_string(), "Me".to_string()),
-            ("r 1 1 1 c 1,2,3".to_string(), "Me".to_string())
+            ("r 1 1 1 c 1,2,3".to_string(), "Me".to_string()),
+            ("e 2 rate".to_string(), "Me".to_string())
         ]
     );
     assert_eq!(events.len(), 2);
