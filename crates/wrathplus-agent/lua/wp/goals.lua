@@ -39,7 +39,10 @@
 --   not fighting or dead, the next action of the top goal that has a plan runs AS an Agent
 --   activity named `goal:<action>`, so the fast tier and the status line see it. A failed action
 --   is AGENT_ACTION_FAILED(goal, action, why) and waits `retry_after` seconds before it is tried
---   again, doubling on each failure in a row (an interruption, a death or a hold is no failure).
+--   again, doubling on each failure in a row (an interruption, a death or a hold is no failure);
+--   one that failed within `quick_fail` seconds of starting waits even when nothing else is left.
+--   The fast tier is offered goal actions on the same terms: not while fighting or dead, and not
+--   while one backs off.
 -- Holds: Goals.hold{ reason, seconds } stops the runner (and its running action) for that long;
 --   there is no unlimited form. On expiry AGENT_HOLD_EXPIRED(reason, waited) is signalled and the
 --   runner waits `grace` seconds more for a Goals.hold (keep waiting: `waited` keeps counting while
@@ -56,6 +59,9 @@
 local G = {
   on = false, goals = {}, actions = {}, places = {}, log = {}, state = nil,
   replan_every = 5, retry_after = 20, retry_cap = 300, grace = 3, max_steps = 5,
+  -- An action that fails within this many seconds of starting is not tried again before its
+  -- backoff is over, even by the standing goal that never idles.
+  quick_fail = 2,
   -- Health below this out of combat is hp_low; mana below `mana_below` is mana_low.
   rest_below = 0.5, mana_below = 0.35,
   -- Mobs this many levels above us still count for XP.
@@ -491,10 +497,13 @@ local function plan(goal, facts, usable)
   return nil
 end
 
+-- With `include_cooling`, an action backing off after a quick failure is still left out: one
+-- that fails as it starts would otherwise be restarted at once, over and over.
 local function usable_actions(include_cooling)
   local out = {}
   for name, a in pairs(G.actions) do
-    if include_cooling or not G.cooling(name) then out[#out + 1] = a end
+    local f = G.cooling(name) and G.failures[name]
+    if not f or (include_cooling and not f.quick) then out[#out + 1] = a end
   end
   table.sort(out, function(a, b) return a.name < b.name end)
   return out
@@ -619,7 +628,7 @@ local function ended(ok, why)
     note(c.action.name .. " interrupted: " .. tostring(why))
   else
     local f = G.failures[key] or { n = 0 }
-    f.n, f.why = f.n + 1, why
+    f.n, f.why, f.quick = f.n + 1, why, now() - c.since < G.quick_fail
     f.until_ = now() + math.min(G.retry_cap, G.retry_after * 2 ^ (f.n - 1))
     f.waiting = true
     G.failures[key] = f
@@ -655,7 +664,14 @@ register = function(action)
   if not (Agent and Agent.intents) then return end
   Agent.intents[name] = {
     when = function() return offered[name] and offered[name].text or (action.why or action.name) end,
-    available = function() return G.on and not G.held and offered[name] ~= nil end,
+    -- Not while it backs off (a failure counts the same whoever started the action), and not to
+    -- start while fighting or dead, as the runner starts nothing then; the running one stays shown.
+    available = function()
+      if not (G.on and not G.held and offered[name] ~= nil and not G.cooling(action.name)) then return false end
+      local a = Agent.activity()
+      if a and a.name == name then return true end
+      return not UnitIsDeadOrGhost("player") and not UnitAffectingCombat("player") and not (Combat and Combat.active)
+    end,
     run = function()
       local goal = G.goals[offered[name] and offered[name].goal or "progress"] or G.goals.progress
       local args = { goal = goal.name, data = goal.data, facts = last_facts }

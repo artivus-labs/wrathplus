@@ -372,7 +372,8 @@ if Agent and Agent.intent then
   end
   Agent.intent("pick_up_quests", {
     when = function() return "Quest givers nearby have quests for you (" .. names("available") .. "): pick them up." end,
-    available = function() return giver("available") ~= nil end,
+    -- Not in a fight: the walk to the giver would only fail.
+    available = function() return not UnitAffectingCombat("player") and giver("available") ~= nil end,
     run = function()
       Q.attempt("available")
       Q.pick_up()
@@ -386,7 +387,7 @@ if Agent and Agent.intent then
   })
   Agent.intent("hand_in_quests", {
     when = function() return "You have finished quests to hand in nearby (" .. names("reward") .. ")." end,
-    available = function() return giver("reward") ~= nil end,
+    available = function() return not UnitAffectingCombat("player") and giver("reward") ~= nil end,
     run = function()
       Q.attempt("reward")
       Q.hand_in()

@@ -2,7 +2,7 @@ import { describe as group, expect, test } from "bun:test";
 import { Inbox, summarize, TOOLS } from "../src/brain.ts";
 import { configFromEnv } from "../src/index.ts";
 import { SYSTEM_PROMPT, systemPrompt } from "../src/prompt.ts";
-import { describe, overheard, PLANNER_EVENTS, RepeatedErrors, watch, type GameEvent } from "../src/watch.ts";
+import { collapse, describe, overheard, PLANNER_EVENTS, RepeatedErrors, watch, type GameEvent } from "../src/watch.ts";
 
 const event = (seq: number, name: string, args: unknown[] = []): GameEvent => ({ seq, time: seq, event: name, args });
 
@@ -26,7 +26,7 @@ group("events a player would notice", () => {
       "Dongle whispers: need help?",
       "Wifey invites you to a party (AcceptGroup() or DeclineGroup()).",
       "Your Lua failed: module x not found (in: require('x'))",
-      "Game error: Out of range.",
+      "Game error: Out of range. ×2",
       "Your walk ended stuck: AgentWalk().note says why; route around it or pick another way.",
     ]);
   });
@@ -100,7 +100,9 @@ group("events a player would notice", () => {
         if (since >= 1_000_000) return Response.json({ events: [], next: 10, missed: 0 });
         if (!served && since === 10) {
           served = true;
-          return Response.json({ events: [event(10, "PLAYER_DEAD"), event(11, "CHAT_MSG_WHISPER", ["hi", "Dongle"])], next: 12, missed: 0 });
+          // A walk that fails in a hot loop around the death: one line with its count.
+          const walks = Array.from({ length: 40 }, (_, i) => event(12 + i, "AGENT_WALK_DONE", ["failed"]));
+          return Response.json({ events: [walks[0], event(10, "PLAYER_DEAD"), ...walks.slice(1), event(11, "CHAT_MSG_WHISPER", ["hi", "Dongle"])], next: 52, missed: 0 });
         }
         await Bun.sleep(50);
         return Response.json({ events: [], next: since, missed: 0 });
@@ -113,7 +115,9 @@ group("events a player would notice", () => {
     abort.abort();
     await done;
     port.stop(true);
-    expect(messages).toEqual(["Game events:\n- You died.\n- Dongle whispers: hi"]);
+    expect(messages).toEqual([
+      "Game events:\n- Your walk ended failed: AgentWalk().note says why; route around it or pick another way. ×40\n- You died.\n- Dongle whispers: hi",
+    ]);
   });
 
   test("a request triage carried out reaches neither the planner nor the fast tier's wake-ups", async () => {
@@ -276,4 +280,11 @@ group("planner plumbing", () => {
     const config = configFromEnv(["Reach", "level", "5"], { WRATHPLUS_AGENT_URL: "http://127.0.0.1:17950/", WRATHPLUS_AGENT_TOKEN: "t" });
     expect(config).toEqual({ url: "http://127.0.0.1:17950", token: "t", goal: "Reach level 5", model: "claude-haiku-5-5", checkInSeconds: 0 });
   });
+});
+
+test("lines repeated across batches add up to one line with their count", () => {
+  expect(collapse(["Your walk ended failed ×3", "You died.", "Your walk ended failed ×5", "Your walk ended failed"])).toEqual([
+    "Your walk ended failed ×9",
+    "You died.",
+  ]);
 });
