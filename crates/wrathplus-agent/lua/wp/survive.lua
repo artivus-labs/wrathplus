@@ -307,7 +307,10 @@ end
 function S.eat()
   local did = {}
   if S.hp() < 0.95 and not aura("player", "Food", "HELPFUL") then
-    local bag, slot, item = S.item("Food")
+    -- Our own cooking first, then the best food we may eat (Professions); else the first found.
+    local bag, slot, item
+    if Professions and Professions.best_food then bag, slot, item = Professions.best_food() end
+    if not bag then bag, slot, item = S.item("Food") end
     if not bag and not aura("player", "Recently Bandaged", "HARMFUL") then bag, slot, item = S.item("First Aid") end
     if bag then
       UseContainerItem(bag, slot)

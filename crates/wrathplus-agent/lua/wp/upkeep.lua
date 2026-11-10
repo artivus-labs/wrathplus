@@ -21,6 +21,7 @@
 --   Train:  at a class trainer, learn every available rank the money covers, then close the
 --           window. Upkeep.trainer() is the nearest trainer of your own class ("Warrior
 --           Trainer"); after a level-up the fast tier is offered train_skills when one is in sight.
+--           At a Cooking or First Aid trainer, Professions.train() learns instead.
 --   Loot:   in a group roll, `loot` = "upgrades" (the default) needs on what it would wear as an
 --           upgrade and greeds on the rest; "greed" always greeds; "pass" passes; false leaves the
 --           roll to the agent (START_LOOT_ROLL, RollOnLoot). A bind-on-pickup roll it made is
@@ -495,7 +496,11 @@ end
 U.trained_level = nil
 
 local function train()
-  if IsTradeskillTrainer and IsTradeskillTrainer() then return end
+  -- A tradeskill trainer: Cooking and First Aid are Professions' to learn; the rest is the agent's.
+  if IsTradeskillTrainer and IsTradeskillTrainer() then
+    if Professions and Professions.train then Professions.train() end
+    return
+  end
   -- Not ours (a priest trainer for a warrior): nothing to learn here.
   if (GetNumTrainerServices() or 0) == 0 then return end
   local learned, money = {}, GetMoney() or 0

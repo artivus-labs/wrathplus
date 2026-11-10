@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ModuleVersions } from "../src/modules.ts";
 import type { Decision, HoldDecision, TimeShares } from "../src/policy.ts";
-import { GUIDANCE, Reflection, STALL_GUIDANCE, stalled, type ReflectOptions, type Score } from "../src/reflect.ts";
+import { GUIDANCE, Reflection, STALL_GUIDANCE, stalled, unusedTrade, type ReflectOptions, type Score } from "../src/reflect.ts";
 
 const event = (name: string, args: unknown[] = []) => ({ seq: 1, time: 0, event: name, args });
 const MIN = 60_000;
@@ -218,4 +218,20 @@ test("a note that says nothing is left is set against the live facts that say ot
   memory = "- Lyria trains warriors in Goldshire.";
   r.observe({ mobs_for_xp: true });
   expect(r.reflect()).not.toContain("Your notes and the game disagree");
+});
+
+test("resting a lot with meat and cloth in the bags and no profession is pointed out", () => {
+  const { clock, r } = setup({ settleMs: 0, minGapMs: 0 });
+  r.sample({ level: 11, xp: 100, max: 1000, trade: { professions: 0, reagents: 23, food: 0 } });
+  clock.now = 10 * MIN;
+  const rest = event("AGENT_INTENT_DONE", ["goal:rest", true]);
+  r.notice([rest, rest, rest, event("AGENT_FOOD_BOUGHT", [5, 23, 0])]);
+  r.trigger("asked");
+  expect(r.check()).toContain("Professions: you rested 3 times and bought 5 food while carrying 23 meat and cloth");
+  // Known professions, no reagents, or little resting: nothing to say.
+  const w = { rests: 4, foodBought: 0 };
+  expect(unusedTrade({ ...w, trade: { professions: 2, reagents: 23, food: 4 } })).toBeNull();
+  expect(unusedTrade({ ...w, trade: { professions: 0, reagents: 0, food: 0 } })).toBeNull();
+  expect(unusedTrade({ rests: 1, foodBought: 2, trade: { professions: 0, reagents: 9, food: 0 } })).toBeNull();
+  expect(unusedTrade({ ...w, trade: undefined })).toBeNull();
 });

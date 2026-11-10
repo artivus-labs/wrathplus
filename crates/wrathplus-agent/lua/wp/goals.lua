@@ -26,7 +26,8 @@
 --   needs_food (nothing to eat, or to drink for a mana user, and money for some), recent_deaths
 --   (in the last ten minutes: each lowers the levels pulled, Survive.band), mobs_for_xp (a mob in
 --   sight that gives XP and is a safe pull: Survive.pull_ok), zone_fit ("low": the zone is below
---   us, "ok", "high": above us), in_combat, dead.
+--   us, "ok", "high": above us), in_combat, dead. wp.professions adds can_cook, can_bandage,
+--   food_low, bandages_low, can_skill_up and profession_to_learn.
 -- Actions:
 --   Goals.action{ name, why, pre = { fact = value } | fn(facts), effects = { fact = value },
 --                 cost = n | fn(facts), run = fn(args), done = fn() → finished, ok, why, timeout,
@@ -35,8 +36,9 @@
 --       so a failure backs off that one, not the whole action; `stop` undoes what an action that
 --       ended badly left going (its fight, its walk). Built in: hand_in_quests,
 --       pick_up_quests, work_objective, train, sell_and_repair, buy_food, rest, grind, seek_mobs,
---       travel_to_zone. Fights are only started when Survive.pull_ok says so (grind and
---       work_objective take the nearest safe mob, and wait for or give up on an unsafe one),
+--       travel_to_zone (and wp.professions' learn_professions, craft). Fights are only started
+--       when Survive.pull_ok says so (grind and work_objective take the nearest safe mob, and wait
+--       for or give up on an unsafe one),
 --       and whatever the plan, the runner rests first when hurt.
 --       A plan is the cheapest chain of actions (A* over the facts) from now to
 --       the goal's `want`; plans are made again on the agent's signals (an activity's end, a
@@ -522,7 +524,9 @@ local BUILT_IN_FACTS = {
   { "needs_food", function()
     if not Survive or (GetMoney and GetMoney() or 0) < G.food_money then return false end
     local mana_user = UnitPowerType ~= nil and UnitPowerType("player") == 0
-    return Survive.count("Food") == 0 or (mana_user and Survive.count("Drink") == 0)
+    -- No food, unless we can cook some from the bags (wp.professions' craft makes it).
+    local cook = Professions and Professions.known().Cooking and Professions.makeable("food") > 0
+    return (Survive.count("Food") == 0 and not cook) or (mana_user and Survive.count("Drink") == 0)
   end },
   { "mobs_for_xp", function()
     local any = false
@@ -1200,6 +1204,10 @@ local function visit(st)
   forget(p)
   return true, false, tostring(p.name) .. " is not where they stood"
 end
+
+-- For modules that add actions of their own (wp.professions): a remembered place of a kind on this
+-- continent, the units in sight this pass, and a visit to a remembered NPC (finished, ok, why).
+G.place, G.nearby, G.visit = place, nearby, visit
 
 local quest_visit = {}
 
