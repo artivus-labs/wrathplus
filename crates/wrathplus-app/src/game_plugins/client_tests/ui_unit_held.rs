@@ -4,35 +4,32 @@
 use bevy::prelude::*;
 
 /// The chain feed reads the resolver inputs the aura feed pushes in the same frame, so the
-/// declared order puts the feed after it: read off the schedule graph.
+/// declared order puts the feed after it: read off the schedule graph, by the type each system
+/// runs under (a build without `bevy/debug` names none).
 #[test]
 fn the_chain_feed_runs_after_the_aura_feed_it_reads() {
     use crate::game_plugins::schedule_tests::{census, headless_client, SyncPoints};
+    use crate::ui_unit::aura_readers;
 
     let mut app = headless_client();
     let c = census(&mut app, Update, SyncPoints::Declared);
-    if !c
-        .systems
-        .values()
-        .any(|s| s.name.contains("wrathplus_app::"))
-    {
-        eprintln!("skipped: this build carries no type names");
-        return;
-    }
-    let one = |suffix: &str| {
-        let mut hits = c.systems.iter().filter(|(_, s)| s.name.ends_with(suffix));
+    let one = |what: &str, hit: &dyn Fn(&_) -> bool| {
+        let mut hits = c.systems.iter().filter(|(_, s)| hit(s));
         match (hits.next(), hits.next()) {
             (Some((k, _)), None) => *k,
-            _ => panic!("exactly one system named `…{suffix}` in Update"),
+            _ => panic!("exactly one {what} in Update"),
         }
     };
-    let aura = one("::ui_aura::feed_auras");
-    for feed in [
-        "::ui_unit::held::feed_chain_units",
-        "::spell_targeting::feed_targeting_to_vm",
+    let aura = one("system in AuraEvents", &|s| {
+        s.sets.iter().any(|set| set == "AuraEvents")
+    });
+    for (feed, ty) in [
+        ("feed_chain_units", aura_readers::feed_chain_units()),
+        ("feed_targeting_to_vm", aura_readers::feed_targeting_to_vm()),
     ] {
         assert!(
-            c.dependencies.contains(&(aura, one(feed))),
+            c.dependencies
+                .contains(&(aura, one(feed, &|s| s.type_id == ty))),
             "{feed} is declared after feed_auras"
         );
     }

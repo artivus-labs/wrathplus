@@ -57,6 +57,7 @@ fn new_vm(app: &mut App) {
 /// Building this graph also rejects a cycle through the unit-feed chain or its shared set.
 #[test]
 fn startup_stat_and_health_feeds_are_declared_after_aura_events_without_a_cycle() {
+    use super::aura_readers::system_type;
     use bevy::ecs::schedule::NodeId;
 
     let mut app = startup_app();
@@ -70,20 +71,19 @@ fn startup_stat_and_health_feeds_are_declared_after_aura_events_without_a_cycle(
             .map(|(key, _, _)| NodeId::Set(key))
             .expect("the production aura feed's set");
         let systems: Vec<_> = schedule.systems().unwrap().collect();
-        // As in the whole-client schedule census, release builds may omit diagnostic names.
-        if !systems
-            .iter()
-            .any(|(_, s)| s.name().contains("::ui_unit::"))
-        {
-            eprintln!("skipped: this build carries no type names");
-            return;
-        }
-        for suffix in ["::ui_pet_doll::feed_pet_doll", "::ui_unit::feed_units"] {
+        // By the type each system runs under: a build without `bevy/debug` names none.
+        for (feed, ty) in [
+            (
+                "feed_pet_doll",
+                system_type(crate::ui_pet_doll::feed_pet_doll),
+            ),
+            ("feed_units", system_type(feed_units)),
+        ] {
             let matching: Vec<_> = systems
                 .iter()
-                .filter(|(_, s)| s.name().ends_with(suffix))
+                .filter(|(_, s)| bevy::ecs::system::System::type_id(&***s) == ty)
                 .collect();
-            assert_eq!(matching.len(), 1, "one production {suffix}");
+            assert_eq!(matching.len(), 1, "one production {feed}");
             let system = NodeId::System(matching[0].0);
             assert!(
                 graph
@@ -91,7 +91,7 @@ fn startup_stat_and_health_feeds_are_declared_after_aura_events_without_a_cycle(
                     .graph()
                     .all_edges()
                     .any(|edge| edge == (aura, system)),
-                "{suffix} must explicitly run after AuraEvents"
+                "{feed} must explicitly run after AuraEvents"
             );
         }
     });
