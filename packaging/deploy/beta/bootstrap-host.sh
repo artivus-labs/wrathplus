@@ -12,7 +12,7 @@ log 'apt: updates and base packages'
 apt-get update -q
 apt-get -y -q -o Dpkg::Options::=--force-confold upgrade
 apt-get install -y -q ca-certificates curl gnupg git rsync tmux jq bc xxd openssl unzip \
-    unattended-upgrades fail2ban python3-systemd
+    unattended-upgrades fail2ban python3-systemd age rclone
 
 log 'unattended-upgrades: daily security updates, no automatic reboot'
 cat > /etc/apt/apt.conf.d/20auto-upgrades <<'EOF'

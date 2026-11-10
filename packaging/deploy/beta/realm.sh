@@ -11,7 +11,8 @@
 #   realm.sh account NAME   create a player account (no GM rights) over SOAP; password file under
 #                           /etc/wrathplus-beta/accounts/NAME (0600), never printed
 #   realm.sh soap CMD       one worldserver command over SOAP as the SOAPADMIN account
-#   realm.sh install        install the daily backup timer and the wrathplus-realm command
+#   realm.sh install        install the daily backup timer (+ off-box copy, offsite.sh) and the
+#                           wrathplus-realm and wrathplus-offsite commands
 #   realm.sh account-service  Bun, services/account as a systemd unit (127.0.0.1:8787), its SOAP
 #                           account (/etc/wrathplus/soap-account, 0600), Caddy with automatic TLS
 #   realm.sh detach CMD     run CMD as a transient systemd unit, logging to $ROOT/logs
@@ -54,10 +55,10 @@ stage_modules() {
     rm -rf "$CONTEXT"
     mkdir -p "$CONTEXT"
     local name
-    rsync -a --exclude .git "$CORE/modules/mod-playerbots/" "$CONTEXT/mod-playerbots/"
-    rsync -a --exclude .git "$SRC/mod-multibot-bridge/" "$CONTEXT/mod-multibot-bridge/"
+    rsync -a --chmod=Dgo+rx,Fgo+r --exclude .git "$CORE/modules/mod-playerbots/" "$CONTEXT/mod-playerbots/"
+    rsync -a --chmod=Dgo+rx,Fgo+r --exclude .git "$SRC/mod-multibot-bridge/" "$CONTEXT/mod-multibot-bridge/"
     for name in $BUNDLED_MODULES; do
-        rsync -a --exclude .git "$RECIPE/modules/$name/" "$CONTEXT/$name/"
+        rsync -a --chmod=Dgo+rx,Fgo+r --exclude .git "$RECIPE/modules/$name/" "$CONTEXT/$name/"
     done
     if [ -n "$(find "$CONTEXT" \( -type l -o ! -type f ! -type d -o -iname '*.conf' -o -name .env -o -name '.env.*' \) -print -quit)" ]; then
         die 'module context contains a link, special file or working .conf/.env file'
@@ -145,7 +146,9 @@ backup_account_service() {
 cmd_update() {
     if [ "${1:-}" != --no-pull ]; then
         log 'updating repo'
-        git -C "$REPO" pull --ff-only
+        # lib.sh sets umask 077 for secrets; checkout files must stay readable (the image build
+        # copies modules with their modes, and the server runs as an unprivileged user).
+        (umask 022 && git -C "$REPO" pull --ff-only)
         # Re-exec so this run uses the pulled scripts and pins.
         exec "$BETA_DIR/realm.sh" update --no-pull
     fi
@@ -313,10 +316,14 @@ cmd_account_service() {
 cmd_install() {
     install -m 0644 "$BETA_DIR/systemd/wrathplus-backup.service" /etc/systemd/system/
     install -m 0644 "$BETA_DIR/systemd/wrathplus-backup.timer" /etc/systemd/system/
+    install -d -m 0755 /etc/systemd/system/wrathplus-backup.service.d
+    install -m 0644 "$BETA_DIR/systemd/wrathplus-backup.service.d/offsite.conf" \
+        /etc/systemd/system/wrathplus-backup.service.d/
     ln -sf "$BETA_DIR/realm.sh" /usr/local/sbin/wrathplus-realm
+    ln -sf "$BETA_DIR/offsite.sh" /usr/local/sbin/wrathplus-offsite
     systemctl daemon-reload
     systemctl enable --now wrathplus-backup.timer
-    log 'installed: wrathplus-backup.timer (daily dump); the realm restarts via Compose restart policies'
+    log 'installed: wrathplus-backup.timer (daily dump, then wrathplus-offsite); the realm restarts via Compose restart policies'
 }
 
 cmd_detach() {
