@@ -20,6 +20,8 @@ group("events a player would notice", () => {
       event(9, "UI_ERROR_MESSAGE", ["Out of range."]),
       event(10, "AGENT_WALK_DONE", ["arrived"]),
       event(11, "AGENT_WALK_DONE", ["stuck"]),
+      event(12, "AGENT_WALK_DONE", ["stalled", "Quartermaster Hicks"]),
+      event(13, "AGENT_RESTED", [200, null]),
     ], "Agentone");
     expect(lines).toEqual([
       "You died.",
@@ -28,6 +30,8 @@ group("events a player would notice", () => {
       "Your Lua failed: module x not found (in: require('x'))",
       "Game error: Out of range. ×2",
       "Your walk ended stuck: AgentWalk().note says why; route around it or pick another way.",
+      "A walk to Quartermaster Hicks stalled: no ground gained for a while, even after sending it again. Look at where you are (a wall, a ledge, a door) and route around it.",
+      "Rested: health and mana are full.",
     ]);
   });
 
@@ -242,6 +246,12 @@ group("planner plumbing", () => {
     expect(SYSTEM_PROMPT).toContain("push_goal with zone set (the goal's data.zone)");
     expect(SYSTEM_PROMPT).toContain("Never teach an action of your own that walks to another zone");
     expect(SYSTEM_PROMPT).toContain("When a built-in keeps doing nothing, suspect your own modules first");
+  });
+
+  test("the prompt says any vendor buys anything, and that a walk by hand holds the runner", () => {
+    expect(SYSTEM_PROMPT).toContain("every vendor buys any item, quartermasters and smiths included");
+    expect(SYSTEM_PROMPT).toContain("puts it on hold until the walk ends");
+    expect(SYSTEM_PROMPT).toContain("wake_me on AGENT_RESTED");
   });
 
   test("the inbox yields messages in order and ends when closed", async () => {

@@ -13,7 +13,9 @@ const MAX_ENTRIES: usize = 2_000;
 
 /// Run `code` and report `{ok, values, output}` or `{ok: false, error, output}`. A bare expression
 /// (`UnitName("player")`) is returned as a REPL would; anything else runs as a chunk, whose
-/// `return` values are reported. `budget` bounds the run in VM instruction units.
+/// `return` values are reported. `budget` bounds the run in VM instruction units. Around the run,
+/// `Agent.port_call(true)` and `Agent.port_call(false)` are called when the agent's Lua defines
+/// it, so its modules can tell what the caller's own code does from what runs by itself.
 pub(crate) fn run(script: &UiScript, code: &str, budget: u64) -> Value {
     let lua = script.lua();
     let output = Arc::new(Mutex::new(Vec::<String>::new()));
@@ -32,9 +34,11 @@ pub(crate) fn run(script: &UiScript, code: &str, budget: u64) -> Value {
     if let Ok(capture) = capture {
         let _ = globals.set("print", capture);
     }
+    port_call(lua, true);
     script.set_instruction_budget(budget);
     let result = load(lua, code).and_then(|f| call_packed(lua, f));
     script.clear_instruction_budget();
+    port_call(lua, false);
     let _ = globals.set("print", saved_print);
     let output = std::mem::take(&mut *output.lock().expect("output lock"));
     match result {
@@ -44,6 +48,17 @@ pub(crate) fn run(script: &UiScript, code: &str, budget: u64) -> Value {
             "output": output,
         }),
         Err(e) => json!({"ok": false, "error": e.to_string(), "output": output}),
+    }
+}
+
+/// `Agent.port_call(begin)`, if the agent's Lua has one; its errors are its own.
+fn port_call(lua: &Lua, begin: bool) {
+    let hook = lua
+        .globals()
+        .get::<mlua::Table>("Agent")
+        .and_then(|agent| agent.get::<mlua::Function>("port_call"));
+    if let Ok(hook) = hook {
+        let _ = hook.call::<()>(begin);
     }
 }
 

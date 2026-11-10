@@ -18,9 +18,10 @@
 --   `progress` is always there, at the lowest priority: hand in, pick up, work objectives, train,
 --       sell and repair, rest, else grind, else look further afield or travel to a better zone.
 -- Facts, the planner's world state, read fresh each pass (Goals.facts(); Goals.fact(name, fn) adds
---   one): quest_ready, objectives_open, quest_giver_near, hand_in_near, bags_full, needs_repair,
---   can_train, trainer_known, vendor_known, repair_known, food_vendor_known (seen this session,
---   and where: Goals.places), hp_low, mana_low (below what a fight is started at), gear_broken
+--   one): quest_ready, objectives_open, quest_giver_near, hand_in_near, bags_full (fewer free
+--   slots than Upkeep.full_below), needs_repair, can_train, trainer_known, vendor_known,
+--   repair_known, food_vendor_known (seen this session, and where: Goals.places), hp_low,
+--   mana_low (below what a fight is started at), gear_broken
 --   (the main hand cannot swing), pull_ok (fit to start a fight: none of those three),
 --   needs_food (nothing to eat, or to drink for a mana user, and money for some), recent_deaths
 --   (in the last ten minutes: each lowers the levels pulled, Survive.band), mobs_for_xp (a mob in
@@ -60,6 +61,20 @@
 --   zones that fit. An action the planner taught (not built in) that walks into a zone above us
 --   is stopped there and fails with the same list.
 --
+-- Places: Goals.places[kind] lists the NPCs seen (kinds trainer, our class's; vendor, every
+--   merchant, which buys any item, quartermasters too; repair), up to `places_max` each, and an
+--   action goes to the nearest. Goals.learn_places{ { kind, name, x, y [, z, map, zone, guid] }, ... }
+--   adds places from elsewhere (the realm's own list of its NPCs).
+-- Keep: Goals.keep{ "name", ... } adds items a full bag never sells at a merchant (Upkeep.keep);
+--   selling that still leaves the bags full fails sell_and_repair with what fills them, and it
+--   backs off like any failure.
+-- Walks the planner starts by hand (AgentMoveTo, Move.to, AgentInteract from afar, in its lua
+--   tool, outside any activity) while the runner is on: the runner holds while the walk lasts
+--   (at most `walk_hold_cap` seconds), the goal action it pre-empted ends as interrupted, and the
+--   tool's output says which action and where it was going. A stop or a sit by hand (AgentStop,
+--   SitStandOrDescendStart, DoEmote("sit")) holds it `stop_hold` seconds the same way. The
+--   runner's own walks are not held.
+--
 -- `Goals.state` says what the runner is doing; `Goals.log` keeps its last few lines.
 
 local G = {
@@ -68,8 +83,9 @@ local G = {
   -- An action that fails within this many seconds of starting is not tried again before its
   -- backoff is over, even by the standing goal that never idles.
   quick_fail = 2,
-  -- Health below this out of combat is hp_low; mana below `mana_below` is mana_low. Resting
-  -- goes on to `rest_until`.
+  -- Health below this out of combat is hp_low; mana below `mana_below` is mana_low; at or above
+  -- `rest_until` health is never low (below it, it is where the mobs here want more). Resting
+  -- goes on to full health and mana.
   rest_below = 0.7, mana_below = 0.4, rest_until = 0.9,
   -- Mobs this many levels above us still count when reading how a zone suits us (zone_fit).
   above = 2,
@@ -79,6 +95,10 @@ local G = {
   -- an objective whose area is too dangerous is left alone for `danger_wait`; food is bought
   -- with at least this much money (copper).
   unsafe_wait = 20, danger_wait = 600, food_money = 50,
+  -- NPCs remembered per kind, and the longest a walk of the planner's holds the runner.
+  places_max = 8, walk_hold_cap = 300,
+  -- How long the runner holds after the planner stops the character or sits it down by hand.
+  stop_hold = 30,
   failures = {}, current = nil, held = nil, after = nil,
 }
 
@@ -291,7 +311,35 @@ local function sells_food(title)
   return false
 end
 
--- Remember where the NPCs we need stood, as a player remembers the trainer's house.
+
+local function same_place(a, b)
+  if a.guid and b.guid then return a.guid == b.guid end
+  return a.name == b.name and a.map == b.map and far(a, b) < 40
+end
+
+-- Remember a place of a kind: the same NPC again moves to the front, the oldest beyond
+-- `places_max` is forgotten.
+local function learn(kind, p)
+  local list = G.places[kind] or {}
+  G.places[kind] = list
+  for i = #list, 1, -1 do
+    if same_place(list[i], p) then table.remove(list, i) end
+  end
+  table.insert(list, 1, p)
+  while #list > G.places_max do table.remove(list) end
+end
+
+-- An NPC that was not where it stood, under every kind.
+local function forget(p)
+  for _, list in pairs(G.places) do
+    for i = #list, 1, -1 do
+      if same_place(list[i], p) then table.remove(list, i) end
+    end
+  end
+end
+
+-- Remember where the NPCs we need stood, as a player remembers the trainer's house. A smith who
+-- repairs is a vendor too: every merchant buys any item.
 local function remember(list)
   local class = UnitClass and UnitClass("player")
   local zone = GetRealZoneText and GetRealZoneText()
@@ -302,24 +350,46 @@ local function remember(list)
         map = pos and pos.map, at = now() }
       for _, s in ipairs(u.npc) do
         if s == "classtrainer" and class and u.title and u.title:lower():find(class:lower(), 1, true) then
-          G.places.trainer = place
-        elseif s == "repair" then
-          G.places.repair = place
-        elseif s == "vendor" and not (G.places.repair and G.places.repair.guid == u.guid) then
-          G.places.vendor = place
+          learn("trainer", place)
+        elseif s == "repair" or s == "vendor" then
+          learn(s, place)
+          if s == "repair" then learn("vendor", place) end
         end
         -- Innkeepers sell food and drink; so do the vendors whose title says so.
-        if s == "innkeeper" or (s == "vendor" and sells_food(u.title)) then G.places.food = place end
+        if s == "innkeeper" or (s == "vendor" and sells_food(u.title)) then learn("food", place) end
       end
     end
   end
 end
 
--- A remembered place on this continent, else nil.
+-- Places from elsewhere: { { kind = "vendor" | "repair" | "trainer" | ..., name, x, y [, z, map,
+-- zone, guid] }, ... }. A repair NPC is a vendor too. Returns how many were taken.
+function G.learn_places(list)
+  assert(type(list) == "table", "learn_places takes a list of places")
+  local n = 0
+  for _, p in ipairs(list) do
+    assert(type(p) == "table" and valid_name(p.kind) and type(p.name) == "string" and tonumber(p.x) and tonumber(p.y),
+      "a place is { kind, name, x, y [, z, map, zone, guid] }")
+    local place = { guid = p.guid, name = p.name, x = tonumber(p.x), y = tonumber(p.y), z = tonumber(p.z),
+      map = p.map, zone = p.zone, at = now() }
+    learn(p.kind, place)
+    if p.kind == "repair" then learn("vendor", place) end
+    n = n + 1
+  end
+  dirty = true
+  return n
+end
+
+-- The nearest remembered place of a kind on this continent, else nil.
 local function place(kind)
-  local p, pos = G.places[kind], me()
-  if p and pos and p.map and pos.map ~= p.map then return nil end
-  return p
+  local pos, best, best_d = me(), nil, math.huge
+  for _, p in ipairs(G.places[kind] or {}) do
+    if not (pos and p.map and pos.map ~= p.map) then
+      local d = pos and far(pos, p) or 0
+      if d < best_d then best, best_d = p, d end
+    end
+  end
+  return best
 end
 
 -- A giver in reach marked for us, leaving out those a visit just found had nothing (Quests.skipping).
@@ -416,7 +486,7 @@ local BUILT_IN_FACTS = {
   { "hand_in_near", function() return marker("reward") ~= nil end },
   { "bags_full", function()
     local free = free_slots()
-    return free ~= nil and free <= 1
+    return free ~= nil and free < ((Upkeep and Upkeep.full_below) or 2)
   end },
   { "needs_repair", function()
     if not GetInventoryItemDurability then return false end
@@ -433,7 +503,7 @@ local BUILT_IN_FACTS = {
     remember(nearby())
     return place("trainer") ~= nil
   end },
-  { "vendor_known", function() return (place("repair") or place("vendor")) ~= nil end },
+  { "vendor_known", function() return place("vendor") ~= nil end },
   -- Repairs need a repair NPC: any vendor buys junk, but only some fix gear.
   { "repair_known", function() return place("repair") ~= nil end },
   { "gear_broken", function() return Survive ~= nil and Survive.weapon_broken() end },
@@ -663,7 +733,7 @@ end
 -- The runner
 
 -- Ends that are not the action's fault: the backoff is for actions that fail on their own.
-local INTERRUPTIONS = { "^replaced by", "^died", "^hold", "^attacked", "^hurt", "^fled" }
+local INTERRUPTIONS = { "^replaced by", "^died", "^hold", "^attacked", "^hurt", "^fled", "^walk interrupted" }
 
 local function interrupted(why)
   for _, p in ipairs(INTERRUPTIONS) do
@@ -805,6 +875,146 @@ local function check_hold(t)
   if G.after and t >= G.after.until_ then G.after = nil end
 end
 
+---------------------------------------------------------------------------------------------------
+-- Walks the planner starts by hand, through the control port's Lua (Agent.port_call brackets each
+-- call): the runner steps aside for them, so the two never fight over where the character goes.
+
+-- Inside a port call: the walk verbs as they were before it, and how deep we are in our own.
+local port = { saved = nil, depth = 0 }
+
+-- Where a walk goes, and how far that is: a place, a guid or a name in sight. nil when it is no
+-- walk (an NPC within reach) or unknown.
+local function walk_target(a, b, within)
+  local pos = me()
+  if type(a) == "number" and type(b) == "number" then
+    return string.format("(%d, %d)", a, b), pos and far(pos, { x = a, y = b }) or 0
+  end
+  if type(a) == "table" and a.x then
+    return string.format("(%d, %d)", a.x, a.y), pos and far(pos, a) or 0
+  end
+  if type(a) ~= "string" then return nil end
+  for _, u in ipairs(seen(200)) do
+    if u.guid == a or (u.name and u.name:lower() == a:lower()) then
+      if within and u.distance <= within then return nil end
+      return tostring(u.name or a), u.distance or 0
+    end
+  end
+end
+
+-- What the pre-empted action was doing: where it was going.
+local function going(c)
+  if c.args and c.args.going then return " (going to " .. tostring(c.args.going) .. ")" end
+  if Move and Move.mode == "to" and Move.state then return " (" .. Move.state .. ")" end
+  return ""
+end
+
+-- A walk, stop or sit the planner does by hand: hold the runner (ending the action it pre-empts,
+-- whose stop would otherwise undo the walk) before it happens, and say so in the tool's output. A
+-- walk's hold ends with the walk; a stop's or a sit's after `stop_hold` seconds.
+local function planner_override(what, distance)
+  if not G.on or (G.held and not G.held.by_hand) then return end
+  local walk = what.walk
+  local c = G.current
+  local a = Agent and Agent.activity and Agent.activity()
+  local pre_empted = c and a and a.name == c.intent and c
+  local said = pre_empted and (c.action.name .. going(c)) or nil
+  local seconds = walk and math.min(G.walk_hold_cap, math.floor(15 + 1.5 * (distance or 0) / 7)) or G.stop_hold
+  G.hold({ reason = what.reason, seconds = seconds })
+  G.held.by_hand = { since = now(), walk = walk, pre_empted = said }
+  local text
+  if walk then
+    text = said
+      and string.format("This walk pre-empted goal action %s for goal %s; the goal runner resumes when the walk ends (at most %d s).",
+        said, c.goal, seconds)
+      or string.format("The goal runner holds while this walk lasts, and resumes when it ends (at most %d s).", seconds)
+  else
+    text = string.format("%s%s; the goal runner holds for %d s, then resumes (Goals.release() resumes it now). The runner rests (eating from the bags), sells, loots, fights and walks by itself: shape it with goals, not by stopping it.",
+      what.verb, said and (" pre-empted goal action " .. said .. " for goal " .. c.goal) or "", seconds)
+  end
+  note(what.reason .. (said and (" pre-empted " .. said) or ""))
+  print(text)
+end
+
+local function returned(ok, ...)
+  port.depth = port.depth - 1
+  if not ok then error((...), 0) end
+  return ...
+end
+
+-- What a walk verb's call does: a walk somewhere, or nothing (an NPC within `within` yards).
+local function walking_to(within)
+  return function(a, b)
+    local where, distance = walk_target(a, b, within)
+    if where then return { walk = true, reason = "your walk to " .. where }, distance end
+  end
+end
+
+local function stopping(verb)
+  return function() return { verb = verb, reason = "you " .. verb:lower() } end
+end
+
+-- A verb, wrapped: a call from the port's own code, outside an activity starting and outside
+-- another wrapped verb, is the planner's own doing; `classify(args)` says what it does.
+local function wrap(fn, classify)
+  return function(a, b, ...)
+    local mine = port.depth == 0 and not (Agent and Agent.starting)
+    -- Deeper from here (the hold's own stop of the action, the verb's own calls) is not the planner's.
+    port.depth = port.depth + 1
+    if mine then
+      local what, distance = classify(a, b)
+      if what then pcall(planner_override, what, distance) end
+    end
+    return returned(pcall(fn, a, b, ...))
+  end
+end
+
+local function sit_emote(token)
+  return type(token) == "string" and token:upper() == "SIT" and { verb = "Sat down", reason = "you sat down" } or nil
+end
+
+-- The verbs wrapped for the length of one port call: { name, classify, on Move }.
+local VERBS = {
+  { "AgentMoveTo", walking_to() }, { "AgentInteract", walking_to(5) }, { "to", walking_to(), true },
+  { "AgentStop", stopping("Stopped") }, { "SitStandOrDescendStart", stopping("Sat down") },
+  { "DoEmote", sit_emote },
+}
+
+local function verb_home(v) return v[3] and Move or _G end
+
+if Agent then
+  Agent.port_call = function(begin)
+    if begin and not port.saved then
+      port.saved = {}
+      for i, v in ipairs(VERBS) do
+        local home = verb_home(v)
+        local fn = home and home[v[1]]
+        if type(fn) == "function" then
+          local wrapped = wrap(fn, v[2])
+          port.saved[i] = { fn = fn, wrapped = wrapped }
+          home[v[1]] = wrapped
+        end
+      end
+    elseif not begin and port.saved then
+      -- Put back only what is still ours: a verb the call replaced itself stays replaced.
+      for i, v in ipairs(VERBS) do
+        local home, saved = verb_home(v), port.saved[i]
+        if saved and home and home[v[1]] == saved.wrapped then home[v[1]] = saved.fn end
+      end
+      port.saved, port.depth = nil, 0
+    end
+  end
+end
+
+-- The planner's walk is over (or never started): the runner carries on at once.
+local function check_walk_hold(t)
+  local h = G.held
+  if not (h and h.by_hand and h.by_hand.walk) or t - h.by_hand.since < 1 then return end
+  local walk = AgentWalk and AgentWalk()
+  if (walk and walk.status == "walking") or (Move and Move.mode == "to") then return end
+  note("your walk is over: the runner carries on")
+  G.release()
+end
+
 -- An action the planner taught that walks into a zone above us is stopped at its edge: travel
 -- goes through a goal's data.zone and travel_to_zone, whose zone Goals.push checks. A built-in
 -- action is not stopped (travel_to_zone's target was checked; a quest walk is the quest's).
@@ -825,6 +1035,7 @@ local function check_zone(c)
 end
 
 local function tick(t)
+  check_walk_hold(t)
   check_hold(t)
   check_zone(G.current)
   if not G.on then return end
@@ -941,8 +1152,15 @@ local function walk_over()
   return arrived, outcome
 end
 
+-- Why a walk that did not arrive ended the action: one someone else stopped short is an
+-- interruption (the runner starts the action again), anything else the action's failure.
+local function walk_failure(outcome, why)
+  if outcome == "interrupted" then return "walk interrupted (stopped short by someone else) on the way: " .. why end
+  return why
+end
+
 -- Talk to a remembered NPC: in sight, AgentInteract walks up; else walk to where they stood.
-local function visit(kind, st)
+local function visit(st)
   local p = st.place
   for _, u in ipairs(seen(80)) do
     if u.guid == p.guid or (u.name == p.name and u.kind == "unit") then
@@ -961,8 +1179,10 @@ local function visit(kind, st)
   end
   if walking() then return false end
   local arrived, outcome = walk_over()
-  if not arrived then return true, false, "could not reach " .. tostring(p.name) .. " (" .. tostring(outcome) .. ")" end
-  G.places[kind] = nil
+  if not arrived then
+    return true, false, walk_failure(outcome, "could not reach " .. tostring(p.name) .. " (" .. tostring(outcome) .. ")")
+  end
+  forget(p)
   return true, false, tostring(p.name) .. " is not where they stood"
 end
 
@@ -1020,7 +1240,7 @@ G.action({
     for _, q in ipairs(Quests.list()) do
       local h = hand_in_of(q)
       if h and not G.cooling("hand_in_quests:" .. q.title) then
-        args.subject = q.title
+        args.subject, args.going = q.title, "the hand-in of " .. q.title
         quest_visit.target = { id = q.id, title = q.title, x = h.x, y = h.y }
         local ok, why = Move.to(h.x, h.y)
         if not ok then error(hand_in_failure("no way: " .. tostring(why)), 0) end
@@ -1039,7 +1259,7 @@ G.action({
         Quests.hand_in()
       elseif not walking() then
         local arrived, outcome = walk_over()
-        return true, false, hand_in_failure(arrived and "the route stops there" or ("walk " .. tostring(outcome)))
+        return true, false, walk_failure(outcome, hand_in_failure(arrived and "the route stops there" or ("walk " .. tostring(outcome))))
       end
       return false
     end
@@ -1185,7 +1405,7 @@ G.action({
   run = function(args)
     local o = pick_objective()
     assert(o, "no objective to work")
-    args.subject = o.key
+    args.subject, args.going = o.key, "the area for " .. o.text
     job = { o = o, since = now(), uses = 0 }
     note("objective: " .. o.text .. " (" .. o.quest.title .. ")")
   end,
@@ -1243,7 +1463,9 @@ G.action({
       if walking() then return false end
       if job.walked then
         local arrived, outcome = walk_over()
-        if not arrived then return true, false, "could not reach the area for " .. o.text .. " (" .. tostring(outcome) .. ")" end
+        if not arrived then
+          return true, false, walk_failure(outcome, "could not reach the area for " .. o.text .. " (" .. tostring(outcome) .. ")")
+        end
       end
       job.walked = true
       local ok, why = Move.to(o.poi.x, o.poi.y)
@@ -1261,27 +1483,32 @@ G.action({
   timeout = 600,
 })
 
-local function npc_action(name, kind, why, pre, effects, finished)
+-- An action that talks to the nearest remembered NPC of a kind (`kind(facts)` picks it), with
+-- `subject(facts)` naming what a failure backs off, until `finished(st)` says it is over.
+local function npc_action(spec)
   local st = {}
   G.action({
-    name = name, why = why, pre = pre, effects = effects,
+    name = spec.name, why = spec.why, pre = spec.pre, effects = spec.effects,
     stop = function()
       gossip_want = nil
       Move.free()
     end,
     -- Further away costs more, but never so much that grinding beats it for good.
-    cost = function()
-      local p, pos = place(kind) or (kind == "repair" and place("vendor")), me()
+    cost = function(f)
+      local p, pos = place(spec.kind(f)), me()
       return 3 + ((p and pos) and math.min(far(pos, p) / 200, 4) or 0)
     end,
-    run = function()
-      st = { since = now(), place = place(kind) or (kind == "repair" and place("vendor")) }
+    run = function(args)
+      local kind = spec.kind(args.facts or {})
+      st = { since = now(), place = place(kind) }
       assert(st.place, "no " .. kind .. " known")
+      args.subject = spec.subject and spec.subject(args.facts or {}) or nil
+      args.going = st.place.name
       gossip_want = kind == "trainer" and "trainer" or "vendor"
     end,
     done = function()
-      local over, ok, reason = finished(st)
-      if not over then over, ok, reason = visit(st.place == G.places.vendor and "vendor" or kind, st) end
+      local over, ok, reason = spec.finished(st)
+      if not over then over, ok, reason = visit(st) end
       if over then gossip_want = nil end
       return over, ok, reason
     end,
@@ -1289,31 +1516,57 @@ local function npc_action(name, kind, why, pre, effects, finished)
   })
 end
 
-npc_action("train", "trainer", "Learn the new ranks from our class trainer.",
-  { can_train = true, trainer_known = true }, { can_train = false, progressed = true },
-  function() return Upkeep.trained_level == level(), true end)
+npc_action({ name = "train", why = "Learn the new ranks from our class trainer.",
+  kind = function() return "trainer" end,
+  pre = { can_train = true, trainer_known = true }, effects = { can_train = false, progressed = true },
+  finished = function() return Upkeep.trained_level == level(), true end })
 
-npc_action("sell_and_repair", "repair", "Sell the junk and repair at a merchant.",
-  function(f) return (f.bags_full and f.vendor_known) or (f.needs_repair and f.repair_known) end,
-  { bags_full = false, needs_repair = false, gear_broken = false, progressed = true },
-  function(st)
+-- Full bags send us to the nearest merchant of any kind (every one buys any item); worn-out gear to
+-- the nearest who repairs. Bags a visit could not empty back the bag errand off ("bags"), not the
+-- repairs; and with nothing a merchant would take, there is no errand at all.
+npc_action({ name = "sell_and_repair", why = "Sell the junk and repair at a merchant.",
+  kind = function(f) return (f.needs_repair and f.repair_known) and "repair" or "vendor" end,
+  subject = function(f) return f.bags_full and "bags" or nil end,
+  pre = function(f)
+    if f.needs_repair and f.repair_known then return true end
+    if not (f.bags_full and f.vendor_known) or G.cooling("sell_and_repair:bags") then return false end
+    if pass.sellable == nil then pass.sellable = not (Upkeep and Upkeep.sellable) or Upkeep.sellable() end
+    return pass.sellable
+  end,
+  effects = { bags_full = false, needs_repair = false, gear_broken = false, progressed = true },
+  finished = function(st)
     if not (G.merchant_at and G.merchant_at >= st.since) then return false end
     if now() - G.merchant_at < 1.5 then return false end
     if CloseMerchant then CloseMerchant() end
     local facts = G.facts()
-    if facts.bags_full then return true, false, "the bags are still full after selling the junk" end
+    if facts.bags_full then
+      return true, false, "the bags are still full after selling: they hold "
+        .. (Upkeep and Upkeep.filling and Upkeep.filling() or "?")
+        .. ". Free slots yourself (sell or destroy what you can spare, or let Upkeep.sell_when_full sell a type), or get a bag; selling waits before it is tried again"
+    end
     return true, true
-  end)
+  end })
 
-npc_action("buy_food", "food", "Buy food (and drink) where it is sold: eating between fights is how health comes back.",
-  { needs_food = true, food_vendor_known = true }, { needs_food = false, progressed = true },
-  function(st)
+-- Items a full bag never sells at a merchant, by name.
+function G.keep(names)
+  assert(type(names) == "table", "Goals.keep takes a list of item names")
+  for _, name in ipairs(names) do Upkeep.keep[tostring(name)] = true end
+  local out = {}
+  for name in pairs(Upkeep.keep) do out[#out + 1] = name end
+  table.sort(out)
+  return out
+end
+
+npc_action({ name = "buy_food", why = "Buy food (and drink) where it is sold: eating between fights is how health comes back.",
+  kind = function() return "food" end,
+  pre = { needs_food = true, food_vendor_known = true }, effects = { needs_food = false, progressed = true },
+  finished = function(st)
     if not (G.merchant_at and G.merchant_at >= st.since) then return false end
     if now() - G.merchant_at < 1.5 then return false end
     if CloseMerchant then CloseMerchant() end
     if G.facts().needs_food then return true, false, tostring(st.place.name) .. " sold nothing we can eat and afford" end
     return true, true
-  end)
+  end })
 
 -- A living hostile close enough to notice us where we stand (its aggro radius and a margin).
 local function hostile_close()
@@ -1327,6 +1580,8 @@ end
 
 local rest = {}
 
+-- Rest until health and mana are full; then AGENT_RESTED(health, mana) says so, for whoever
+-- waits on it (the planner, instead of a timer).
 G.action({
   name = "rest",
   stop = function()
@@ -1351,8 +1606,9 @@ G.action({
     end
     local hp = ratio(UnitHealth("player"), UnitHealthMax("player"))
     local mana = (UnitPowerType and UnitPowerType("player") ~= 0) and 1 or ratio(UnitPower("player", 0), UnitPowerMax("player", 0))
-    if hp >= G.rest_until and mana >= G.rest_until then
+    if hp >= 1 and mana >= 1 then
       if Survive then Survive.stand() end
+      signal("RESTED", UnitHealth("player"), UnitPowerType and UnitPowerType("player") == 0 and UnitPower("player", 0) or nil)
       return true, true
     end
     if not rest.ate then
@@ -1436,7 +1692,8 @@ G.action({
       end
     end
     if walking() then return false end
-    return true, false, "no mobs that give XP and are safe to pull on the way"
+    local _, outcome = walk_over()
+    return true, false, walk_failure(outcome, "no mobs that give XP and are safe to pull on the way")
   end,
   timeout = 120,
 })
@@ -1460,7 +1717,7 @@ G.action({
   run = function(args)
     local z = travel_target(args.data and args.data.zone or top_zone_wish())
     assert(z, "no zone to travel to")
-    args.subject = z.name
+    args.subject, args.going = z.name, z.name
     travel = { zone = z }
     note("travel to " .. z.name .. " (levels " .. z.min .. "-" .. z.max .. ")")
     local ok, why = Move.to(z.x, z.y)
@@ -1474,7 +1731,7 @@ G.action({
     if walking() then return false end
     local arrived, outcome = walk_over()
     if arrived then return true, true end
-    return true, false, "could not reach " .. travel.zone.name .. " (" .. tostring(outcome) .. ")"
+    return true, false, walk_failure(outcome, "could not reach " .. travel.zone.name .. " (" .. tostring(outcome) .. ")")
   end,
   timeout = 1800,
 })

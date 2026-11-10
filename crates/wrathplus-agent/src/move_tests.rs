@@ -271,3 +271,58 @@ fn it_turns_to_whoever_talks_to_it_from_close_by_when_idle() {
     let faced: String = script.eval("return table.concat(faced, ' | ')").unwrap();
     assert_eq!(faced, "0xP");
 }
+
+#[test]
+fn a_walk_someone_stops_short_ends_interrupted_and_one_that_gains_no_ground_ends_stalled() {
+    let mut script = moving();
+    script
+        .run(
+            "said = {} AgentSignal = function(name, ...) said[#said + 1] = name .. ' ' .. table.concat({ ... }, ' ') end \
+             UnitAffectingCombat = function() return false end UnitBuff = function() return nil end \
+             AgentWalk = function() return { status = walking and 'walking' or 'stopped' } end",
+        )
+        .unwrap();
+    assert!(script.eval::<bool>("return Move.to(50, 0)").unwrap());
+    script.tick(0.3);
+    // AgentStop from someone else: no end the walker announces, so Move ends it.
+    script.run("walking = false").unwrap();
+    script.tick(0.3);
+    assert!(script
+        .eval::<bool>("return Move.mode == nil and Move.last.outcome == 'interrupted'")
+        .unwrap());
+    // A walk that stands still: sent again once after 20 s, then over as stalled, and said.
+    script.run("calls = {} said = {}").unwrap();
+    assert!(script.eval::<bool>("return Move.to(50, 0)").unwrap());
+    for _ in 0..70 {
+        script.tick(0.3);
+    }
+    assert_eq!(calls(&script), "move 50,0 | move 50,0");
+    assert_eq!(
+        script.eval::<String>("return Move.mode or 'none'").unwrap(),
+        "to"
+    );
+    for _ in 0..70 {
+        script.tick(0.3);
+    }
+    assert!(script
+        .eval::<bool>("return Move.mode == nil and Move.last.outcome == 'stalled'")
+        .unwrap());
+    let said: String = script.eval("return table.concat(said, ' | ')").unwrap();
+    assert_eq!(
+        said,
+        "MOVE_DONE (50, 0) stalled | WALK_DONE stalled (50, 0)"
+    );
+    // Standing still to eat is no stall.
+    script
+        .run("calls = {} UnitBuff = function(_, name) if name == 'Food' then return 'Food' end end")
+        .unwrap();
+    assert!(script.eval::<bool>("return Move.to(50, 0)").unwrap());
+    for _ in 0..140 {
+        script.tick(0.3);
+    }
+    assert_eq!(calls(&script), "move 50,0");
+    assert_eq!(
+        script.eval::<String>("return Move.mode or 'none'").unwrap(),
+        "to"
+    );
+}

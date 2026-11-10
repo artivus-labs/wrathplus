@@ -94,7 +94,12 @@ function A.run(name)
   if A.current and A.current.name == name then return true, "already doing " .. name end
   if A.current then finish(false, "replaced by " .. name) end
   A.current = { name = name, since = GetTime(), spec = spec }
+  -- While an activity starts, A.starting names it: what it sets going is its own (wp.goals tells
+  -- a walk an activity starts from one the planner starts by hand).
+  local outer = A.starting
+  A.starting = name
   local ok, result = pcall(spec.run)
+  A.starting = outer
   if not ok then
     note("failed " .. name .. ": " .. tostring(result))
     finish(false, tostring(result))

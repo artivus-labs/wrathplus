@@ -38,7 +38,10 @@ const NOTABLE: Record<string, (args: unknown[]) => string | null> = {
   AGENT_WALK_DONE: (a) =>
     a[0] === "stuck" || a[0] === "failed"
       ? `Your walk ended ${a[0]}: AgentWalk().note says why; route around it or pick another way.`
-      : null,
+      : a[0] === "stalled"
+        ? `A walk to ${a[1] ?? "somewhere"} stalled: no ground gained for a while, even after sending it again. Look at where you are (a wall, a ledge, a door) and route around it.`
+        : null,
+  AGENT_RESTED: () => "Rested: health and mana are full.",
   AGENT_COMBAT_REVIEW: (a) => `${a[0]} Worth a look: is the rotation the right one, in the right order? Rework Rotation.list (and keep it in a module) if not.`,
   AGENT_PULL_REFUSED: (a) =>
     `Combat refused to pull ${a[0]}: ${a[1]}. Pick a safer mob or place, rest or repair first; Combat.engage(guid, { force = true }) only if you are sure.`,
@@ -69,6 +72,7 @@ export const PLANNER_EVENTS = new Set([
   "AGENT_COMBAT_REVIEW",
   "AGENT_PULL_REFUSED",
   "AGENT_FLEEING",
+  "AGENT_RESTED",
 ]);
 
 /** Game errors that keep coming back (the same red line `times` times within `windowMs`): the

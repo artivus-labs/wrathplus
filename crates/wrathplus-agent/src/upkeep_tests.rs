@@ -265,3 +265,146 @@ fn at_a_merchant_it_buys_food_it_can_eat_within_its_means() {
     script.fire_event("MERCHANT_SHOW", vec![]);
     assert_eq!(calls(&script), "");
 }
+
+/// Bags as at the live playtest: a backpack, nothing in the bag slots, and bags lying in the pack.
+/// Sizes come off the tooltip in the client; here off a table.
+const BAGS: &str = r#"
+ITEMS.pouch = { "Small Blue Pouch", 1, 5, 1, "Container", "Bag", "INVTYPE_BAG", 25 }
+ITEMS.brown = { "Small Brown Pouch", 1, 5, 1, "Container", "Bag", "INVTYPE_BAG", 10 }
+ITEMS.big = { "Large Brown Sack", 1, 15, 1, "Container", "Bag", "INVTYPE_BAG", 90 }
+ITEMS.soul = { "Small Soul Pouch", 1, 10, 1, "Container", "Soul Bag", "INVTYPE_BAG", 10 }
+SIZES = { pouch = 6, brown = 4, big = 8, soul = 6 }
+bags = { [0] = {}, {}, {}, {}, {} }
+GetContainerNumSlots = function(bag)
+  if bag == 0 then return 16 end
+  return worn[19 + bag] and SIZES[worn[19 + bag]] or 0
+end
+GetItemFamily = function(link) return link == "soul" and 256 or 0 end
+Upkeep.bag_slots = function(where, a, b)
+  if where == "bag" then return SIZES[bags[a][b]] end
+  return SIZES[MERCHANT[a].link]
+end
+"#;
+
+#[test]
+fn spare_bags_go_on_largest_first_and_a_larger_one_replaces_the_smallest() {
+    let mut script = upkeep();
+    script.run(BAGS).unwrap();
+    script
+        .run("bags[0][3] = 'brown' bags[0][5] = 'pouch' bags[0][7] = 'soul'")
+        .unwrap();
+    for _ in 0..4 {
+        script.tick(1.1);
+    }
+    // The pouch (6) first, then the brown pouch (4); the soul pouch holds only shards.
+    assert_eq!(calls(&script), "equip pouch 20 | equip brown 21");
+    // All four slots full: a larger bag takes the smallest one's place.
+    script
+        .run("calls = {} Upkeep.log = {} worn[22] = 'pouch' worn[23] = 'pouch' bags[0][9] = 'big'")
+        .unwrap();
+    script.fire_event("BAG_UPDATE", vec![]);
+    for _ in 0..3 {
+        script.tick(1.1);
+    }
+    assert_eq!(calls(&script), "equip big 21");
+    let log: String = script
+        .eval("return table.concat(Upkeep.log, '; ')")
+        .unwrap();
+    assert_eq!(
+        log,
+        "equipped Large Brown Sack (8 slots) in place of Small Brown Pouch (4 slots)"
+    );
+}
+
+/// Full bags at a merchant, as at the live playtest: white trade goods, a quest item, the
+/// Hearthstone, a scroll, a white belt it would wear and an axe it would not.
+const FULL: &str = r#"
+ITEMS.meat = { "Stringy Wolf Meat", 1, 5, 0, "Trade Goods", "Meat", "", 4 }
+ITEMS.linen = { "Linen Cloth", 1, 5, 0, "Trade Goods", "Cloth", "", 13 }
+ITEMS.malachite = { "Malachite", 1, 7, 0, "Gem", "Simple", "", 5 }
+ITEMS.okra = { "Okra", 1, 1, 0, "Quest", "Quest", "", 0 }
+ITEMS.hearth = { "Hearthstone", 1, 1, 0, "Miscellaneous", "Junk", "", 5 }
+ITEMS.scroll = { "Scroll of Agility", 1, 5, 0, "Consumable", "Scroll", "", 18 }
+ITEMS.wbelt = { "Linen Belt", 1, 5, 1, "Armor", "Cloth", "INVTYPE_WAIST", 6 }
+IDS = { hearth = 6948 }
+bags = { [0] = { "meat", "meat", "linen", "malachite", "okra", "hearth", "scroll", "wbelt", "axe", "claw" } }
+GetContainerItemID = function(bag, slot) return IDS[bags[bag][slot]] or 1 end
+GetContainerItemQuestInfo = function(bag, slot) return bags[bag][slot] == "okra", nil, nil end
+"#;
+
+#[test]
+fn full_bags_also_sell_trade_goods_and_gear_it_would_not_wear_keeping_the_rest() {
+    let mut script = upkeep();
+    script.run(FULL).unwrap();
+    script.fire_event("MERCHANT_SHOW", vec![]);
+    // The junk first; one freed slot is under two, so the whites it has no use for go too.
+    assert_eq!(
+        calls(&script),
+        "sell claw | sell meat | sell meat | sell linen | sell malachite | sell axe | repair"
+    );
+    let log: String = script
+        .eval("return table.concat(Upkeep.log, '; ')")
+        .unwrap();
+    assert!(
+        log.contains("bags full: sold 5 more for 31c (Stringy Wolf Meat, Linen Cloth, Malachite, Rusty Hatchet)"),
+        "{log}"
+    );
+    let filling: String = script.eval("return Upkeep.filling()").unwrap();
+    assert_eq!(
+        filling,
+        "Hearthstone (hearthstone), Linen Belt (an upgrade), Okra (quest), Scroll of Agility (consumable)"
+    );
+    // The planner keeps the cloth; with room in the bags only the junk goes.
+    script
+        .run(&format!(
+            "calls = {{}} {FULL} Goals.keep({{ 'Linen Cloth' }})"
+        ))
+        .unwrap();
+    script.fire_event("MERCHANT_SHOW", vec![]);
+    assert!(!calls(&script).contains("sell linen"));
+    script
+        .run("calls = {} bags = { [0] = { 'meat', 'claw' } } GetContainerNumSlots = function(bag) return bag == 0 and 4 or 0 end")
+        .unwrap();
+    script.fire_event("MERCHANT_SHOW", vec![]);
+    assert_eq!(calls(&script), "sell claw | repair");
+}
+
+/// A vendor's bags, and the API a merchant window answers with.
+const MERCHANT: &str = r#"
+MERCHANT = { { link = "brown", price = 400 }, { link = "pouch", price = 1000 }, { link = "axe", price = 50 } }
+GetMerchantNumItems = function() return #MERCHANT end
+GetMerchantItemLink = function(i) return MERCHANT[i].link end
+GetMerchantItemInfo = function(i) local m = MERCHANT[i] return ITEMS[m.link][1], "", m.price, 1, -1, 1 end
+BuyMerchantItem = function(i) calls[#calls + 1] = "buy " .. MERCHANT[i].link money = money - MERCHANT[i].price end
+"#;
+
+#[test]
+fn a_merchant_sells_it_the_largest_bag_when_the_money_left_covers_the_reserve() {
+    let mut script = upkeep();
+    script.run(BAGS).unwrap();
+    script.run(MERCHANT).unwrap();
+    // 2000c, 6c of repairs: one 1000c pouch, which leaves more than the 166c reserve (level 4:
+    // 160c, and the repairs); a second would not.
+    script.run("money = 2000").unwrap();
+    script.fire_event("MERCHANT_SHOW", vec![]);
+    assert_eq!(calls(&script), "repair | buy pouch");
+    // Short of money: nothing bought, and the log says why.
+    script
+        .run("calls = {} Upkeep.log = {} money = 500")
+        .unwrap();
+    script.fire_event("MERCHANT_SHOW", vec![]);
+    assert_eq!(calls(&script), "repair");
+    let log: String = script
+        .eval("return table.concat(Upkeep.log, '; ')")
+        .unwrap();
+    assert_eq!(
+        log,
+        "repaired for 6c; did not buy Small Blue Pouch (6 slots) for 1000c: keeping 166c for training and repairs"
+    );
+    // Every slot holds a bag as large as any it sells: nothing to buy.
+    script
+        .run("calls = {} money = 5000 for inv = 20, 23 do worn[inv] = 'pouch' end")
+        .unwrap();
+    script.fire_event("MERCHANT_SHOW", vec![]);
+    assert_eq!(calls(&script), "repair");
+}
