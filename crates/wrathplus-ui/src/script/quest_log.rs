@@ -1482,11 +1482,12 @@ mod tests {
                  and done == nil and d == nil and id == 0"
             )
             .unwrap());
-        // 12340 registers the fold bits at "0" (`0x51df24`) and never `displayQuestID`; one set
-        // non-zero adds a tenth return, `true`, hit or miss (`0x5e5f0d`-`0x5e5f30`).
+        // 12340 registers the fold bits with default "0" (`0x51df24`) and never `displayQuestID`;
+        // one set non-zero adds a tenth return, `true`, hit or miss (`0x5e5f0d`-`0x5e5f30`).
         assert!(s
             .eval::<bool>(
-                "return GetCVar('questLogCollapseFilter') == '0' and GetCVar('displayQuestID') == nil"
+                "return GetCVarDefault('questLogCollapseFilter') == '0' \
+                 and GetCVar('displayQuestID') == nil"
             )
             .unwrap());
         s.run("RegisterCVar('displayQuestID', '1')").unwrap();
