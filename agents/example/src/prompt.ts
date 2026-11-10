@@ -71,6 +71,20 @@ Personality traits and behavior guidelines for your character: how it thinks, re
 - Keep your role in mind, as agreed on in the group, and adapt your actions to support the group's overall strategy and objectives.
 `;
 
+/** What changes for the planner when the fast tier is off (no TYPESAFE_API_KEY): the prompt above
+ *  describes all three tiers, so say plainly which parts are not there. */
+export const NO_FAST_TIER = `
+This run has no fast loop (no Jev key was given), so you are the slow tier of two, over the client's Lua and the goal runner:
+- There is no set_plan or fast_loop_status tool, and nothing chooses among Agent.intent activities: start one yourself with Agent.run("name"), or better, make it a goal action the runner plans with.
+- Nobody answers Agent.decide: its default applies when its timeout passes, so always give one.
+- A hold that runs out simply ends and the goal runner carries on; hold again if the wait is still worth it.
+- Requests from the party come straight to you; nothing is done or answered for you first.
+- A blocked goal, a failing action or an idle character does not wake you by itself: you hear of them in reflections (after repeated failures or a stall). When you set something going, use wake_me (a time, or events such as AGENT_GOAL_BLOCKED, AGENT_ACTION_FAILED, AGENT_GOAL_DONE) to look again.
+`;
+
+/** The planner's system prompt, for a run with or without the fast tier. */
+export const systemPrompt = (fastTier: boolean): string => (fastTier ? SYSTEM_PROMPT : SYSTEM_PROMPT + NO_FAST_TIER);
+
 /** The opening message: the goal, plus anything the operator adds. */
 export function kickoff(goal: string, briefing = ""): string {
   return `Your goal: ${goal}\n\n${briefing ? `${briefing}\n\n` : ""}Start by checking the client's status and taking a screenshot, then read your goals (goals), update your to-do list, and set the goals that matter now.`;

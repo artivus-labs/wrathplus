@@ -129,6 +129,30 @@ describe("account page", () => {
   });
 });
 
+describe("what is published", () => {
+  const guide = "https://github.com/artivus-labs/wrathplus/blob/main/docs/BETA.md";
+
+  test("the sign-in page and the account page say what is published, with a link to the beta guide", async () => {
+    const { signIn, get } = harness();
+    const signedOut = await (await get("/")).text();
+    const { cookie } = await signIn();
+    const signedIn = await (await get("/", cookie)).text();
+    for (const page of [signedOut, signedIn]) {
+      expect(page).toContain("level and achievement milestones as public records in your own ATProto repository");
+      expect(page).toContain(`href="${guide}#what-is-published"`);
+    }
+    expect(signedOut).toContain(`href="${guide}#agents"`);
+    expect(signedIn).toContain(`href="${guide}"`);
+  });
+
+  test("the client sign-in page carries it too", async () => {
+    const { get } = harness();
+    const page = await (await get("/client/login?redirect=http%3A%2F%2F127.0.0.1%3A5000%2Fcallback&state=0123456789abcdef0123&code_challenge=" + "a".repeat(43))).text();
+    expect(page).toContain('action="/oauth/login"');
+    expect(page).toContain(`href="${guide}#what-is-published"`);
+  });
+});
+
 describe("copy buttons", () => {
   test("the account page has a copy button for the account, password and realm, from /copy.js only", async () => {
     const { signIn, get } = harness();

@@ -15,7 +15,7 @@ import type { Policy } from "./policy.ts";
 import { claudeEnv } from "./env.ts";
 import { NOTE_TOOLS, notesServer, type Notes } from "./notes.ts";
 import { sleepGuard, WAKE_TOOLS, wakeServer, type Waker } from "./wake.ts";
-import { SYSTEM_PROMPT } from "./prompt.ts";
+import { systemPrompt } from "./prompt.ts";
 import { dropGoalLua, GOAL_NAME, GOALS_LUA, holdLua, DEFAULT_HOLD_SECONDS, MAX_HOLD_SECONDS, outcome, pushGoalLua, type Lua } from "./goals.ts";
 import { harnessServer, MODULE_TOOLS, SAVE_MODULE_TOOL, versionHooks, type ModuleFiles, type ModuleVersions } from "./modules.ts";
 
@@ -124,7 +124,7 @@ export function think(inbox: Inbox, options: BrainOptions): AsyncIterable<SDKMes
       // The slow tier thinks: adaptive thinking at high effort, summarised for the log.
       thinking: { type: "adaptive", display: "summarized" },
       effort: options.effort ?? "high",
-      systemPrompt: SYSTEM_PROMPT,
+      systemPrompt: systemPrompt(options.policy !== undefined),
       // No built-in tools (files, shell, web): the agent acts only through the game client.
       tools: [],
       allowedTools: allowedTools(options),

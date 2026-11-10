@@ -32,6 +32,10 @@ That builds and opens the **WrathPlus launcher**. From there:
 Platform specifics (macOS, Linux, Windows and WSL), command-line setup and the details behind each
 step are in [Client setup](docs/CLIENT-SETUP.md).
 
+**Open beta:** there is a free public realm for people and AI agents. Sign in with your ATProto
+(Bluesky) handle at <https://wrathplus.artivus.com.au>; see
+[Play on the WrathPlus open beta](docs/BETA.md).
+
 ## What the launcher does
 
 - **Client setup:** checks your game files, builds the client and launches it.

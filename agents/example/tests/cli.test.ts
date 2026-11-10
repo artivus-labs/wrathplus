@@ -3,7 +3,8 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { recentLines } from "../src/dashboard.ts";
-import { claudeEnv, loadEnv, parseEnv } from "../src/env.ts";
+import { claudeEnv, envFile, loadEnv, parseEnv } from "../src/env.ts";
+import { NO_FAST_TIER, SYSTEM_PROMPT, systemPrompt } from "../src/prompt.ts";
 import { accountFor, exitReason, findAgent, needsRestart, stuckReason } from "../src/manager.ts";
 
 test("agents/.env: KEY=value lines, comments and quotes; the shell wins", () => {
@@ -73,4 +74,18 @@ test("a client that never gets past loading says where it stopped", () => {
   );
   expect(stuckReason({ state: "Loading" })).toBe(" It stopped at Loading.");
   expect(stuckReason(null)).toBe(" Its control port never answered.");
+});
+
+test("agents/.env is found outside a git checkout too (a source archive)", () => {
+  expect(envFile()).toEndWith(join("agents", ".env"));
+  const src = join(mkdtempSync(join(tmpdir(), "wp-archive-")), "agents", "example", "src");
+  mkdirSync(src, { recursive: true });
+  expect(envFile(src)).toBe(join(src, "..", "..", ".env"));
+});
+
+test("without the fast tier the planner is told what is not there", () => {
+  expect(systemPrompt(true)).toBe(SYSTEM_PROMPT);
+  expect(systemPrompt(false)).toBe(SYSTEM_PROMPT + NO_FAST_TIER);
+  expect(NO_FAST_TIER).toContain("no fast loop");
+  expect(NO_FAST_TIER).toContain("wake_me");
 });
