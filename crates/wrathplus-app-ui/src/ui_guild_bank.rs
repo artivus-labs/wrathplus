@@ -390,11 +390,14 @@ pub(crate) fn feed_guild_bank(
     }
 }
 
+/// An item entry's icon and link, resolved from the item cache.
+type ItemLink<'a> = &'a dyn Fn(u32, Option<&Item>) -> (Option<String>, Option<String>);
+
 /// The published view, vault open or not; `link` resolves an item's icon and link, `name` a guid.
 fn view(
     bank: &GuildBank,
     native_guild: &crate::ui_guild::NativeGuild,
-    link: &dyn Fn(u32, Option<&Item>) -> (Option<String>, Option<String>),
+    link: ItemLink<'_>,
     name: &dyn Fn(u64) -> Option<String>,
 ) -> WrathGuildBankView {
     let purchased = usize::from(bank.tab_count).min(TABS);
