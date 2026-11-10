@@ -1194,11 +1194,6 @@ mod tests {
                 "UIParent.lua — the internet-cafe billing nag, likewise never sent",
             ),
             (
-                "GOSSIP_ENTER_CODE",
-                "UIParent.lua — the code-entry gossip option (a door with a combination); \
-                 WrathPlus's gossip feed carries no code-entry option kind yet",
-            ),
-            (
                 "PLAYER_SKINNED",
                 "UIParent.lua — the corpse-skinned notice; WrathPlus's loot feed does not derive it",
             ),
