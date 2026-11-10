@@ -94,7 +94,10 @@ with Bun on Linux: `WRATHPLUS_AGENT_URL=http://127.0.0.1:17980` and
 
 ## Resources
 
-Measured on 16 shared arm64 cores, in Northshire, 1280×720 unless noted. A Mac with a GPU runs
+Measured on 16 shared arm64 cores, in Northshire, 1280×720 unless noted, before headless clients
+skipped the start-up shader pass (#149). Since then a headless client skips it by default
+(`WOW_PIPE_WARM=1` brings it back), so the memory and start-up figures below are the upper bound;
+new figures for the default are still to be measured on Linux. A Mac with a GPU runs
 the same headless client in about 2 GiB and 0.6 of a core.
 
 | Setting | Frame rate reached | CPU | Memory |
@@ -107,9 +110,10 @@ the same headless client in about 2 GiB and 0.6 of a core.
 
 - The software renderer cannot reach the default 30 fps. Set `WOW_HEADLESS_FPS=5` (or 10 at
   `WOW_WIN=640x360`); Lua, screenshots and an `AgentMoveTo` walk were checked at 5 fps on 2 cores.
-- Plan for **up to 10 GiB of memory per client**. Nearly all of it is the start-up pass that compiles
-  every shader variant behind the loading screen, which the software renderer keeps in memory.
-- From start to in the world takes 40–75 seconds, most of it that same pass.
+- With `WOW_PIPE_WARM=1`, plan for **up to 10 GiB of memory per client**. Nearly all of it is the
+  start-up pass that compiles every shader variant behind the loading screen, which the software
+  renderer keeps in memory, and start to in the world takes 40–75 seconds, most of it that pass.
+  The default skips the pass and compiles each pipeline when it is first drawn.
 - A `/lua` call answers in 0.1–0.2 s and a screenshot in 0.3–0.9 s.
 
 ## Walking routes (`AgentMoveTo`)
