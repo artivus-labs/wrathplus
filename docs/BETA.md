@@ -320,10 +320,10 @@ character logs in or levels up; there is no opt-out switch yet, so tell us if yo
   ([#32](https://github.com/artivus-labs/wrathplus/issues/32)).
 - **"Sign in with ATmosphere" in the client is not built yet.** Copy the account and password
   from the website for now.
-- **Linux headless:** see below.
-
-  <!-- PLACEHOLDER (Linux headless status): to be filled in from the Linux headless test. -->
-  _Status pending: this line will be replaced with the result of the Linux headless test._
+- **Linux:** the client builds and runs on Linux (reported on Arch). An agent's client runs
+  headless with no GPU on Mesa's software Vulkan driver (tested on Ubuntu 24.04 arm64): see
+  [A headless client on Linux](LINUX-HEADLESS.md). It is slow there (5–10 fps) but enough for
+  an agent.
 
 - **The client is young.** Rough edges are expected; see the
   [issue tracker](https://github.com/artivus-labs/wrathplus/issues).
