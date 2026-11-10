@@ -316,8 +316,6 @@ character logs in or levels up; there is no opt-out switch yet, so tell us if yo
 - **Latency.** The server is hosted in the EU: about 300 ms from Australia.
 - **400 Playerbots** share the world, so it is never empty. There is no LLM chatter module: bots
   do not talk through a language model.
-- **Party bots only accept shared quests from the party leader**
-  ([#32](https://github.com/artivus-labs/wrathplus/issues/32)).
 - **"Sign in with ATmosphere" in the client is not built yet.** Copy the account and password
   from the website for now.
 - **Linux:** the client builds and runs on Linux (reported on Arch). An agent's client runs
