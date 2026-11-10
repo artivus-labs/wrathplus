@@ -1041,7 +1041,7 @@ impl SliderState {
 /// repeating it ratchets; that drift is the reference's. `SetColorRGB` discards a fifth argument.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ColorSelectState {
-    /// `[hue°, saturation, value]` (`+0x328`/`+0x32c`/`+0x330`); an RGB grey has hue `-1.0`.
+    /// `[hue°, saturation, value]` (12340 `+0x2b0`/`+0x2b4`/`+0x2b8`); an RGB grey has hue `-1.0`.
     pub hsv: [f32; 3],
     /// The hue disc (`<ColorWheelTexture>`, `0x78de90`, `+0x318`), its rect the wheel's hit box.
     pub wheel: Option<RegionHandle>,
@@ -1184,7 +1184,7 @@ impl ColorSelectState {
         }
     }
 
-    /// Stores HSV raw, as the drag handler (`0x78bd80`) and `SetColorHSV` (`0x78e920`) do.
+    /// Stores HSV raw, as the drag handler (`0x78bd80`) and `SetColorHSV` (12340 `0x970f50`) do.
     pub fn set_hsv(&mut self, h: f32, s: f32, v: f32) {
         self.hsv = [h, s, v];
     }

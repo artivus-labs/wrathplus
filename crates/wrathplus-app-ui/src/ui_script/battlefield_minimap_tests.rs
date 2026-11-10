@@ -808,7 +808,7 @@ fn the_tab_follows_the_window_fades_in_on_hover_and_gates_its_drag_on_the_lock()
         "part way through the 0.15 s fade, got {part_way}"
     );
     s.tick(0.2);
-    assert_eq!(num(&s, "BattlefieldMinimapTab:GetAlpha()"), 0.75);
+    assert_eq!(num(&s, "BattlefieldMinimapTab:GetAlpha()"), 191.0 / 255.0); // 0.75's byte
 
     s.mouse_move(5.0, 5.0);
     update(&mut s, 0.1);

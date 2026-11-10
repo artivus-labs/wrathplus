@@ -68,6 +68,8 @@ mod wrath_quest_poi;
 mod wrath_region_attrs;
 mod wrath_titles;
 mod wrath_tooltip;
+mod wrath_widget_kinds;
+mod wrath_widget_methods;
 pub use wrath_barber::{WrathBarberRequest, WrathBarberShop, WrathBarberStyle};
 pub use wrath_chat_verbs::WrathChatVerbRequest;
 pub use wrath_combat_log::{WrathCombatLogEntry, WrathCombatLogUnit, WRATH_COMBAT_LOG_EVENTS};
@@ -484,7 +486,7 @@ const REG_FRAME_METHODS: &str = "__wrathplus_frame_methods";
 const REG_REGION_METHODS: &str = "__wrathplus_region_methods";
 #[cfg(test)]
 pub(crate) const REG_REGION_METHODS_FOR_TEST: &str = REG_REGION_METHODS;
-/// The title region's method table and metatable: the 19 Region methods and nothing else.
+/// The title region's method table and metatable: the Region table (12340 `0xac1480`) alone.
 const REG_TITLE_METHODS: &str = "__wrathplus_title_methods";
 const REG_TITLE_META: &str = "__wrathplus_title_meta";
 /// The region leaf tables and metatables: Texture and FontString each answer their own map.
@@ -851,6 +853,8 @@ impl UiScript {
             movie::install_wrath(&lua)?;
             wrath_barber::install(&lua)?;
             wrath_region_attrs::install(&lua)?;
+            wrath_widget_methods::install(&lua)?;
+            wrath_widget_kinds::install(&lua)?;
             wrath_item_gems::install(&lua)?;
             wrath_quests_completed::install(&lua)?;
             wrath_calendar::install(&lua)?;
@@ -1167,7 +1171,7 @@ impl UiScript {
             .arena
             .iter_frames()
             .find(|(_, f)| f.name.as_deref() == Some(name) && f.effective_visible)
-            .map(|(_, f)| f.effective_alpha)
+            .map(|(_, f)| f.effective_alpha())
     }
 
     /// Resolve and cache every frame's rect, which `GetWidth`/`GetHeight`/`extract` read, then fire

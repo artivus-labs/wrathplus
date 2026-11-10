@@ -85,9 +85,6 @@ pub enum QuadContent {
         /// `SetPosition`'s offset, in the ortho leg's layout units (`0x76d1a0`: the root is
         /// `T(pos · layoutScale) · R(facing) · S(…)`).
         position: (f32, f32, f32),
-        /// The frame's own alpha, which the model draws at: `Frame:SetAlpha` pushes it into the
-        /// instance without the parent chain (`0x76d120`).
-        own_alpha: f32,
         /// `ReplaceIconTexture`'s path, the type-14 texture override.
         icon: Option<String>,
         /// The camera, a raw index into the file's camera table: `None` renders orthographic, the

@@ -67,7 +67,7 @@ impl UiScript {
             let (rect, alpha, content, clip, scale) = match target {
                 ZTarget::Frame(fh) => {
                     let frame = model.arena.frame(fh);
-                    let alpha = frame.map(|f| f.effective_alpha).unwrap_or(1.0);
+                    let alpha = frame.map_or(1.0, |f| f.effective_alpha());
                     let scale = frame.map(|f| f.effective_scale).unwrap_or(1.0);
                     let clip = effective_clip(&model, &scroll_sources, fh);
                     let content = match frame.map(|f| &f.kind_state) {
@@ -85,7 +85,6 @@ impl UiScript {
                             facing: m.facing,
                             model_scale: m.scale,
                             position: m.position,
-                            own_alpha: frame.map_or(1.0, |f| f.alpha),
                             icon: m.icon.clone(),
                             camera: m.camera,
                             light: m.light,
@@ -260,9 +259,9 @@ impl UiScript {
                         continue;
                     }
                     let mut data = data_ref.cloned().unwrap_or_default();
-                    // One hop (region combine `0x772180`): the region's alpha times its owner's
-                    // `effective_alpha`, which `SetAlpha 0x76a690` already carries down the tree.
-                    let alpha = owner_frame.map(|f| f.effective_alpha).unwrap_or(1.0)
+                    // The region's alpha times its owner's effective alpha, the own and
+                    // inherited bytes' product (12340 `0x487d86`).
+                    let alpha = owner_frame.map_or(1.0, |f| f.effective_alpha())
                         * data.alpha.unwrap_or(1.0);
                     if let Some(fo) = state_font {
                         // The font object's paint, behind the severance mask (`font_explicit`) on

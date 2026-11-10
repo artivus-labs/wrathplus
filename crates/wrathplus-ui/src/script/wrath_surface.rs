@@ -123,7 +123,6 @@ fn install_frame_methods(lua: &Lua) -> mlua::Result<()> {
                 function t.SetFormattedText(self, fmt, ...) self:SetText(format(fmt, ...)) end
             end
             buttons.SetNormalFontObject = buttons.SetTextFontObject
-            buttons.GetNormalFontObject = buttons.GetTextFontObject
             fontstrings.SetSpacing = fontstrings.SetSpacing or function() end
             fontstrings.GetSpacing = fontstrings.GetSpacing or function() return 0 end
             minimaps.SetPlayerTextureHeight = minimaps.SetPlayerTextureHeight or function() end

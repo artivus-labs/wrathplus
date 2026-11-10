@@ -785,7 +785,7 @@ pub(super) fn tick_fades(lua: &Lua) {
     {
         let mut model = lua.app_data_mut::<Model>().expect("model app_data");
         for (h, a) in ramping {
-            model.arena.set_alpha(h, a);
+            model.arena.set_alpha(h, f64::from(a));
         }
     }
     for h in finished {

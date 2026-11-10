@@ -433,7 +433,7 @@ fn a_title_region_is_a_plain_region_and_creating_it_twice_is_destructive() {
         "the second call ran ClearAllPoints on the region it returned"
     );
 
-    // It answers the 19 Region methods and nothing else (`0x81c554`, `0x81c528`): no Show/Hide,
+    // It answers the Region table (12340 `0xac1480`) and nothing else: no Show/Hide,
     // no scripts, no textures.
     for name in crate::script::REGION_MAP_METHODS {
         assert_eq!(

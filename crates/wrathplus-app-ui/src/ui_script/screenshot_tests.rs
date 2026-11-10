@@ -95,8 +95,8 @@ fn the_line_fades_out_over_the_references_two_seconds() {
     s.tick(1.0);
     let half = alpha(&s);
     assert!(
-        (half - 0.5).abs() < 1e-3,
-        "halfway through 2 s the line is at half alpha, got {half}"
+        (half - 0.5).abs() < 2.0 / 255.0,
+        "halfway through 2 s the line is at half alpha, to the alpha byte, got {half}"
     );
 
     s.tick(1.0);

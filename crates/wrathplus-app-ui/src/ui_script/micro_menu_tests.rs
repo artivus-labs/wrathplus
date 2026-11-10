@@ -185,8 +185,8 @@ fn the_talent_button_greys_below_level_ten_and_says_when_it_comes() {
     assert_eq!(
         s.eval::<(i64, f64)>("return TalentMicroButton:IsEnabled(), TalentMicroButton:GetAlpha()")
             .unwrap(),
-        (0, 0.5),
-        "disabled and dimmed before 10"
+        (0, wrathplus_ui::widget::alpha_unit(127)),
+        "disabled and dimmed to 0.5, the alpha byte 127, before 10"
     );
     assert!(s
         .eval::<bool>("return TalentMicroButton:IsVisible()")

@@ -689,7 +689,7 @@ impl Plate {
                 .extend(model.arena.set_shown(frame, true));
         }
         if last.as_ref().is_none_or(|l| l.alpha != state.alpha) {
-            model.arena.set_alpha(frame, state.alpha);
+            model.arena.set_alpha(frame, f64::from(state.alpha));
         }
 
         // Raw health on the bar; the fill's reaction colour brightens while lit (`LIT_BOOST`).
