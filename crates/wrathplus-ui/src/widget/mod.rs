@@ -79,11 +79,10 @@ pub struct Frame {
     pub strata: Strata,
     /// The level within the stratum (`frameLevel +0xc4`, default 0).
     pub level: u16,
-    /// This frame's own alpha, 0.0..=1.0 (`alpha +0xc8`, default 1.0).
-    pub alpha: f32,
-    /// Always equal to [`Frame::alpha`]: alpha cascades at set time, and at draw a region
-    /// multiplies only its owner frame's alpha (`0x772180`/`0x77fac0`).
-    pub effective_alpha: f32,
+    /// This frame's own alpha byte (`+0xbc`, default 0xff); [`WidgetArena::set_alpha`] writes it.
+    pub alpha: u8,
+    /// The ancestors' alpha product (`+0xbd`, 0xff at the root); see [`Frame::effective_alpha`].
+    pub inherited_alpha: u8,
     /// The frame's own Show/Hide bit (`+0xd0`, default true).
     pub shown: bool,
     /// `shown` and every ancestor effectively visible (`+0xd4`).
@@ -311,7 +310,8 @@ impl WidgetArena {
     // ── Create / destroy ────────────────────────────────────────────────────────────────────────
 
     /// Create a frame as the client's ctor `0x769090` does, whatever the parent: shown, MEDIUM,
-    /// level 0, scale and alpha 1.0. A dead `parent` makes a top-level frame.
+    /// level 0, scale and own alpha 1.0, and the parent's alpha product inherited (12340's
+    /// parent-set `0x491253`, 0xff with none). A dead `parent` makes a top-level frame.
     pub fn create(
         &mut self,
         kind: FrameKind,
@@ -321,15 +321,10 @@ impl WidgetArena {
         let parent = parent.filter(|&p| self.frame(p).is_some());
         let parent_visible = parent.is_none_or(|p| self.frame(p).unwrap().effective_visible);
         let parent_scale = parent.map_or(1.0, |p| self.frame(p).unwrap().effective_scale);
+        let parent_alpha = parent.map_or(0xff, |p| self.frame(p).unwrap().effective_alpha_byte());
 
         let insertion_seq = self.next_insertion;
         self.next_insertion += 1;
-
-        let shown = true;
-        let scale = 1.0f32;
-        // 1.0 whatever the parent's: only `SetAlpha` pushes alpha down the tree.
-        let alpha = 1.0f32;
-        let effective_alpha = alpha;
 
         let frame = Frame {
             disabled_layers: 0,
@@ -346,10 +341,10 @@ impl WidgetArena {
                 Strata::default()
             },
             level: 0,
-            alpha,
-            effective_alpha,
-            shown,
-            effective_visible: shown && parent_visible,
+            alpha: 0xff,
+            inherited_alpha: parent_alpha,
+            shown: true,
+            effective_visible: parent_visible,
             mouse_enabled: mouse_enabled_by_ctor(kind),
             // The WorldFrame ctor takes the wheel (`0x481b1f`); the reference's ScrollFrame and
             // ScrollingMessageFrame ctors do not, and a stock one takes it from `<OnMouseWheel>`.
@@ -368,8 +363,8 @@ impl WidgetArena {
             max_resize: (0.0, 0.0),
             user_placed: false,
             toplevel: false,
-            scale,
-            effective_scale: parent_scale * scale,
+            scale: 1.0,
+            effective_scale: parent_scale,
             ignore_parent_scale: false,
             wow_id: 0,
             insertion_seq,
@@ -560,6 +555,7 @@ impl WidgetArena {
 }
 
 mod propagation;
+pub use propagation::alpha_unit;
 
 #[cfg(test)]
 mod tests;

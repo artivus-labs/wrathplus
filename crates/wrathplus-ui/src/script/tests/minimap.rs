@@ -274,7 +274,10 @@ fn frame_effective_alpha_reads_the_shown_frames_alpha() {
     assert_eq!(s.frame_effective_alpha("NoSuchFrame"), None);
     s.run("f:Show()").unwrap();
     let a = s.frame_effective_alpha("PingModel").expect("shown");
-    assert!((a - 0.5).abs() < 1e-6, "the frame's alpha: {a}");
+    assert!(
+        (a - 127.0 / 255.0).abs() < 1e-6,
+        "the frame's alpha byte: {a}"
+    );
     s.run("p:Hide()").unwrap();
     assert_eq!(
         s.frame_effective_alpha("PingModel"),

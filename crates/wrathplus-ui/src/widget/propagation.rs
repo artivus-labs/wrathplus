@@ -2,7 +2,38 @@
 
 use crate::order::Strata;
 
-use super::{FrameHandle, RegionHandle, WidgetArena, SCALE_EPS};
+use super::{Frame, FrameHandle, RegionHandle, WidgetArena, SCALE_EPS};
+
+/// `SetAlpha`'s byte (12340 `0x49fa25`-`0x49fa63`): clamped to 0..=1, NaN to 1 (an unordered
+/// `fcom` takes the upper arm), times 255 and truncated (RC forced to 11, `0x49fa55`).
+fn alpha_byte(alpha: f64) -> u8 {
+    let a = if alpha < 0.0 {
+        0.0
+    } else if alpha < 1.0 {
+        alpha
+    } else {
+        1.0
+    };
+    (a * 255.0) as u8
+}
+
+/// An alpha byte as `GetAlpha` answers it (`0x49f9b7`): times the `f64` `1/255` at `0x9ece88`.
+pub fn alpha_unit(byte: u8) -> f64 {
+    f64::from(byte) * (1.0 / 255.0)
+}
+
+impl Frame {
+    /// Own alpha times inherited, `/ 255` truncated (`0x49f937`-`0x49f94d`, the `0x80808081`
+    /// multiply): what `GetEffectiveAlpha` answers and the frame and its regions draw at.
+    pub fn effective_alpha_byte(&self) -> u8 {
+        (u16::from(self.alpha) * u16::from(self.inherited_alpha) / 255) as u8
+    }
+
+    /// [`Self::effective_alpha_byte`] as a draw alpha.
+    pub fn effective_alpha(&self) -> f32 {
+        alpha_unit(self.effective_alpha_byte()) as f32
+    }
+}
 
 impl WidgetArena {
     // ── Visibility ───────────────────────────────────────────────────────────────────────────────
@@ -189,15 +220,31 @@ impl WidgetArena {
 
     // ── Alpha ────────────────────────────────────────────────────────────────────────────────────
 
-    /// `SetAlpha` (`0x76a690`): write the raw value to `h` and every descendant frame (`+0xc8`),
-    /// with no draw-time product, so a child's own later `SetAlpha` holds until an ancestor's next.
-    pub fn set_alpha(&mut self, h: FrameHandle, alpha: f32) {
+    /// `SetAlpha` (12340 `0x49f9e0`): [`alpha_byte`] into `h`'s own byte only (`0x48ea10`); on a
+    /// change, its descendants' inherited bytes follow ([`Self::propagate_alpha`]).
+    pub fn set_alpha(&mut self, h: FrameHandle, alpha: f64) {
+        let byte = alpha_byte(alpha);
         let Some(f) = self.frame_mut(h) else { return };
-        f.alpha = alpha;
-        f.effective_alpha = alpha;
-        let children = self.frame(h).expect("just wrote it").children.clone();
+        if f.alpha != byte {
+            f.alpha = byte;
+            self.propagate_alpha(h);
+        }
+    }
+
+    /// The alpha-changed slot (`0x491680`): each child's inherited byte becomes `h`'s effective
+    /// byte, recursing only where it changed (`0x49170b`); hidden frames are not skipped.
+    fn propagate_alpha(&mut self, h: FrameHandle) {
+        let Some(f) = self.frame(h) else { return };
+        let (byte, children) = (f.effective_alpha_byte(), f.children.clone());
         for c in children {
-            self.set_alpha(c, alpha);
+            self.set_inherited_alpha(c, byte);
+        }
+    }
+
+    fn set_inherited_alpha(&mut self, h: FrameHandle, byte: u8) {
+        if let Some(f) = self.frame_mut(h).filter(|f| f.inherited_alpha != byte) {
+            f.inherited_alpha = byte;
+            self.propagate_alpha(h);
         }
     }
 
@@ -234,8 +281,8 @@ impl WidgetArena {
 
     /// Phase 2 of `SetParent` (`0x76ab10`): relink, strata := the parent's (`0x76ab5a`, MEDIUM for
     /// none), level := the parent's + 1 without propagating (`0x76ab65`, 0 for none), scale
-    /// re-inherited, then the show half, returning the frames that became visible; alpha is
-    /// untouched. `h`'s own children keep their levels, so one can end up below `h`.
+    /// and alpha re-inherited, then the show half, returning the frames that became visible.
+    /// `h`'s own children keep their levels, so one can end up below `h`.
     /// `was_visible` is whether phase 1 hid anything (the reference's `ebx` at `0x76ab2b`); the
     /// show half runs only then (`0x76abfd`), so a hidden frame moved under a visible parent keeps
     /// a stale effective visibility until something shows it.
@@ -277,6 +324,9 @@ impl WidgetArena {
         self.set_frame_level(h, plevel, true);
         let ps = self.parent_effective_scale(h);
         self.propagate_scale(h, ps);
+        // The parent's alpha product, 0xff for none (`0x491253`-`0x491277`, `0x4912ca`).
+        let pa = new_parent.map_or(0xff, |np| self.frame(np).unwrap().effective_alpha_byte());
+        self.set_inherited_alpha(h, pa);
 
         if was_visible && self.parent_visible(h) {
             self.propagate_visible(h, true, &mut shown);

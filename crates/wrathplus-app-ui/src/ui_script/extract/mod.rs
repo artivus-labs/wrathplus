@@ -1184,7 +1184,6 @@ fn convert_entry_inner(
             facing,
             model_scale,
             position,
-            own_alpha,
             icon,
             camera,
             light,
@@ -1232,14 +1231,14 @@ fn convert_entry_inner(
                         icon: icon.clone(),
                         rect,
                         z_key: eq.z,
-                        // The instance draws at the widget's own alpha (`0x76d120`).
-                        alpha: own_alpha,
+                        // The instance draws at the frame's effective alpha (12340 `0x95fb40`).
+                        alpha: eq.alpha,
                         clip,
                     },
                 );
                 if crate::ui_models::trace_on() {
                     info!(
-                        "tile-trace: composite {path} pane {handle:?} {} rect=({:.1},{:.1})-({:.1},{:.1}) size_px={}x{} z={:?} alpha={own_alpha:.2} cell={:?} atlas={:?}",
+                        "tile-trace: composite {path} pane {handle:?} {} rect=({:.1},{:.1})-({:.1},{:.1}) size_px={}x{} z={:?} alpha={:.2} cell={:?} atlas={:?}",
                         name.as_deref().unwrap_or("<anonymous>"),
                         rect.min.x,
                         rect.min.y,
@@ -1248,6 +1247,7 @@ fn convert_entry_inner(
                         size_px.x,
                         size_px.y,
                         eq.z,
+                        eq.alpha,
                         tiles.cells.get(&handle),
                         tiles.atlas_size
                     );

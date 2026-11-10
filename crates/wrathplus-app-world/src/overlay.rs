@@ -333,7 +333,7 @@ pub struct TileRequest {
     pub rect: Rect,
     /// `ZKey::callback(Artwork)`: after every texture and font string of the pane's layer.
     pub z_key: u64,
-    /// The frame's own alpha, which the composite draws at (`0x76d120`).
+    /// The frame's effective alpha, which the composite draws at (12340 `0x95fb40`).
     pub alpha: f32,
     /// The enclosing ScrollFrame's clip, in the quad pass's space.
     pub clip: Option<Rect>,

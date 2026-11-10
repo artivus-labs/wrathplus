@@ -709,8 +709,10 @@ fn an_idle_dock_stops_rewriting_the_tab_alpha_every_frame() {
     assert!(s.errors().is_empty(), "{:?}", s.errors());
 
     let alpha: f64 = s.eval("return ChatFrame1Tab:GetAlpha()").unwrap();
-    assert!(
-        (alpha - 0.42).abs() < 1e-6,
+    // 0.42 truncates to the alpha byte 107 (12340 `SetAlpha` `0x49f9e0`).
+    assert_eq!(
+        alpha,
+        wrathplus_ui::widget::alpha_unit(107),
         "a settled dock must not rewrite its tab alpha — got {alpha}"
     );
 }

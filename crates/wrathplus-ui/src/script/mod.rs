@@ -1167,7 +1167,7 @@ impl UiScript {
             .arena
             .iter_frames()
             .find(|(_, f)| f.name.as_deref() == Some(name) && f.effective_visible)
-            .map(|(_, f)| f.effective_alpha)
+            .map(|(_, f)| f.effective_alpha())
     }
 
     /// Resolve and cache every frame's rect, which `GetWidth`/`GetHeight`/`extract` read, then fire

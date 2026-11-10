@@ -45,8 +45,8 @@ fn a_started_fade_ramps_off_uiparents_tick_and_completes() {
         .eval::<f64>("return WrathPlusFadeProbe:GetAlpha()")
         .unwrap();
     assert!(
-        (mid - 0.5).abs() < 1e-3,
-        "half the timeToFade in, half the ramp: {mid} {:?}",
+        (mid - 0.5).abs() < 2.0 / 255.0,
+        "half the timeToFade in, half the ramp, to the alpha byte: {mid} {:?}",
         s.errors()
     );
 

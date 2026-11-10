@@ -535,13 +535,13 @@ mod tests {
         let mut s = UiScript::new().unwrap();
         s.run(r#"f=CreateFrame('Frame','AnimationTest'); g=f:CreateAnimationGroup(); g:SetLooping('BOUNCE'); a=g:CreateAnimation('Alpha'); a:SetChange(-0.7); a:SetDuration(1); a:Play()"#).unwrap();
         s.tick(0.5);
-        assert!((s.eval::<f64>("return f:GetAlpha()").unwrap() - 0.65).abs() < 0.001);
+        assert!((s.eval::<f64>("return f:GetAlpha()").unwrap() - 165.0 / 255.0).abs() < 1e-9);
         s.run("a:Pause()").unwrap();
         s.tick(0.5);
-        assert!((s.eval::<f64>("return f:GetAlpha()").unwrap() - 0.65).abs() < 0.001);
+        assert!((s.eval::<f64>("return f:GetAlpha()").unwrap() - 165.0 / 255.0).abs() < 1e-9);
         s.run("a:Play()").unwrap();
         s.tick(1.0);
-        assert!((s.eval::<f64>("return f:GetAlpha()").unwrap() - 0.65).abs() < 0.001);
+        assert!((s.eval::<f64>("return f:GetAlpha()").unwrap() - 165.0 / 255.0).abs() < 1e-9);
         s.run("a:Stop()").unwrap();
         assert_eq!(s.eval::<f64>("return f:GetAlpha()").unwrap(), 1.0);
     }

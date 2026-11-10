@@ -235,25 +235,42 @@ fn generational_handle_detects_reuse() {
 
 // ── Alpha ────────────────────────────────────────────────────────────────────────────────────
 
+/// 12340 keeps each frame's own alpha byte and draws at the product up the parent chain, each hop
+/// truncated (`0x49f9e0`, `0x491680`, `0x49f900`): `SetAlpha` never writes a descendant.
 #[test]
-fn set_alpha_overwrites_the_subtree() {
+fn set_alpha_keeps_its_own_byte_and_children_inherit_the_product() {
     let mut a = arena();
     let root = a.create(FrameKind::Frame, None, None);
     let child = a.create(FrameKind::Frame, None, Some(root));
     let grandchild = a.create(FrameKind::Frame, None, Some(child));
     a.set_alpha(root, 0.5);
-    for h in [root, child, grandchild] {
-        assert_eq!(a.frame(h).unwrap().alpha, 0.5);
-        assert_eq!(a.frame(h).unwrap().effective_alpha, 0.5);
+    a.set_alpha(child, 0.5);
+    fn f(a: &WidgetArena, h: FrameHandle) -> Frame {
+        a.frame(h).unwrap().clone()
     }
-    // Last write wins: the child's own SetAlpha holds until the parent sets again.
-    a.set_alpha(child, 1.0);
-    assert_eq!(a.frame(root).unwrap().effective_alpha, 0.5);
-    assert_eq!(a.frame(child).unwrap().effective_alpha, 1.0);
-    assert_eq!(a.frame(grandchild).unwrap().effective_alpha, 1.0);
-    // A frame created under a dimmed parent starts at 1.0.
-    let late = a.create(FrameKind::Frame, None, Some(root));
-    assert_eq!(a.frame(late).unwrap().effective_alpha, 1.0);
+    // 0.5 stores 127; 127 * 127 / 255 truncates to 63; the grandchild inherits 63 at 1.0.
+    assert_eq!(
+        (
+            f(&a, root).alpha,
+            f(&a, child).alpha,
+            f(&a, grandchild).alpha
+        ),
+        (127, 127, 255)
+    );
+    assert_eq!(f(&a, child).effective_alpha_byte(), 63);
+    assert_eq!(f(&a, grandchild).effective_alpha_byte(), 63);
+    // Created under a dimmed parent, a frame inherits its product (`0x491253`).
+    let late = a.create(FrameKind::Frame, None, Some(child));
+    assert_eq!(f(&a, late).inherited_alpha, 63);
+    // Reparenting re-inherits, down the moved subtree; to the root it is 0xff (`0x4912ca`).
+    a.set_parent(child, None);
+    assert_eq!(f(&a, child).effective_alpha_byte(), 127);
+    assert_eq!(f(&a, grandchild).inherited_alpha, 127);
+    // Out of range clamps; NaN takes the upper arm.
+    a.set_alpha(root, f64::NAN);
+    assert_eq!(f(&a, root).alpha, 255);
+    a.set_alpha(root, -1.0);
+    assert_eq!(f(&a, root).alpha, 0);
 }
 
 // ── The per-kind registries ──────────────────────────────────────────────────────────────────
