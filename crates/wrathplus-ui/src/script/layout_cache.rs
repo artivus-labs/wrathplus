@@ -44,15 +44,15 @@ pub struct FrameLayout {
 impl super::UiScript {
     /// Snapshot, sorted by name so the file is stable, every frame the reference's writer
     /// (`0x490e60`) writes: a non-empty name (`0x490e79`, `0x490e82`), `userPlaced` (`0x490e8e`,
-    /// `0x1000`) and `movable` or `resizable` (`0x490e97`, `0x100|0x200`), with every anchor
-    /// nameable. Every drag stamps `userPlaced` (`0x7652b0` at `0x7652e5`), so the last test is
+    /// `0x1000`), not `SetDontSavePosition` (12340 `0x517e37`, `0x80000`) and `movable` or
+    /// `resizable` (`0x490e97`, `0x100|0x200`), with every anchor nameable. Every drag stamps `userPlaced` (`0x7652b0` at `0x7652e5`), so the last test is
     /// what drops the row of a stock frame an addon once moved, once that addon is gone.
     pub fn user_placed_layouts(&self) -> Vec<FrameLayout> {
         let model = self.model_ref();
         let mut out: Vec<FrameLayout> = model
             .arena
             .iter_frames()
-            .filter(|(_, f)| f.user_placed && (f.movable || f.resizable))
+            .filter(|(_, f)| f.user_placed && !f.dont_save_position && (f.movable || f.resizable))
             .filter_map(|(h, f)| {
                 let name = f.name.clone()?;
                 let input = model.layout_inputs.get(&h)?;

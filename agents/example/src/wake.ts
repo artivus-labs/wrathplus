@@ -140,6 +140,9 @@ export class Waker {
   }
 }
 
+/** Why a wake-up of `seconds` (undefined: no time limit) may not be set now, or null when it may. */
+export type WakeGate = (seconds: number | undefined) => Promise<string | null>;
+
 export const WAKE_TOOLS = ["mcp__wake__wake_me"];
 
 /** Tools that act on the game (the client's, goals, a module rollback): refused while asleep. */
@@ -164,30 +167,26 @@ export function sleepGuard(waker: Waker): HookCallback {
 }
 
 /** The planner's alarm clock. */
-export function wakeServer(waker: Waker) {
+export function wakeServer(waker: Waker, gate?: WakeGate) {
   return createSdkMcpServer({
     name: "wake",
     version: "0.1.0",
     tools: [
       tool(
         "wake_me",
-        "Ask to be woken later; your turn ends with it (the game tools are refused until you reply without a tool call). Wakes you after `seconds`, or when one of `events` fires (game events such as AGENT_WALK_DONE, QUEST_LOG_UPDATE, PLAYER_REGEN_ENABLED), whichever is first. Replaces any earlier wake-up. You are woken anyway by news (the fast loop, deaths, whispers, stuck walks); use this only when you are driving something yourself and want to look again.",
+        "Ask to be woken later; your turn ends with it (the game tools are refused until you reply without a tool call). Wakes you after `seconds`, or when one of `events` fires (game events such as AGENT_WALK_DONE, QUEST_LOG_UPDATE, PLAYER_REGEN_ENABLED), whichever is first. Replaces any earlier wake-up. You are woken anyway by news (the fast loop, deaths, whispers, stuck walks); use this only when you are driving something yourself and want to look again. With nothing running in the game (no activity, and the goal runner with nothing it can do), a wake-up with no time limit or longer than a few minutes is refused: start something first.",
         {
           seconds: z.number().int().min(1).optional(),
           events: z.array(z.string().regex(/^[A-Z][A-Z0-9_]*$/)).optional(),
           reason: z.string().describe("What to check when you wake."),
         },
-        async ({ seconds, events, reason }) => ({
-          content: [
-            {
-              type: "text" as const,
-              text:
-                !seconds && !events?.length
-                  ? "Give seconds, events or both."
-                  : waker.set(seconds, events ?? [], reason),
-            },
-          ],
-        }),
+        async ({ seconds, events, reason }) => {
+          const text = (value: string) => ({ content: [{ type: "text" as const, text: value }] });
+          if (!seconds && !events?.length) return text("Give seconds, events or both.");
+          const refusal = await gate?.(seconds);
+          if (refusal) return { ...text(refusal), isError: true };
+          return text(waker.set(seconds, events ?? [], reason));
+        },
       ),
     ],
   });

@@ -76,7 +76,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             super::button::with_button(lua, &this, |b| b.motion_while_disabled.then_some(1i64))
         })?,
     )?;
-    // StatusBar Set/GetRotatesTexture and EditBox Set/GetCountInvisibleLetters: stored per frame.
+    // StatusBar Set/GetRotatesTexture and EditBox SetCountInvisibleLetters/IsCountInvisibleLetters
+    // (12340 `0x975a80`/`0x975ad0`): stored per frame.
     // Labelled: neither changes drawing or the letter count here.
     let store: mlua::Function = lua
         .load(
@@ -86,7 +87,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             function bars.SetRotatesTexture(self, on) rotates[self] = on and true or nil end
             function bars.GetRotatesTexture(self) return rotates[self] and 1 or nil end
             function boxes.SetCountInvisibleLetters(self, on) invisible[self] = on and true or nil end
-            function boxes.GetCountInvisibleLetters(self) return invisible[self] and 1 or nil end"#,
+            function boxes.IsCountInvisibleLetters(self) return invisible[self] and 1 or nil end"#,
         )
         .set_name("=[AzerothBench Wrath widget flags]")
         .into_function()?;
@@ -163,7 +164,8 @@ mod tests {
         for check in [
             "select(1, FlagButton:GetPushedTextOffset()) == 2 and select(2, FlagButton:GetPushedTextOffset()) == -3",
             "FlagButton:GetMotionScriptsWhileDisabled() == 1",
-            "FlagBar:GetRotatesTexture() == 1 and FlagBox:GetCountInvisibleLetters() == 1",
+            "FlagBar:GetRotatesTexture() == 1 and FlagBox:IsCountInvisibleLetters() == 1 and FlagBox.GetCountInvisibleLetters == nil",
+            "FlagBox:IsInIMECompositionMode() == nil",
         ] {
             assert!(s.eval::<bool>(&format!("return {check}")).unwrap(), "{check}");
         }

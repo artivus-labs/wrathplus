@@ -14,15 +14,16 @@ pub(super) fn fire_text_changed(bank: &mut GuildBank, script: &mut UiScript) {
 }
 
 /// The frame's events for a change of view, in the order the reference's reply handler raises
-/// them; a closed bank is the default view.
+/// them; the frame opens and closes with the view's `open`, the bank guid.
 pub(super) fn events(
     before: Option<&WrathGuildBankView>,
     after: &WrathGuildBankView,
 ) -> Vec<(&'static str, Vec<ScriptValue>)> {
     let closed = WrathGuildBankView::default();
-    let was_open = before.is_some_and(|b| *b != closed);
-    let is_open = *after != closed;
-    let before = before.unwrap_or(&closed);
+    let was_open = before.is_some_and(|b| b.open);
+    let is_open = after.open;
+    // An opening diffs against nothing, so it announces the state it opens on.
+    let before = before.filter(|_| was_open).unwrap_or(&closed);
     let mut out = Vec::new();
     match (was_open, is_open) {
         (false, true) => out.push(("GUILDBANKFRAME_OPENED", Vec::new())),

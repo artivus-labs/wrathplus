@@ -1,8 +1,8 @@
 //! The `ColorSelect` methods: the `CSimpleColorSelect` widget (factory `0x6eef90`, XML load
 //! `0x78b3f0`), one colour held as HSV floats. `SetColorRGB` fires `OnColorSelect` (script map
-//! `0x78b4f0`, slot `+0x338`) on every call: `0x78ed01` calls `0x78bae0`, whose only test
-//! (`0x78bafd`) is for a bound handler, while `CSimpleSlider::SetValue` (`0x789930`) skips an equal
-//! value. The RGB round trip loses a step on 9.75 % of colours, as in the reference: in and out use
+//! `0x78b4f0`, 12340 slot `+0x2c0`, `0x96dd8a`) on every call: `0x78ed01` calls `0x78bae0`,
+//! whose only test (`0x78bafd`) is for a bound handler, while `CSimpleSlider::SetValue`
+//! (`0x789930`) skips an equal value. The RGB round trip loses a step on 9.75 % of colours, as in the reference: in and out use
 //! different quantizers (round-half-up, then floor), so reading back and setting ratchets a channel
 //! down; see [`ColorSelectState`].
 
@@ -21,7 +21,7 @@ pub(super) const REG_COLORSELECT_METHODS: &str = "__wrathplus_colorselect_method
 
 /// Run `f` over a frame's ColorSelect state under one short write borrow; errors if `this` is not
 /// a live ColorSelect, as the method table is a plain Lua value a caller can misapply.
-fn with_colorselect<T>(
+pub(super) fn with_colorselect<T>(
     lua: &Lua,
     this: &Table,
     f: impl FnOnce(&mut ColorSelectState) -> T,
@@ -254,9 +254,9 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
 }
 
 /// Fire `OnColorSelect(self, r, g, b)`; a handler error goes to [`Model::errors`], not the caller.
-fn fire_color_select(lua: &Lua, this: &Table, r: f64, g: f64, b: f64) -> mlua::Result<()> {
+pub(super) fn fire_color_select(lua: &Lua, t: &Table, r: f64, g: f64, b: f64) -> mlua::Result<()> {
     let id = {
-        let h = frame_handle_of(lua, this)?;
+        let h = frame_handle_of(lua, t)?;
         let mut model = lua.app_data_mut::<Model>().expect("model app_data");
         model.frame_id(h)
     };

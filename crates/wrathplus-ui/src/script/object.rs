@@ -22,7 +22,7 @@ mod create_args;
 mod events_regions;
 pub(crate) mod frame_state;
 mod layout_methods;
-pub(crate) use layout_methods::eff_scale;
+pub(crate) use layout_methods::{eff_scale, settle};
 pub(crate) mod movable;
 pub(crate) mod toplevel;
 pub(crate) use layout_methods::{anchor_bits_eq, anchor_retarget_is_structural};

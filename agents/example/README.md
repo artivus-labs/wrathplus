@@ -38,7 +38,10 @@ On the public beta realm, see [Play on the WrathPlus open beta](../../docs/BETA.
   work between choices:
   - **The event watcher** (`src/watch.ts`) long-polls the client and hands every event to the fast
     tier. The planner only hears what needs it: death, whispers, party chat, invites, trades and
-    duels, plus operator notes (each stdin line).
+    duels. Small talk (an NPC naming it, a stranger's or a bot's `/say` with its name, an emote
+    at it) does not wake it line by line: with the fast tier Jev waves, nods, says hello, ignores
+    it or passes on what needs thought (`SmallTalk` in `src/triage.ts`); without it the lines ride
+    along with the next wake-up and wake the planner by themselves at most once in ten minutes.
   - **The fast tier** (`src/policy.ts`, on when `TYPESAFE_API_KEY` is set) asks Jev, TypeSafe's
     System One decision model, only when woken: an activity ended (`AGENT_INTENT_DONE`), the
     planner sent a plan, a decision opened, combat started or ended, death, loot, gossip or quest
@@ -61,7 +64,19 @@ On the public beta realm, see [Play on the WrathPlus open beta](../../docs/BETA.
   and when one runs out (`AGENT_HOLD_EXPIRED`) Jev decides `keep_waiting` (for a minute, a few, or
   ten) or `stop_waiting`, from the reason, the minutes waited, who in the party is actually here,
   and the goals. Idle with no hold, Jev is offered `wait` for a minute, then not at all; after three
-  minutes the planner is told (`idleGraceMs`, `idleNotifyMs`).
+  minutes the planner is told, and every ten minutes after that while it lasts, with each goal's
+  next actions or why it is blocked (`idleGraceMs`, `idleNotifyMs`, `idleRepeatMs`).
+- **Nobody is coming** (`src/waits.ts`, `src/runner.ts`): there is no operator or user in the
+  loop, and the harness does not let the planner wait for one. The prompt says so first. A `hold`
+  is classified before it is placed (by Jev; without the fast tier by a word pattern): a wait for
+  something in the game that happens by itself is placed, a wait for a person, an answer, an
+  instruction or a permission is refused with the goals and facts to decide from. After Jev ends
+  a wait (`stop_waiting`), the same wait in similar words is refused for 30 minutes. The tool
+  result shows the time held in all. `wake_me` with no time limit, or longer than 300 s, is
+  refused while nothing runs in the game. `Goals.on` belongs to the harness: checked every 15 s
+  and turned back on (the planner is told once); `WRATHPLUS_AGENT_GOALS=0` leaves the runner off.
+  A reflection window that was 80% idle or on hold leads with that and asks for its cause to be
+  fixed.
 - **Reflection** (`src/reflect.ts`): after a death, a level-up, three failed actions in ten
   minutes, fifteen minutes without progress, or a quiet moment every half hour
   (`WRATHPLUS_AGENT_REFLECT_MINUTES`; `WRATHPLUS_AGENT_REFLECT=0` turns it off), the planner gets
@@ -90,7 +105,8 @@ bun run agent dashboard             # http://127.0.0.1:17900: every running agen
 - **`run`** starts the agent's headless client (logged in, `--character` entered; without it the
   planner picks or creates one at character select), waits for it, runs the planner and Jev, and
   stops the client when you stop the agent (Ctrl-C). A client already started from the Manager is
-  driven as it is. Lines typed into the terminal reach the planner as operator notes. A client `run`
+  driven as it is. A line typed into the terminal reaches the planner as an outside note, which
+  it is told is rare and never to wait for. A client `run`
   started is restarted into the same character if it exits or is disconnected (back at the login
   screen), so the planner carries on.
 - **Several at once:** one `run` per terminal; each agent has its own account and port.

@@ -8,6 +8,7 @@
 
 import { choice, chosen, Jev, noul, yes, type Answer, type Question } from "./jev.ts";
 import { holdLua, luaString } from "./goals.ts";
+import { goalLines, NOBODY } from "./waits.ts";
 
 export { luaString };
 import type { GameEvent } from "./watch.ts";
@@ -98,7 +99,7 @@ export const WAIT_WHEN = {
 /** The choices on a hold that has run out (AGENT_HOLD_EXPIRED). */
 export const HOLD_CHOICES = {
   keep_waiting: "Keep waiting: what it waits for is really coming (whoever it waits for is online and on the way, or said to wait), and waiting longer is worth more than getting on.",
-  stop_waiting: "Stop waiting and get on with its goals: whoever it waits for is offline, not here and not coming, or it has waited long enough.",
+  stop_waiting: "Stop waiting and get on with its goals: whoever it waits for is offline, not here and not coming, or it has waited long enough; or it waits for someone outside the game (an operator, a user, an answer, an instruction, a permission), and nobody outside the game will ever answer.",
 };
 
 /** How much longer a kept hold lasts, as choices for Jev. */
@@ -273,11 +274,15 @@ export interface PolicyOptions {
   heartbeatMs?: number;
   /** Idle (no activity, no hold) for this long, `wait` is no longer offered (ms, default 60 s). */
   idleGraceMs?: number;
-  /** Idle for this long, the planner is told (ms, default 3 min; once per idle stretch). */
+  /** Idle for this long, the planner is told (ms, default 3 min). */
   idleNotifyMs?: number;
+  /** Still idle, it is told again this often, more plainly (ms, default 10 min). */
+  idleRepeatMs?: number;
+  /** A hold decision: the wait was ended (stop_waiting) or kept going for `seconds`. */
+  onHold?: (decision: HoldDecision) => void;
   /** A test clock. */
   now?: () => number;
-  /** The operator's goal, which Jev reads beside the planner's plan. */
+  /** The run's goal, which Jev reads beside the planner's plan. */
   goal?: string;
   /** Told when the plan stalls, looks complete, or an intent keeps failing. */
   onNotify: (summary: string) => void;
@@ -303,7 +308,8 @@ export class Policy {
   #holdTotals = new Map<string, number>();
   #blockedTold = new Map<string, number>();
   #idleSince: number | undefined;
-  #idleTold = false;
+  #idleToldAt: number | undefined;
+  #idleTellings = 0;
   #last: { at: number; kind: keyof TimeShares } | undefined;
   time: TimeShares = { busy: 0, idle: 0, hold: 0, other: 0 };
 
@@ -450,14 +456,18 @@ export class Policy {
     if (kind === "idle") this.#idleSince ??= now;
     else {
       this.#idleSince = undefined;
-      this.#idleTold = false;
+      this.#idleToldAt = undefined;
+      this.#idleTellings = 0;
     }
-    if (kind === "idle" && !this.#idleTold && this.idleMs >= (this.options.idleNotifyMs ?? 180_000)) {
-      this.#idleTold = true;
-      const goals = (game.goals ?? []).map((g) => `${g.name} (${g.status ?? "?"}${g.note ? `: ${g.note}` : ""})`).join(", ");
-      this.options.onNotify(
-        `The character has stood idle for ${Math.round(this.idleMs / 1000)}s: no activity, no hold, and nothing started. Goals: ${goals || "none (is wp.goals loaded?)"}. Find out why the runner has nothing to do (the goals tool shows each goal's plan and the facts), then push a goal it can act on or teach the missing action.`,
-      );
+    // Told once the stretch is long enough, then again while it lasts: an idle character is never
+    // something the planner may leave be.
+    const idleDue =
+      this.#idleToldAt === undefined
+        ? this.idleMs >= (this.options.idleNotifyMs ?? 180_000)
+        : now - this.#idleToldAt >= (this.options.idleRepeatMs ?? 600_000);
+    if (kind === "idle" && idleDue) {
+      this.#idleToldAt = now;
+      this.options.onNotify(idleNotice(Math.round(this.idleMs / 1000), Array.isArray(game.goals) ? game.goals : [], this.#idleTellings++));
     }
     // A hold that ran out: Jev decides whether to keep waiting (the latest one; older ones are moot).
     const expiry = this.#expired.at(-1);
@@ -540,6 +550,7 @@ export class Policy {
       decision.result = "released";
     }
     this.holds.push(decision);
+    this.options.onHold?.(decision);
     if (this.holds.length > 50) this.holds.shift();
     this.note(`hold "${expiry.reason}" ran out after ${context.minutes_waited} min: ${decision.choice}${decision.seconds ? ` ${decision.seconds}s` : ""}`);
     this.options.log?.(
@@ -622,6 +633,17 @@ export class Policy {
     if (!response.ok) return { ok: false, values: [], error: `HTTP ${response.status}` };
     return (await response.json()) as { ok: boolean; values: unknown[]; error?: string };
   }
+}
+
+/** What the planner is told about an idle character: the goals with the runner's next actions or
+ *  why each is blocked and, from the second telling on, that nobody else will move it. */
+export function idleNotice(seconds: number, goals: Goal[], tellings = 0): string {
+  const lines = goalLines(goals).join("\n") || "- none (is wp.goals loaded?)";
+  const first = `The character has stood idle for ${seconds}s: no activity, no hold, and nothing started.`;
+  if (tellings === 0) {
+    return `${first}\nGoals:\n${lines}\nFind out why the runner has nothing to do (the goals tool shows each goal's plan and the facts), then push a goal it can act on or teach the missing action.`;
+  }
+  return `${first} You were told ${tellings === 1 ? "once" : `${tellings} times`} already and it is still standing there. ${NOBODY}\nGoals, with what the runner would do next or why it cannot:\n${lines}\nAct in this turn: unblock the top goal (teach the action or the fact it is missing), push a goal the runner can act on (a zone that fits your level: Goals.zones()), or start an activity yourself. Do not end the turn with the character idle.`;
 }
 
 /** Time shares as whole percentages, or null before anything has been measured. */

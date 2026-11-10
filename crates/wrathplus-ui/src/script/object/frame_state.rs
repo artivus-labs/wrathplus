@@ -417,24 +417,32 @@ pub(super) fn install(lua: &Lua, m: &Table) -> mlua::Result<()> {
     )?;
     m.set(
         "SetAlpha",
-        lua.create_function(|lua, (this, alpha): (Table, f32)| {
+        lua.create_function(|lua, (this, alpha): (Table, f64)| {
             let h = frame_handle_of(lua, &this)?;
-            // The reference clamps to 0..1; stock fade code passing a 0..255 alpha relies on it.
+            // Clamped to 0..1 (stock fade code passing a 0..255 alpha relies on it), own byte only.
             lua.app_data_mut::<Model>()
                 .expect("model")
                 .arena
-                .set_alpha(h, alpha.clamp(0.0, 1.0));
+                .set_alpha(h, alpha);
             Ok(())
         })?,
     )?;
-    m.set(
-        "GetAlpha",
-        lua.create_function(|lua, this: Table| {
-            let h = frame_handle_of(lua, &this)?;
-            let model = lua.app_data_ref::<Model>().expect("model");
-            Ok(model.arena.frame(h).map(|f| f.alpha).unwrap_or(1.0))
-        })?,
-    )?;
+    // GetAlpha (`0x49f980`): the own byte; GetEffectiveAlpha (`0x49f900`): own times inherited.
+    for (name, effective) in [("GetAlpha", false), ("GetEffectiveAlpha", true)] {
+        m.set(
+            name,
+            lua.create_function(move |lua, this: Table| {
+                let h = frame_handle_of(lua, &this)?;
+                let model = lua.app_data_ref::<Model>().expect("model");
+                let byte = match model.arena.frame(h) {
+                    Some(f) if effective => f.effective_alpha_byte(),
+                    Some(f) => f.alpha,
+                    None => 0xff,
+                };
+                Ok(crate::widget::alpha_unit(byte))
+            })?,
+        )?;
+    }
     // `SetBackdrop(table|nil)` (`0x7776e0` → `0x76a5d0`) installs or removes the tiled background
     // and 8-piece border, both white until tinted; the two colour setters tint the background and
     // the border respectively (`0x77f410`/`0x77f440`).

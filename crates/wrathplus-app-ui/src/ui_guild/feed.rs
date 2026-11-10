@@ -7,7 +7,6 @@ use bevy::prelude::*;
 use wrathplus_formats::AreaTableCatalog;
 use wrathplus_protocol::types::{
     guild_presence, GuildInfo, GuildRosterMember, GUILD_RANKS_MAX_COUNT, GUILD_RANKS_MIN_COUNT,
-    GUILD_RANK_MAX_LENGTH,
 };
 use wrathplus_ui::script::{
     GuildMemberInfo, GuildRankInfo, GuildRequest, GuildState as VmGuild, ScriptValue, UiScript,
@@ -37,6 +36,7 @@ pub(super) struct FedGuild {
 pub(super) fn feed_guild(
     script: Option<NonSendMut<UiScript>>,
     mut guild: ResMut<GuildState>,
+    show_offline: Res<super::GuildShowOffline>,
     self_q: Query<&ObjectStore, With<SelfPlayer>>,
     areas: Option<Res<AreaTableRes>>,
     commands: Res<NetCommands>,
@@ -75,7 +75,8 @@ pub(super) fn feed_guild(
     // The away tag is the string table's, by key, as `GetGuildRosterInfo` (`0x5cc9c0`) reads it.
     let get = |key: &str| script.lua().globals().get::<String>(key).ok();
     let away = |presence: u8| status_key(presence).and_then(&get).unwrap_or_default();
-    let rows = display_rows(&guild, areas.as_deref().map(|a| &a.0), identity, &away);
+    let areas = areas.as_deref().map(|a| &a.0);
+    let rows = display_rows(&guild, show_offline.0, areas, identity, &away);
     let display_order: Vec<u64> = rows.iter().map(|r| r.guid).collect();
     let selection = index_of(&display_order, guild.selection);
     guild.display_order = display_order;
@@ -92,7 +93,6 @@ pub(super) fn feed_guild(
         rights: guild.own_rights(),
         motd: guild.motd.clone(),
         info_text: guild.info_text.clone(),
-        num_members: guild.num_members(),
         roster: rows.into_iter().map(|r| r.info).collect(),
         ranks: guild
             .rank_rights
@@ -106,7 +106,6 @@ pub(super) fn feed_guild(
             })
             .collect(),
         selection,
-        show_offline: guild.show_offline,
     });
 
     // `GUILD_ROSTER_UPDATE`; `super::RosterUpdate` decides whether it carries arg1.
@@ -200,10 +199,12 @@ fn ginfo_lines(script: &UiScript, info: &GuildInfo) -> Vec<crate::ui_action::Sho
     .collect()
 }
 
-/// The roster in display order: every member, sorted, never filtered. Until the guild query
-/// answers, only the rank-name column is empty.
+/// The roster in display order: every member, sorted, never filtered; with show-offline off the
+/// offline rows sink below `GetNumGuildMembers()`. Until the guild query answers, only the
+/// rank-name column is empty.
 pub(super) fn display_rows(
     guild: &GuildState,
+    show_offline: bool,
     areas: Option<&AreaTableCatalog>,
     identity: Option<&Identity>,
     away: &dyn Fn(u8) -> String,
@@ -213,7 +214,7 @@ pub(super) fn display_rows(
         .iter()
         .map(|m| row(m, areas, identity, away))
         .collect();
-    guild.sort.order(&mut rows, guild.show_offline);
+    guild.sort.order(&mut rows, show_offline);
     rows
 }
 
@@ -282,11 +283,10 @@ pub(super) fn index_of(order: &[u64], guid: u64) -> u32 {
 }
 
 /// Turn the Lua guild intents into their sends. The note verbs carry a 1-based display row where
-/// the wire wants a name; select, sort and show-offline are local and send nothing.
+/// the wire wants a name; select and sort are local and send nothing.
 pub(super) fn drain_guild(
     script: Option<NonSendMut<UiScript>>,
     mut guild: ResMut<GuildState>,
-    native: Res<super::wrath::NativeGuild>,
     commands: Res<NetCommands>,
     time: Res<Time<Real>>,
 ) {
@@ -359,10 +359,7 @@ pub(super) fn drain_guild(
                 rights,
                 name,
             } => {
-                let Some(name) = capped_rank_name(name) else {
-                    continue;
-                };
-                let bank = rank_bank(&script, &native, rank_index);
+                let bank = rank_bank(&script, rank_index);
                 let _ = commands.0.send(ClientCommand::NativeGuildRank(SaveRank {
                     rank: rank_index,
                     flags: rights,
@@ -381,9 +378,7 @@ pub(super) fn drain_guild(
                 // `GuildControlAddRank` (`0x4d2271`) and `GuildControlDelRank` (`0x4d22e6`) check
                 // silently; the stock buttons follow them (`FriendsFrame.lua:887`, `:908`).
                 if guild.rank_rights.len() < GUILD_RANKS_MAX_COUNT {
-                    if let Some(name) = capped_rank_name(name) {
-                        let _ = commands.0.send(ClientCommand::GuildAddRank { name });
-                    }
+                    let _ = commands.0.send(ClientCommand::GuildAddRank { name });
                 }
             }
             GuildRequest::DelRank => {
@@ -392,30 +387,21 @@ pub(super) fn drain_guild(
                 }
             }
             GuildRequest::Select(index) => guild.select(index),
-            GuildRequest::SetShowOffline(on) => guild.set_show_offline(on),
             GuildRequest::Sort(field) => guild.sort_by(&field),
         }
     }
 }
 
-/// The bank rights a 3.3.5 rank save carries: the guild-control pane's staged edit
-/// (`wrath_guild_bank_staged_rights`), else the rank's words from the last roster, so a rank
-/// saved without touching the bank keeps them.
-fn rank_bank(
-    script: &UiScript,
-    native: &super::wrath::NativeGuild,
-    rank: u32,
-) -> WrathGuildBankRankRights {
-    script
+/// The bank words a 3.3.5 rank save carries for 0-based `rank`: the guild-control pane's staged
+/// row of that rank (`wrath_guild_bank_staged_rights`, the row the setters wrote, as
+/// `0x5cb25f`-`0x5cb2e5` reads `[0xad07a8]`), its money word times 10000 (`imul` at `0x5cb274`):
+/// `SetGuildBankWithdrawLimit` stores gold.
+fn rank_bank(script: &UiScript, rank: u32) -> WrathGuildBankRankRights {
+    let mut bank = script
         .wrath_guild_bank_staged_rights(rank)
-        .unwrap_or_else(|| {
-            native
-                .rank(rank)
-                .map_or_else(Default::default, |r| WrathGuildBankRankRights {
-                    money_per_day: r.money_limit,
-                    tabs: r.tabs,
-                })
-        })
+        .unwrap_or_default();
+    bank.money_per_day = bank.money_per_day.wrapping_mul(10_000);
+    bank
 }
 
 /// A note verb: resolve the row to the member, write the note locally, and send only if it
@@ -449,104 +435,6 @@ fn set_note(
     let _ = commands.0.send(command);
 }
 
-/// The rank name, or `None` past vmangos's cap of 15, where it kicks the session
-/// (`Handlers/GuildHandler.cpp:580-584`, `:600-604`); the stock edit box stops at 15. Deviation: a
-/// script's 16-letter name, which the reference's bindings pass (1 to 16 units, `0x4d20d0`,
-/// `0x4d2210`), is dropped rather than sent or truncated, because vmangos would kick the session.
-fn capped_rank_name(name: String) -> Option<String> {
-    if name.chars().count() > GUILD_RANK_MAX_LENGTH {
-        warn!(
-            "guild: refusing a {}-character rank name (the server kicks over {GUILD_RANK_MAX_LENGTH})",
-            name.chars().count()
-        );
-        return None;
-    }
-    Some(name)
-}
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn dnd_wins_over_afk() {
-        use guild_presence::{AFK, DND, OFFLINE, ONLINE};
-        assert_eq!(status_key(ONLINE | AFK | DND), Some("CHAT_FLAG_DND"));
-        assert_eq!(status_key(ONLINE | DND), Some("CHAT_FLAG_DND"));
-        assert_eq!(status_key(ONLINE | AFK), Some("CHAT_FLAG_AFK"));
-        assert_eq!(status_key(ONLINE), None);
-        assert_eq!(status_key(OFFLINE), None);
-    }
-
-    #[test]
-    fn online_is_the_whole_byte() {
-        let member = |presence| GuildRosterMember {
-            presence,
-            ..Default::default()
-        };
-        assert!(member(guild_presence::ONLINE).is_online());
-        assert!(member(guild_presence::AFK).is_online(), "no ONLINE bit set");
-        assert!(member(0x80).is_online(), "an unknown bit reads as online");
-        assert!(!member(guild_presence::OFFLINE).is_online());
-    }
-
-    #[test]
-    fn an_offline_row_keeps_its_level_class_and_zone() {
-        let member = GuildRosterMember {
-            guid: 5,
-            presence: guild_presence::OFFLINE,
-            name: "Kaplan".into(),
-            rank_id: 1,
-            level: 42,
-            class: 8, // Mage
-            zone: 12,
-            last_online_days: 3.5,
-            public_note: "alt".into(),
-            officer_note: String::new(),
-        };
-        let row = row(&member, None, None, &|_| String::new());
-        assert_eq!(row.info.level, 42);
-        assert_eq!(row.info.class, "Mage");
-        assert!(!row.info.online);
-        assert_eq!(row.info.last_online.days, 3);
-        assert_eq!(row.info.status, "");
-        assert_eq!(row.guid, 5);
-    }
-
-    #[test]
-    fn an_online_row_reports_no_last_online() {
-        let member = GuildRosterMember {
-            presence: guild_presence::ONLINE,
-            // Ignored for an online member, as in the reference (`0x4d14fd`).
-            last_online_days: 9.0,
-            ..Default::default()
-        };
-        assert_eq!(
-            row(&member, None, None, &|_| String::new())
-                .info
-                .last_online,
-            Default::default()
-        );
-    }
-
-    #[test]
-    fn the_shown_order_maps_both_ways() {
-        assert_eq!(index_of(&[11, 22, 33], 22), 2);
-        assert_eq!(index_of(&[22, 11, 33], 22), 1, "same player, new row");
-        assert_eq!(index_of(&[11, 33], 22), 0, "no longer listed");
-        assert_eq!(index_of(&[11, 22], 0), 0, "nothing selected");
-    }
-
-    #[test]
-    fn an_over_long_rank_name_is_refused() {
-        assert_eq!(
-            capped_rank_name("Officer".into()).as_deref(),
-            Some("Officer")
-        );
-        assert!(capped_rank_name("A".repeat(GUILD_RANK_MAX_LENGTH)).is_some());
-        assert_eq!(
-            capped_rank_name("A".repeat(GUILD_RANK_MAX_LENGTH + 1)),
-            None
-        );
-    }
-}
+#[path = "feed_tests.rs"]
+mod tests;

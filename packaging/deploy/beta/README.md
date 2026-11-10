@@ -31,7 +31,9 @@ and mod-atproto-identity (the realm side of `services/account`). mod-llm-chatter
 - `bootstrap-host.sh` — one-time host setup.
 - `realm.sh` — everything else (`realm.sh` with no argument lists the commands); installed as
   `/usr/local/sbin/wrathplus-realm`.
-- `systemd/` — daily backup service and timer; the account service unit.
+- `offsite.sh` — after each daily backup, an age-encrypted copy to an off-box bucket (below);
+  installed as `/usr/local/sbin/wrathplus-offsite`.
+- `systemd/` — daily backup service and timer (with the off-box drop-in); the account service unit.
 
 ## Box layout
 
@@ -115,6 +117,16 @@ gunzip -c /var/backups/wrathplus/wrathplus-beta-<stamp>.sql.gz | \
   docker exec -i wrathplus-beta-mysql-1 sh -c 'MYSQL_PWD=$(cat /run/instance-secrets/mysql-root) exec mysql -uroot'
 wrathplus-realm start
 ```
+
+### Off-box copies
+
+After each daily backup `wrathplus-offsite` tars the newest SQL dump and account-service archive,
+encrypts them with age to the recipient in `/etc/wrathplus-beta/offsite.agepub` and uploads them
+with rclone to the bucket in `/etc/wrathplus-beta/offsite.env` (0600: `R2_ACCESS_KEY_ID`,
+`R2_SECRET_ACCESS_KEY`, `R2_ENDPOINT`, `R2_BUCKET`; a token scoped to that bucket). The bucket
+keeps 14 days. Without `offsite.env` the step is skipped. The age private key never goes on the
+box: a restore downloads the object elsewhere, decrypts it with `age -d -i <key>`, and copies the
+dump back.
 
 ## Network
 

@@ -10,6 +10,8 @@
 //! - [`watch_pipelines`]: the tripwire, a `warn!` for every pipeline compiled uncovered, which
 //!   means the menagerie has a coverage hole.
 //! - `WOW_PIPE_TRACE=<path>`: one line per pipeline created, with its full variant identity.
+//! - [`gate`]: a headless client skips the pass (`WOW_PIPE_WARM=1|0` overrides), and its live
+//!   compiles log at debug.
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -25,6 +27,7 @@ use wrathplus_world::particles::buffer::{
     begin_effect_frame, EffectBlend, EffectDrawSpec, EffectFog, EffectQuads, EffectVertex,
 };
 
+mod gate;
 mod menagerie;
 mod release;
 use menagerie::{spawn_menagerie, BoothCamQuery, WarmLanes};
@@ -63,6 +66,7 @@ pub fn plugin(app: &mut App) {
     });
     app.insert_resource(PipeWatch(shared.clone()));
     app.init_resource::<WarmPass>();
+    gate::announce();
     app.add_systems(
         Last,
         (
@@ -131,6 +135,9 @@ fn watch_pipelines(
             let line = describe(&pipe.descriptor);
             if covered {
                 debug!("pipeline compiled (covered) [{id}] {line}");
+            } else if gate::plan().expects_live_compiles() {
+                // No warm pass on purpose (headless): compiling on first draw is the plan.
+                debug!("pipeline compiled live, as planned [{id}] {line}");
             } else {
                 // The tripwire: a live compile is a visible stall, and a warm pass coverage hole.
                 warn!("pipeline compiled LIVE [{id}] {line}");
@@ -297,9 +304,10 @@ impl WarmPass {
     }
 }
 
-/// Whether this process warms at all: never in a capture, which must stay deterministic.
+/// Whether this process warms at all: not in a capture nor, by default, headless ([`gate`]).
+/// Where it does not, every cover's gate reads as satisfied and no startup cover is raised.
 pub(crate) fn runs_a_menagerie() -> bool {
-    !wrathplus_world::dev_state::deterministic_run()
+    gate::plan().runs()
 }
 
 /// How long after the last reveal `pending == 0` means drained: the counters cross worlds a frame
@@ -367,7 +375,7 @@ fn run_warm_pass(
         despawn_rigs(&mut commands, &rigs);
         return;
     }
-    // No menagerie in a capture.
+    // No menagerie in a capture or a headless client: the pass counts as done.
     if !runs_a_menagerie() {
         warm.done = true;
         return;

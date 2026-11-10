@@ -23,7 +23,7 @@ export function recentLines(notes: string, count = 14): string[] {
   if (!existsSync(dir)) return [];
   const newest = readdirSync(dir).filter((f) => f.endsWith(".jsonl")).sort().pop();
   if (!newest) return [];
-  const shown = new Set(["planner", "turn end", "fast loop", "events", "wake-up", "operator", "compaction"]);
+  const shown = new Set(["planner", "turn end", "fast loop", "events", "wake-up", "outside note", "harness", "compaction"]);
   const lines: string[] = [];
   for (const raw of readFileSync(join(dir, newest), "utf8").trim().split("\n").slice(-200)) {
     try {

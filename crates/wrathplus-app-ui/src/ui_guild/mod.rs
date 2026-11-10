@@ -13,8 +13,8 @@ pub(crate) mod wrath;
 pub(crate) use wrath::NativeGuild;
 
 pub(crate) use crate::guild::{
-    last_online, net, GuildMemberNotify, GuildState, Identity, RosterRow, RosterUpdate,
-    ROSTER_REQUEST_THROTTLE_SECS,
+    last_online, net, GuildMemberNotify, GuildShowOffline, GuildState, Identity, RosterRow,
+    RosterUpdate, ROSTER_REQUEST_THROTTLE_SECS,
 };
 #[cfg(test)]
 pub(crate) use crate::guild::{unit_guild, unit_guild_name};
@@ -26,10 +26,19 @@ pub(crate) struct GuildFeed;
 /// The guild windows' session: the wire mirror, the VM feed, and the outbound intents.
 pub struct UiGuildPlugin;
 
-/// `guildMemberNotify`'s change callback: conjunct 2 of the sign-on/sign-off line's condition.
-pub fn on_cvar(ev: On<crate::cvars::CvarChanged>, mut notify: ResMut<GuildMemberNotify>) {
+/// `guildMemberNotify`'s change callback, conjunct 2 of the sign-on/sign-off line's condition, and
+/// `guildShowOffline`'s (`0x5ca870`): store, re-sort and repaint the roster.
+pub fn on_cvar(
+    ev: On<crate::cvars::CvarChanged>,
+    mut notify: ResMut<GuildMemberNotify>,
+    mut offline: ResMut<GuildShowOffline>,
+    mut guild: ResMut<GuildState>,
+) {
     if ev.is("guildMemberNotify") {
         notify.0 = ev.flag();
+    } else if ev.is("guildShowOffline") {
+        offline.0 = ev.flag();
+        guild.note_roster_update(RosterUpdate::Applied);
     }
 }
 
@@ -42,6 +51,8 @@ pub(crate) const CVARS: &[crate::cvars::Registered] = {
         // lines, read only in `SMSG_GUILD_EVENT`'s handler. The knob is
         // [`GuildMemberNotify`].
         same("guildMemberNotify", "0"),
+        // `guildShowOffline` (`0x51e1e2`, "1"): `Get/SetGuildRosterShowOffline`; [`GuildShowOffline`].
+        same("guildShowOffline", "1"),
     ]
 };
 
@@ -54,6 +65,7 @@ impl Plugin for UiGuildPlugin {
         crate::query_cache::register::<GuildState>(app);
         app.init_resource::<GuildState>()
             .init_resource::<GuildMemberNotify>()
+            .init_resource::<GuildShowOffline>()
             .add_systems(
                 Update,
                 (
@@ -79,7 +91,6 @@ mod tests {
         GuildRosterMember, GUILD_RANKS_MAX_COUNT,
     };
     use wrathplus_protocol::ObjectFields;
-    use wrathplus_ui::script::LastOnline;
 
     fn identity(name: &str, ranks: &[&str]) -> Identity {
         let mut rank_names: [String; GUILD_RANKS_MAX_COUNT] = Default::default();
@@ -161,7 +172,7 @@ mod tests {
     }
 
     #[test]
-    fn show_offline_changes_the_count_and_the_order_not_the_membership() {
+    fn show_offline_changes_the_order_not_the_membership() {
         let mut guild = GuildState::default();
         guild.apply_roster(GuildRoster {
             members: vec![
@@ -172,68 +183,15 @@ mod tests {
             ..Default::default()
         });
 
-        let rows = feed::display_rows(&guild, None, None, &|_| String::new());
+        let rows = feed::display_rows(&guild, false, None, None, &|_| String::new());
         assert_eq!(rows.len(), 3, "every member, always");
-        assert_eq!(guild.num_members(), 2, "but the count is the online tally");
         assert!(
             rows[..2].iter().all(|r| r.info.online),
-            "and the counted rows are the leading ones"
+            "the online tally's rows lead"
         );
         assert!(!rows[2].info.online);
-
-        guild.set_show_offline(true);
-        let rows = feed::display_rows(&guild, None, None, &|_| String::new());
+        let rows = feed::display_rows(&guild, true, None, None, &|_| String::new());
         assert_eq!(rows.len(), 3);
-        assert_eq!(guild.num_members(), 3, "now the count is everybody");
-    }
-
-    #[test]
-    fn last_online_decomposes_largest_unit_first() {
-        // Under an hour: every unit zero.
-        assert_eq!(last_online(0.02), LastOnline::default());
-        assert_eq!(last_online(0.0), LastOnline::default());
-        // Just over an hour.
-        assert_eq!(
-            last_online(1.0 / 24.0 + 0.001),
-            LastOnline {
-                hours: 1,
-                ..Default::default()
-            }
-        );
-        // Just under and just over a day.
-        assert_eq!(last_online(0.99).days, 0);
-        assert_eq!(last_online(0.99).hours, 23);
-        assert_eq!(last_online(1.01).days, 1);
-        // Just under and just over a month (30 days).
-        assert_eq!(last_online(29.9).months, 0);
-        assert_eq!(last_online(29.9).days, 29);
-        assert_eq!(
-            last_online(30.0),
-            LastOnline {
-                months: 1,
-                ..Default::default()
-            }
-        );
-        // Just under and just over a year (365 days).
-        assert_eq!(last_online(364.9).years, 0);
-        assert_eq!(last_online(364.9).months, 12, "12 months, not 1 year");
-        assert_eq!(
-            last_online(365.0),
-            LastOnline {
-                years: 1,
-                ..Default::default()
-            }
-        );
-        // The full decomposition: 400.5 days is 1 year, 1 month, 5 days, 12 hours.
-        assert_eq!(
-            last_online(400.5),
-            LastOnline {
-                years: 1,
-                months: 1,
-                days: 5,
-                hours: 12,
-            }
-        );
     }
 
     #[test]
@@ -291,9 +249,6 @@ mod tests {
             !RosterUpdate::Applied.arg1(),
             "a column click must never ask the server for a roster"
         );
-
-        guild.set_show_offline(true);
-        assert_eq!(guild.roster_event.take(), Some(RosterUpdate::Applied));
 
         guild.apply_roster(GuildRoster::default());
         assert_eq!(

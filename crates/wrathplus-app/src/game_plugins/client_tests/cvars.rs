@@ -144,6 +144,14 @@ fn registered_defaults_mirror_the_code_truths() {
     );
     assert_eq!(d["guildMemberNotify"], 0.0, "the binary registers \"0\"");
     assert_eq!(
+        d["guildShowOffline"] != 0.0,
+        crate::guild::GuildShowOffline::default().0
+    );
+    assert_eq!(
+        d["guildShowOffline"], 1.0,
+        "the binary registers \"1\" (`0x51e1e2`)"
+    );
+    assert_eq!(
         d["BlockTrades"] != 0.0,
         crate::ui_trade::BlockTrades::default().0
     );
@@ -444,6 +452,8 @@ fn the_observers_apply_every_arm() {
     assert!(!res::<LootConfig>(&app).show_loot_spam);
     apply(&mut app, "guildMemberNotify", "1");
     assert!(res::<crate::guild::GuildMemberNotify>(&app).0);
+    apply(&mut app, "guildShowOffline", "0");
+    assert!(!res::<crate::guild::GuildShowOffline>(&app).0);
     apply(&mut app, "BlockTrades", "1");
     assert!(res::<crate::ui_trade::BlockTrades>(&app).0);
     use crate::nameplates::name_bit;
@@ -849,6 +859,8 @@ pub(super) fn cvar_app() -> App {
         ))
         .init_resource::<PaneRate>()
         .init_resource::<crate::guild::GuildMemberNotify>()
+        .init_resource::<crate::guild::GuildShowOffline>()
+        .init_resource::<crate::guild::GuildState>()
         .init_resource::<crate::ui_trade::BlockTrades>()
         .init_resource::<crate::spell::AutoSelfCast>()
         .init_resource::<crate::perf::FpsJournalSetting>()

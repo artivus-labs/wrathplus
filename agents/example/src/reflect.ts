@@ -342,6 +342,8 @@ const clock = (ms: number) => new Date(ms).toISOString().slice(11, 16);
 export function digest(reasons: string[], w: Window, score: Score, fast: FastTier | undefined, changes: Change[]): string {
   const out: string[] = [];
   out.push(`Reflection (${reasons.join("; ")}). Since your last review, ${score.window_minutes} min ago:`);
+  const stall = stalled(score, w);
+  if (stall) out.push(stall);
   const rate = (v: number | null) => (v === null ? "n/a" : v.toLocaleString("en"));
   out.push(
     [
@@ -393,9 +395,39 @@ export function digest(reasons: string[], w: Window, score: Score, fast: FastTie
       `Your module changes (module_versions has them all):\n${[...earlier, ...recent].map((c) => `- ${changeLine(c)}`).join("\n")}\nJudge each change by what it said to watch: if the numbers got worse since, roll it back (rollback_module).`,
     );
   }
-  out.push(GUIDANCE);
+  out.push(stall ? STALL_GUIDANCE : GUIDANCE);
   return out.join("\n\n");
 }
+
+/** A window spent standing still: this share of it idle or on hold is THE problem of the review. */
+export const STALL_SHARE = 80;
+
+/** The line a stalled window's digest leads with, or null when the window was not a stall. Without
+ *  the fast tier there are no time shares: a window of 15 minutes or more with no experience, no
+ *  kill and no quest handed in counts the same. */
+export function stalled(score: Score, w: Pick<Window, "xp" | "kills" | "quests">): string | null {
+  const nobody = "No one is coming: there is no operator and no user, and nobody will answer a question, approve a plan or log in. Whatever it was waiting for, the waiting is the failure, and only you can end it.";
+  if (score.idle_pct !== null && score.hold_pct !== null) {
+    const still = score.idle_pct + score.hold_pct;
+    if (still < STALL_SHARE) return null;
+    return `THE PROBLEM: your character did nothing for ${still}% of this window (idle ${score.idle_pct}%, on hold ${score.hold_pct}%), ${score.window_minutes} min in all. ${nobody} Everything else below matters less than this.`;
+  }
+  if (score.window_minutes >= 15 && w.xp === 0 && w.kills === 0 && w.quests === 0) {
+    return `THE PROBLEM: in the ${score.window_minutes} min of this window your character gained no experience, won no fight and handed in no quest. ${nobody} Everything else below matters less than this.`;
+  }
+  return null;
+}
+
+/** The guidance for a stalled window: find what made it stop and change that, now. */
+export const STALL_GUIDANCE = `Fix the stall as a coding agent fixes a hang: find what made it stop, and change that.
+1. Name the cause. Why did the character stop? Usual ones:
+   - It kept dying, so nothing looked safe. Fix the fights, not the schedule: a zone that fits (Goals.zones() lists them with fit and distance; Goals.push{ name = "...", why = "...", data = { zone = "..." } } in Lua makes travel_to_zone go there), mobs at or below your level (Goals.above is how many levels above you still count; lower it, or replace Goals.fits), resting sooner (Goals.rest_below, the health share under which it rests before the next fight), a rotation or a Lua handler for the fight it loses.
+   - A goal is blocked and nothing else is planned (goals shows the plan and the facts): teach the action or the fact it is missing, or drop the goal so progress runs.
+   - A quest cannot be handed in or worked: Quests.where(id) gives the hand-in and its text; go there (a goal action), or abandon the quest so it stops blocking.
+   - You were waiting for an answer, a decision or a permission. Nobody will give one. Take the decision now with what you know and write it in MEMORY.md.
+2. Make the change in this turn: the module or goal that removes the cause (save_module, AgentReload, push_goal), tested with lua, then note_change with idle % as the number to watch.
+3. End the turn with the character doing something: an activity running or a plan the runner is acting on (goals shows it).
+"No change", "the blockers are not in my modules" and "waiting on a decision" are not outcomes of this review: the stall is the bug, and it is yours to fix.`;
 
 export const GUIDANCE = `Work on your harness as a coding agent works on its own code:
 1. Pick the one or two things that cost you the most above (deaths, idle time, an action that keeps failing, a goal that stays blocked, a slow fight). Leave the rest.

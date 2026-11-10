@@ -21,31 +21,31 @@ pub struct WrathGuildBankTab {
     pub name: String,
     /// The icon's file name under `Interface\Icons`; empty is the question mark.
     pub icon: String,
-    pub viewable: bool,
-    pub can_deposit: bool,
-    /// Item withdrawals per day for the player's rank.
-    pub withdrawals_per_day: u32,
 }
 
-/// One rank's guild-bank rights (`0xc21e64`, stride 0xe dwords).
+/// One rank's row of 12340's rank table (`0xc21e60`, stride 0x38).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct WrathGuildBankRankRights {
     /// Copper per day (`GetGuildBankWithdrawLimit` answers it in gold).
     pub money_per_day: u32,
-    /// Per tab: flags (1 view, 2 deposit, 4 update text) and item withdrawals per day.
+    /// Per tab: flags (1 view, 2 deposit, 4 update text, `0xc21e68`) and the item limit
+    /// (`0xc21e80`).
     pub tabs: [(u32, u32); 6],
 }
 
-/// The guild bank as the host publishes it.
+/// The guild bank as the host publishes it, vault open or not.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct WrathGuildBankView {
+    /// The vault is open: the bank guid (`0xc1dc10`) is set.
+    pub open: bool,
     /// Copper in the bank (`0xc1dc20`).
     pub money: u64,
     /// Purchased tabs in order (`0xc1dc0c` of them).
     pub tabs: Vec<WrathGuildBankTab>,
-    /// Item withdrawals the player has left today (`0xc1dc30`).
-    pub remaining_withdrawals: u32,
-    /// Each rank's rights, rank 1 first; the rank being edited is staged from these.
+    /// Item withdrawals the player has left today (`0xc1dc30`), signed: -1 is unlimited.
+    pub remaining_withdrawals: i32,
+    /// Each rank's rights, rank 0 (the guild master) first, from the roster and our own row from
+    /// `MSG_GUILD_PERMISSIONS`; the rank being edited is staged from these.
     pub rank_rights: Vec<WrathGuildBankRankRights>,
     /// Per purchased tab, its occupied slots (`super::wrath_guild_bank`).
     pub slots: Vec<Vec<super::wrath_guild_bank::WrathGuildBankSlot>>,
@@ -136,10 +136,13 @@ pub(crate) struct State {
 }
 
 impl super::UiScript {
-    /// Publish the guild bank whole; the staged rank rights restart from its `rank_rights`.
+    /// Publish the guild bank whole; the staged rank rights restart when its `rank_rights` move,
+    /// as a packet overwrites the edits 12340's setters made in place.
     pub fn set_wrath_guild_bank(&mut self, bank: WrathGuildBankView) {
         let mut model = self.model_mut();
-        model.wrath_friends.staged = bank.rank_rights.clone();
+        if model.wrath_friends.bank.rank_rights != bank.rank_rights {
+            model.wrath_friends.staged = bank.rank_rights.clone();
+        }
         model.wrath_friends.bank = bank;
     }
 
@@ -148,12 +151,12 @@ impl super::UiScript {
         self.model_mut().wrath_friends.events = events;
     }
 
-    /// The staged bank rights of 1-based `rank`, for App's rank save (`GuildControlSaveRank`).
+    /// The staged bank rights of 0-based `rank`, the wire's rank id, for App's rank save
+    /// (`GuildControlSaveRank`).
     pub fn wrath_guild_bank_staged_rights(&self, rank: u32) -> Option<WrathGuildBankRankRights> {
         let model = self.model_ref();
-        usize::try_from(rank.checked_sub(1)?)
-            .ok()
-            .and_then(|i| model.wrath_friends.staged.get(i).cloned())
+        let rank = usize::try_from(rank).ok()?;
+        model.wrath_friends.staged.get(rank).cloned()
     }
 
     /// Drain the guild-bank intents in call order.
@@ -200,6 +203,12 @@ fn set(
 
 fn none() -> mlua::Result<MultiValue> {
     Ok(MultiValue::new())
+}
+
+/// The player's own rank's row of the rank table, which the bank predicates read.
+pub(super) fn own_bank_rank(model: &Model) -> Option<&WrathGuildBankRankRights> {
+    let rank = usize::try_from(model.guild.rank_index).ok()?;
+    model.wrath_friends.bank.rank_rights.get(rank)
 }
 
 /// The 0-based rank `GuildControlSetRank` loaded, if any.
@@ -276,16 +285,21 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         let Some(n) = number(lua, &arg(&args, 0)) else {
             return Err(mlua::Error::runtime("Usage: GetGuildBankTabInfo(tab)"));
         };
-        let tab = n.round_ties_even() as i64;
-        let (row, remaining, has_player) = {
+        // Truncated (`fistp` under `or 0xc00`, `0x5a6867`); the rank bindings likewise
+        // (`0x5cb5ac`, `0x5cb4bf`, `0x5cb7a6`), and none here goes through `lua_tointeger`.
+        let tab = i64::from(super::binding_abi::ftol(n));
+        let (row, rights, remaining, has_player) = {
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             let bank = &model.wrath_friends.bank;
-            let row = usize::try_from(tab - 1)
-                .ok()
-                .filter(|i| *i < 6)
-                .and_then(|i| bank.tabs.get(i).cloned());
+            let i = usize::try_from(tab - 1).ok().filter(|i| *i < 6);
+            let row = i.and_then(|i| bank.tabs.get(i).cloned());
+            // The own rank's tab words (`0x5a41c0`, `0x5a41f0`), not the vault's.
+            let rights = i
+                .zip(own_bank_rank(&model))
+                .map_or((0, 0), |(i, r)| r.tabs[i]);
             (
                 row,
+                rights,
                 bank.remaining_withdrawals,
                 model.unit_guids.player != 0,
             )
@@ -316,9 +330,10 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         Ok(MultiValue::from_vec(vec![
             Value::String(lua.create_string(&name)?),
             Value::String(lua.create_string(format!("Interface\\Icons\\{icon}"))?),
-            flag(t.viewable),
-            flag(t.can_deposit),
-            int(t.withdrawals_per_day),
+            flag(rights.0 & 1 != 0),
+            flag(rights.0 & 2 != 0),
+            // Both signed (`fild` at `0x5a69a2`, `0x5a69ae`): -1 is unlimited.
+            int(rights.1 as i32),
             int(remaining),
         ]))
     })?;
@@ -332,7 +347,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         let Some(n) = number(lua, &arg(&args, 0)) else {
             return Err(mlua::Error::runtime("Usage: PickupGuildBankMoney(amount)"));
         };
-        let copper = n.round_ties_even() as i64 as u32;
+        let copper = super::binding_abi::ftol(n) as u32;
         let mut model = lua.app_data_mut::<Model>().expect("model app_data");
         if copper != 0 && u64::from(copper) <= model.wrath_friends.bank.money {
             model
@@ -350,7 +365,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 "Usage: GetGuildBankTabPermissions(tab)",
             ));
         };
-        let tab = n.round_ties_even() as i64;
+        let tab = i64::from(super::binding_abi::ftol(n));
         let model = lua.app_data_ref::<Model>().expect("model app_data");
         let (flags, withdrawals) = edited_rank(&model)
             .and_then(|r| model.wrath_friends.staged.get(r))
@@ -363,13 +378,18 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             int(withdrawals),
         ]))
     })?;
-    // GetGuildBankWithdrawLimit() (`0x5cb700`): the edited rank's daily copper as gold.
+    // GetGuildBankWithdrawLimit() (`0x5cb700`): the edited rank's signed money word, divided by
+    // 10000 only when not negative (`0x5cb71e`), so the guild master's unlimited word answers -1.
     set(lua, "GetGuildBankWithdrawLimit", |lua, _| {
         let model = lua.app_data_ref::<Model>().expect("model app_data");
-        let copper = edited_rank(&model)
+        let word = edited_rank(&model)
             .and_then(|r| model.wrath_friends.staged.get(r))
-            .map_or(0, |r| r.money_per_day);
-        Ok(MultiValue::from_vec(vec![int(copper / 10_000)]))
+            .map_or(0, |r| r.money_per_day as i32);
+        Ok(MultiValue::from_vec(vec![int(if word >= 0 {
+            word / 10_000
+        } else {
+            word
+        })]))
     })?;
     // SetGuildBankTabPermissions(tab, index, enabled) (`0x5cb470`): index 1 view, 2 deposit,
     // 3 update text, on the edited rank's staged rights.
@@ -387,7 +407,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             _ => 0,
         };
         let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-        let tab = usize::try_from(t.round_ties_even() as i64 - 1)
+        let tab = usize::try_from(i64::from(super::binding_abi::ftol(t)) - 1)
             .ok()
             .filter(|t| *t < 6);
         if let (Some(r), Some(tab)) = (edited_rank(&model), tab) {
@@ -410,7 +430,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         };
         let amount = (a.trunc().max(0.0) as u64).min(100_000) as u32;
         let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-        let tab = usize::try_from(t.round_ties_even() as i64 - 1)
+        let tab = usize::try_from(i64::from(super::binding_abi::ftol(t)) - 1)
             .ok()
             .filter(|t| *t < 6);
         if let (Some(r), Some(tab)) = (edited_rank(&model), tab) {
@@ -420,14 +440,15 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         }
         none()
     })?;
-    // SetGuildBankWithdrawLimit(amount) (`0x5cb6a0`): at most 1000000000 copper.
+    // SetGuildBankWithdrawLimit(amount) (`0x5cb6a0`): the truncated gold figure, stored raw; an
+    // unsigned compare caps it at 1000000000 (`0x5cb6d9`), so a negative one lands there too.
     set(lua, "SetGuildBankWithdrawLimit", |lua, args| {
         let Some(a) = number(lua, &arg(&args, 0)) else {
             return Err(mlua::Error::runtime(
                 "Usage: Script_SetGuildBankWithdrawLimit(amount)",
             ));
         };
-        let amount = (a.trunc().max(0.0) as u64).min(1_000_000_000) as u32;
+        let amount = (super::binding_abi::ftol(a) as u32).min(1_000_000_000);
         let mut model = lua.app_data_mut::<Model>().expect("model app_data");
         if let Some(r) = edited_rank(&model) {
             if let Some(rights) = model.wrath_friends.staged.get_mut(r) {
@@ -477,7 +498,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         };
         let row = {
             let model = lua.app_data_ref::<Model>().expect("model app_data");
-            usize::try_from(n.round_ties_even() as i64 - 1)
+            usize::try_from(i64::from(super::binding_abi::ftol(n)) - 1)
                 .ok()
                 .and_then(|i| model.wrath_friends.events.get(i).cloned())
         };
@@ -521,156 +542,5 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::script::UiScript;
-
-    fn vm() -> UiScript {
-        let s = UiScript::new().unwrap();
-        s.model_mut().unit_guids.player = 0x10;
-        s
-    }
-
-    fn bank() -> WrathGuildBankView {
-        WrathGuildBankView {
-            money: 1_234_567,
-            tabs: vec![
-                WrathGuildBankTab {
-                    name: "Mats".into(),
-                    icon: "INV_Fabric_Linen_01".into(),
-                    viewable: true,
-                    can_deposit: false,
-                    withdrawals_per_day: 5,
-                },
-                WrathGuildBankTab::default(),
-            ],
-            remaining_withdrawals: 3,
-            rank_rights: vec![WrathGuildBankRankRights {
-                money_per_day: 250_000,
-                tabs: [(1 | 2, 10), (0, 0), (0, 0), (0, 0), (0, 0), (0, 0)],
-            }],
-            ..Default::default()
-        }
-    }
-
-    #[test]
-    fn guild_bank_tabs_money_and_staged_rank_rights() {
-        let mut s = vm();
-        assert_eq!(s.eval::<i64>("return GetNumGuildBankTabs()").unwrap(), 0);
-        s.run("GUILDBANK_TAB_NUMBER = 'Tab %d'").unwrap();
-        s.set_wrath_guild_bank(bank());
-        assert_eq!(s.eval::<i64>("return GetNumGuildBankTabs()").unwrap(), 2);
-        assert_eq!(
-            s.eval::<(String, String, Option<i64>, Option<i64>, i64, i64)>(
-                "return GetGuildBankTabInfo(1)"
-            )
-            .unwrap(),
-            (
-                "Mats".into(),
-                "Interface\\Icons\\INV_Fabric_Linen_01".into(),
-                Some(1),
-                None,
-                5,
-                3
-            )
-        );
-        assert_eq!(
-            s.eval::<String>("return (GetGuildBankTabInfo(2))").unwrap(),
-            "Tab 2"
-        );
-        assert_eq!(
-            s.eval::<i64>("return select(5, GetGuildBankTabInfo(4))")
-                .unwrap(),
-            0
-        );
-        assert_eq!(
-            s.eval::<f64>("return GetGuildBankMoney()").unwrap(),
-            1_234_567.0
-        );
-        s.run("PickupGuildBankMoney(500) PickupGuildBankMoney(99999999)")
-            .unwrap();
-        assert_eq!(
-            s.take_wrath_guild_bank_requests(),
-            vec![WrathGuildBankRequest::PickupMoney { copper: 500 }]
-        );
-        // Rank rights follow the rank being edited.
-        s.model_mut().guild_control.rank = 1;
-        assert_eq!(
-            s.eval::<i64>("return GetGuildBankWithdrawLimit()").unwrap(),
-            25
-        );
-        assert_eq!(
-            s.eval::<(Option<i64>, Option<i64>, Option<i64>, i64)>(
-                "return GetGuildBankTabPermissions(1)"
-            )
-            .unwrap(),
-            (Some(1), Some(1), None, 10)
-        );
-        s.run(
-            "SetGuildBankTabPermissions(1, 3, true) SetGuildBankTabPermissions(1, 1, false) \
-             SetGuildBankTabWithdraw(1, 999999) SetGuildBankWithdrawLimit(5000000000)",
-        )
-        .unwrap();
-        let staged = s.wrath_guild_bank_staged_rights(1).unwrap();
-        assert_eq!(staged.tabs[0], (2 | 4, 100_000));
-        assert_eq!(staged.money_per_day, 1_000_000_000);
-    }
-
-    #[test]
-    fn guild_events_coin_text_mutes_and_battle_net() {
-        let mut s = vm();
-        s.set_wrath_guild_events(vec![WrathGuildEvent {
-            kind: 3,
-            player1: Some("Ann".into()),
-            player2: Some("Bob".into()),
-            rank: Some("Officer".into()),
-            seconds_ago: (26 * 3600) as u32,
-        }]);
-        assert_eq!(s.eval::<i64>("return GetNumGuildEvents()").unwrap(), 1);
-        assert_eq!(
-            s.eval::<(String, String, String, String, i64, i64, i64, i64)>(
-                "return GetGuildEventInfo(1)"
-            )
-            .unwrap(),
-            (
-                "promote".into(),
-                "Ann".into(),
-                "Bob".into(),
-                "Officer".into(),
-                0,
-                0,
-                1,
-                2
-            )
-        );
-        s.run("GOLD_AMOUNT = '%d Gold' SILVER_AMOUNT = '%d Silver' COPPER_AMOUNT = '%d Copper'")
-            .unwrap();
-        assert_eq!(
-            s.eval::<String>("return GetCoinText(1020304)").unwrap(),
-            "102 Gold, 3 Silver, 4 Copper"
-        );
-        assert_eq!(
-            s.eval::<String>("return GetCoinText(0, ' ')").unwrap(),
-            "0 Copper"
-        );
-        assert_eq!(
-            s.eval::<i64>("return GetNumMutes() + GetSelectedMute()")
-                .unwrap(),
-            0
-        );
-        s.run("UNKNOWN = 'Unknown'").unwrap();
-        assert_eq!(
-            s.eval::<String>("return GetMuteName(1)").unwrap(),
-            "Unknown"
-        );
-        assert_eq!(
-            s.eval::<i64>("return select('#', BNGetNumFOF(1))").unwrap(),
-            0
-        );
-        s.run("SummonFriend('Cid')").unwrap();
-        assert_eq!(
-            s.take_wrath_guild_bank_requests(),
-            vec![WrathGuildBankRequest::SummonFriend { name: "Cid".into() }]
-        );
-    }
-}
+#[path = "wrath_friends_frame_tests.rs"]
+mod tests;

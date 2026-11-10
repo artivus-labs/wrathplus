@@ -4,6 +4,10 @@
 // else. A clear request is done at once, with a few words back in the same channel; the planner
 // hears about it with its next wake-up instead of being woken. Questions, chat and anything
 // needing thought go to the planner as before, and so does a request Jev is unsure of.
+//
+// Small talk (`SmallTalk`, below) is sorted the same way: an NPC, a bot or a stranger saying
+// something to the character in passing is answered with a courtesy or ignored, not given a
+// planner turn each.
 
 import { choice, noul, type Jev } from "./jev.ts";
 
@@ -130,5 +134,151 @@ export class Triage {
     }
     if (!wantsReply) await this.say(action.ack, request.channel, request.sender);
     return { handled: !wantsReply, note: `${ask}; the fast loop ${action.done}`, reply: wantsReply };
+  }
+}
+
+/** Something said to the character in passing: an NPC naming it, a line in /say or /yell with its
+ *  name from someone outside the party (the realm's bots chatter this way), an emote aimed at it. */
+export interface Chatter {
+  speaker: string;
+  text: string;
+  kind: "npc" | "say" | "emote";
+}
+
+/** How it reads in a message to the planner. */
+export function chatterLine(c: Chatter): string {
+  if (c.kind === "emote") return c.text;
+  return `${c.speaker} says to you: ${c.text}${c.kind === "npc" ? " (an NPC)" : ""}`;
+}
+
+interface Courtesy {
+  when: string;
+  lua: (speaker: string) => string;
+  did: string;
+}
+
+const emote = (token: string, did: string, when: string): Courtesy => ({
+  when,
+  lua: (s) => `DoEmote(${q(token)}, ${q(s)}) return true`,
+  did,
+});
+const line = (text: string, when: string): Courtesy => ({
+  when,
+  lua: () => `SendChatMessage(${q(text)}, "SAY") return true`,
+  did: `said "${text}"`,
+});
+
+/** What the fast tier can answer small talk with by itself: Jev picks, it writes nothing. */
+export const COURTESIES: Record<string, Courtesy> = {
+  wave: emote("WAVE", "waved", "A greeting or a goodbye: wave back."),
+  nod: emote("NOD", "nodded", "A remark, an opinion or a piece of advice that wants no more than acknowledgement: nod."),
+  laugh: emote("LAUGH", "laughed", "A joke or something funny: laugh."),
+  bow: emote("BOW", "bowed", "A bow, a salute or formal respect: bow back."),
+  thank: emote("THANK", "thanked them", "A compliment, good wishes, a blessing or help offered in passing: thank them."),
+  greet: line("Hello there.", "They greet the agent in words and a spoken greeting back fits better than a wave."),
+};
+
+const IGNORE = "Idle chatter that wants no answer (a remark to nobody in particular, a complaint, a rumour, a repeat of what was just said), or an answer was given moments ago.";
+const NEEDS_THOUGHT =
+  "A real request, question, invitation, offer or warning that deserves a proper answer or a decision: an invitation to group, a trade or help offered or asked for, a question about what the agent is doing, directions that matter to its quests.";
+
+export interface SmallTalkOptions {
+  /** The fast tier: with it, Jev answers or ignores small talk itself. */
+  jev?: Jev;
+  lua?: (code: string) => Promise<{ ok: boolean; values?: unknown[]; error?: string }>;
+  now?: () => number;
+  /** Without the fast tier, small talk wakes the planner at most this often (ms, default 10 min);
+   *  the rest rides along with its next wake-up. */
+  wakeEveryMs?: number;
+  /** One answer to a speaker, then none for this long (ms, default 2 min). */
+  perSpeakerMs?: number;
+  /** How sure Jev must be to act (or to wake the planner) rather than let the line ride along. */
+  confidence?: number;
+}
+
+/** What became of a batch of small talk. */
+export interface Sorted {
+  /** Lines that wake the planner now. */
+  wake: string[];
+  /** Lines for its next wake-up, with what the fast tier did about each. */
+  later: string[];
+}
+
+/** Small talk never costs a planner turn each: with the fast tier Jev waves, nods, says hello or
+ *  ignores it (and passes on what really needs the planner); without it, the lines are batched
+ *  into the next wake-up, and wake the planner by themselves at most once per `wakeEveryMs`. */
+export class SmallTalk {
+  calls = 0;
+  #answered = new Map<string, number>();
+  #wokeAt = -Infinity;
+
+  constructor(readonly options: SmallTalkOptions = {}) {}
+
+  #now(): number {
+    return this.options.now?.() ?? Date.now();
+  }
+
+  async handle(items: Chatter[], game?: unknown): Promise<Sorted> {
+    const sorted: Sorted = { wake: [], later: [] };
+    const unsorted: Chatter[] = [];
+    for (const item of items) {
+      if (!this.options.jev || !this.options.lua) unsorted.push(item);
+      else if (!(await this.#sort(item, game, sorted))) unsorted.push(item);
+    }
+    if (!unsorted.length) return sorted;
+    // Nobody to sort these: one wake-up per `wakeEveryMs` at most, the rest ride along.
+    const now = this.#now();
+    if (now - this.#wokeAt >= (this.options.wakeEveryMs ?? 600_000)) {
+      this.#wokeAt = now;
+      sorted.wake.push(...unsorted.map((c) => `${chatterLine(c)} (small talk: a short reply or an emote is welcome, not required)`));
+    } else {
+      sorted.later.push(...unsorted.map(chatterLine));
+    }
+    return sorted;
+  }
+
+  /** Let Jev sort one line; false when it could not (the caller batches it). */
+  async #sort(item: Chatter, game: unknown, sorted: Sorted): Promise<boolean> {
+    const jev = this.options.jev!;
+    const lua = this.options.lua!;
+    const now = this.#now();
+    const text = chatterLine(item);
+    const recently = now - (this.#answered.get(item.speaker) ?? -Infinity) < (this.options.perSpeakerMs ?? 120_000);
+    const criteria: Record<string, string> = { ignore: IGNORE, needs_thought: NEEDS_THOUGHT };
+    // Answered a moment ago: one courtesy is enough, so only ignore or the planner are offered.
+    if (!recently) for (const [name, c] of Object.entries(COURTESIES)) criteria[name] = c.when;
+    let answer;
+    try {
+      const response = await jev.ask(
+        { said: { from: item.speaker, text: item.text, kind: item.kind }, game },
+        {
+          small_talk: choice(
+            "Someone in the game world said this to a game-playing agent in passing: an NPC, a bot or a player outside its party (state.said). What should the agent do about it, as a polite player busy with its own goals would?",
+            criteria,
+          ),
+        },
+      );
+      this.calls++;
+      answer = response.answers.small_talk;
+    } catch {
+      return false;
+    }
+    if (answer?.type !== "choice") return false;
+    const sure = answer.confidence >= (this.options.confidence ?? 0.6);
+    if (answer.choice === "needs_thought") {
+      // Unsure that it needs the planner: it reads it with its next wake-up, at no extra turn.
+      if (sure) sorted.wake.push(`${text} (the fast loop judged this needs you)`);
+      else sorted.later.push(text);
+      return true;
+    }
+    const courtesy = recently ? undefined : COURTESIES[answer.choice];
+    if (!courtesy || !sure) {
+      sorted.later.push(`${text} (ignored)`);
+      return true;
+    }
+    const result = await lua(courtesy.lua(item.speaker)).catch(() => ({ ok: false }));
+    if (result.ok) this.#answered.set(item.speaker, now);
+    sorted.later.push(`${text} (the fast loop ${result.ok ? courtesy.did : "could not answer"})`);
+    return true;
   }
 }

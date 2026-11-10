@@ -1361,7 +1361,7 @@ pub(crate) fn composite_quads(bridge: &UiModelTiles) -> Vec<UiQuad> {
                 z_key: req.z_key,
                 texture: Some(atlas.clone()),
                 uv: UvRect::from_tex_coords([u0, u1, v0, v1]),
-                // The widget's own alpha (`0x76d120`).
+                // The frame's effective alpha (12340 `0x95fb40`).
                 color: [1.0, 1.0, 1.0, req.alpha],
                 // A render target is premultiplied.
                 premultiplied: true,

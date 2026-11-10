@@ -97,6 +97,7 @@ The control port's token comes from `WOW_AGENT_TOKEN` (16+ characters) for the s
 | `WOW_DATA` | your install's `Data` folder |
 | `WOW_CLIENT_PROFILE=wrath`, `WOW_LOCALE=enUS` | the 3.3.5a profile and your install's locale |
 | `WOW_HEADLESS=1` | no window, no audio; frames go to an offscreen image (`WOW_WIN=WxH`, default 1280×720) |
+| `WOW_PIPE_WARM=1` | optional: compile every shader pipeline at start-up, as the windowed client does. A headless client skips that pass by default and compiles each pipeline when it is first drawn, which starts faster and uses far less memory at the cost of brief pop-in |
 | `WRATHPLUS_HOME` | a folder of this agent's own for settings, cache and its Lua modules |
 | `WOW_AGENT_TOKEN` | the control port's bearer token |
 | `WOW_NAV_MMAPS` | optional: an `mmaps` folder, for `AgentMoveTo` and `AgentPath` (see [the example agent](#the-example-agent)) |
