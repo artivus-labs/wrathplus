@@ -4,18 +4,32 @@
 //!
 //! | Route | What it does |
 //! |---|---|
-//! | `GET /status` | client state (login, character select, in world), in world the player, and where routes come from (`nav`) |
+//! | `GET /status` | client state (login, character select, in world), `cinematic`, in world the player, and where routes come from (`nav`) |
 //! | `POST /lua[?budget=N]` | run the body in the UI's Lua; values, `print` output or the error |
 //! | `GET /screenshot[?scale=0.5][&format=jpeg[&quality=85]]` | the next rendered frame, PNG or JPEG |
-//! | `GET /events?since=N[&wait_ms=M][&limit=K]` | every UI event since cursor `N`, long-polling |
+//! | `GET /events[?since=N][&wait_ms=M][&limit=K][&names=A,B_][&exclude=C*]` | UI events after cursor `N`, long-polling, filtered by name |
 //! | `GET /view?token=…` | a read-only page for people: the live frame, the character, events and the agent's Lua |
 //! | `GET /files`, `GET|PUT|DELETE /files/<module>` | the agent's own Lua modules (see `env`) |
 //!
+//! `/status` is `{state, in_world, ui_ready, cinematic, time, player, nav}`. `player` is `null` out of the
+//! world, and in it until the player's own record has arrived (about a second after entering,
+//! while the level reads 0): an agent waits for `in_world` with a `player`. `cinematic` is true
+//! while a cinematic holds the client (a new character's intro, from the server's trigger until
+//! the world is back around the character): `AgentNearby` then lists what the server's camera
+//! sees and walking is refused, each saying so, until it ends or `StopCinematic()` skips it. The
+//! port never skips one itself.
+//!
+//! `/events` returns `{events, next, missed}`: pass `next` as the following `since`. Without
+//! `since` a read starts from now (only what arrives during `wait_ms`); `since=0` is the whole
+//! retained buffer. `limit` defaults to 100. `names` and `exclude` are comma-separated event
+//! names, or prefixes when they end in `_` or `*` (`names=AGENT_,CHAT_MSG_,PLAYER_DEAD`); with
+//! them only a matching event ends the wait, and `next` moves past what was filtered out.
+//!
 //! In Lua, besides the stock API: `AgentNearby([yards])`, `AgentFindNpc(service [, yards])`,
-//! `AgentPosition()`, `AgentTarget(guid)`, `AgentInteract(guid)` (`world`), `AgentQuestPOI(quest)`
-//! (`quest_poi`), `AgentZones()` (`zones`), `AgentPath`, `AgentMoveTo`, `AgentStop`, `AgentWalk`,
-//! `AgentServices` (`nav`, over local mmaps from `WOW_NAV_MMAPS`, else routes asked of the realm;
-//! services always from the realm), and the module functions (`env`).
+//! `AgentPosition()`, `AgentTarget(guid)`, `AgentInteract(guid)`, `AgentCinematic()` (`world`),
+//! `AgentQuestPOI(quest)` (`quest_poi`), `AgentZones()` (`zones`), `AgentPath`, `AgentMoveTo`,
+//! `AgentStop`, `AgentWalk`, `AgentServices` (`nav`, over local mmaps from `WOW_NAV_MMAPS`, else
+//! routes asked of the realm; services always from the realm), and the module functions (`env`).
 //!
 //! With the port open, the UI's movement verbs run from any Lua (stock gates them on a key
 //! binding), so an agent's scripts can walk. Everything else an agent does goes through the same
@@ -31,6 +45,7 @@ mod env;
 mod events;
 mod lua;
 mod nav;
+mod npc;
 mod quest_poi;
 mod server;
 mod world;
@@ -51,7 +66,8 @@ use wrathplus_ui::script::{ScriptValue, UiScript};
 /// load gets, about 50x the heaviest addon, so only a runaway loop meets it.
 const DEFAULT_BUDGET: u64 = 200_000_000;
 
-/// The player summary `/status` reports in world, read through the stock API.
+/// The player summary `/status` reports in world, read through the stock API ([`player_of`]
+/// drops it until the record is real).
 const STATUS_LUA: &str = r#"local x, y = GetPlayerMapPosition("player")
 return {
   name = UnitName("player"), level = UnitLevel("player"),
@@ -241,6 +257,7 @@ fn serve_jobs(
     headless: Option<Res<wrathplus_world::headless::HeadlessFrame>>,
     time: Res<Time<bevy::time::Real>>,
     mut idle: Option<ResMut<wrathplus_app_ui::ui_chat::idle::LastInput>>,
+    cinematic: Option<Res<wrathplus_app_world::cinematic::Cinematic>>,
     shots: Local<Shots>,
     mut shot_at: Local<Option<f64>>,
 ) {
@@ -275,10 +292,7 @@ fn serve_jobs(
                 let state = state.as_ref().map(|s| *s.get());
                 let in_world = state == Some(ClientState::InWorld);
                 let player = match (&script, in_world) {
-                    (Some(script), true) => {
-                        let reply = lua::run(script, STATUS_LUA, DEFAULT_BUDGET);
-                        reply["values"].get(0).cloned().unwrap_or(reply)
-                    }
+                    (Some(script), true) => player_of(lua::run(script, STATUS_LUA, DEFAULT_BUDGET)),
                     _ => Value::Null,
                 };
                 // Out of the world the glue API (GetNumCharacters, CreateCharacter...) installs a
@@ -295,6 +309,7 @@ fn serve_jobs(
                     "state": state.map(|s| format!("{s:?}")),
                     "in_world": in_world,
                     "ui_ready": ui_ready,
+                    "cinematic": cinematic.as_ref().is_some_and(|c| c.is_active()),
                     "time": link.started.elapsed().as_secs_f64(),
                     "player": player,
                     "nav": nav::status(&link.nav),
@@ -338,6 +353,25 @@ fn serve_jobs(
                     });
             }
         }
+    }
+}
+
+/// `/status`'s `player` from [`STATUS_LUA`]'s reply: the summary once the player's record is real,
+/// `null` before. For about a second after entering the world the state is already `InWorld`
+/// while the unit fields have not arrived, and the stock API reads level 0, health 0 and an empty
+/// zone; that is no player to act on. A Lua error is passed on as it is, to be seen.
+fn player_of(reply: Value) -> Value {
+    if reply["ok"] == false {
+        return reply;
+    }
+    let player = &reply["values"][0];
+    let real = player["level"].as_f64().is_some_and(|level| level >= 1.0)
+        && player["health_max"].as_f64().is_some_and(|max| max >= 1.0)
+        && player["name"].is_string();
+    if real {
+        player.clone()
+    } else {
+        Value::Null
     }
 }
 
@@ -404,4 +438,62 @@ fn install_signal(lua: &mlua::Lua, events: Arc<EventLog>, started: Instant) -> m
             },
         )?,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wrathplus_ui::script::UiScript;
+
+    fn status_with(stubs: &str) -> Value {
+        let script = UiScript::new().unwrap();
+        script.run(stubs).unwrap();
+        player_of(lua::run(&script, STATUS_LUA, DEFAULT_BUDGET))
+    }
+
+    const STUBS: &str = r#"
+        level, health_max, name = 0, 0, nil
+        GetPlayerMapPosition = function() return 0, 0 end
+        UnitName = function(unit) if unit == "player" then return name end end
+        UnitLevel = function() return level end
+        UnitClass = function() return "Warrior", "WARRIOR" end
+        UnitRace = function() return "Human", "Human" end
+        UnitHealth = function() return health_max end
+        UnitHealthMax = function() return health_max end
+        UnitPower = function() return 0 end
+        UnitPowerMax = function() return 100 end
+        UnitIsDeadOrGhost = function() return false end
+        UnitAffectingCombat = function() return false end
+        GetRealZoneText = function() return level > 0 and "Elwynn Forest" or "" end
+        GetSubZoneText = function() return "" end
+    "#;
+
+    /// The second after entering the world: the state says `InWorld` and the unit fields have
+    /// not arrived. `/status` reports no player rather than a level 0 one with no health.
+    #[test]
+    fn status_has_no_player_until_the_record_is_real() {
+        assert_eq!(status_with(STUBS), Value::Null);
+        // The name alone (the character list had it) is not the record.
+        let named = format!("{STUBS} name = 'Betaone'");
+        assert_eq!(status_with(&named), Value::Null);
+        let real = format!("{STUBS} name, level, health_max = 'Betaone', 1, 60");
+        let player = status_with(&real);
+        assert_eq!(player["name"], "Betaone");
+        assert_eq!(player["level"], 1);
+        assert_eq!(player["health"], 60);
+        assert_eq!(player["zone"], "Elwynn Forest");
+        // Dead is still a player: health 0 of a real maximum.
+        let dead = format!("{real} UnitHealth = function() return 0 end");
+        assert_eq!(status_with(&dead)["health"], 0);
+    }
+
+    #[test]
+    fn a_status_script_error_is_reported_not_hidden() {
+        let reply = player_of(json!({"ok": false, "error": "boom", "output": []}));
+        assert_eq!(reply["error"], "boom");
+        assert_eq!(
+            player_of(json!({"ok": true, "values": [], "output": []})),
+            Value::Null
+        );
+    }
 }

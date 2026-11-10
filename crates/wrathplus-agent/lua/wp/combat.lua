@@ -11,6 +11,11 @@
 --                        AGENT_PULL_REFUSED). `force` pulls anyway; `Combat.safe = false` never
 --                        refuses. Casters and hunters fight from `reach` yards (their class's
 --                        range), facing the target without walking in.
+--                        Returns at once: the fight runs in the background and ends as
+--                        AGENT_COMBAT_DONE. Out of sight is false and why: during a cinematic
+--                        (a new character's intro starts a few seconds after it enters the world,
+--                        hiding every unit) the reason says so, and a running fight waits it out
+--                        instead of counting its target lost.
 --   Combat.active        the guid being fought, or nil. Combat.state says what it is doing.
 --   Combat.engaged(guid) for an intent's done: true once that fight is over (and the outcome).
 --   Combat.defend        (default true) with no fight of its own, engage whatever is attacking you;
@@ -85,6 +90,11 @@ local function find(guid)
   for _, u in ipairs(AgentNearby(C.sight)) do
     if u.guid == guid then return u end
   end
+end
+
+-- Why nothing is in sight or walkable right now (a cinematic), else nil.
+local function held()
+  return AgentCinematic and AgentCinematic() or nil
 end
 
 local function far(a, b)
@@ -183,7 +193,7 @@ local refused_at = -60
 
 function C.engage(guid, opts)
   local u = find(guid)
-  if not u then return false, "not in sight" end
+  if not u then return false, held() or "not in sight" end
   if C.safe and Survive and not (opts and opts.force) then
     local ok, why = Survive.pull_ok(u)
     if not ok then
@@ -323,6 +333,14 @@ end
 
 local function tick(now)
   if UnitIsDeadOrGhost("player") then return done("died") end
+  -- A cinematic: the target is out of sight with everything else, and no walk would start. That
+  -- is not the target lost: wait it out (the agent may skip it; we never do).
+  local why = held()
+  if why then
+    seen_at = now
+    C.state = "waiting: " .. why
+    return
+  end
   local u = find(C.active)
   if not u then
     if now - (seen_at or now) >= C.lose_after then return done("lost") end
@@ -443,7 +461,7 @@ frame:SetScript("OnUpdate", function(_, dt)
     end
   elseif C.active then
     tick(GetTime())
-  elseif C.defend and not UnitIsDeadOrGhost("player") then
+  elseif C.defend and not UnitIsDeadOrGhost("player") and not held() then
     -- Attacked with no fight of our own (resting, walking, between pulls): fight back.
     local foe = attacker(30)
     if foe then

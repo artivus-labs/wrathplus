@@ -14,10 +14,17 @@ export class AgentError extends Error {
 }
 
 export interface EventsQuery {
+  /** Cursor; omitted, the read starts from now. 0 is the whole retained buffer. */
   since?: number;
   wait_ms?: number;
   limit?: number;
+  /** Only these events: whole names, or prefixes when they end in `_` or `*`. */
+  names?: string[];
+  /** Never these, in the same form. */
+  exclude?: string[];
 }
+
+type Query = Record<string, number | string | undefined>;
 
 /** Longer than the port's own 60 s game timeout, so its 504 arrives before ours. */
 const REQUEST_TIMEOUT_MS = 90_000;
@@ -41,9 +48,15 @@ export class AgentClient {
     return this.#json("POST", "/lua", { budget }, code);
   }
 
-  /** `GET /events?since=N&wait_ms=M&limit=K`: UI events after a cursor, long-polling. */
+  /** `GET /events[?since=N][&wait_ms=M][&limit=K][&names=A,B_][&exclude=C*]`: UI events after a
+   *  cursor (from now without one), long-polling, filtered by name. */
   events(query: EventsQuery = {}): Promise<unknown> {
-    return this.#json("GET", "/events", { ...query });
+    const { names, exclude, ...rest } = query;
+    return this.#json("GET", "/events", {
+      ...rest,
+      names: names?.length ? names.join(",") : undefined,
+      exclude: exclude?.length ? exclude.join(",") : undefined,
+    });
   }
 
   /** `GET /files`: the agent's saved Lua modules. */
@@ -74,7 +87,7 @@ export class AgentClient {
   async #json(
     method: string,
     path: string,
-    query: Record<string, number | undefined> = {},
+    query: Query = {},
     body?: string,
   ): Promise<unknown> {
     const response = await this.#request(method, path, query, body);
@@ -89,7 +102,7 @@ export class AgentClient {
   async #request(
     method: string,
     path: string,
-    query: Record<string, number | undefined>,
+    query: Query,
     body?: string,
   ): Promise<Response> {
     const url = new URL(this.baseUrl + path);

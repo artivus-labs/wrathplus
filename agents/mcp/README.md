@@ -8,14 +8,30 @@ tool is one HTTP call to the port.
 |---|---|---|
 | `lua(code, budget?)` | `POST /lua[?budget=N]` | `{ok, values, output}` or `{ok:false, error, output}` (a tool error) |
 | `screenshot(scale?)` | `GET /screenshot?scale=S` | PNG image content, scale 0.5 by default |
-| `events(since?, wait_ms?, limit?)` | `GET /events` | `{events, next, missed}`; pass `next` as the next `since` |
-| `status()` | `GET /status` | `{state, in_world, ui_ready, time, player, nav}` (`nav`: where walking routes come from) |
+| `events(since?, names?, exclude?, wait_ms?, limit?)` | `GET /events` | `{events, next, missed}`; pass `next` as the next `since` |
+| `status()` | `GET /status` | `{state, in_world, ui_ready, cinematic, time, player, nav}` (`nav`: where walking routes come from) |
 | `modules(name?)` | `GET /files[/<name>]` | the saved module list, or one module's source |
 | `save_module(name, source)` | `PUT /files/<name>` | `{saved, bytes}`; `require(name)` or `AgentReload(name)` in Lua loads it |
 
 Lua runs in the UI's VM against the stock WoW 3.3.5a API. With the port open, the movement
 functions (`MoveForwardStart`, `TurnLeftStart`, ...) work from any Lua. HTTP failures (401, 504,
 ...) and unreachable ports come back as MCP tool errors carrying the port's error text.
+
+`events` is built for a language model's context. Without `since` a read starts from now (it
+returns only the cursor, or what arrives during `wait_ms`); `since: 0` asks for the whole retained
+buffer, which is mostly other units' combat log and `UNIT_*` noise. `names` and `exclude` take
+event names, or prefixes when they end in `_` or `*` (`["AGENT_", "CHAT_MSG_", "QUEST_"]`); with
+them only a matching event ends a wait. `limit` defaults to 100. `wait_ms` is cut to 25000,
+because hosts time a tool call out at about 30 s.
+
+`status` reports `player: null` for about a second after entering the world, until the
+character's record has arrived (wait for `in_world` with a `player`), and `cinematic: true` while
+a cinematic holds the client: a new character starts in its intro, during which nothing is near
+and walking is refused. `StopCinematic()` in Lua skips it; the tools never skip one themselves.
+
+The `lua` tool's description carries a short reference of the agent helpers (`AgentNearby`,
+`AgentMoveTo`, `Combat.engage`, `Quests`, `Move`, `Goals`...) and which of them finish in the
+background as `AGENT_*` events.
 
 Modules are the agent's own Lua, kept in the client's `Agent/scripts` folder across reloads and
 restarts; a module named `autoexec` runs whenever the client enters the world. Two are built in:

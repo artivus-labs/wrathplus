@@ -26,6 +26,9 @@
 --   Move.mode, Move.state       "follow Pallytest" / "stay" / "to Marshal Dughan", and what it is
 --                               doing right now; Move.reached() for an intent's `until`.
 --
+-- Under a cinematic (AgentCinematic) nothing is in sight and no walk starts: a mode waits for it
+-- to end, and a Move.to(x, y) asked for meanwhile fails at once with the reason.
+--
 -- Grouped, the fast tier is offered two intents: follow_companion (Move.companion if set, else the
 -- party leader, else, when this agent leads, the first other member) and stay_here.
 
@@ -271,6 +274,13 @@ end
 local function tick(now)
   if UnitIsDeadOrGhost("player") then
     M.state = "dead"
+    return
+  end
+  -- A cinematic hides everyone and stops all walking: wait, with nobody counted as lost.
+  local held = AgentCinematic and AgentCinematic()
+  if held then
+    seen_at = now
+    M.state = "waiting: " .. held
     return
   end
   if M.mode == "stay" then

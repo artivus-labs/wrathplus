@@ -100,8 +100,10 @@ group("events a player would notice", () => {
       port: 0,
       hostname: "127.0.0.1",
       async fetch(request) {
-        const since = Number(new URL(request.url).searchParams.get("since"));
-        if (since >= 1_000_000) return Response.json({ events: [], next: 10, missed: 0 });
+        const cursor = new URL(request.url).searchParams.get("since");
+        // No cursor: the watcher's first read, "from now".
+        if (cursor === null) return Response.json({ events: [], next: 10, missed: 0 });
+        const since = Number(cursor);
         if (!served && since === 10) {
           served = true;
           // A walk that fails in a hot loop around the death: one line with its count.
@@ -130,8 +132,10 @@ group("events a player would notice", () => {
       port: 0,
       hostname: "127.0.0.1",
       async fetch(request) {
-        const since = Number(new URL(request.url).searchParams.get("since"));
-        if (since >= 1_000_000) return Response.json({ events: [], next: 10, missed: 0 });
+        const cursor = new URL(request.url).searchParams.get("since");
+        // No cursor: the watcher's first read, "from now".
+        if (cursor === null) return Response.json({ events: [], next: 10, missed: 0 });
+        const since = Number(cursor);
         if (!served && since === 10) {
           served = true;
           return Response.json({

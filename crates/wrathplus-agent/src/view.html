@@ -123,7 +123,7 @@ async function statusLoop() {
     try {
       const s = await (await get("/status")).json();
       const badge = $("state");
-      badge.textContent = s.state || "unknown";
+      badge.textContent = (s.state || "unknown") + (s.cinematic ? " · cinematic" : "");
       badge.className = "badge live";
       const p = s.player;
       if (p && p.name) {

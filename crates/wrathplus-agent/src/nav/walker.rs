@@ -110,12 +110,14 @@ pub(crate) fn walk(
     link: Res<NavLink>,
     mut auto: AutoMove,
     script: Option<NonSend<wrathplus_ui::script::UiScript>>,
+    cinematic: Option<Res<wrathplus_app_world::cinematic::Cinematic>>,
 ) {
     let mut click = Click {
         auto: &mut auto,
         script: script.as_deref(),
     };
-    step(&link.0, &mut click);
+    let held = cinematic.is_some_and(|c| c.is_active());
+    step(&link.0, &mut click, held);
 }
 
 /// End a walk short of its goal, saying why.
@@ -158,7 +160,9 @@ fn me_at(walk: &Walk, at: Vec3) -> world::Me {
 /// the next. Click-to-move gives up when it stops closing (a slope too steep, a wall), so a corner
 /// it fell short of is tried once more after a push ([`PUSH`]), then routed round
 /// ([`route_round`]), then the walk ends as `stuck`.
-pub(crate) fn step(nav: &Handles, mover: &mut impl Mover) {
+/// `held`: a cinematic holds the client. Refusals are still announced and a stop still applies,
+/// but the walk takes no step (a route that arrives meanwhile included) until it ends.
+pub(crate) fn step(nav: &Handles, mover: &mut impl Mover, held: bool) {
     let Ok(mut walk) = nav.walk.lock() else {
         return;
     };
@@ -189,7 +193,7 @@ pub(crate) fn step(nav: &Handles, mover: &mut impl Mover) {
         }
         return;
     }
-    if walk.status != "walking" || mover.walking() {
+    if held || walk.status != "walking" || mover.walking() {
         return;
     }
     let at = mover.position();

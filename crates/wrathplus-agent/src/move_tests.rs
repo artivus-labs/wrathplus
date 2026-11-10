@@ -326,3 +326,35 @@ fn a_walk_someone_stops_short_ends_interrupted_and_one_that_gains_no_ground_ends
         "to"
     );
 }
+
+/// A cinematic hides everyone: going to someone waits for it to end instead of ending "failed"
+/// or "lost", and asks for no walk meanwhile.
+#[test]
+fn a_cinematic_holds_a_walk_to_someone_without_losing_them() {
+    let mut script = moving();
+    script
+        .run(
+            "signals = {} AgentSignal = function(name, who, how) signals[#signals + 1] = name .. ' ' .. tostring(how) end \
+             cinematic = nil AgentCinematic = function() return cinematic end \
+             local seen = AgentNearby AgentNearby = function() return cinematic and {} or seen() end \
+             Move.lose_after = 1 pally.x = 30 Move.to('party1')",
+        )
+        .unwrap();
+    script.tick(0.3);
+    assert_eq!(calls(&script), "move 27,0");
+    script
+        .run("cinematic = 'a cinematic is playing' walking = false")
+        .unwrap();
+    for _ in 0..10 {
+        script.tick(0.3);
+    }
+    assert_eq!(calls(&script), "move 27,0");
+    assert_eq!(state(&script), "waiting: a cinematic is playing");
+    assert!(script
+        .eval::<bool>("return Move.mode == 'to' and #signals == 0")
+        .unwrap());
+    // A place asked for meanwhile is refused at once, with the reason (AgentMoveTo's).
+    script.run("cinematic = nil").unwrap();
+    script.tick(0.3);
+    assert_eq!(calls(&script), "move 27,0 | move 27,0");
+}

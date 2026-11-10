@@ -4,7 +4,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { AgentClient } from "../src/client.ts";
 import { configFromEnv } from "../src/index.ts";
-import { createServer } from "../src/tools.ts";
+import { createServer, HELPERS, MAX_WAIT_MS } from "../src/tools.ts";
 
 const TOKEN = "test-token-0123456789";
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
@@ -156,14 +156,102 @@ describe("tools", () => {
     expect(JSON.parse(textOf(result))).toEqual(body);
   });
 
-  test("events defaults since to 0", async () => {
-    reply = () => Response.json({ events: [], next: 1, missed: 0 });
-    await call("events");
-    expect(seen[0]?.query).toEqual({ since: "0" });
+  test("events without since sends none: the port reads from now", async () => {
+    reply = () => Response.json({ events: [], next: 7801, missed: 0 });
+    const result = await call("events");
+    expect(seen[0]?.query).toEqual({});
+    expect(JSON.parse(textOf(result))).toEqual({ events: [], next: 7801, missed: 0 });
+    // The whole buffer is asked for by name: since 0.
+    await call("events", { since: 0 });
+    expect(seen[1]?.query).toEqual({ since: "0" });
+  });
+
+  test("events passes names and exclude as comma-separated lists", async () => {
+    reply = () => Response.json({ events: [], next: 9, missed: 0 });
+    await call("events", { since: 4, names: ["AGENT_", "CHAT_MSG_", "PLAYER_DEAD"], exclude: ["AGENT_LUA"], limit: 20 });
+    expect(seen[0]?.query).toEqual({
+      since: "4",
+      names: "AGENT_,CHAT_MSG_,PLAYER_DEAD",
+      exclude: "AGENT_LUA",
+      limit: "20",
+    });
+    // On the wire the commas are escaped, which the port undoes.
+    await call("events", { names: [], exclude: [] });
+    expect(seen[1]?.query).toEqual({});
+    const refused = await call("events", { names: [""] });
+    expect(refused.isError).toBe(true);
+    expect(seen).toHaveLength(2);
+  });
+
+  test("events caps wait_ms under a host's 30 s tool timeout, and says so", async () => {
+    expect(MAX_WAIT_MS).toBe(25_000);
+    reply = () => Response.json({ events: [], next: 3, missed: 0 });
+    await call("events", { since: 3, wait_ms: 30_000, names: ["AGENT_"] });
+    expect(seen[0]?.query).toEqual({ since: "3", wait_ms: "25000", names: "AGENT_" });
+    await call("events", { since: 3, wait_ms: 1_000 });
+    expect(seen[1]?.query.wait_ms).toBe("1000");
+    const events = (await (await connect()).listTools()).tools.find((t) => t.name === "events");
+    expect(events?.description).toContain("at most 25000 ms");
+    expect(events?.description).toContain("default 100");
+    expect(events?.description).toContain("since=0");
+  });
+
+  test("every description opens with a sentence that stands alone inside 100 characters", async () => {
+    const { tools } = await (await connect()).listTools();
+    expect(tools).toHaveLength(6);
+    for (const tool of tools) {
+      const opening = (tool.description ?? "").split(/(?<=\.)\s/)[0] ?? "";
+      expect(opening.length, `${tool.name}: ${opening}`).toBeGreaterThan(30);
+      expect(opening.length, `${tool.name}: ${opening}`).toBeLessThanOrEqual(100);
+      expect(opening.endsWith("."), `${tool.name}: ${opening}`).toBe(true);
+    }
+  });
+
+  test("the lua tool carries the helper reference, compact", async () => {
+    const lua = (await (await connect()).listTools()).tools.find((t) => t.name === "lua");
+    expect(lua?.description).toContain(HELPERS);
+    expect(HELPERS.length).toBeLessThanOrEqual(1500);
+    for (const helper of [
+      "AgentNearby(",
+      "AgentPosition()",
+      "AgentMoveTo(",
+      "AgentWalk()",
+      "AGENT_WALK_DONE",
+      "AgentInteract(",
+      "AgentTarget(",
+      "Combat.engage(",
+      "AGENT_COMBAT_DONE",
+      "Combat.engaged(",
+      "Quests.pick_up()",
+      "Quests.hand_in()",
+      "AGENT_QUESTS_DONE(kind, picked, handed)",
+      "Quests.list()",
+      "Move.to(",
+      "Move.follow(",
+      "Goals.on",
+      "Goals.list()",
+      "Goals.facts()",
+      "Goals.push{",
+      "Goals.hold{",
+      "Agent.activity()",
+      "StopCinematic()",
+    ]) {
+      expect(HELPERS, helper).toContain(helper);
+    }
+    // The walk's statuses and the fight's outcomes, as the client's Lua spells them.
+    expect(HELPERS).toContain("idle|routing|walking|arrived|stopped|failed|stuck");
+    expect(HELPERS).toContain("killed|lost|stopped|died");
+  });
+
+  test("status says what a null player and cinematic mean", async () => {
+    const status = (await (await connect()).listTools()).tools.find((t) => t.name === "status");
+    expect(status?.description).toContain("player is null");
+    expect(status?.description).toContain("cinematic is true");
+    expect(status?.description).toContain("StopCinematic()");
   });
 
   test("status gets /status", async () => {
-    const body = { state: "InWorld", in_world: true, ui_ready: true, time: 12.5, player: { name: "Jev" } };
+    const body = { state: "InWorld", in_world: true, ui_ready: true, cinematic: false, time: 12.5, player: { name: "Jev" } };
     reply = () => Response.json(body);
     const result = await call("status");
     expect(seen[0]).toMatchObject({ method: "GET", path: "/status", query: {}, auth: `Bearer ${TOKEN}`, body: "" });

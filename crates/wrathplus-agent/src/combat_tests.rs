@@ -240,3 +240,105 @@ fn an_attack_that_is_not_landing_is_started_again() {
     assert_eq!(script.eval::<i64>("return started").unwrap(), 1);
     assert!(script.eval::<bool>("return Combat.fleeing == nil").unwrap());
 }
+
+/// The first outside session's "lost" rabbits (reproduced on the beta, 2026-11-10): a brand-new
+/// character is in the world for some four seconds before its intro cinematic starts, so
+/// `Combat.engage` finds its target and returns true; then the cinematic hides every unit and
+/// stops all walking, and five seconds on the fight ended "lost". It waits instead, saying why.
+#[test]
+fn a_cinematic_hides_the_target_without_losing_it() {
+    let mut script = combat();
+    script
+        .run(
+            "cinematic = nil \
+             AgentCinematic = function() return cinematic end \
+             shown = wolf \
+             AgentNearby = function() return (shown and not cinematic) and { shown } or {} end",
+        )
+        .unwrap();
+    assert!(script.eval::<bool>("return Combat.engage('0xW')").unwrap());
+    script.tick(0.25);
+    assert_eq!(calls(&script), "target 0xW | move 20");
+    // The cinematic starts: nothing in sight for far longer than `lose_after`.
+    script
+        .run("cinematic = 'a cinematic is playing: StopCinematic() skips it' walking = false")
+        .unwrap();
+    for _ in 0..40 {
+        script.tick(0.25);
+    }
+    assert_eq!(
+        script.eval::<String>("return Combat.active").unwrap(),
+        "0xW",
+        "still this fight"
+    );
+    let state: String = script.eval("return Combat.state").unwrap();
+    assert_eq!(
+        state,
+        "waiting: a cinematic is playing: StopCinematic() skips it"
+    );
+    // No walk asked for meanwhile (each would be refused), and nothing signalled.
+    assert_eq!(calls(&script), "target 0xW | move 20");
+    assert_eq!(
+        script
+            .eval::<String>("return table.concat(signals, ' | ')")
+            .unwrap(),
+        ""
+    );
+    // Over (skipped, or run out): the chase carries on and the fight is won.
+    script.run("cinematic = nil").unwrap();
+    script.tick(0.25);
+    assert_eq!(calls(&script), "target 0xW | move 20 | move 20");
+    script.run("wolf.distance = 2").unwrap();
+    script.tick(0.25);
+    script.run("wolf.dead = true").unwrap();
+    for _ in 0..8 {
+        script.tick(0.25);
+    }
+    assert_eq!(
+        script
+            .eval::<String>("return table.concat(signals, ' | ')")
+            .unwrap(),
+        "COMBAT_DONE 0xW killed"
+    );
+    // A target really gone after the cinematic is still lost, counted from its end.
+    script
+        .run("Combat.lose_after = 0.5 shown = { guid = '0xR', name = 'Rabbit', x = 9, y = 0, z = 0, distance = 9, dead = false } Combat.engage('0xR') cinematic = 'held'")
+        .unwrap();
+    for _ in 0..8 {
+        script.tick(0.25);
+    }
+    assert!(script
+        .eval::<bool>("return Combat.active == '0xR'")
+        .unwrap());
+    script.run("cinematic, shown = nil, nil").unwrap();
+    for _ in 0..4 {
+        script.tick(0.25);
+    }
+    assert_eq!(
+        script.eval::<String>("return Combat.last.outcome").unwrap(),
+        "lost"
+    );
+}
+
+/// Under the cinematic nothing is in sight: `engage` says why it found nobody, and nothing that
+/// "attacks" is fought.
+#[test]
+fn engaging_under_a_cinematic_says_why_nobody_is_in_sight() {
+    let script = combat();
+    script
+        .run(
+            "AgentCinematic = function() return 'a cinematic is playing' end \
+             AgentNearby = function() return {} end",
+        )
+        .unwrap();
+    let (ok, why): (bool, String) = script.eval("return Combat.engage('0xW')").unwrap();
+    assert!(!ok);
+    assert_eq!(why, "a cinematic is playing");
+    // Out of a cinematic an unseen unit is a plain false.
+    script
+        .run("AgentCinematic = function() return nil end")
+        .unwrap();
+    let (ok, why): (bool, String) = script.eval("return Combat.engage('0xW')").unwrap();
+    assert!(!ok);
+    assert_eq!(why, "not in sight");
+}

@@ -383,3 +383,59 @@ fn a_realm_route_gets_the_push_and_the_first_step_grace() {
     assert_eq!(sent.len(), 2, "{sent:?}");
     assert!(sent[0].starts_with("A 2 ") && sent[1].starts_with("P 2 - "));
 }
+
+/// A cinematic starts while the realm works out a route: the answer is kept, but the walker takes
+/// no step until the cinematic ends (click-to-move would stall and end the walk `stuck` with no
+/// reason); the walk says why meanwhile, and carries on after.
+#[test]
+fn a_realm_route_that_arrives_under_a_cinematic_waits_for_its_end() {
+    let mut rig = Rig::in_world();
+    rig.lua.load("AgentMoveTo(150, 260, 31)").exec().unwrap();
+    assert_eq!(rig.realm(&[]), ["P 1 - 100.0 200.0 30.0 150.0 260.0 31.0"]);
+    rig.world.snapshot.lock().unwrap().cinematic = true;
+    rig.held = true;
+    assert_eq!(rig.status(), "routing");
+    rig.realm(&["r 1 1 1 c 1000,2000,300 500,600,10"]);
+    rig.walk();
+    assert!(rig.feet.clicks.is_empty(), "no step under the cinematic");
+    let (status, note) = rig.walk_status();
+    assert_eq!(status, "walking");
+    assert_eq!(note.as_deref(), Some(world::CINEMATIC_NOTE));
+    // A new walk asked for meanwhile is refused, announced once; the held one is replaced.
+    rig.lua
+        .load("AgentMoveTo(120, 200, 30) AgentMoveTo(121, 200, 30)")
+        .exec()
+        .unwrap();
+    rig.walk();
+    assert_eq!(rig.events(), ["AGENT_WALK_DONE [\"failed\"]"]);
+    // Over: a walk asked for now goes, and nothing else was left half-walked.
+    rig.world.snapshot.lock().unwrap().cinematic = false;
+    rig.held = false;
+    rig.later(1.0);
+    rig.lua.load("AgentMoveTo(150, 260, 31)").exec().unwrap();
+    rig.realm(&[]);
+    rig.realm(&["r 2 1 1 c 1000,2000,300 500,600,10"]);
+    rig.walk();
+    assert_eq!(rig.feet.clicks, [[150.0, 260.0, 31.0]]);
+    assert_eq!(rig.status(), "arrived");
+}
+
+/// The same with no new walk asked: the route that arrived under the cinematic is walked after it.
+#[test]
+fn a_walk_held_by_a_cinematic_carries_on_after_it() {
+    let mut rig = Rig::in_world();
+    rig.lua.load("AgentMoveTo(150, 260, 31)").exec().unwrap();
+    rig.realm(&[]);
+    rig.world.snapshot.lock().unwrap().cinematic = true;
+    rig.held = true;
+    rig.realm(&["r 1 1 1 c 1000,2000,300 500,600,10"]);
+    rig.walk();
+    assert!(rig.feet.clicks.is_empty());
+    rig.world.snapshot.lock().unwrap().cinematic = false;
+    rig.held = false;
+    assert_eq!(rig.walk_status(), ("walking".into(), None));
+    rig.walk();
+    assert_eq!(rig.feet.clicks, [[150.0, 260.0, 31.0]]);
+    assert_eq!(rig.status(), "arrived");
+    assert_eq!(rig.events(), ["AGENT_WALK_DONE [\"arrived\"]"]);
+}

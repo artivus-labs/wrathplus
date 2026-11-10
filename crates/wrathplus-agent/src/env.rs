@@ -225,6 +225,9 @@ mod zone_guard_tests;
 mod hot_loop_tests;
 
 #[cfg(test)]
+#[path = "goals_runner_tests.rs"]
+mod goals_runner_tests;
+#[cfg(test)]
 #[path = "goals_safety_tests.rs"]
 mod goals_safety_tests;
 #[cfg(test)]

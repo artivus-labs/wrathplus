@@ -5,26 +5,43 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { AgentError, type AgentClient } from "./client.ts";
 
-const LUA_DESCRIPTION = `Run a Lua chunk in the WrathPlus game client's UI Lua VM: the stock World of Warcraft 3.3.5a (Wrath of the Lich King, build 12340) addon API, as an addon would see it.
-Use it to read game state (UnitName("player"), UnitHealth("target"), GetPlayerMapPosition("player"), GetQuestLogTitle(i), GetContainerItemInfo(bag, slot), ...) and to act (TargetUnit, CastSpellByName, UseContainerItem, SendChatMessage, InteractUnit, ...).
-Movement functions work from here (MoveForwardStart/MoveForwardStop, TurnLeftStart/TurnLeftStop, StrafeLeftStart, JumpOrAscendStart, ToggleAutoRun, ...): start a motion, wait, then stop it in a later call.
-A bare expression (e.g. \`UnitLevel("player")\`) returns its values; otherwise use \`return a, b\`. The answer is JSON: {ok, values, output} where output holds anything print()ed, or {ok:false, error, output} on a Lua error.
-Each chunk runs to completion inside one game frame, so do not loop waiting for the world to change: return and call again (or use the events tool).
-For logic that should run on its own every frame (rotations, following, looting), save it as a module with save_module and load it with require("name") (AgentReload("name") after changes); a module named autoexec runs whenever the client enters the world. Frames work as in addons: CreateFrame("Frame"):SetScript("OnUpdate", fn) ticks, :RegisterEvent(...) reacts.
-Beyond the stock API: AgentNearby([yards]) lists every unit, player, game object and corpse the client knows (guid, name, kind, distance, x/y/z, level, health, dead, reaction, quest marker, title, npc services such as vendor/repair/trainer/innkeeper/flightmaster, lootable); AgentFindNpc(service [, yards]) gives the nearest NPC offering a service ("repair", "vendor", "classtrainer", "innkeeper"...); AgentPosition(); AgentTarget(guid); AgentInteract(guid) (talk to, loot or use it; straight-line walk); AgentServices([kinds [, radius]]) asks the realm where services are on your map, nearest first (vendor, repair, trainer = your class trainer, flightmaster, innkeeper, banker, questgiver-hub, trainer_cooking, trainer_first_aid, trainer_profession): {pending = true} first, AGENT_SERVICES_READY when the answer is in, then the next call returns {{kind, name, x, y, z, map, zone, members, profession}, ...}; AgentMoveTo(x, y[, z] | guid) walks a navmesh route (doors, stairs; z optional), with AgentPath, AgentWalk and AgentStop (when routes come from the realm, see status: AgentMoveTo returns {pending = true} and AgentWalk().status is "routing" until the route arrives; AgentPath returns {pending = true} first and the route on the next call, after AGENT_PATH_READY); Move.to(unit), Move.follow(unit) (follow mode, fighting beside them), Move.stay() and Combat.engage(guid) for melee that chases its target; Agent.intent(name, {when, run}) and Agent.decide(name, {question, options, on}) hand intents and decisions to a fast decision loop when one runs.
-Built in: require("wp.engine") (a Playerbots-style decision engine: triggers, actions with relevance, prerequisites/alternatives/continuers, strategies per combat state) and require("wp.values") (health, power, group, auras, cooldowns, spell readiness, range, threat, bags, position).`;
+/** The agent helpers an outside agent needs, and which of them finish in the background. Every
+ *  claim here is checked against crates/wrathplus-agent (src/world.rs, src/nav.rs, lua/wp/*.lua);
+ *  keep it under 1500 characters. */
+export const HELPERS = `Helpers (guids: "0x..." strings). What walks or fights returns at once and ends as an AGENT_* event (events names=["AGENT_"]).
+- AgentNearby([yards]), nearest first: {guid, name, kind, distance, x, y, z, level, health, dead, reaction, creature_type, quest, npc, lootable}. AgentPosition(): {x, y, z, facing, map}. AgentTarget(guid).
+- AgentMoveTo(x, y[, z] | guid): walks a navmesh route; returns the route, {pending = true} while the realm routes it, or nil, why. AgentWalk(): {status = idle|routing|walking|arrived|stopped|failed|stuck, note}, ending as AGENT_WALK_DONE(status). AgentStop(). A later AgentMoveTo, AgentInteract or Combat.engage replaces it.
+- AgentInteract(guid): talk to, loot, use or attack it; walks there itself.
+- Combat.engage(guid): true if in sight; chases, fights, loots: AGENT_COMBAT_DONE(guid, killed|lost|stopped|died). Combat.engaged(guid): over, won, outcome. Combat.stop().
+- Quests.pick_up(), Quests.hand_in(): visit givers within 30 yd: AGENT_QUESTS_DONE(kind, picked, handed). Quests.list(): {id, title, complete, objectives}.
+- Move.to(unit | x, y[, z]): AGENT_MOVE_DONE(target, arrived|lost|failed). Move.follow(unit), Move.free().
+- Goals.on = true levels by itself. Goals.list(), Goals.facts(), Goals.state; Goals.push{name, why, priority, want}; Goals.hold{reason, seconds} pauses it. Agent.activity(): {name, seconds}, nil between actions.
+- StopCinematic() skips a cinematic (status.cinematic); a new character starts in one, with nothing near or walkable.`;
+
+const LUA_DESCRIPTION = `Run Lua in the WrathPlus game client's UI VM (the WoW 3.3.5a addon API) to read game state and act.
+It is the stock World of Warcraft 3.3.5a (build 12340) API as an addon sees it: read (UnitName("player"), UnitHealth("target"), GetQuestLogTitle(i), GetContainerItemInfo(bag, slot), ...) and act (CastSpellByName, UseContainerItem, SendChatMessage, ...). Movement verbs work from here (MoveForwardStart/MoveForwardStop, TurnLeftStart/TurnLeftStop, JumpOrAscendStart, ...): start one, stop it in a later call.
+A bare expression (\`UnitLevel("player")\`) returns its values; otherwise use \`return a, b\`. The answer is JSON {ok, values, output}, output being what print()ed, or {ok:false, error, output} on a Lua error.
+A chunk runs to completion inside one game frame: never loop waiting for the world to change. Return, then call again or wait on the events tool.
+${HELPERS}
+For code that runs by itself every frame, save a module (save_module) and require("name") it (AgentReload("name") after a change; one named autoexec runs on entering the world). Frames work as in addons: CreateFrame("Frame"):SetScript("OnUpdate", fn) ticks, :RegisterEvent(...) reacts.
+Also: AgentFindNpc(service[, yards]) (the nearest "repair", "vendor", "classtrainer", "innkeeper"... in sight), AgentServices([kinds[, radius]]) (where services are on your map, from the realm: {pending = true} first, then the list after AGENT_SERVICES_READY), AgentPath (a route preview; {pending = true} first when the realm routes, then the route after AGENT_PATH_READY), Rotation.list (what Combat casts), Agent.intent(name, {when, run}) and Agent.decide(name, {question, options, on}) for a fast decision loop when one runs, require("wp.engine") (a Playerbots-style decision engine) and require("wp.values") (health, power, auras, cooldowns, range, threat, bags).`;
 
 const MODULES_DESCRIPTION = `List your saved Lua modules, or read one when \`name\` is given (dotted names like grind.loop). Modules persist across reloads and restarts of the client.`;
 
-const SAVE_MODULE_DESCRIPTION = `Save a Lua module (source code) under a dotted name like grind.loop, for require("grind.loop") in the lua tool. Saving does not run it: call require (first load) or AgentReload("grind.loop") (after a change). Name it autoexec to run it whenever the client enters the world.`;
+const SAVE_MODULE_DESCRIPTION = `Save a Lua module (source) under a dotted name like grind.loop, for require("grind.loop") in lua. Saving does not run it: call require (first load) or AgentReload("grind.loop") (after a change). Name it autoexec to run it whenever the client enters the world.`;
 
 const SCREENSHOT_DESCRIPTION = `Capture the next rendered frame of the WrathPlus game client as a PNG image. scale (0-1, default 0.5) shrinks it; use 1 for full resolution when reading small text.`;
 
-const EVENTS_DESCRIPTION = `Read the game UI events (the same events addons receive: PLAYER_TARGET_CHANGED, CHAT_MSG_SAY, UNIT_HEALTH, COMBAT_LOG_EVENT_UNFILTERED, ...) that fired after cursor \`since\`.
-Returns JSON {events:[{seq, time, event, args}], next, missed}. Pass \`next\` as \`since\` on the following call to continue where you left off; start with since=0. \`missed\` counts events that dropped out of the retained window before you read them.
-limit caps how many come back (default 1000).`;
+const EVENTS_DESCRIPTION = `Read game UI events after cursor \`since\` (omit it to start from now), optionally filtered by name.
+They are the events addons receive (PLAYER_TARGET_CHANGED, CHAT_MSG_SAY, UNIT_HEALTH, COMBAT_LOG_EVENT_UNFILTERED, ...) plus the agent's own AGENT_* signals. Returns JSON {events:[{seq, time, event, args}], next, missed}: pass \`next\` as \`since\` on the following call.
+Without \`since\` the read starts from now: nothing already logged comes back, only \`next\` to carry on from. since=0 reads the whole retained buffer (up to 10000 events, mostly other units' COMBAT_LOG_EVENT and UNIT_* noise: filter it).
+names keeps only these events and exclude drops them: whole names ("PLAYER_DEAD"), or prefixes when they end in "_" or "*" (["AGENT_", "CHAT_MSG_", "QUEST_", "UI_ERROR_MESSAGE"]).
+limit caps how many come back (default 100, oldest first); when it cuts a read short, \`next\` carries on after the last one returned. \`missed\` counts events that dropped out of the retained window before you read them.`;
 
-const EVENTS_WAIT = "\nwait_ms (up to 30000) long-polls until at least one event arrives.";
+/** The longest wait the tool passes on: under the 30 s at which hosts time a tool call out. */
+export const MAX_WAIT_MS = 25_000;
+
+const EVENTS_WAIT = `\nwait_ms long-polls until an event arrives (with names or exclude: one that matches), for at most ${MAX_WAIT_MS} ms; a longer wait is cut to that, because hosts time a tool call out at about 30 s. No event in time is an empty read: call again with \`next\`.`;
 
 export interface ToolOptions {
   /** Offer events' wait_ms long-poll (default true). A host that wakes its agent on events itself
@@ -32,7 +49,19 @@ export interface ToolOptions {
   longPoll?: boolean;
 }
 
-const STATUS_DESCRIPTION = `Report the WrathPlus game client's state: {state, in_world, ui_ready, time, player, nav}. state is the client phase (login, character select, in world, ...); ui_ready means its Lua answers, and out of the world that the login and character-select API (GetNumCharacters, CreateCharacter, EnterWorld...) is installed, so wait for it before calling those; in world, player summarises name, level, class, race, health, power, dead, combat, zone, subzone, map position and target. nav says where walking routes (AgentMoveTo, AgentPath) come from: source "local" (the client's own mmaps), "realm" (asked of the realm over the game connection: a walk is "routing" until its route arrives) or "none" (no walking routes: detail says how to get them).`;
+const STATUS_DESCRIPTION = `Report the WrathPlus client's state: {state, in_world, ui_ready, cinematic, time, player, nav}.
+state is the client phase (Login, CharSelect, InWorld, ...). ui_ready means its Lua answers, and out of the world that the login and character-select API (GetNumCharacters, CreateCharacter, EnterWorld...) is installed, so wait for it before calling those.
+player is null out of the world, and for about a second after entering it, until the character's own record has arrived: wait for in_world with a player before acting. Then it summarises name, level, class, race, health, power, dead, combat, zone, subzone, map position and target.
+cinematic is true while a cinematic holds the client (a new character's intro fly-by): nothing is near (AgentNearby) and walking is refused until it ends by itself or StopCinematic() (lua tool) skips it.
+nav says where walking routes (AgentMoveTo, AgentPath) come from: source "local" (the client's own mmaps), "realm" (asked of the realm over the game connection: a walk is "routing" until its route arrives) or "none" (no walking routes: detail says how to get them).`;
+
+interface EventsArgs {
+  since?: number;
+  wait_ms?: number;
+  limit?: number;
+  names?: string[];
+  exclude?: string[];
+}
 
 function text(value: unknown, isError = false): CallToolResult {
   return {
@@ -114,16 +143,46 @@ export function registerTools(server: McpServer, client: AgentClient, options: T
       title: "Read UI events",
       description: EVENTS_DESCRIPTION + (longPoll ? EVENTS_WAIT : ""),
       inputSchema: {
-        since: z.number().int().min(0).optional().describe("Cursor: the `next` of the last call (0 to start)."),
+        since: z
+          .number()
+          .int()
+          .min(0)
+          .optional()
+          .describe("Cursor: the `next` of the last call. Omit to start from now; 0 reads the whole buffer."),
+        names: z
+          .array(z.string().min(1))
+          .optional()
+          .describe('Only these events: names, or prefixes ending in "_" or "*", e.g. ["AGENT_", "CHAT_MSG_"].'),
+        exclude: z
+          .array(z.string().min(1))
+          .optional()
+          .describe('Never these events, in the same form, e.g. ["COMBAT_LOG*", "UNIT_"].'),
         ...(longPoll
-          ? { wait_ms: z.number().int().min(0).max(30_000).optional().describe("Long-poll up to this many ms for an event.") }
+          ? {
+              wait_ms: z
+                .number()
+                .int()
+                .min(0)
+                .optional()
+                .describe(`Long-poll up to this many ms for a (matching) event; capped at ${MAX_WAIT_MS}.`),
+            }
           : {}),
-        limit: z.number().int().min(1).max(10_000).optional().describe("Most events to return (default 1000)."),
+        limit: z.number().int().min(1).max(10_000).optional().describe("Most events to return (default 100)."),
       },
       annotations: { readOnlyHint: true },
     },
-    ({ since, wait_ms, limit }: { since?: number; wait_ms?: number; limit?: number }) =>
-      guarded(async () => text(await client.events({ since: since ?? 0, wait_ms: longPoll ? wait_ms : undefined, limit }))),
+    ({ since, wait_ms, limit, names, exclude }: EventsArgs) =>
+      guarded(async () =>
+        text(
+          await client.events({
+            since,
+            wait_ms: longPoll && wait_ms !== undefined ? Math.min(wait_ms, MAX_WAIT_MS) : undefined,
+            limit,
+            names,
+            exclude,
+          }),
+        ),
+      ),
   );
 
   server.registerTool(
