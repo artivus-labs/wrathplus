@@ -245,9 +245,9 @@ pub struct Guid(pub u64);
 pub struct NetEntity {
     pub kind: EntityKind,
     pub display_id: Option<u32>,
-    /// `OBJECT_FIELD_SCALE_X`, the complete render scale: the server already folds in the DBC
-    /// scale, so it is never multiplied by ours. A live change eases over 2 s with a cosine
-    /// smoothstep (`0x614bbf`), through `entities::live_display`.
+    /// `OBJECT_FIELD_SCALE_X`. A unit renders at it × its model scale (`0x71c0e0`), which the
+    /// server leaves out of the field; a live change eases over 2 s with a cosine smoothstep
+    /// (`0x743f79`), through `entities::live_display`.
     pub scale: f32,
 }
 

@@ -67,17 +67,22 @@ pub(super) fn drive(
 }
 
 /// The camera pivot's target height: the model-local [`CameraPivot`] times the body's raw
-/// `OBJECT_FIELD_SCALE_X`, not the eased render scale, clamped. `swimming` picks the preset as
+/// `OBJECT_FIELD_SCALE_X` × its model scale (the un-eased `0x71c0e0`), not the eased render scale,
+/// clamped. `swimming` picks the preset as
 /// `0x50f880` does (`0x50f89e`, `cam+0x124`), lower by [`CameraPivot::swim_drop_local`];
 /// [`super::camera::PivotGlide`] glides between presets. `None` until the model attaches: the
 /// reference skips the camera update while the model is unresolved (`0x50e907`), so a display
 /// swap holds, then glides once.
 pub(super) fn pivot_target(
     pivot: Option<&CameraPivot>,
-    net: Option<&crate::net::NetEntity>,
+    (net, k): (
+        Option<&crate::net::NetEntity>,
+        Option<&crate::entities::ModelScale>,
+    ),
     swimming: bool,
 ) -> Option<f32> {
-    pivot.map(|p| model_pivot_height(p, net.map_or(1.0, |n| n.scale), swimming))
+    let scale = net.map_or(1.0, |n| n.scale) * k.map_or(1.0, |k| k.0);
+    pivot.map(|p| model_pivot_height(p, scale, swimming))
 }
 
 /// `WOW_TWIST_GAP=<radians>` pins the counter-twist's yaw gap; the env is read once.

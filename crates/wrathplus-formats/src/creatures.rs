@@ -115,13 +115,33 @@ pub struct CreatureCatalog {
     display: HashMap<u32, DisplayRow>,
     models: HashMap<u32, ModelRow>,
     extra: HashMap<u32, NpcAppearance>,
+    /// `ChrRaces` `(race, sex)` → the race's base display (`+0x10` male, `+0x14` female).
+    race_displays: HashMap<(u8, u8), u32>,
 }
 
 impl CreatureCatalog {
-    /// A display's own `creatureModelScale`, the mount scale law: a mount renders at
-    /// `OBJECT_FIELD_SCALE_X × creatureModelScale`, without `modelScale` (`0x613ef0`).
+    /// A display's own `creatureModelScale`, the mount's factor in a mounted unit's render scale
+    /// (`0x71c0fb` multiplies the `[unit+0x990]` that `0x73d660` stores from it).
     pub fn display_scale(&self, display_id: u32) -> Option<f32> {
         self.display.get(&display_id).map(|r| r.scale)
+    }
+
+    /// A unit display's model scale before its family ramp (`0x722ae0` → `0x71c110`): the race
+    /// display's `creatureModelScale` (`0x71c050`, 1.0 without an extra row) × `creatureModelScale`
+    /// × `modelScale`, and 1.0 when that is not positive. The unit renders at this × its eased
+    /// `OBJECT_FIELD_SCALE_X` (`0x71c0e0`); `None` for a display or model miss, which renders at
+    /// 1.0 with no family ramp (`0x722b07`, `0x722b32`).
+    pub fn unit_model_scale(&self, display_id: u32) -> Option<f32> {
+        let row = self.display.get(&display_id)?;
+        let model = self.models.get(&row.model_id)?;
+        let race = (row.extended_id != 0)
+            .then(|| self.extra.get(&row.extended_id))
+            .flatten()
+            .and_then(|e| self.race_displays.get(&(e.race, e.sex)))
+            .and_then(|d| self.display.get(d))
+            .map_or(1.0, |r| r.scale);
+        let k = race * row.scale * model.scale;
+        Some(if k > 0.0 { k } else { 1.0 })
     }
 
     /// A display's footstep camera shake, a `CameraShakes.dbc` id (`FootstepShakeSize`).
@@ -177,9 +197,9 @@ impl CreatureCatalog {
         self.display.iter().map(|(id, r)| (*id, r.model_id))
     }
 
-    /// `modelScale × creatureModelScale`. The server folds it into `OBJECT_FIELD_SCALE_X`, which
-    /// alone scales a unit (`0x613ef0`), so only the glue screens read this: the reference sizes
-    /// the serverless character-select pet by it (`0x472dc6`).
+    /// `modelScale × creatureModelScale`, which the reference sizes the serverless character-select
+    /// pet (`0x472dc6`) and a corpse (`0x705ac0`) by; a world unit takes
+    /// [`Self::unit_model_scale`].
     pub fn model_scale(&self, display_id: u32) -> Option<f32> {
         let row = self.display.get(&display_id)?;
         let model = self.models.get(&row.model_id)?;
@@ -457,11 +477,25 @@ pub fn load_creature_catalog(chain: &mut Chain) -> Result<CreatureCatalog> {
 
     // Best-effort: without it only humanoid NPCs lose their skins; the caller logs `extra_len()`.
     let extra = load_creature_display_info_extra(chain).unwrap_or_default();
+    // Best-effort: without it a humanoid NPC's race scale reads 1.0.
+    let race_displays = crate::race_creature_type::read_chr_races(chain)
+        .map(|rs| {
+            rs.records()
+                .iter()
+                .filter_map(|r| {
+                    let race = u8::try_from(u32_at(r, 0)?).ok()?;
+                    Some([(0, u32_at(r, 4)?), (1, u32_at(r, 5)?)].map(|(sex, d)| ((race, sex), d)))
+                })
+                .flatten()
+                .collect()
+        })
+        .unwrap_or_default();
 
     Ok(CreatureCatalog {
         display,
         models,
         extra,
+        race_displays,
     })
 }
 

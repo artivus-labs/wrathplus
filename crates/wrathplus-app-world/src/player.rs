@@ -175,8 +175,12 @@ pub(super) type BodyQuery<'w, 's> = Query<
         // Both hands and the ranged slot, for the `Z` toggle's cycle (the reference's
         // `GetWeapon(0/1/2)`).
         Option<&'static crate::creature_anim::Wielded>,
-        // The raw `OBJECT_FIELD_SCALE_X` for the pivot height, not the transform's 2 s-eased scale.
-        Option<&'static crate::net::NetEntity>,
+        // The raw `OBJECT_FIELD_SCALE_X` and model scale for the pivot height, not the
+        // transform's 2 s-eased scale.
+        (
+            Option<&'static crate::net::NetEntity>,
+            Option<&'static crate::entities::ModelScale>,
+        ),
     ),
     (With<Embodied>, Without<FlyCam>),
 >;

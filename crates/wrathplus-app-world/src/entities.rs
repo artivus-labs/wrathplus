@@ -54,8 +54,8 @@ use mount::reseat_mounts;
 pub(crate) mod corpse;
 
 mod live_display;
-pub(crate) use live_display::DisplaySwapped;
 use live_display::{refresh_live_display, tick_scale_ease};
+pub(crate) use live_display::{DisplaySwapped, ModelScale};
 
 /// Terrain conform: a model flagged `GlobalModelFlags & 3 ∈ {1,3}` tilts to the ground.
 mod conform;
@@ -282,8 +282,8 @@ impl Creatures {
         self.catalog.size_class(display_id)
     }
 
-    /// A display's `modelScale × creatureModelScale`; only the glue screens' pet reads it, as the
-    /// server folds it into a spawned unit's `OBJECT_FIELD_SCALE_X`.
+    /// A display's `modelScale × creatureModelScale`: the glue screens' pet and a corpse's model
+    /// scale; a world unit's is [`wrathplus_formats::CreatureCatalog::unit_model_scale`].
     pub(crate) fn model_scale(&self, display_id: u32) -> Option<f32> {
         self.catalog.model_scale(display_id)
     }
@@ -614,6 +614,13 @@ impl Plugin for EntitiesPlugin {
         // After the net stage, whose Commands create the entity; until then its readers take the
         // constructor default.
         .add_systems(Update, stamp_collision_heights.after(WorldStage::Net))
+        // Before attach, so a unit's first build takes its model scale.
+        .add_systems(
+            Update,
+            live_display::stamp_unit_model_scales
+                .after(WorldStage::Net)
+                .before(EntityVisualsSet),
+        )
         // Display models resolve and build before attach, all after `WorldStage::Net` spawns the
         // entities, or attach would meet an unresolved display and lock in a cube.
         .add_systems(
