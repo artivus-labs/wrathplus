@@ -126,6 +126,7 @@ fn argus_menu(quests: Vec<GossipQuestRow>) -> Option<GossipMenu> {
         options: vec![GossipOptionView {
             label: "Train me.".into(),
             icon_type: "trainer".into(),
+            ..Default::default()
         }],
     })
 }

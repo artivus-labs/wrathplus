@@ -39,7 +39,6 @@ fn session() -> Option<UiScript> {
             quest(103, "Charlie"),
         ],
         num_quests: 3,
-        ..Default::default()
     });
     let poi = |quest_id: u32| WrathQuestPoi {
         quest_id,

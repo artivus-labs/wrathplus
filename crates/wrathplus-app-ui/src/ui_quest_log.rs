@@ -52,7 +52,8 @@ pub struct QuestLog {
     row_slots: Vec<(u32, u8)>,
     /// The collapsed headers, by title.
     collapsed: HashSet<String>,
-    /// Per pushed entry, the header's title, `None` for a quest: the fold drain's index map.
+    /// Per pushed entry, folded rows included, the header's title, `None` for a quest: the fold
+    /// drain's index map.
     header_keys: Vec<Option<String>>,
 }
 
@@ -556,6 +557,12 @@ fn feed_server_clock(
     script.set_server_unix_time(now);
 }
 
+/// A quest's log level (`0x5e0d20`): a template level of -1 answers the player's own level
+/// (`0x5e0d7a`), which the row sort (`0x5e08f0`) and `GetQuestLogTitle` both read.
+fn log_level(level: i32, player: u32) -> u32 {
+    u32::try_from(level).unwrap_or(player)
+}
+
 /// The reference's header for `zoneOrSort` 0 (`0x84b4ec`). Only a cached template makes a header
 /// (`0x4de6f6`), so it never stands for a template in flight.
 const MISSING_HEADER: &str = "Missing header! (quest designers)";
@@ -692,6 +699,11 @@ pub(crate) fn feed_quest_log(
 
     // ── Section headers ─────────────────────────────────────────────────────────────────────────
     // One per `ZoneOrSort`: a positive id names an `AreaTable` zone, a negative a `QuestSort`.
+    let player_level = store.0.unit_level().unwrap_or(0);
+    // `PLAYER_FIELD_MAX_LEVEL`, the cap the log's money and XP getters test (`[desc+0x11ac]`).
+    let at_cap = (store.0)
+        .get(wrathplus_protocol::types::Field::PlayerMaxLevel)
+        .is_some_and(|cap| player_level >= cap);
     let ordered = {
         let keyed: Vec<GroupRow> = rows
             .iter()
@@ -709,7 +721,7 @@ pub(crate) fn feed_quest_log(
                             .unwrap_or_default()
                             .to_string()
                     },
-                    level: t.map(|t| t.level).unwrap_or(0),
+                    level: t.map_or(0, |t| log_level(t.level, player_level)),
                     title: t.map(|t| t.title.clone()).unwrap_or_default(),
                     slot: r.slot,
                 }
@@ -727,11 +739,12 @@ pub(crate) fn feed_quest_log(
 
     let mut entries: Vec<QuestLogEntryView> = Vec::new();
     let mut header_keys: Vec<Option<String>> = Vec::new();
-    // Quests under a collapsed header: out of the visible list, still in the log, and counted by
-    // the watch prune, as the reference's scans the whole row array (`0x4de7a7`-`0x4de80f`).
-    let mut hidden_quest_ids: Vec<u32> = Vec::new();
+    // Quests under a collapsed header stay in the row array after every visible row, as the
+    // comparator `0x5e08f0` sorts them (`0x5e0a2a`-`0x5e0b63`); it ties two folded rows, which keep
+    // their group, level and title order here.
+    let mut folded: Vec<QuestLogEntryView> = Vec::new();
     let mut tooltip_rows = Vec::new();
-    for (_, name, row_idxs) in &groups {
+    for (header, (_, name, row_idxs)) in (1..).zip(&groups) {
         let collapsed = quest_log.collapsed.contains(name);
         entries.push(QuestLogEntryView {
             quest_id: 0,
@@ -754,7 +767,7 @@ pub(crate) fn feed_quest_log(
                 match quest_log.template(r.quest_id, &commands) {
                     Some(t) => (
                         t.title.clone(),
-                        t.level,
+                        log_level(t.level, player_level),
                         // The tag: `Type` is a `QuestInfo.dbc` id, 0 naming none. No table gives
                         // `None`, never `""`: the row's Lua tests presence.
                         tag_names
@@ -794,6 +807,8 @@ pub(crate) fn feed_quest_log(
                                     macros.subject,
                                 );
                             }
+                            let max_money = t.money_max_level;
+                            crate::quest_rewards::at_level_cap(&mut detail, max_money, at_cap);
                             detail
                         }),
                     ),
@@ -816,11 +831,7 @@ pub(crate) fn feed_quest_log(
                     .map(|o| (o.poi_bit, o.text.clone()))
                     .collect(),
             ));
-            if collapsed {
-                hidden_quest_ids.push(r.quest_id);
-                continue;
-            }
-            entries.push(QuestLogEntryView {
+            let entry = QuestLogEntryView {
                 suggested_group: quest_log
                     .template(r.quest_id, &commands)
                     .and_then(|t| t.wrath.as_ref())
@@ -840,10 +851,18 @@ pub(crate) fn feed_quest_log(
                 timer: r.log_slot.timer,
                 objectives,
                 detail,
-            });
-            header_keys.push(None);
+                folded_under: if collapsed { header } else { 0 },
+            };
+            if collapsed {
+                folded.push(entry);
+            } else {
+                entries.push(entry);
+                header_keys.push(None);
+            }
         }
     }
+    entries.extend(folded);
+    header_keys.resize(entries.len(), None);
 
     // ── Selection remap ─────────────────────────────────────────────────────────────────────────
     let sel = script.quest_log_selection();
@@ -910,18 +929,17 @@ pub(crate) fn feed_quest_log(
     let fresh = QuestLogState {
         entries,
         num_quests: rows.len() as u32,
-        hidden_quest_ids,
     };
     if fresh == *last {
         return;
     }
     // Announced after the push, so a handler reads the new log. The reference announces from the
     // `SMSG_QUESTUPDATE_*` handler (`0x5e5ad0`), dropping a toast whose name is uncached; this
-    // rides the log diff, so a quest under a collapsed header announces nothing. A progress toast
-    // is the leaderboard line, as the `ERR_QUEST_ADD_*_SII` keys compose the same sentence.
+    // rides the log diff, folded quests included, as the handler is blind to the fold. A progress
+    // toast is the leaderboard line, as the `ERR_QUEST_ADD_*_SII` keys compose the same sentence.
     let progressed = quests_with_progressed_objectives(last, &fresh);
     script.set_quest_log(fresh.clone());
-    // `QUEST_WATCH_UPDATE` with the quest's 1-based log row (`0x4df880`'s search of `0xbb71c0`)
+    // `QUEST_WATCH_UPDATE` with the quest's 1-based row among all rows (`0xc237b0`)
     // goes first, from the `SMSG_QUESTUPDATE_*` handler, so the log update after it redraws the
     // tracker stock's 300 s auto-watch grew (`QuestLogFrame.lua:265-269`); the reference fires it
     // before the descriptor lands, here after the push.
@@ -1115,8 +1133,10 @@ fn load_quest_tag_names(
     }
 }
 
-/// Drains `CollapseQuestHeader` and `ExpandQuestHeader`: an entry index names a header by its
-/// title, and 0 is every header (the collapse-all button).
+/// Drains `CollapseQuestHeader` and `ExpandQuestHeader`: a header row's index names that header
+/// by its title; any other index, out of range or a quest row, is every header (`0x5e0c00`:
+/// `0x5e0c06` and `0x5e0c18` jump to `0x5e0c87`, which writes the whole mask). The stock tracker
+/// passes a quest row (`WatchFrame.lua:987`), so opening the log from it expands every header.
 fn drain_quest_log_collapses(
     script: Option<NonSendMut<UiScript>>,
     mut quest_log: ResMut<QuestLog>,
@@ -1125,19 +1145,21 @@ fn drain_quest_log_collapses(
         return;
     };
     for (idx, collapse) in script.take_quest_log_collapses() {
-        if idx == 0 {
-            if collapse {
-                let all: Vec<String> = quest_log.header_keys.iter().flatten().cloned().collect();
-                quest_log.collapsed.extend(all);
-            } else {
-                quest_log.collapsed.clear();
-            }
-        } else if let Some(Some(name)) = quest_log.header_keys.get(idx as usize - 1).cloned() {
-            if collapse {
+        let header = (idx as usize)
+            .checked_sub(1)
+            .and_then(|i| quest_log.header_keys.get(i).cloned().flatten());
+        match (header, collapse) {
+            (Some(name), true) => {
                 quest_log.collapsed.insert(name);
-            } else {
+            }
+            (Some(name), false) => {
                 quest_log.collapsed.remove(&name);
             }
+            (None, true) => {
+                let all: Vec<String> = quest_log.header_keys.iter().flatten().cloned().collect();
+                quest_log.collapsed.extend(all);
+            }
+            (None, false) => quest_log.collapsed.clear(),
         }
     }
 }
@@ -1313,10 +1335,11 @@ mod tests {
     }
 
     #[test]
-    fn fold_hiding_the_selection_resets_to_zero_never_the_header() {
+    fn a_quest_leaving_the_log_resets_the_selection_to_zero_never_the_header() {
         // A header is never a selection: 0 lets `QuestLog_SetFirstValidSelection` pick a quest.
+        // A fold keeps the quest in the rows, so only an abandon or a turn-in gets here.
         let old = vec![header("A"), quest(7)];
-        let new = vec![header("A")]; // folded: the quest left the visible list
+        let new = vec![header("A")];
         assert_eq!(remap_selection(&old, &new, 2), 0);
     }
 
@@ -1822,9 +1845,15 @@ mod tests {
             t.quest_id = id;
             t.zone_or_sort = zos;
             t.title = title.into();
+            // A scales with the player: its log level is the player's 10 (`0x5e0d7a`). At the
+            // cap, 10, its money is the max-level amount (`0x5e4928`).
+            t.level = if id == A { -1 } else { 1 };
+            t.money_max_level = 250;
             log.insert_template(t);
             pairs.push((quest_id_field(slot), id));
         }
+        pairs.push((Field::UnitLevel.span().unwrap().index, 10));
+        pairs.push((Field::PlayerMaxLevel.span().unwrap().index, 10));
         app.insert_resource(log);
         app.world_mut().spawn((
             ObjectStore(ObjectFields::from_pairs(&pairs)),
@@ -1852,6 +1881,29 @@ mod tests {
 
         app.update();
         assert_eq!(app.world().resource::<QuestLog>().tooltip_rows.len(), 3);
+        let eval = |app: &App, lua: &str| {
+            app.world()
+                .non_send_resource::<UiScript>()
+                .eval::<i64>(lua)
+                .unwrap()
+        };
+        assert_eq!(eval(&app, "return select(2, GetQuestLogTitle(2))"), 10);
+        assert_eq!(eval(&app, "return GetQuestLogRewardMoney(2)"), 250);
+        // Folded, A moves after every visible row and stays selected there: numEntries drops
+        // (`0x5e0b80`) and a collapse never writes the selection `[0xc23ad8]`.
+        run(&mut app, "SelectQuestLogEntry(2); CollapseQuestHeader(1)");
+        app.update();
+        assert_eq!(
+            eval(
+                &app,
+                "return GetNumQuestLogEntries() * 10 + GetQuestLogSelection()"
+            ),
+            45
+        );
+        // A quest row, folded A's here, expands every header (`0x5e0c18` → `0x5e0c87`).
+        run(&mut app, "ExpandQuestHeader(5)");
+        app.update();
+        assert_eq!(eval(&app, "return GetNumQuestLogEntries()"), 5);
         run(&mut app, "SelectQuestLogEntry(4); SetAbandonQuest()");
         assert_eq!(
             app.world()
@@ -1879,6 +1931,10 @@ mod tests {
             matches!(sent.as_slice(), [ClientCommand::QuestlogRemove { slot: 1 }]),
             "the abandon removes B's slot (1), never C's (2): {sent:?}"
         );
+        // Out of range, a negative index collapses every header (`0x5e0c06` → `0x5e0c87`).
+        run(&mut app, "CollapseQuestHeader(-2.5)");
+        app.update();
+        assert_eq!(eval(&app, "return GetNumQuestLogEntries()"), 2);
     }
 
     // ── The accept line ─────────────────────────────────────────────────────────────────────────

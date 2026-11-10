@@ -61,7 +61,7 @@ pub struct QuestGreetingInfo {
     /// The row's quest and level off the wire; `GetActiveTitle`'s completion (`0x58bcb0`) and the
     /// trivial test (`0x58aba0`) read them against the log and the player at call time.
     pub quest_id: u32,
-    pub level: u32,
+    pub level: i32,
     pub daily: bool,
     pub repeatable: bool,
 }
@@ -262,39 +262,9 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         "QuestGetAutoAccept",
         lua.create_function(|lua, ()| {
             let model = lua.app_data_ref::<Model>().expect("model app_data");
-            Ok(model.quest.as_ref().is_some_and(|q| q.auto_accept))
+            Ok(flag(model.quest.as_ref().is_some_and(|q| q.auto_accept)))
         })?,
     )?;
-    g.set(
-        "GetAvailableQuestInfo",
-        lua.create_function(|lua, index: usize| {
-            let model = lua.app_data_ref::<Model>().expect("model app_data");
-            let row = model
-                .quest
-                .as_ref()
-                .and_then(|q| q.available_info.get(index.wrapping_sub(1)));
-            Ok(match row {
-                Some(row) => MultiValue::from_vec(vec![
-                    Value::Boolean(super::quest_log::quest_trivial(&model, row.level)),
-                    Value::Boolean(row.daily),
-                    Value::Boolean(row.repeatable),
-                ]),
-                None => MultiValue::from_vec(vec![Value::Nil, Value::Nil, Value::Nil]),
-            })
-        })?,
-    )?;
-    g.set(
-        "IsActiveQuestTrivial",
-        lua.create_function(|lua, index: usize| {
-            let model = lua.app_data_ref::<Model>().expect("model app_data");
-            Ok(model
-                .quest
-                .as_ref()
-                .and_then(|q| q.active_info.get(index.wrapping_sub(1)))
-                .map(|row| super::quest_log::quest_trivial(&model, row.level)))
-        })?,
-    )?;
-
     // ── Text getters ──
     fn install_text(lua: &Lua, name: &str, pick: fn(&QuestState) -> String) -> mlua::Result<()> {
         lua.globals().set(
@@ -622,11 +592,10 @@ mod tests {
             s.eval::<String>("return GetRewardTitle()").unwrap(),
             "Champion"
         );
-        assert!(s.eval::<bool>("local t,d,r = GetAvailableQuestInfo(1); return t and d and not r and IsActiveQuestTrivial(1) and QuestGetAutoAccept()").unwrap());
+        assert!(s.eval::<bool>("local t,d,r = GetAvailableQuestInfo(1); return t == 1 and d == 1 and r == nil and IsActiveQuestTrivial(1) == 1 and QuestGetAutoAccept() == 1").unwrap());
+        // Outside the list the trivial test runs on level 0 (`0x58dc1c`, `0x58d478`).
         assert!(s
-            .eval::<bool>(
-                "return GetAvailableQuestInfo(0) == nil and IsActiveQuestTrivial(2) == nil"
-            )
+            .eval::<bool>("return GetAvailableQuestInfo(0) == 1 and IsActiveQuestTrivial(2) == 1")
             .unwrap());
         s.set_quest(None);
         assert_eq!(s.eval::<u32>("return GetRewardHonor()").unwrap(), 0);

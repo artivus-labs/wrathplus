@@ -29,13 +29,17 @@ fn reopen_app() -> (App, crossbeam_channel::Receiver<ClientCommand>) {
         .init_resource::<crate::ui_trainer::TrainerErrors>()
         .init_resource::<GuidIndex>()
         .init_resource::<InteractNpc>()
+        .init_resource::<crate::names::NameCache>()
+        .init_resource::<crate::app_core::state::WorldStates>()
         .insert_non_send_resource(UiScript::new().unwrap())
         .add_systems(
             Update,
             (
                 close_npc_session_out_of_range::<GossipState>,
                 close_npc_session_out_of_range::<TrainerOpen>,
-                super::super::drain_gossip,
+                // The select reads the menu the VM was fed, as 12340's reads its own table.
+                super::super::feed_gossip,
+                super::super::select::drain_gossip,
                 crate::ui_trainer::drain_trainer,
                 crate::ui_session::feed_interact_npc,
             )
@@ -86,6 +90,7 @@ fn open_and_buy(app: &mut App, rx: &crossbeam_channel::Receiver<ClientCommand>) 
                 icon: 3,
                 coded: false,
                 message: "I require training, Llane.".into(),
+                ..Default::default()
             }],
             quests: vec![],
             quest_info: vec![],

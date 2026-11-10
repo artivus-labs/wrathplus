@@ -162,7 +162,6 @@ mod tests {
                 })
                 .to_vec(),
             num_quests: 3,
-            ..Default::default()
         };
         let mut watched = vec![818, 4242, 808];
         let mut seated = false;

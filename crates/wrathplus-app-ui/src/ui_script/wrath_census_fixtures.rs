@@ -279,13 +279,12 @@ pub(super) fn seed(s: &mut UiScript) {
     ]);
 
     // Gossip and the questgiver greeting.
+    let mut train = GossipOptionView::default();
+    (train.label, train.icon_type) = ("Train me".into(), "trainer".into());
     s.set_gossip(Some(GossipMenu {
         greeting: "Greetings".into(),
         quests: vec![],
-        options: vec![GossipOptionView {
-            label: "Train me".into(),
-            icon_type: "trainer".into(),
-        }],
+        options: vec![train],
     }));
 
     // The trainer.

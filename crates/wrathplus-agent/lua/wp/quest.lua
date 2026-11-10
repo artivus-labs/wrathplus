@@ -259,10 +259,10 @@ frame:SetScript("OnEvent", function(_, event)
     if job == "available" and (GetNumGossipAvailableQuests() or 0) > 0 then
       SelectGossipAvailableQuest(1)
     elseif job == "reward" then
-      -- Four values per active quest: title, level, low level, complete.
-      local active = { GetGossipActiveQuests() }
-      for i = 1, #active / 4 do
-        if active[i * 4] then return SelectGossipActiveQuest(i) end
+      -- Four values per active quest: title, level, trivial, complete; the flags are 1 or nil,
+      -- so the count comes from select("#"), as GossipFrame.lua reads it, not from `#`.
+      for i = 1, select("#", GetGossipActiveQuests()) / 4 do
+        if select(i * 4, GetGossipActiveQuests()) then return SelectGossipActiveQuest(i) end
       end
       CloseGossip()
     else

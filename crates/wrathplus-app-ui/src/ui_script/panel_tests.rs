@@ -8,6 +8,15 @@ use wrathplus_ui::script::{
 /// warns under this loader, so a list without `UIPanelTemplates.xml` loses scroll bars silently.
 use super::test_ui::load_ui as load_xml;
 
+/// A gossip option with no confirm box and no code.
+fn option(label: &str, icon_type: &str) -> GossipOptionView {
+    GossipOptionView {
+        label: label.into(),
+        icon_type: icon_type.into(),
+        ..Default::default()
+    }
+}
+
 /// The rect of the frame sized `w` by `h`, from the `QuadContent::Frame` quad every frame emits.
 fn frame_rect(quads: &[ExtractedQuad], w: f32, h: f32) -> wrathplus_ui::layout::Rect {
     quads
@@ -62,14 +71,8 @@ fn shipped_gossip_frame_drives_end_to_end() {
         greeting: "Greetings, traveler. How may I help you?".into(),
         quests: Vec::new(),
         options: vec![
-            GossipOptionView {
-                label: "Let me browse your goods.".into(),
-                icon_type: "vendor".into(),
-            },
-            GossipOptionView {
-                label: "I wish to sign the petition.".into(),
-                icon_type: "gossip".into(),
-            },
+            option("Let me browse your goods.", "vendor"),
+            option("I wish to sign the petition.", "gossip"),
         ],
     }));
     s.fire_event("GOSSIP_SHOW", vec![]);
@@ -173,7 +176,7 @@ fn shipped_gossip_frame_drives_end_to_end() {
     );
     s.mouse_button(cx, cy, "LeftButton", true);
     s.mouse_button(cx, cy, "LeftButton", false);
-    assert_eq!(s.take_gossip_selects(), vec![1]);
+    assert_eq!(s.take_gossip_selects(), vec![(1, None)]);
     assert!(!s.take_gossip_close());
 
     // The close button hides the window; its OnHide calls `CloseGossip()` (`GossipFrame.xml:455`).
@@ -204,26 +207,24 @@ fn shipped_gossip_frame_renders_quest_rows_above_options() {
     load_xml(&mut s, r"Interface\FrameXML\StaticPopup.xml");
     load_xml(&mut s, "Interface\\FrameXML\\GossipFrame.xml");
 
+    // Level 60 rows, the VM's default player's own, so neither greys as trivial (`0x58aba0`).
     s.set_gossip(Some(GossipMenu {
         greeting: "A word, traveler.".into(),
         quests: vec![
             GossipQuestRow {
                 title: "Report to Goldshire".into(),
-                level: 5,
+                level: 60,
                 active: true,
                 ..Default::default()
             },
             GossipQuestRow {
                 title: "A Threat Within".into(),
-                level: 7,
+                level: 60,
                 active: false,
                 ..Default::default()
             },
         ],
-        options: vec![GossipOptionView {
-            label: "Let me browse your goods.".into(),
-            icon_type: "vendor".into(),
-        }],
+        options: vec![option("Let me browse your goods.", "vendor")],
     }));
     s.fire_event("GOSSIP_SHOW", vec![]);
     assert!(s.errors().is_empty(), "script errors: {:?}", s.errors());
@@ -330,10 +331,7 @@ fn shipped_gossip_rows_grow_to_their_wrapped_labels() {
     load_xml(&mut s, "Interface\\FrameXML\\GossipFrame.xml");
 
     // Three options that wrap at the label's 275 px (`GossipFrame.xml:114`).
-    let long = |t: &str| GossipOptionView {
-        label: t.into(),
-        icon_type: "gossip".into(),
-    };
+    let long = |t: &str| option(t, "gossip");
     s.set_gossip(Some(GossipMenu {
         greeting: "Make your choice!".into(),
         quests: Vec::new(),
@@ -477,11 +475,8 @@ fn shipped_panel_slot_replaces_gossip_with_merchant() {
     s.set_gossip(Some(GossipMenu {
         greeting: "Well met.".into(),
         quests: Vec::new(),
-        options: vec![GossipOptionView {
-            label: "Let me browse your goods.".into(),
-            // A lone non-gossip option is taken without the frame (`GossipFrame.lua:11-17`).
-            icon_type: "gossip".into(),
-        }],
+        // A lone non-gossip option is taken without the frame (`GossipFrame.lua:11-17`).
+        options: vec![option("Let me browse your goods.", "gossip")],
     }));
     s.fire_event("GOSSIP_SHOW", vec![]);
     assert!(s.errors().is_empty(), "script errors: {:?}", s.errors());
@@ -693,10 +688,8 @@ fn gossip_bank_option_hands_the_left_slot_to_the_bank() {
         s.set_gossip(Some(GossipMenu {
             greeting: "Welcome to the bank of Ironforge!".into(),
             quests: Vec::new(),
-            options: vec![GossipOptionView {
-                label: "I would like to check my deposit box.".into(),
-                icon_type: "gossip".into(), // a lone "money" row is taken without the frame
-            }],
+            // A lone "money" row is taken without the frame.
+            options: vec![option("I would like to check my deposit box.", "gossip")],
         }));
         s.fire_event("GOSSIP_SHOW", vec![]);
         assert!(s

@@ -2,12 +2,16 @@
 
 /// One `SMSG_GOSSIP_MESSAGE` option: `index` is echoed as `gossipListId` on select, `icon` is a
 /// `GOSSIP_ICON_*` (0 chat, 1 vendor, 2 taxi, 3 trainer, …), `coded` asks for a code.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GossipOption {
     pub index: u32,
     pub icon: u8,
     pub coded: bool,
     pub message: String,
+    /// The confirm box's price in copper and its text, empty for no box (12340 keeps a pointer
+    /// only for a non-empty one, `0x58b2cb`).
+    pub box_money: u32,
+    pub box_text: String,
 }
 
 /// One quest in `SMSG_GOSSIP_MESSAGE`'s quest list.
@@ -15,7 +19,7 @@ pub struct GossipOption {
 pub struct QuestOption {
     pub quest_id: u32,
     pub icon: u32,
-    pub level: u32,
+    pub level: i32,
     pub title: String,
 }
 

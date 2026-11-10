@@ -37,9 +37,8 @@ fn the_greeting_marks_a_complete_quest_yellow_and_an_unfinished_one_grey() {
             entry(5, false, 0),
         ],
         num_quests: 3,
-        ..Default::default()
     });
-    let row = |quest_id: u32, level: u32| QuestGreetingInfo {
+    let row = |quest_id: u32, level: i32| QuestGreetingInfo {
         quest_id,
         level,
         ..Default::default()

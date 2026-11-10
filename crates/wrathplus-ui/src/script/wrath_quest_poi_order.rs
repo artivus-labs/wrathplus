@@ -79,7 +79,6 @@ mod tests {
         s.set_quest_log(QuestLogState {
             entries: vec![quest(0, true), quest(808, false), quest(826, false)],
             num_quests: 2,
-            ..Default::default()
         });
         let ask = |s: &UiScript, a: &str| {
             s.eval::<String>(&format!("return select('#', QuestPOIGetQuestIDByIndex({a}))..' '..tostring((QuestPOIGetQuestIDByIndex({a})))")).unwrap()

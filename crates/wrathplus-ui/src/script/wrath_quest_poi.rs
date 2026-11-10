@@ -483,7 +483,6 @@ mod tests {
                 },
             ],
             num_quests: 3,
-            ..Default::default()
         });
         // Map 0 projects to the displayed map; anything else is off it.
         s.set_world_loc_projector(Box::new(|_, map, x, y| {

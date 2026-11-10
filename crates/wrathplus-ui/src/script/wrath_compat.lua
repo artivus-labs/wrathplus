@@ -188,6 +188,8 @@ do
     PushToTalkButton = "`",
     PushToTalkSound = "0",
     questFadingDisable = "1",
+    -- `0x51df24`: the header fold bits, default "0"; WrathPlus keeps the folds by header title.
+    questLogCollapseFilter = "0",
     questPOI = "1",
     removeChatDelay = "0",
     rotateMinimap = "0",

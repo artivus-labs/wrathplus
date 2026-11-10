@@ -124,7 +124,7 @@ fn gossip_menu(
     npc: u64,
     text_id: u32,
     options: Vec<GossipOption>,
-    quests: Vec<(u32, u32, u32, String)>,
+    quests: Vec<(u32, u32, i32, String)>,
     gossip: &mut GossipState,
     net_commands: &NetCommands,
     index: &GuidIndex,

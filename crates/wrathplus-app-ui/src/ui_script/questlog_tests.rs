@@ -135,7 +135,6 @@ fn entries(n: u32) -> QuestLogState {
     QuestLogState {
         num_quests: n,
         entries,
-        hidden_quest_ids: Vec::new(),
     }
 }
 
@@ -610,7 +609,6 @@ fn overflowing_entry() -> QuestLogState {
         .collect();
     QuestLogState {
         num_quests: 1,
-        hidden_quest_ids: Vec::new(),
         entries: vec![QuestLogEntryView {
             quest_id: 1,
             title: "A Very Long Quest".into(),

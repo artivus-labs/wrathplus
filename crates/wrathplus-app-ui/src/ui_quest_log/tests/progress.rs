@@ -28,7 +28,6 @@ fn state(entries: Vec<QuestLogEntryView>) -> QuestLogState {
     QuestLogState {
         num_quests: entries.iter().filter(|e| !e.is_header).count() as u32,
         entries,
-        hidden_quest_ids: Vec::new(),
     }
 }
 

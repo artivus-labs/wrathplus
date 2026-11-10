@@ -920,7 +920,7 @@ pub enum SessionEvent {
         npc: u64,
         text_id: u32,
         options: Vec<GossipOption>,
-        quests: Vec<(u32, u32, u32, String)>,
+        quests: Vec<(u32, u32, i32, String)>,
         quest_info: Vec<crate::types::WrathQuestInfo>,
     },
     /// An NPC's `!`/`?` marker (`SMSG_QUESTGIVER_STATUS`), a [`crate::types::dialog_status`].

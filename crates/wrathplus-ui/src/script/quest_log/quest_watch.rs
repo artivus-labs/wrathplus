@@ -54,8 +54,7 @@ pub(crate) fn restore(model: &mut Model, ids: &[u32]) {
             .quest_log
             .entries
             .iter()
-            .any(|e| !e.is_header && e.quest_id == id)
-            || model.quest_log.hidden_quest_ids.contains(&id);
+            .any(|e| !e.is_header && e.quest_id == id);
         let watches = &mut model.quest_watches;
         if in_log && !watches.ids.contains(&id) && watches.ids.len() < MAX_WATCHES {
             watches.ids.push(id);
@@ -70,6 +69,19 @@ fn watch_id_at(model: &Model, index: u32) -> Option<u32> {
         .and_then(|n| model.quest_log.entries.get(n))
         .filter(|e| !e.is_header)
         .map(|e| e.quest_id)
+}
+
+/// The quest `AddQuestWatch` and `RemoveQuestWatch` name (`0x5e67c0`, `0x5df700`): a number
+/// truncates (the x87 control word set to chop) to a row, a non-number is the selection
+/// (`0x5e6825`, `0x5df764`).
+fn watch_target(lua: &Lua, model: &Model, row: Value) -> mlua::Result<Option<u32>> {
+    let index = match lua.coerce_number(row)? {
+        Some(n) => n.trunc() as i64,
+        None => i64::from(model.quest_log_selection),
+    };
+    Ok(u32::try_from(index)
+        .ok()
+        .and_then(|i| watch_id_at(model, i)))
 }
 
 impl crate::script::UiScript {
@@ -108,14 +120,15 @@ pub(crate) fn quest_done(model: &Model, quest_id: u32) -> bool {
 }
 
 /// `0x58aba0`, the grey-quest test: the player is above the quest's level by more than
-/// `[0xa12fd0][player level / 5]` (4, 4, 5, 5, 6, 6, 7, 7, then 8). No player, not trivial.
-pub(crate) fn quest_trivial(model: &Model, quest_level: u32) -> bool {
-    const MARGIN: [u32; 8] = [4, 4, 5, 5, 6, 6, 7, 7];
-    let Some(player) = model.unit("player").map(|u| u.level) else {
+/// `[0xa12fd0][player level / 5]` (4, 4, 5, 5, 6, 6, 7, 7, then 8), compared signed. A level -1
+/// quest scales with the player and is never trivial (`0x58aba7`). No player, not trivial.
+pub(crate) fn quest_trivial(model: &Model, quest_level: i32) -> bool {
+    const MARGIN: [i64; 8] = [4, 4, 5, 5, 6, 6, 7, 7];
+    let Some(player) = model.unit("player").map(|u| i64::from(u.level)) else {
         return false;
     };
     let margin = MARGIN.get(player as usize / 5).copied().unwrap_or(8);
-    quest_level + margin < player
+    quest_level != -1 && i64::from(quest_level) + margin < player
 }
 
 pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
@@ -172,11 +185,12 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     )?;
     g.set(
         "AddQuestWatch",
-        lua.create_function(|lua, (i, seconds): (u32, Option<f64>)| {
+        lua.create_function(|lua, (i, seconds): (Value, Value)| {
             let now = super::super::clock::now(lua);
-            let seconds = seconds.map_or(0, |s| s.round() as i64);
+            // Seconds truncate too (`0x5e6849`-`0x5e6861`); a non-number is 0, permanent.
+            let seconds = lua.coerce_number(seconds)?.map_or(0, |s| s.trunc() as i64);
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-            let Some(id) = watch_id_at(&model, i) else {
+            let Some(id) = watch_target(lua, &model, i)? else {
                 return Ok(());
             };
             let arm = (seconds != 0).then_some(now + seconds as f64);
@@ -202,16 +216,17 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     )?;
     g.set(
         "RemoveQuestWatch",
-        lua.create_function(|lua, i: u32| {
+        lua.create_function(|lua, i: Value| {
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-            if let Some(id) = watch_id_at(&model, i) {
+            if let Some(id) = watch_target(lua, &model, i)? {
                 model.quest_watches.ids.retain(|w| *w != id);
                 model.quest_watches.expiry.remove(&id);
             }
             Ok(())
         })?,
     )?;
-    // The watched quest's current 1-based row, nil when it is not a visible row.
+    // The watched quest's current 1-based row among all rows, folded ones included
+    // (`0x5df800`-`0x5df819` loop to `[0xc23ad0]`), nil when it left the log.
     g.set(
         "GetQuestIndexForWatch",
         lua.create_function(|lua, w: usize| {
@@ -302,5 +317,15 @@ mod tests {
         s.run("AddQuestWatch(1, 300) AddQuestWatch(1)").unwrap();
         s.tick(400.0);
         assert!(watched(&s, 1), "a re-add without seconds made it permanent");
+
+        // No row is the selection (`0x5e6825`, `0x5df764`), and the seconds truncate (`0x5e6849`).
+        s.run("RemoveQuestWatch(2) SelectQuestLogEntry(2) AddQuestWatch(nil, 10.9)")
+            .unwrap();
+        s.tick(10.5);
+        assert!(!watched(&s, 2), "10.9 s armed 10 s, lapsed by 10.5 s");
+        s.run("AddQuestWatch()").unwrap();
+        assert!(watched(&s, 2));
+        s.run("RemoveQuestWatch()").unwrap();
+        assert!(!watched(&s, 2));
     }
 }

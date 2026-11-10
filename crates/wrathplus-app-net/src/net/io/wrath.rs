@@ -3082,9 +3082,9 @@ pub(super) fn session_packet(command: ClientCommand) -> (u32, Vec<u8>) {
             (s::CMSG_CANCEL_AURA, s::encode_cancel_aura(spell_id))
         }
         ClientCommand::GossipHello { guid } => (n::CMSG_GOSSIP_HELLO, guid.to_le_bytes().to_vec()),
-        ClientCommand::GossipSelectOption { guid, option } => (
+        ClientCommand::GossipSelectOption { guid, option, code } => (
             n::CMSG_GOSSIP_SELECT_OPTION,
-            n::encode_gossip_select_option(guid, option),
+            n::encode_gossip_select_option(guid, option, code.as_deref()),
         ),
         ClientCommand::NpcTextQuery { text_id, guid } => (
             n::CMSG_NPC_TEXT_QUERY,

@@ -274,7 +274,7 @@ pub struct GossipState {
     /// The packet's quest rows, `(quest_id, dialog-status icon, level, title)`. The level is kept
     /// because `GetGossipAvailableQuests` and `GetGossipActiveQuests` return `(title, level)`
     /// pairs, walked in twos by stock `GossipFrame.lua` (lines 66 and 90).
-    pub quests: Vec<(u32, u32, u32, String)>,
+    pub quests: Vec<(u32, u32, i32, String)>,
     pub quest_info: Vec<wrathplus_protocol::types::WrathQuestInfo>,
     pub records: HashMap<u32, Vec<NpcTextBlock>>,
 }

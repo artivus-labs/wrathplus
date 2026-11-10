@@ -133,10 +133,7 @@ fn guard_poi_probe(
                     return;
                 };
                 info!("PROBE guardpoi: clicking \"{OPTION_LABEL}\" (option {option})");
-                let _ = net.0.send(ClientCommand::GossipSelectOption {
-                    guid: guard,
-                    option,
-                });
+                let _ = net.0.send(ClientCommand::gossip_select(guard, option));
                 probe.phase = Phase::Asked { sent_at: now };
             } else if now - sent_at > 8.0 {
                 error!("PROBE guardpoi: FAILURE — SMSG_GOSSIP_MESSAGE never arrived");

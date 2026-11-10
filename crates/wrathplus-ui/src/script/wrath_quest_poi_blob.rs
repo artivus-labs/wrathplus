@@ -336,7 +336,6 @@ mod tests {
                 ..Default::default()
             }],
             num_quests: 1,
-            ..Default::default()
         });
         s.set_world_loc_projector(Box::new(|_, _, x, y| Some((x / 100.0, y / 100.0))));
         let area = WorldMapAreaView {

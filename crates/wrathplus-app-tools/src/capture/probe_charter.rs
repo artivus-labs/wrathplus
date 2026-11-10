@@ -1140,10 +1140,7 @@ fn assert_icon_and_select(
         probe.phase = Phase::Done;
         return;
     }
-    let _ = net.0.send(ClientCommand::GossipSelectOption {
-        guid: npc,
-        option: opt.index,
-    });
+    let _ = net.0.send(ClientCommand::gossip_select(npc, opt.index));
     info!(
         "PROBE_CHARTER: 4 (registrar) GossipSelectOption({npc:#x}, wire index {}) sent for {:?}",
         opt.index, opt.message

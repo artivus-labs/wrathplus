@@ -75,7 +75,7 @@ pub struct QuestListEntry {
     pub wrath: Option<WrathQuestInfo>,
     pub quest_id: u32,
     pub icon: u32,
-    pub level: u32,
+    pub level: i32,
     pub title: String,
 }
 

@@ -647,7 +647,7 @@ pub(crate) struct Model {
 
     /// The open gossip menu, the `SelectGossipOption` calls and whether `CloseGossip` ran.
     pub(crate) gossip: Option<gossip::GossipMenu>,
-    pub(crate) gossip_selects: Vec<u32>,
+    pub(crate) gossip_selects: Vec<(u32, Option<String>)>,
     pub(crate) gossip_close: bool,
     /// `SelectGossipQuest` 1-based rows, each sent as `CMSG_QUESTGIVER_QUERY_QUEST` for its quest.
     pub(crate) gossip_quest_selects: Vec<u32>,
@@ -859,7 +859,8 @@ pub(crate) struct Model {
     pub(crate) pet_spell_tooltip_asks: HashSet<u32>,
     /// The tooltips whose spell render missed its view, re-rendered when the app answers.
     pub(crate) spell_tooltip_waits: HashMap<FrameHandle, super::tooltip_spell::SpellWait>,
-    /// `CollapseQuestHeader`/`ExpandQuestHeader` as `(1-based entry, collapse)`, entry 0 for all.
+    /// `CollapseQuestHeader`/`ExpandQuestHeader` as `(1-based entry, collapse)`; any entry not a
+    /// header row, 0 among them, is every header.
     pub(crate) quest_log_collapses: Vec<(u32, bool)>,
     /// The quest watch set, pruned when a quest leaves the log.
     pub(crate) quest_watches: super::quest_log::QuestWatches,

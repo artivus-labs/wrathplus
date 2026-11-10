@@ -182,7 +182,11 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             else {
                 return Ok(0.0);
             };
-            let headers = entries[..=i].iter().filter(|e| e.is_header).count();
+            // A folded quest answers its own header's place (`0x5deae0`), not the headers above.
+            let headers = match entries[i].folded_under {
+                0 => entries[..=i].iter().filter(|e| e.is_header).count(),
+                h => h as usize,
+            };
             Ok(headers as f64)
         })?,
     )?;
@@ -344,7 +348,6 @@ mod tests {
                 },
             ],
             num_quests: 1,
-            ..Default::default()
         });
         s.run(
             "GetQuestGreenRange = function() return 5 end GetItemCount = function() return 0 end",
@@ -364,6 +367,18 @@ mod tests {
         assert_eq!(s.eval::<f64>("return GetQuestSortIndex(2)").unwrap(), 1.0);
         assert_eq!(difficulty_color(10, 20, 5), "|cff808080");
         assert_eq!(difficulty_color(15, 20, 5), "|cff40c040");
+        // Folded under the first of two headers, Wolves answers 1, not both (`0x5deae0`).
+        {
+            let mut m = s.model_mut();
+            let mut wolves = m.quest_log.entries.remove(1);
+            wolves.folded_under = 1;
+            let westfall = QuestLogEntryView {
+                is_header: true,
+                ..Default::default()
+            };
+            m.quest_log.entries.extend([westfall, wolves]);
+        }
+        assert_eq!(s.eval::<f64>("return GetQuestSortIndex(3)").unwrap(), 1.0);
     }
 
     #[test]
@@ -430,7 +445,6 @@ mod tests {
                 ..Default::default()
             }],
             num_quests: 1,
-            ..Default::default()
         };
         s.set_quest_log(log(Some(spell(Some("Fireball")))));
         assert!(
