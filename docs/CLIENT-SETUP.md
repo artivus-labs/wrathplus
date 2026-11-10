@@ -56,7 +56,8 @@ sudo apt-get update
 sudo apt-get install build-essential pkg-config libasound2-dev libudev-dev libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev libxi-dev libxrandr-dev libvulkan1
 ```
 
-Install rustup separately and use your distribution's GPU driver instructions. Other Linux
+Install rustup separately and use your distribution's GPU driver instructions. A headless agent
+client needs neither a desktop nor a GPU: see [LINUX-HEADLESS.md](LINUX-HEADLESS.md). Other Linux
 distributions need equivalent packages; Manager checks tools and pkg-config capabilities, not
 distribution names. Display/GPU health and all transitive build dependencies still require an
 actual build and run.
