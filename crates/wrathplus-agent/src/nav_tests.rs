@@ -320,9 +320,10 @@ fn a_cinematic_refuses_the_walk_and_says_how_to_end_it() {
     let lua = Lua::new();
     world::install(&lua, &world_handles).unwrap();
     install(&lua, &handles, &world_handles).unwrap();
+    // Asked twice in one chunk (as a script retrying would), before the walker's frame.
     let (route, why, status, note, flagged): (Option<Table>, String, String, String, bool) = lua
         .load(
-            "local route, why = AgentMoveTo(10, 0, 0) local w = AgentWalk() \
+            "local route, why = AgentMoveTo(10, 0, 0) AgentMoveTo(11, 0, 0) local w = AgentWalk() \
              return route, why, w.status, w.note, w.cinematic",
         )
         .eval()
@@ -334,8 +335,9 @@ fn a_cinematic_refuses_the_walk_and_says_how_to_end_it() {
         (status.as_str(), note.as_str(), flagged),
         ("failed", why.as_str(), true)
     );
-    // Announced like any refused walk, so whoever waits on it is woken: once, however often a
-    // loop asks again while the cinematic lasts.
+    // Announced like any refused walk, so whoever waits on it is woken (the second refusal did
+    // not clear the first's announcement): once, however often a loop asks again while the
+    // cinematic lasts.
     assert!(std::mem::take(&mut handles.walk.lock().unwrap().failed));
     lua.load("AgentMoveTo(10, 0, 0) AgentMoveTo(12, 0, 0)")
         .exec()
