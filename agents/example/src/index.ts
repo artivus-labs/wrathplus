@@ -1,7 +1,8 @@
 #!/usr/bin/env bun
 // The example agent: Claude plans and writes Lua through the client's MCP tools; game events
 // arrive as messages while it works. Nobody operates it: it decides everything itself. A line typed
-// on stdin reaches it as an outside note, which it is told never to wait for.
+// on stdin, or sent with `bun run agent note <name> "text"`, reaches it as an outside note, which it
+// is told never to wait for.
 //
 //   WRATHPLUS_AGENT_URL=http://127.0.0.1:17950 WRATHPLUS_AGENT_TOKEN=… \
 //     bun run agents/example/src/index.ts "Reach level 5 in Northshire"
@@ -18,9 +19,11 @@ import { Jev } from "./jev.ts";
 import { controlFiles, ModuleVersions } from "./modules.ts";
 import { claudeAuth, loadEnv } from "./env.ts";
 import { Notes } from "./notes.ts";
+import { outsideNote, tailNotes } from "./outside.ts";
+import { haikuSpeak } from "./say.ts";
 import { Policy } from "./policy.ts";
 import { kickoff } from "./prompt.ts";
-import { Reflection, XP_LUA, type XpSample } from "./reflect.ts";
+import { FACTS_LUA, Reflection, XP_LUA, type XpSample } from "./reflect.ts";
 import { RunnerLock } from "./runner.ts";
 import { SmallTalk, Triage } from "./triage.ts";
 import { HoldGate, idleWakeRefusal } from "./waits.ts";
@@ -151,6 +154,7 @@ export async function runAgent(config: Config, options: RunOptions): Promise<voi
           quiet: () => !inTurn,
           fast: () => (policy ? { decisions: policy.decisions, holds: policy.holds, time: policy.time } : undefined),
           versions,
+          memory: () => notes.memory(),
           periodMs: Number(process.env.WRATHPLUS_AGENT_REFLECT_MINUTES ?? 30) * 60_000,
         });
   if (reflection) {
@@ -162,6 +166,12 @@ export async function runAgent(config: Config, options: RunOptions): Promise<voi
           .then((r) => {
             const xp = r.ok ? (r.values?.[0] as XpSample | undefined) : undefined;
             if (xp && typeof xp.level === "number") reflection.sample(xp);
+          })
+          .catch(() => undefined);
+        void lua(FACTS_LUA)
+          .then((r) => {
+            const facts = r.ok ? r.values?.[0] : undefined;
+            if (facts && typeof facts === "object") reflection.observe(facts as Record<string, unknown>);
           })
           .catch(() => undefined);
       }
@@ -181,7 +191,10 @@ export async function runAgent(config: Config, options: RunOptions): Promise<voi
         )
       : undefined;
   // Small talk (`triage.ts`): sorted by Jev, or batched without it; never one planner turn a line.
-  const chatter = new SmallTalk(jev ? { jev, lua } : {});
+  // With Jev, a remark that wants words back gets one line in character from Claude Haiku
+  // (`say.ts`); WRATHPLUS_AGENT_SAY=0 keeps it to emotes.
+  const speaking = process.env.WRATHPLUS_AGENT_SAY !== "0" ? { speak: haikuSpeak(), memory: () => notes.memory() } : {};
+  const chatter = new SmallTalk(jev ? { jev, lua, ...speaking } : {});
   const opening = kickoff(config.goal, notes.briefing());
   inbox.push(opening);
   let self: string | undefined;
@@ -236,14 +249,16 @@ export async function runAgent(config: Config, options: RunOptions): Promise<voi
       tell("events", text);
     },
   });
-  // Outside notes from stdin: rare, and never promised (the prompt says not to wait for one).
+  // Outside notes from stdin and from `bun run agent note` (`outside.ts`): rare, and never promised
+  // (the prompt says not to wait for one).
   if (options.stdin ?? true) {
     void (async () => {
       for await (const line of console) {
-        if (line.trim()) tell("outside note", `Outside note (nobody is waiting for a reply, and no further note is promised): ${line.trim()}`);
+        if (line.trim()) tell("outside note", outsideNote(line));
       }
     })();
   }
+  tailNotes(notes.home, (text) => tell("outside note", text), abortController.signal);
   const mcpEntry = fileURLToPath(new URL("../../mcp/src/index.ts", import.meta.url));
   let checkIn: ReturnType<typeof setTimeout> | undefined;
   console.log(`WrathPlus example agent · ${config.model} (${claudeAuth()}) · ${config.url}\nGoal: ${config.goal}\n`);

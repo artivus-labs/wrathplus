@@ -213,6 +213,18 @@ mod goals_tests;
 mod hand_in_tests;
 
 #[cfg(test)]
+#[path = "quest_skip_tests.rs"]
+mod quest_skip_tests;
+
+#[cfg(test)]
+#[path = "zone_guard_tests.rs"]
+mod zone_guard_tests;
+
+#[cfg(test)]
+#[path = "hot_loop_tests.rs"]
+mod hot_loop_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

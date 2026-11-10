@@ -251,8 +251,10 @@ if Agent and Agent.intent then
       return "You have levelled since you last trained: learn your new skills from "
         .. (t and t.name or "your trainer") .. " (" .. (t and t.title or "") .. ")."
     end,
+    -- Not in a fight: the walk to the trainer would only fail.
     available = function()
-      return U.train and (UnitLevel("player") or 1) > (U.trained_level or 1) and U.trainer(60) ~= nil
+      return U.train and not UnitAffectingCombat("player") and (UnitLevel("player") or 1) > (U.trained_level or 1)
+        and U.trainer(60) ~= nil
     end,
     run = function()
       talking_since = GetTime()

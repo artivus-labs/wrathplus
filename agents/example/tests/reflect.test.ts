@@ -171,3 +171,51 @@ test("without the fast tier, a long window with no experience, kill or quest is 
   expect(stalled({ ...score, idle_pct: 50, hold_pct: 29 }, { xp: 0, kills: 0, quests: 0 })).toBeNull();
   expect(stalled({ ...score, idle_pct: 50, hold_pct: 30 }, { xp: 900, kills: 4, quests: 0 })).toContain("did nothing for 80%");
 });
+
+test("a built-in that keeps doing nothing is named with the agent's own loaded modules", () => {
+  const { clock, r } = setup();
+  clock.now = 10 * MIN;
+  const noop = (minutes: number) =>
+    event("AGENT_NOOP", ["pick_up_quests", `Smith Argus offered nothing we took; skipping them for ${minutes} min`, "autoexec, decline_elmore, pickup_filter"]);
+  r.notice([noop(2)]);
+  // Once is no pattern.
+  expect(r.reflect()).not.toContain("Built-ins that keep doing nothing");
+  r.notice([noop(2), noop(4), event("AGENT_NOOP", ["hand_in_quests", "Marshal Dughan took nothing we handed in; skipping them for 2 min", ""])]);
+  const block = r
+    .reflect()
+    .split("\n\n")
+    .find((p) => p.startsWith("Built-ins that keep doing nothing"));
+  expect(block).toBe(
+    [
+      "Built-ins that keep doing nothing:",
+      "- pick_up_quests ×2, last: Smith Argus offered nothing we took; skipping them for 4 min",
+      "Your own modules loaded in the client: autoexec, decline_elmore, pickup_filter. Does one of them cause this: a handler that declines, closes or skips what the built-in does, or a wrapper that replaces it? Read them (modules) before you blame the built-in or the game, and fix or roll back the one that does, rather than adding another.",
+    ].join("\n"),
+  );
+});
+
+test("a note that says nothing is left is set against the live facts that say otherwise", () => {
+  let memory = [
+    "- Elwynn: Goldshire is exhausted for level 11 (only L5 spiders, boars, sheep, wolves).",
+    "- Lyria trains warriors in Goldshire.",
+    "Review: Goldshire quests are exhausted; Kobold Candles needs the mine.",
+  ].join("\n");
+  const { clock, r } = setup({ memory: () => memory });
+  clock.now = 10 * MIN;
+  // No facts read yet: nothing to compare.
+  expect(r.reflect()).not.toContain("Your notes and the game disagree");
+  r.observe({ quest_giver_near: false, objectives_open: true, mobs_for_xp: true, zone_fit: "low" });
+  const said = r
+    .reflect()
+    .split("\n\n")
+    .find((p) => p.startsWith("Your notes and the game disagree"));
+  expect(said).toBe(
+    'Your notes and the game disagree. MEMORY.md says "- Elwynn: Goldshire is exhausted for level 11 (only L5 spiders, boars, sheep, wolves)." and "Review: Goldshire quests are exhausted; Kobold Candles needs the mine.", but the client says now: your quest log has objectives still open (objectives_open); mobs that give you XP are in sight (mobs_for_xp). The facts are live and the note is old: check the note against them, and correct or remove it (memory_write) before you act on it.',
+  );
+  // Facts that agree with the note, or a note with no such words, say nothing.
+  r.observe({ quest_giver_near: false, objectives_open: false, mobs_for_xp: false });
+  expect(r.reflect()).not.toContain("Your notes and the game disagree");
+  memory = "- Lyria trains warriors in Goldshire.";
+  r.observe({ mobs_for_xp: true });
+  expect(r.reflect()).not.toContain("Your notes and the game disagree");
+});

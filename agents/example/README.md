@@ -42,6 +42,14 @@ On the public beta realm, see [Play on the WrathPlus open beta](../../docs/BETA.
     at it) does not wake it line by line: with the fast tier Jev waves, nods, says hello, ignores
     it or passes on what needs thought (`SmallTalk` in `src/triage.ts`); without it the lines ride
     along with the next wake-up and wake the planner by themselves at most once in ten minutes.
+    When Jev judges that a remark or greeting wants a spoken reply in character rather than an
+    emote, one short Claude Haiku 5.5 call (`src/say.ts`, the same login as the planner, no
+    tools, no session) writes the line from the character (name, race, class, level, zone), who
+    spoke and what, the last few lines of chat and the last few hundred characters of MEMORY.md;
+    it is cut to one plain line of at most 120 characters and said in `/say`. At most one such
+    line every 30 s and 20 an hour, one answer per speaker per 2 minutes; a failure or a line
+    not written within 10 s becomes a wave or a nod. Each appears under "Said to you nearby" as
+    `said "<line>" to <speaker>`. `WRATHPLUS_AGENT_SAY=0` keeps small talk to emotes.
   - **The fast tier** (`src/policy.ts`, on when `TYPESAFE_API_KEY` is set) asks Jev, TypeSafe's
     System One decision model, only when woken: an activity ended (`AGENT_INTENT_DONE`), the
     planner sent a plan, a decision opened, combat started or ended, death, loot, gossip or quest
@@ -83,6 +91,9 @@ On the public beta realm, see [Play on the WrathPlus open beta](../../docs/BETA.
   a digest of the window (deaths and causes, fight reviews, goals, failed actions, Jev's choices
   and holds, idle time, Lua and game errors) with a scoreboard (XP/hour, deaths, quests, idle %),
   and works on its harness like a coding agent: small change, test, deploy, watch, roll back.
+  A built-in that keeps ending as a no-op (a quest giver visit that changes nothing) is named
+  with the agent's own loaded modules as the first suspects, and a MEMORY.md line that says an
+  area is exhausted or unreachable is set against the live goal facts that say otherwise.
   Scores go to `<notes>/reflections.jsonl`. Every `save_module` is kept as a version in
   `<notes>/modules/<name>/` with `changelog.jsonl` (`src/modules.ts`); `module_versions`,
   `note_change` and `rollback_module` are its tools.
@@ -99,6 +110,7 @@ cp ../.env.example ../.env          # optional: your own keys (see above); it ma
 bun run agent add Scout             # a realm account (AGENTSCOUT), control port and token
 bun run agent run Scout --character Scoutly "Reach level 5 in Northshire."
 bun run agent list                  # every agent, its client and whether a planner drives it
+bun run agent note Scout "text"     # an outside note for a running agent
 bun run agent dashboard             # http://127.0.0.1:17900: every running agent on one page
 ```
 
@@ -109,6 +121,12 @@ bun run agent dashboard             # http://127.0.0.1:17900: every running agen
   it is told is rare and never to wait for. A client `run`
   started is restarted into the same character if it exits or is disconnected (back at the login
   screen), so the planner carries on.
+- **Outside notes without a terminal:** `bun run agent note Scout "The Westfall road is open."`
+  reaches a running agent the same way, worded so that nobody is waiting for a reply. It appends to
+  `notes/outside.jsonl` in the agent's state folder, which the running agent reads every second
+  from where it was when it started; a note for an agent nobody drives is refused, since it would
+  never be read. Use it when the agent's stdin is not yours to type into (started by the Manager,
+  a detached pane).
 - **Several at once:** one `run` per terminal; each agent has its own account and port.
 - **Watching:** each client serves a live view (`run` prints its address); the dashboard shows
   all of them side by side, with what each planner last said and did.
@@ -128,6 +146,7 @@ bun run agent dashboard             # http://127.0.0.1:17900: every running agen
 | `WOW_NAV_MMAPS` | the managed server's `mmaps` | the navmesh for `AgentMoveTo` |
 | `WRATHPLUS_AGENT_MODEL` | `claude-haiku-5-5` | when `--model` is not given |
 | `WRATHPLUS_AGENT_CHECKIN_SECONDS` | `0` (off) | idle check-in |
+| `WRATHPLUS_AGENT_SAY` | on | `0`: small talk gets emotes only, no line from Claude Haiku |
 | `WRATHPLUS_JEV_MODEL`, `WRATHPLUS_JEV_HEARTBEAT_MS` | `jev-latest`, `20000` | the fast tier's model and safety heartbeat |
 
 Against a client you started some other way, `src/index.ts` takes the control port from

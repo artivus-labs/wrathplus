@@ -264,8 +264,18 @@ export function goalsServer(lua: Lua, gate?: HoldGate) {
             .describe(
               "The facts the goal wants, which the planner plans toward: built-in facts (the goals tool lists them, e.g. { quest_ready: true }, { zone_fit: \"ok\" }) or ones you add with Goals.fact. Without want, the goal wants a fact of its own name; if no action's effects reach what it wants, it shows as blocked: teach one (Goals.action) or want existing facts.",
             ),
+          zone: z
+            .string()
+            .optional()
+            .describe(
+              "A zone to travel to: the built-in travel_to_zone walks there (with want { zone_fit: \"ok\" } or a fact of your own). It must be one Goals.zones() lists; a zone above your level is refused, with the zones that fit. Zone levels come from Goals.zones(), never from memory.",
+            ),
         },
-        async (goal) => reply(outcome(await lua(pushGoalLua(goal)), `Goal ${goal.name} set. The goals tool shows its plan.`)),
+        async (goal) => {
+          const result = await lua(pushGoalLua(goal));
+          const text = outcome(result, `Goal ${goal.name} set. The goals tool shows its plan.`);
+          return result.ok && result.values?.[0] !== false ? reply(text) : { ...reply(text), isError: true };
+        },
       ),
       tool(
         "drop_goal",
