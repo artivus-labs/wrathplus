@@ -67,10 +67,11 @@ fn arg(args: &MultiValue, i: usize) -> Value {
     args.get(i).cloned().unwrap_or(Value::Nil)
 }
 
-/// A rounded 1-based argument as 0-based, `None` when not a number or below 1.
+/// A truncated 1-based argument as 0-based (`fistp` under `or 0xc00`, as `0x5a686a` and
+/// `0x564fae` read theirs), `None` when not a number or below 1.
 fn index(lua: &Lua, v: &Value) -> Option<Option<usize>> {
     let n = lua.coerce_number(v.clone()).ok().flatten()?;
-    Some(usize::try_from(n.round_ties_even() as i64 - 1).ok())
+    Some(usize::try_from(i64::from(super::binding_abi::ftol(n)) - 1).ok())
 }
 
 fn int(n: impl Into<i64>) -> Value {

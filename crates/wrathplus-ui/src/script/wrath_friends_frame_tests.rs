@@ -59,6 +59,12 @@ fn guild_bank_tabs_money_and_staged_rank_rights() {
         (-1, -1)
     );
     assert_eq!(
+        s.eval::<String>("return (GetGuildBankTabInfo(1.5))")
+            .unwrap(),
+        "Mats",
+        "truncated, not rounded (`0x5a6867`)"
+    );
+    assert_eq!(
         s.eval::<String>("return (GetGuildBankTabInfo(2))").unwrap(),
         "Tab 2"
     );

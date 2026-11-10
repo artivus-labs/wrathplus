@@ -175,6 +175,28 @@ fn a_selection_past_the_roster_clears_it() {
     );
 }
 
+/// `0x5cc9c0` truncates its index (`fistp` under `or 0xc00`), raises its usage on a non-number and
+/// answers nil for a class or zone with no DBC row.
+#[test]
+fn roster_indices_truncate_and_missing_names_are_nil() {
+    let mut s = crate::script::UiScript::new().unwrap();
+    s.set_guild(GuildState {
+        roster: vec![GuildMemberInfo {
+            name: "Ann".into(),
+            ..Default::default()
+        }],
+        ..Default::default()
+    });
+    assert!(s
+        .eval::<bool>(
+            "local n, _, _, _, class, zone = GetGuildRosterInfo(1.9) \
+             return n == 'Ann' and class == nil and zone == nil"
+        )
+        .unwrap());
+    let err = s.run("GetGuildRosterInfo()").unwrap_err().to_string();
+    assert!(err.contains("Usage: GetGuildRosterInfo(index)"), "{err}");
+}
+
 /// `GuildStatus_Update` passes 0 before it tests the selection.
 #[test]
 fn member_lookup_is_one_based_and_tolerates_zero() {

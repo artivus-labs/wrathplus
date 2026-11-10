@@ -285,7 +285,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         let Some(n) = number(lua, &arg(&args, 0)) else {
             return Err(mlua::Error::runtime("Usage: GetGuildBankTabInfo(tab)"));
         };
-        let tab = n.round_ties_even() as i64;
+        let tab = i64::from(super::binding_abi::ftol(n));
         let (row, rights, remaining, has_player) = {
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             let bank = &model.wrath_friends.bank;
@@ -345,7 +345,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         let Some(n) = number(lua, &arg(&args, 0)) else {
             return Err(mlua::Error::runtime("Usage: PickupGuildBankMoney(amount)"));
         };
-        let copper = n.round_ties_even() as i64 as u32;
+        let copper = super::binding_abi::ftol(n) as u32;
         let mut model = lua.app_data_mut::<Model>().expect("model app_data");
         if copper != 0 && u64::from(copper) <= model.wrath_friends.bank.money {
             model
@@ -363,7 +363,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 "Usage: GetGuildBankTabPermissions(tab)",
             ));
         };
-        let tab = n.round_ties_even() as i64;
+        let tab = i64::from(super::binding_abi::ftol(n));
         let model = lua.app_data_ref::<Model>().expect("model app_data");
         let (flags, withdrawals) = edited_rank(&model)
             .and_then(|r| model.wrath_friends.staged.get(r))
@@ -405,7 +405,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             _ => 0,
         };
         let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-        let tab = usize::try_from(t.round_ties_even() as i64 - 1)
+        let tab = usize::try_from(i64::from(super::binding_abi::ftol(t)) - 1)
             .ok()
             .filter(|t| *t < 6);
         if let (Some(r), Some(tab)) = (edited_rank(&model), tab) {
@@ -428,7 +428,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         };
         let amount = (a.trunc().max(0.0) as u64).min(100_000) as u32;
         let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-        let tab = usize::try_from(t.round_ties_even() as i64 - 1)
+        let tab = usize::try_from(i64::from(super::binding_abi::ftol(t)) - 1)
             .ok()
             .filter(|t| *t < 6);
         if let (Some(r), Some(tab)) = (edited_rank(&model), tab) {
@@ -496,7 +496,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         };
         let row = {
             let model = lua.app_data_ref::<Model>().expect("model app_data");
-            usize::try_from(n.round_ties_even() as i64 - 1)
+            usize::try_from(i64::from(super::binding_abi::ftol(n)) - 1)
                 .ok()
                 .and_then(|i| model.wrath_friends.events.get(i).cloned())
         };

@@ -243,16 +243,18 @@ fn member_at(roster: &[GuildMemberInfo], index: i64) -> Option<&GuildMemberInfo>
         .and_then(|i| roster.get(i))
 }
 
-/// A flag argument: `nil`, `false` and `0` are off, anything else on. The reference reads both
-/// flags with `GetBoolOrDefault` (`0x6f1c10`, `binding_abi::bool_or_default`), which differs on
-/// strings and fractions; the FrameXML's checkbox states, `1` or `nil`, read the same in both.
-fn truthy(value: &Value) -> bool {
-    match value {
-        Value::Nil | Value::Boolean(false) => false,
-        Value::Integer(0) => false,
-        Value::Number(n) => *n != 0.0,
-        _ => true,
+/// An index argument as every guild roster and rank binding reads it: `lua_isnumber` or the
+/// binding's usage error, then truncated toward zero (`fistp` under `or 0xc00`, `0x5caf8b`).
+fn index_arg(lua: &Lua, v: Value, usage: &'static str) -> mlua::Result<i64> {
+    binding_abi::ftol_arg(lua, v, usage).map(i64::from)
+}
+
+/// A display string that answers nil when its DBC row is missing (`0x5cc9c0`'s class and zone).
+fn name_or_nil(lua: &Lua, name: &str) -> mlua::Result<Value> {
+    if name.is_empty() {
+        return Ok(Value::Nil);
     }
+    Ok(Value::String(lua.create_string(name)?))
 }
 
 /// The `guildShowOffline` CVar (`[0xbd0970]`, default "1"), as the bindings read its int value
@@ -380,7 +382,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     // (`FriendsFrame.lua:344`, `:347`).
     g.set(
         "GetGuildRosterInfo",
-        lua.create_function(|lua, index: i64| {
+        lua.create_function(|lua, index: Value| {
+            let index = index_arg(lua, index, "Usage: GetGuildRosterInfo(index)")?;
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             // `0x5cc9c0`: eleven; a miss answers nil, nil, 0, 0, five nils, "", nil.
             let Some(m) = member_at(&model.guild.roster, index) else {
@@ -394,17 +397,13 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 Value::String(lua.create_string(&m.rank)?),
                 Value::Integer(i64::from(m.rank_index)),
                 Value::Integer(i64::from(m.level)),
-                Value::String(lua.create_string(&m.class)?),
-                Value::String(lua.create_string(&m.zone)?),
+                name_or_nil(lua, &m.class)?,
+                name_or_nil(lua, &m.zone)?,
                 Value::String(lua.create_string(&m.note)?),
                 Value::String(lua.create_string(&m.officer_note)?),
                 binding_abi::flag(m.online),
                 Value::String(lua.create_string(&m.status)?),
-                if m.class_file.is_empty() {
-                    Value::Nil
-                } else {
-                    Value::String(lua.create_string(&m.class_file)?)
-                },
+                name_or_nil(lua, &m.class_file)?,
             ]))
         })?,
     )?;
@@ -413,7 +412,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     // online member, whom the wire sends no time for.
     g.set(
         "GetGuildRosterLastOnline",
-        lua.create_function(|lua, index: i64| {
+        lua.create_function(|lua, index: Value| {
+            let index = index_arg(lua, index, "Usage: GetGuildRosterLastOnline(index)")?;
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             let Some(m) = member_at(&model.guild.roster, index) else {
                 return Ok((Value::Nil, Value::Nil, Value::Nil, Value::Nil));
@@ -457,7 +457,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     )?;
     g.set(
         "SetGuildRosterSelection",
-        lua.create_function(|lua, index: i64| {
+        lua.create_function(|lua, index: Value| {
+            let index = index_arg(lua, index, "Usage: SetGuildRosterSelection(index)")?;
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
             let len = model.guild.roster.len() as i64;
             let index = u32::try_from(index)
@@ -590,7 +591,13 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     ] {
         g.set(
             global,
-            lua.create_function(move |lua, (index, note): (i64, String)| {
+            lua.create_function(move |lua, (index, note): (Value, Value)| {
+                let usage = match global {
+                    "GuildRosterSetPublicNote" => "Usage: GuildRosterSetPublicNote(index, note)",
+                    _ => "Usage: GuildRosterSetOfficerNote(index, note)",
+                };
+                let index = index_arg(lua, index, usage)?;
+                let note = binding_abi::string_arg(lua, note, usage)?;
                 let Ok(index) = u32::try_from(index) else {
                     return Ok(());
                 };
@@ -639,7 +646,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     // GuildControlGetRankName(index) (`0x4d1e90`): 1-based, the dropdown's ID.
     g.set(
         "GuildControlGetRankName",
-        lua.create_function(|lua, index: i64| {
+        lua.create_function(|lua, index: Value| {
+            let index = index_arg(lua, index, "Usage: GuildControlGetRankName(index)")?;
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             let name = usize::try_from(index)
                 .ok()
@@ -656,7 +664,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     // 0-based `rankIndex` passed by mistake loads nothing.
     g.set(
         "GuildControlSetRank",
-        lua.create_function(|lua, index: i64| {
+        lua.create_function(|lua, index: Value| {
+            let index = index_arg(lua, index, "Usage: GuildControlSetRank(rank)")?;
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
             let rank = u32::try_from(index).ok().filter(|i| *i >= 1).unwrap_or(0);
             let rights = live_rights(&model, rank);
@@ -687,10 +696,14 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // GuildControlSetRankFlag(index, enabled) (`0x5ca2b0`): stage one checkbox, 1 to 17.
+    // GuildControlSetRankFlag(index, enabled) (`0x5ca2b0`): stage one checkbox, 1 to 17, the flag
+    // read by `0x815500` (nil and "0" are off).
     g.set(
         "GuildControlSetRankFlag",
-        lua.create_function(|lua, (index, enabled): (i64, Value)| {
+        lua.create_function(|lua, args: MultiValue| {
+            let usage = "Usage: GuildControlSetRankFlag(index, enabled)";
+            let index = index_arg(lua, args.front().cloned().unwrap_or(Value::Nil), usage)?;
+            let enabled = binding_abi::bool_or_default(args.get(1), false);
             let Some(slot) = usize::try_from(index)
                 .ok()
                 .and_then(|i| i.checked_sub(1))
@@ -699,7 +712,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 return Ok(());
             };
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-            model.guild_control.staged[slot] = truthy(&enabled);
+            model.guild_control.staged[slot] = enabled;
             Ok(())
         })?,
     )?;
