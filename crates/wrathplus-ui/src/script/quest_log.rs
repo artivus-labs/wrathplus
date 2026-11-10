@@ -165,8 +165,8 @@ impl super::UiScript {
         std::mem::take(&mut self.model_mut().quest_confirms)
     }
 
-    /// Drain `CollapseQuestHeader`/`ExpandQuestHeader` as `(1-based index, collapse)`; index 0
-    /// is every header, as the collapse-all button passes (`QuestLogFrame.lua:557`, `:561`).
+    /// Drain `CollapseQuestHeader`/`ExpandQuestHeader` as `(1-based index, collapse)`; an index
+    /// that is not a header row, 0 among them (`QuestLogFrame.lua:557`, `:561`), is every header.
     pub fn take_quest_log_collapses(&mut self) -> Vec<(u32, bool)> {
         std::mem::take(&mut self.model_mut().quest_log_collapses)
     }
@@ -202,62 +202,67 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // `title, level, tag, isHeader, isCollapsed, isComplete`, always six (`0x4df930`). The index
-    // truncates as `_ftol` does, and a missing or non-number one raises `Usage:`; out of range it
-    // answers `nil, 0, nil, nil, nil, nil`, and a header's level is 0 too.
+    // `0x5e5cc0`: `title, level, tag, suggestedGroup, isHeader, isCollapsed, isComplete, isDaily,
+    // questID`. The index truncates and a non-number raises `Usage:`; a header's level and quest are
+    // 0, and out of range answers `nil, 0, nil, 0, nil, nil, nil, nil, 0`. A tenth, `true`, follows
+    // while a `displayQuestID` CVar is non-zero (`0x5e5f0d`-`0x5e5f30`); 12340 never registers one.
     g.set(
         "GetQuestLogTitle",
         lua.create_function(|lua, i: Value| {
             let n = number_arg(lua, i, "Usage: GetQuestLogTitle(index)")?;
-            let entry = {
+            let (entry, show_id) = {
                 let model = lua.app_data_ref::<Model>().expect("model app_data");
-                usize::try_from(n)
+                let entry = usize::try_from(n)
                     .ok()
                     .and_then(|n| n.checked_sub(1))
                     .and_then(|n| model.quest_log.entries.get(n))
-                    .cloned()
+                    .cloned();
+                let show_id = model
+                    .cvars
+                    .get("displayquestid")
+                    .is_some_and(|c| c.value.trim().parse::<f64>().is_ok_and(|v| v as i64 != 0));
+                (entry, show_id)
             };
-            let Some(e) = entry else {
-                // `0x5e5cc0` out of range: no title, level 0, no tag, group 0, then nils and quest 0.
-                let mut v = vec![Value::Nil, Value::Integer(0), Value::Nil, Value::Integer(0)];
-                v.extend([
-                    Value::Nil,
-                    Value::Nil,
-                    Value::Nil,
-                    Value::Nil,
-                    Value::Integer(0),
-                ]);
-                return Ok(MultiValue::from_vec(v));
+            let mut v = match entry {
+                None => {
+                    let mut v = vec![Value::Nil, Value::Integer(0), Value::Nil, Value::Integer(0)];
+                    v.extend([
+                        Value::Nil,
+                        Value::Nil,
+                        Value::Nil,
+                        Value::Nil,
+                        Value::Integer(0),
+                    ]);
+                    v
+                }
+                Some(e) => {
+                    let tag = match &e.tag {
+                        Some(t) => Value::String(lua.create_string(t)?),
+                        None => Value::Nil,
+                    };
+                    let complete = match e.complete {
+                        0 => Value::Nil,
+                        c => Value::Integer(i64::from(c.signum())),
+                    };
+                    // `isCollapsed` is 1 only on a header whose fold bit is clear (`0x5e5d9b`).
+                    let header = |n: i64| Value::Integer(if e.is_header { 0 } else { n });
+                    vec![
+                        Value::String(lua.create_string(&e.title)?),
+                        header(i64::from(e.level)),
+                        tag,
+                        Value::Integer(i64::from(e.suggested_group)),
+                        flag(e.is_header),
+                        flag(e.is_header && e.collapsed),
+                        complete,
+                        flag(e.daily),
+                        header(i64::from(e.quest_id)),
+                    ]
+                }
             };
-            let tag = match &e.tag {
-                Some(t) => Value::String(lua.create_string(t)?),
-                None => Value::Nil,
-            };
-            let complete = match e.complete {
-                0 => Value::Nil,
-                c => Value::Integer(i64::from(c.signum())),
-            };
-            // Returns 4 and 5 are 1 or nil, never booleans; `isCollapsed` is 1 only on a header
-            // whose bit in `[0xbb748c]` is clear.
-            let flag = |b: bool| if b { Value::Integer(1) } else { Value::Nil };
-            // `0x5e5cc0`: 2.0+ puts `suggestedGroup` fourth and appends `isDaily, questID`; a
-            // header's level and quest are 0. A tenth (`displayQuestID`) follows only with that
-            // debug cvar set: labelled, not served.
-            Ok(MultiValue::from_vec(vec![
-                Value::String(lua.create_string(&e.title)?),
-                Value::Integer(if e.is_header { 0 } else { i64::from(e.level) }),
-                tag,
-                Value::Integer(i64::from(e.suggested_group)),
-                flag(e.is_header),
-                flag(e.is_header && e.collapsed),
-                complete,
-                flag(e.daily),
-                Value::Integer(if e.is_header {
-                    0
-                } else {
-                    i64::from(e.quest_id)
-                }),
-            ]))
+            if show_id {
+                v.push(Value::Boolean(true));
+            }
+            Ok(MultiValue::from_vec(v))
         })?,
     )?;
 
@@ -490,23 +495,30 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // Header folds, drained by the app, which owns the collapse set; index 0 is every header.
-    g.set(
-        "CollapseQuestHeader",
-        lua.create_function(|lua, i: u32| {
-            let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-            model.quest_log_collapses.push((i, true));
-            Ok(())
-        })?,
-    )?;
-    g.set(
-        "ExpandQuestHeader",
-        lua.create_function(|lua, i: u32| {
-            let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-            model.quest_log_collapses.push((i, false));
-            Ok(())
-        })?,
-    )?;
+    // Header folds (`0x5e5100`, `0x5e5150`), drained by the app, which owns the collapse set: the
+    // index truncates, and one below 1 queues 0, which like any non-header row is every header.
+    for (name, usage, collapse) in [
+        (
+            "CollapseQuestHeader",
+            "Usage: CollapseQuestHeader(index)",
+            true,
+        ),
+        (
+            "ExpandQuestHeader",
+            "Usage: ExpandQuestHeader(index)",
+            false,
+        ),
+    ] {
+        g.set(
+            name,
+            lua.create_function(move |lua, i: Value| {
+                let i = u32::try_from(number_arg(lua, i, usage)?).unwrap_or(0);
+                let mut model = lua.app_data_mut::<Model>().expect("model app_data");
+                model.quest_log_collapses.push((i, collapse));
+                Ok(())
+            })?,
+        )?;
+    }
 
     // ── The abandon two-step (mark → confirm) ────────────────────────────────────────────────────
     // Marks the selected quest (`QuestLogFrame.xml:464`). The reference's `0x4dfb50` copies the
@@ -1435,6 +1447,18 @@ mod tests {
                  return t == nil and l == 0 and tag == nil and g == 0 and h == nil and c == nil \
                  and done == nil and d == nil and id == 0"
             )
+            .unwrap());
+        // 12340 registers the fold bits at "0" (`0x51df24`) and never `displayQuestID`; one set
+        // non-zero adds a tenth return, `true`, hit or miss (`0x5e5f0d`-`0x5e5f30`).
+        assert!(s
+            .eval::<bool>(
+                "return GetCVar('questLogCollapseFilter') == '0' and GetCVar('displayQuestID') == nil"
+            )
+            .unwrap());
+        s.run("RegisterCVar('displayQuestID', '1')").unwrap();
+        assert_eq!(s.arity("GetQuestLogTitle(2)").unwrap(), 10);
+        assert!(s
+            .eval::<bool>("return select(10, GetQuestLogTitle(3)) == true")
             .unwrap());
     }
 }

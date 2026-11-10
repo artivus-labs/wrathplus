@@ -1127,8 +1127,10 @@ fn load_quest_tag_names(
     }
 }
 
-/// Drains `CollapseQuestHeader` and `ExpandQuestHeader`: an entry index names a header by its
-/// title, and 0 is every header (the collapse-all button).
+/// Drains `CollapseQuestHeader` and `ExpandQuestHeader`: a header row's index names that header
+/// by its title; any other index, out of range or a quest row, is every header (`0x5e0c00`:
+/// `0x5e0c06` and `0x5e0c18` jump to `0x5e0c87`, which writes the whole mask). The stock tracker
+/// passes a quest row (`WatchFrame.lua:987`), so opening the log from it expands every header.
 fn drain_quest_log_collapses(
     script: Option<NonSendMut<UiScript>>,
     mut quest_log: ResMut<QuestLog>,
@@ -1137,19 +1139,21 @@ fn drain_quest_log_collapses(
         return;
     };
     for (idx, collapse) in script.take_quest_log_collapses() {
-        if idx == 0 {
-            if collapse {
-                let all: Vec<String> = quest_log.header_keys.iter().flatten().cloned().collect();
-                quest_log.collapsed.extend(all);
-            } else {
-                quest_log.collapsed.clear();
-            }
-        } else if let Some(Some(name)) = quest_log.header_keys.get(idx as usize - 1).cloned() {
-            if collapse {
+        let header = (idx as usize)
+            .checked_sub(1)
+            .and_then(|i| quest_log.header_keys.get(i).cloned().flatten());
+        match (header, collapse) {
+            (Some(name), true) => {
                 quest_log.collapsed.insert(name);
-            } else {
+            }
+            (Some(name), false) => {
                 quest_log.collapsed.remove(&name);
             }
+            (None, true) => {
+                let all: Vec<String> = quest_log.header_keys.iter().flatten().cloned().collect();
+                quest_log.collapsed.extend(all);
+            }
+            (None, false) => quest_log.collapsed.clear(),
         }
     }
 }
@@ -1886,8 +1890,10 @@ mod tests {
             ),
             45
         );
-        run(&mut app, "ExpandQuestHeader(1)");
+        // A quest row, folded A's here, expands every header (`0x5e0c18` → `0x5e0c87`).
+        run(&mut app, "ExpandQuestHeader(5)");
         app.update();
+        assert_eq!(eval(&app, "return GetNumQuestLogEntries()"), 5);
         run(&mut app, "SelectQuestLogEntry(4); SetAbandonQuest()");
         assert_eq!(
             app.world()
@@ -1915,6 +1921,10 @@ mod tests {
             matches!(sent.as_slice(), [ClientCommand::QuestlogRemove { slot: 1 }]),
             "the abandon removes B's slot (1), never C's (2): {sent:?}"
         );
+        // Out of range, a negative index collapses every header (`0x5e0c06` → `0x5e0c87`).
+        run(&mut app, "CollapseQuestHeader(-2.5)");
+        app.update();
+        assert_eq!(eval(&app, "return GetNumQuestLogEntries()"), 2);
     }
 
     // ── The accept line ─────────────────────────────────────────────────────────────────────────
