@@ -3,11 +3,16 @@
 //! that act on one of them by GUID. Nothing here knows more than the client: the list is what the
 //! server sent this client, and reactions, quest markers and names are the client's own reading.
 //!
+//! While a cinematic holds the client (a new character's intro), `AgentNearby` returns a second
+//! value saying so ([`CINEMATIC_NOTE`]): the list is then what the server's camera sees.
+//! `AgentCinematic()` is that reason alone, or nil.
+//!
 //! Lua (installed by `env`): `AgentPosition()`, `AgentNearby([max_yards])`,
 //! `AgentFindNpc(service [, max_yards])`, `AgentCorpse()`, `AgentTarget(guid)`, `AgentFace(guid)`,
 //! `AgentInteract(guid)`. GUIDs travel as `"0x…"` hex strings. `AgentInteract` turns on click-to-move
 //! (`autoInteract`), so the character walks to the object first, as a player's right-click would.
 
+use crate::npc::{services, SERVICES};
 use bevy::prelude::*;
 use crossbeam_channel::{Receiver, Sender};
 use mlua::{Lua, Table};
@@ -19,7 +24,6 @@ use wrathplus_app_net::names::{gated_rank, NameCache};
 use wrathplus_app_net::net::{Guid, GuidIndex, NetEntity};
 use wrathplus_app_world::target::click::Interact;
 use wrathplus_app_world::target::{RelationInputs, SelectCommit};
-use wrathplus_protocol::types::NpcService;
 use wrathplus_protocol::EntityKind;
 
 /// How often the snapshot is rebuilt (seconds).
@@ -46,6 +50,9 @@ pub(crate) struct Seen {
     pub tapped: bool,
     pub tapped_by_me: bool,
     pub target: Option<u64>,
+    /// A creature's type from its template, once the client has it: "Beast", "Humanoid",
+    /// "Critter" (no XP, no loot worth a fight) ...
+    pub creature_type: Option<&'static str>,
     /// NPC services, from the unit's NPC flags ([`SERVICES`]): what it offers before it is
     /// spoken to, which the stock API cannot tell (`CanMerchantRepair` needs an open window).
     pub npc: Vec<&'static str>,
@@ -78,7 +85,14 @@ pub(crate) struct Snapshot {
     pub objects: Vec<Seen>,
     /// Our corpse (the server's `MSG_CORPSE_QUERY` answer): where to run as a ghost.
     pub corpse: Option<Corpse>,
+    /// A cinematic holds the client (`Cinematic::is_active`): the server shows the world around
+    /// its flying camera, so the list is empty or far away, and the character cannot walk.
+    pub cinematic: bool,
 }
+
+/// What the helpers a cinematic blocks say (`AgentNearby`'s second value, `AgentMoveTo`'s reason,
+/// `AgentWalk().note`).
+pub(crate) const CINEMATIC_NOTE: &str = "a cinematic is playing: the server shows the world around its camera, not around you, and you cannot walk. StopCinematic() skips it; /status says cinematic until the world is back";
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Corpse {
@@ -175,6 +189,7 @@ pub(crate) fn snapshot(
     quests: Option<Res<QuestGiver>>,
     relations: RelationInputs,
     death: Option<Res<wrathplus_app_core::app_core::death::DeathNet>>,
+    cinematic: Option<Res<wrathplus_app_world::cinematic::Cinematic>>,
 ) {
     link.since += time.delta_secs();
     if link.since < REFRESH {
@@ -237,6 +252,9 @@ pub(crate) fn snapshot(
                 let rank = record.map(|r| gated_rank(Some(r), Some(store)) as usize);
                 s.classification = rank.and_then(|r| RANK_WORDS.get(r).copied());
                 s.critter = record.is_some_and(|r| r.creature_type == 8);
+                s.creature_type = record.and_then(|r| {
+                    wrathplus_app_net::creature_type::creature_type_word(r.creature_type)
+                });
             } else if net.kind == EntityKind::GameObject {
                 s.name = templates
                     .as_ref()
@@ -255,6 +273,7 @@ pub(crate) fn snapshot(
     if let Ok(mut shared) = link.snapshot.lock() {
         shared.me = me;
         shared.objects = seen;
+        shared.cinematic = cinematic.is_some_and(|c| c.is_active());
         shared.corpse = death.and_then(|d| d.corpse).map(|c| Corpse {
             pos: c.position,
             map: c.display_map,
@@ -298,49 +317,13 @@ pub(crate) fn parse_guid(text: &str) -> Option<u64> {
     u64::from_str_radix(hex, 16).ok()
 }
 
-/// The NPC services an agent can ask for, by name: `NpcService`'s flags, with trainers also split
-/// by kind (AzerothCore `UNIT_NPC_FLAG_TRAINER_CLASS` 0x20, `_PROFESSION` 0x40).
-pub(crate) const SERVICES: &[(&str, Option<NpcService>, u32)] = &[
-    ("gossip", Some(NpcService::Gossip), 0),
-    ("questgiver", Some(NpcService::QuestGiver), 0),
-    ("vendor", Some(NpcService::Vendor), 0),
-    ("repair", Some(NpcService::Repair), 0),
-    ("trainer", Some(NpcService::Trainer), 0),
-    ("classtrainer", None, 0x20),
-    ("professiontrainer", None, 0x40),
-    ("flightmaster", Some(NpcService::FlightMaster), 0),
-    ("innkeeper", Some(NpcService::Innkeeper), 0),
-    ("banker", Some(NpcService::Banker), 0),
-    ("auctioneer", Some(NpcService::Auctioneer), 0),
-    ("stablemaster", Some(NpcService::StableMaster), 0),
-    ("spirithealer", Some(NpcService::SpiritHealer), 0),
-    ("spiritguide", Some(NpcService::SpiritGuide), 0),
-    ("battlemaster", Some(NpcService::BattleMaster), 0),
-    ("tabarddesigner", Some(NpcService::TabardDesigner), 0),
-    ("petitioner", Some(NpcService::Petitioner), 0),
-    ("guildbanker", Some(NpcService::GuildBanker), 0),
-    ("mailbox", Some(NpcService::Mailbox), 0),
-];
-
-/// The service names an NPC flags word offers.
-pub(crate) fn services(bits: u32) -> Vec<&'static str> {
-    let flags = wrathplus_protocol::types::NpcFlags::from_bits(bits);
-    SERVICES
-        .iter()
-        .filter(|(_, service, mask)| match service {
-            Some(service) => flags.has(*service),
-            None => bits & mask != 0,
-        })
-        .map(|(name, _, _)| *name)
-        .collect()
-}
-
 fn seen_table(lua: &Lua, s: &Seen) -> mlua::Result<Table> {
     let t = lua.create_table()?;
     t.set("guid", guid_text(s.guid))?;
     t.set("kind", s.kind)?;
     t.set("name", s.name.clone())?;
     t.set("title", s.title.clone())?;
+    t.set("creature_type", s.creature_type)?;
     t.set("entry", s.entry)?;
     t.set("x", s.pos[0])?;
     t.set("y", s.pos[1])?;
@@ -398,6 +381,18 @@ pub(crate) fn install(lua: &Lua, handles: &Handles) -> mlua::Result<()> {
             Ok(Some(t))
         })?,
     )?;
+    // `AgentCinematic()`: why nothing is near or walkable while a cinematic holds the client
+    // ([`CINEMATIC_NOTE`]), else nil. The built-in modules wait on it instead of failing.
+    let snap = handles.snapshot.clone();
+    g.set(
+        "AgentCinematic",
+        lua.create_function(move |_, ()| {
+            Ok(snap
+                .lock()
+                .is_ok_and(|s| s.cinematic)
+                .then_some(CINEMATIC_NOTE))
+        })?,
+    )?;
     let snap = handles.snapshot.clone();
     g.set(
         "AgentPosition",
@@ -419,6 +414,7 @@ pub(crate) fn install(lua: &Lua, handles: &Handles) -> mlua::Result<()> {
         "AgentNearby",
         lua.create_function(move |lua, max: Option<f32>| {
             let list = lua.create_table()?;
+            let mut note = None;
             if let Ok(s) = snap.lock() {
                 for seen in s
                     .objects
@@ -427,8 +423,11 @@ pub(crate) fn install(lua: &Lua, handles: &Handles) -> mlua::Result<()> {
                 {
                     list.push(seen_table(lua, seen)?)?;
                 }
+                // A second value, so `ipairs(AgentNearby())` is unchanged and a reader of the
+                // reply sees why the list is empty or far away.
+                note = s.cinematic.then_some(CINEMATIC_NOTE);
             }
-            Ok(list)
+            Ok((list, note))
         })?,
     )?;
     let snap = handles.snapshot.clone();

@@ -225,3 +225,26 @@ fn where_gives_the_hand_in_with_its_map_and_text_reads_the_log_without_moving_it
         "2 3 2 2"
     );
 }
+
+/// A cinematic hides the quest givers: a visit waits, rather than conclude nobody is left.
+#[test]
+fn a_cinematic_holds_a_visit_open() {
+    let mut script = quests();
+    script
+        .run(
+            "cinematic = 'a cinematic is playing' AgentCinematic = function() return cinematic end \
+             AgentNearby = function() return cinematic and {} or { remy, pally } end \
+             Quests.pick_up()",
+        )
+        .unwrap();
+    for _ in 0..5 {
+        script.tick(0.6);
+    }
+    assert!(script.eval::<bool>("return Quests.busy()").unwrap());
+    assert_eq!(calls(&script), "");
+    let state: String = script.eval("return Quests.state").unwrap();
+    assert_eq!(state, "waiting: a cinematic is playing");
+    script.run("cinematic = nil").unwrap();
+    script.tick(0.6);
+    assert_eq!(calls(&script), "interact 0xR");
+}

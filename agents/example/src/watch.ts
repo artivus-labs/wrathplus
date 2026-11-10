@@ -226,12 +226,13 @@ export async function watch(options: WatchOptions): Promise<void> {
   let pending: string[] = [];
   let flushAt = 0;
   const errors = new RepeatedErrors();
-  // Start from now: old events are not news.
+  // Start from now: old events are not news. A read without `since` is the port's "from now",
+  // and answers with the cursor to carry on from.
   try {
-    const head = await read(url, token, 1_000_000_000, 0, signal);
+    const head = await read(url, token, undefined, 0, signal);
     since = head.next;
   } catch {
-    // The first long-poll below starts from 0 instead.
+    // The first long-poll below starts from 0 (the whole retained buffer) instead.
   }
   while (!signal.aborted) {
     try {
@@ -300,8 +301,10 @@ export function collapse(lines: string[]): string[] {
   return [...counts].map(([line, n]) => (n > 1 ? `${line} ×${n}` : line));
 }
 
-async function read(url: string, token: string, since: number, wait: number, signal: AbortSignal) {
-  const response = await fetch(`${url}/events?since=${since}&wait_ms=${Math.round(wait)}&limit=2000`, {
+/** One read of every event after `since` (the port's default of 100 would cut a burst short). */
+async function read(url: string, token: string, since: number | undefined, wait: number, signal: AbortSignal) {
+  const cursor = since === undefined ? "" : `since=${since}&`;
+  const response = await fetch(`${url}/events?${cursor}wait_ms=${Math.round(wait)}&limit=2000`, {
     headers: { Authorization: `Bearer ${token}` },
     signal,
   });

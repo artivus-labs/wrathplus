@@ -81,6 +81,11 @@ pub(super) fn height_given(args: &MultiValue) -> bool {
     )
 }
 
+/// Whether a cinematic holds the client: nothing is walkable until it ends.
+fn in_cinematic(world: &world::Handles) -> bool {
+    world.snapshot.lock().is_ok_and(|s| s.cinematic)
+}
+
 /// Where we are and where the arguments point.
 fn aim(args: &MultiValue, world: &world::Handles) -> Result<(world::Me, [f32; 3]), String> {
     let snapshot = world
@@ -143,18 +148,30 @@ pub(crate) fn install(lua: &Lua, nav: &Handles, world: &world::Handles) -> mlua:
     g.set(
         "AgentMoveTo",
         lua.create_function(move |lua, args: MultiValue| {
-            match go(lua, &n, &w, &args, None) {
+            // No walking under a cinematic (click-to-move stalls, ending `stuck` with no reason):
+            // refuse, and say what to do about it.
+            let went = if in_cinematic(&w) {
+                Err(world::CINEMATIC_NOTE.to_string())
+            } else {
+                go(lua, &n, &w, &args, None)
+            };
+            match went {
                 Ok((Some(route), _)) => Ok((Some(route_table(lua, &route)?), None)),
                 Ok((None, to)) => Ok((Some(pending_table(lua, to)?), None)),
                 Err(e) => {
-                    // Announced like any walk's end, so whoever waits on it is woken.
+                    // Announced like any walk's end, so whoever waits on it is woken; a cinematic's
+                    // refusal once, not on every try of a loop that keeps asking until it is over.
                     if let Ok(mut walk) = n.walk.lock() {
+                        let again = e == world::CINEMATIC_NOTE
+                            && walk.status == "failed"
+                            && walk.note.as_deref() == Some(world::CINEMATIC_NOTE);
                         walk.queue.clear();
                         walk.corner = None;
                         walk.then_interact = None;
                         walk.status = "failed";
                         walk.note = Some(e.clone());
-                        walk.failed = true;
+                        // Never clear an announcement still pending from earlier this frame.
+                        walk.failed |= !again;
                     }
                     Ok((None, Some(e)))
                 }
@@ -174,7 +191,8 @@ pub(crate) fn install(lua: &Lua, nav: &Handles, world: &world::Handles) -> mlua:
                         .any(|o| o.guid == *g && o.distance > INTERACT_DIRECT)
                 })
             });
-            if let Some(object) = far {
+            // Under a cinematic no route is walked: the straight approach, as without a navmesh.
+            if let Some(object) = far.filter(|_| !in_cinematic(&w)) {
                 let args = MultiValue::from_iter([Value::String(lua.create_string(&guid)?)]);
                 // No navmesh, or no route: fall back to the straight approach.
                 if go(lua, &n, &w, &args, Some(object)).is_ok() {
@@ -218,16 +236,26 @@ pub(crate) fn install(lua: &Lua, nav: &Handles, world: &world::Handles) -> mlua:
             Ok(())
         })?,
     )?;
-    let n = nav.clone();
+    let (n, w) = (nav.clone(), world.clone());
     g.set(
         "AgentWalk",
         lua.create_function(move |lua, ()| {
             let t = lua.create_table()?;
+            let cinematic = in_cinematic(&w);
             if let Ok(walk) = n.walk.lock() {
                 t.set("status", walk.status)?;
                 t.set("remaining", walk.queue.len())?;
                 t.set("goal", walk.goal.map(|g| vec![g[0], g[1], g[2]]))?;
-                t.set("note", walk.note.clone())?;
+                // A walk a cinematic holds says so, whatever else it noted.
+                let note = match (&walk.note, cinematic) {
+                    (Some(note), true) if note.as_str() != world::CINEMATIC_NOTE => {
+                        Some(format!("{}; {note}", world::CINEMATIC_NOTE))
+                    }
+                    (None, true) => Some(world::CINEMATIC_NOTE.to_string()),
+                    (note, _) => note.clone(),
+                };
+                t.set("note", note)?;
+                t.set("cinematic", cinematic)?;
                 let ahead = walk.corner.iter().chain(walk.queue.iter());
                 t.set(
                     "route",

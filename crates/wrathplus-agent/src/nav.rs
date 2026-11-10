@@ -21,6 +21,12 @@
 //! status. `AgentAvoid({{x, y, radius}, ...})` gives circles every later route goes round when a
 //! fair detour exists (an agent's hostile mobs); `AgentAvoid({})` clears.
 //!
+//! While a cinematic holds the client (`world::CINEMATIC_NOTE`), `AgentMoveTo` refuses (`nil`, the
+//! reason; the walk reads `failed`, announced once however often it is asked), `AgentInteract`
+//! takes the straight approach, and `AgentWalk()` carries the reason in `note` with
+//! `cinematic = true`. A walk already under way, or a realm route that arrives meanwhile, waits:
+//! the walker takes no step until the cinematic ends, then carries on.
+//!
 //! A corner click-to-move falls short of is tried again after a push (forward held with a jump),
 //! then the walk is routed round the spot, twice at most, before it ends as `stuck` (`walker`).
 

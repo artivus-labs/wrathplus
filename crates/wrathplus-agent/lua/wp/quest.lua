@@ -331,6 +331,13 @@ frame:SetScript("OnUpdate", function(_, dt)
     Q.state = "waiting for the fight to end"
     return
   end
+  -- A cinematic hides the givers: that is not "nobody left to visit".
+  local held = AgentCinematic and AgentCinematic()
+  if held then
+    since = now
+    Q.state = "waiting: " .. held
+    return
+  end
   -- The giver we are on, or the next one with something for us.
   local target = npc and AgentNearby(Q.reach)
   local current

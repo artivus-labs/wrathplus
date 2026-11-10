@@ -4,7 +4,7 @@ use super::api::{height_given, target};
 use super::realm::Purpose;
 use super::walker::*;
 use super::*;
-use mlua::{Lua, MultiValue};
+use mlua::{Lua, MultiValue, Table};
 
 #[test]
 fn targets_come_from_coordinates_or_a_nearby_guid() {
@@ -17,6 +17,7 @@ fn targets_come_from_coordinates_or_a_nearby_guid() {
             ..Default::default()
         }],
         corpse: None,
+        cinematic: false,
     };
     let args = |code: &str| lua.load(code).eval::<MultiValue>().unwrap();
     assert_eq!(
@@ -289,4 +290,85 @@ fn a_quest_hand_in_in_stormwind_is_reached_from_goldshire_without_its_height() {
             && (end[2] - 95.0).abs() < 3.0,
         "{end:?}"
     );
+}
+
+/// A new character's intro cinematic: the walk is refused with the reason instead of ending
+/// `stuck` with none, and `AgentWalk()` carries it while the cinematic lasts.
+#[test]
+fn a_cinematic_refuses_the_walk_and_says_how_to_end_it() {
+    let (world_handles, world_link) = world::link();
+    let (handles, _) = link(
+        Arc::new(crate::events::EventLog::new()),
+        std::time::Instant::now(),
+        world_handles.orders.clone(),
+    );
+    {
+        let mut s = world_handles.snapshot.lock().unwrap();
+        s.me = Some(world::Me {
+            pos: [0.0; 3],
+            facing: 0.0,
+            map: 0,
+        });
+        s.objects = vec![world::Seen {
+            guid: 0x10,
+            distance: 24.0,
+            pos: [24.0, 0.0, 0.0],
+            ..Default::default()
+        }];
+        s.cinematic = true;
+    }
+    let lua = Lua::new();
+    world::install(&lua, &world_handles).unwrap();
+    install(&lua, &handles, &world_handles).unwrap();
+    // Asked twice in one chunk (as a script retrying would), before the walker's frame.
+    let (route, why, status, note, flagged): (Option<Table>, String, String, String, bool) = lua
+        .load(
+            "local route, why = AgentMoveTo(10, 0, 0) AgentMoveTo(11, 0, 0) local w = AgentWalk() \
+             return route, why, w.status, w.note, w.cinematic",
+        )
+        .eval()
+        .unwrap();
+    assert!(route.is_none());
+    assert_eq!(why, world::CINEMATIC_NOTE);
+    assert!(why.contains("StopCinematic()"));
+    assert_eq!(
+        (status.as_str(), note.as_str(), flagged),
+        ("failed", why.as_str(), true)
+    );
+    // Announced like any refused walk, so whoever waits on it is woken (the second refusal did
+    // not clear the first's announcement): once, however often a loop asks again while the
+    // cinematic lasts.
+    assert!(std::mem::take(&mut handles.walk.lock().unwrap().failed));
+    lua.load("AgentMoveTo(10, 0, 0) AgentMoveTo(12, 0, 0)")
+        .exec()
+        .unwrap();
+    assert!(!handles.walk.lock().unwrap().failed);
+    // A far interaction does not start a walk either: it is the plain order.
+    let sent: bool = lua
+        .load("return AgentInteract('0x0000000000000010')")
+        .eval()
+        .unwrap();
+    assert!(sent);
+    assert!(matches!(
+        world_link.orders.try_recv(),
+        Ok(world::Order::Interact(0x10))
+    ));
+    assert_eq!(handles.walk.lock().unwrap().status, "failed");
+    // Over: the walk's own note is left, and the flag is down.
+    world_handles.snapshot.lock().unwrap().cinematic = false;
+    let (flagged, note): (bool, String) = lua
+        .load("local w = AgentWalk() return w.cinematic, w.note")
+        .eval()
+        .unwrap();
+    assert!(!flagged);
+    assert_eq!(note, world::CINEMATIC_NOTE, "the refused walk's own reason");
+    // A walk a cinematic caught under way keeps its note, after the cinematic's.
+    {
+        let mut walk = handles.walk.lock().unwrap();
+        walk.status = "walking";
+        walk.note = Some("partial route".into());
+    }
+    world_handles.snapshot.lock().unwrap().cinematic = true;
+    let note: String = lua.load("return AgentWalk().note").eval().unwrap();
+    assert!(note.starts_with(world::CINEMATIC_NOTE) && note.ends_with("; partial route"));
 }

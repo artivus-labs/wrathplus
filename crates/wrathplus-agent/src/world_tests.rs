@@ -169,3 +169,62 @@ fn creature_ranks_and_critters_reach_lua() {
         .unwrap();
     assert_eq!(read, "elite nil normal true nil");
 }
+
+/// Under a cinematic the list is what the server's camera sees: `AgentNearby` says so in a second
+/// value, which `ipairs(AgentNearby())` and `#AgentNearby()` never see.
+#[test]
+fn nearby_says_when_a_cinematic_is_why_it_is_empty() {
+    let (handles, _link) = link();
+    let lua = Lua::new();
+    install(&lua, &handles).unwrap();
+    let quiet: (usize, Option<String>) = lua
+        .load("local list, note = AgentNearby(50) return #list, note")
+        .eval()
+        .unwrap();
+    assert_eq!(quiet, (0, None));
+    assert!(lua
+        .load("return AgentCinematic() == nil")
+        .eval::<bool>()
+        .unwrap());
+    handles.snapshot.lock().unwrap().cinematic = true;
+    let held: String = lua.load("return AgentCinematic()").eval().unwrap();
+    assert_eq!(held, CINEMATIC_NOTE);
+    let (count, note, walked): (usize, String, usize) = lua
+        .load(
+            "local list, note = AgentNearby(50) local n = 0 \
+             for _ in ipairs(AgentNearby()) do n = n + 1 end return #list, note, n",
+        )
+        .eval()
+        .unwrap();
+    assert_eq!((count, walked), (0, 0));
+    assert_eq!(note, CINEMATIC_NOTE);
+    assert!(note.contains("StopCinematic()"));
+}
+
+/// A creature's type reaches Lua, so an agent can tell a critter (no XP) from a beast.
+#[test]
+fn a_units_creature_type_is_in_its_table() {
+    let (handles, _link) = link();
+    handles.snapshot.lock().unwrap().objects = vec![
+        Seen {
+            guid: 0x1,
+            kind: "unit",
+            name: Some("Rabbit".into()),
+            creature_type: Some("Critter"),
+            ..Default::default()
+        },
+        Seen {
+            guid: 0x2,
+            kind: "unit",
+            name: Some("Unknown yet".into()),
+            ..Default::default()
+        },
+    ];
+    let lua = Lua::new();
+    install(&lua, &handles).unwrap();
+    let (critter, unknown): (String, bool) = lua
+        .load("local n = AgentNearby() return n[1].creature_type, n[2].creature_type == nil")
+        .eval()
+        .unwrap();
+    assert_eq!((critter.as_str(), unknown), ("Critter", true));
+}

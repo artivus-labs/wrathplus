@@ -85,6 +85,14 @@ impl Cinematic {
         self.playing.is_some()
     }
 
+    /// Is a cinematic holding the client: latched for the world to load, on screen, or ended and
+    /// holding black while the world comes back? Wider than [`Cinematic::is_playing`], which is
+    /// `InCinematic()`: the server flies its camera, and the player's view of the world with it,
+    /// from the trigger on. For the agent port's `/status` and helpers.
+    pub fn is_active(&self) -> bool {
+        self.pending.is_some() || self.playing.is_some() || self.settling.is_some()
+    }
+
     /// The shot on screen: `(run, shot index, narration sound id)`, keyed on [`Playing::run`] so a
     /// re-trigger counts as a new shot.
     pub(crate) fn playing_shot(&self) -> Option<(u64, usize, u32)> {
@@ -853,34 +861,7 @@ mod settling_under_black {
     }
 }
 
-/// Lua's `OpeningCinematic()` reaches the wire as one empty `CMSG_OPENING_CINEMATIC` per call.
+/// `OpeningCinematic()` on the wire, and the agent port's reading of a held client.
 #[cfg(test)]
-mod opening_cinematic {
-    use super::*;
-
-    #[test]
-    fn each_call_sends_one_opening_cinematic() {
-        let (tx, rx) = crossbeam_channel::unbounded();
-        let mut app = App::new();
-        app.insert_resource(NetCommands(tx));
-        app.insert_non_send_resource(UiScript::new().unwrap());
-        app.add_systems(Update, send_opening_cinematic);
-        app.world()
-            .non_send_resource::<UiScript>()
-            .run("OpeningCinematic() OpeningCinematic()")
-            .unwrap();
-        app.update();
-        let sent = rx
-            .try_iter()
-            .filter(|c| matches!(c, ClientCommand::OpeningCinematic))
-            .count();
-        assert_eq!(sent, 2);
-        app.update();
-        assert_eq!(rx.try_iter().count(), 0, "drained once");
-        // The opcode the reference puts at `0x48c8c9`.
-        assert_eq!(
-            wrathplus_protocol::wrath_opcode_names::opcode_name(0xf9),
-            Some("CMSG_OPENING_CINEMATIC")
-        );
-    }
-}
+#[path = "cinematic_port_tests.rs"]
+mod port_tests;

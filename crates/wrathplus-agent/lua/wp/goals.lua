@@ -43,13 +43,19 @@
 --       kill, a quest visit) and the client's (level up, quest log, death, zone), else every
 --       `replan_every` seconds.
 -- Runner (`Goals.on`, off until the agent turns it on): with no Agent activity running, no hold,
---   not fighting or dead, the next action of the top goal that has a plan runs AS an Agent
---   activity named `goal:<action>`, so the fast tier and the status line see it. A failed action
+--   not fighting or dead, no cinematic playing (AgentCinematic), the next action of the top goal
+--   that has a plan runs AS an Agent activity named `goal:<action>`, so the fast tier and the
+--   status line see it. A failed action
 --   is AGENT_ACTION_FAILED(goal, action, why) and waits `retry_after` seconds before it is tried
 --   again, doubling on each failure in a row (an interruption, a death or a hold is no failure);
 --   one that failed within `quick_fail` seconds of starting waits even when nothing else is left.
 --   The fast tier is offered goal actions on the same terms: not while fighting or dead, and not
 --   while one backs off.
+--   Between two actions Agent.activity() is nil for a moment: the runner looks every half second,
+--   and on the frame after an action ends well; a fight still winding down (a kill being looted
+--   after its quest credit ended the action: a second or two), a hold or its grace, a cinematic,
+--   and an instant action (no `done`) read nil too. `Goals.state` says which, so poll that (or
+--   wait on the AGENT_ signals) rather than take one nil for idleness.
 -- Holds: Goals.hold{ reason, seconds } stops the runner (and its running action) for that long;
 --   there is no unlimited form. On expiry AGENT_HOLD_EXPIRED(reason, waited) is signalled and the
 --   runner waits `grace` seconds more for a Goals.hold (keep waiting: `waited` keeps counting while
@@ -107,6 +113,8 @@ local facts_fns, fact_order, fact_errors = {}, {}, {}
 -- each action runs as (set up with the runner, below).
 local offered, register = {}, nil
 local dirty, planned_at, last_facts = true, nil, {}
+-- An activity just ended well: the runner looks again on the next frame, not the next half second.
+local kick = false
 
 local function now() return GetTime() end
 
@@ -160,8 +168,8 @@ function G.fits(u)
   if Survive then return (Survive.fits(u)) end
   local lvl = level()
   return u.kind == "unit" and not u.dead and (u.reaction == "hostile" or u.reaction == "neutral")
-    and not (u.tapped and not u.tapped_by_me) and not u.npc and u.level ~= nil
-    and u.level > grey(lvl) and u.level <= lvl + G.above
+    and not (u.tapped and not u.tapped_by_me) and not u.npc and u.creature_type ~= "Critter"
+    and u.level ~= nil and u.level > grey(lvl) and u.level <= lvl + G.above
 end
 
 -- Whether to start a fight with a unit now (Survive.pull_ok): ok, else why not.
@@ -428,8 +436,9 @@ end
 local function zone_fit()
   local lvl, levels = level(), {}
   for _, u in ipairs(nearby()) do
+    -- Critters are level 1 wherever they hop: they say nothing about the zone.
     if u.kind == "unit" and not u.dead and u.level and (u.reaction == "hostile" or u.reaction == "neutral")
-      and not u.npc then
+      and not u.npc and u.creature_type ~= "Critter" then
       levels[#levels + 1] = u.level
     end
   end
@@ -749,6 +758,8 @@ local function ended(ok, why)
   if ok then
     G.failures[key], G.failures[c.action.name] = nil, nil
     note("did " .. c.action.name .. " for " .. c.goal)
+    -- Not for an instant action, which would then run every frame while its plan stands.
+    kick = c.action.done ~= nil
     return
   end
   -- Whatever it left going (a fight, a walk) ends with it.
@@ -830,6 +841,10 @@ end
 
 local function busy()
   if UnitIsDeadOrGhost("player") then return "dead" end
+  -- A cinematic: nothing is in sight and nothing can walk, so an action started now would only
+  -- fail and back off. The agent may skip it (StopCinematic); the runner never does.
+  local held = AgentCinematic and AgentCinematic()
+  if held then return "waiting: " .. held end
   if UnitAffectingCombat("player") or (Combat and Combat.active) then return "fighting" end
   -- Running from a fight is still the fight: no walk of the runner's takes the legs over.
   if Combat and Combat.fleeing then return "fleeing" end
@@ -1097,8 +1112,8 @@ end)
 local since = 0
 frame:SetScript("OnUpdate", function(_, dt)
   since = since + dt
-  if since < 0.5 then return end
-  since = 0
+  if since < 0.5 and not kick then return end
+  since, kick = 0, false
   tick(now())
 end)
 

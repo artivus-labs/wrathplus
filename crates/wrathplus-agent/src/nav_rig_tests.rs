@@ -57,6 +57,8 @@ pub(super) struct Rig {
     pub(super) events: Arc<crate::events::EventLog>,
     pub(super) lua: Lua,
     pub(super) feet: Feet,
+    /// A cinematic holds the client: the walker takes no step.
+    pub(super) held: bool,
 }
 
 impl Rig {
@@ -89,6 +91,7 @@ impl Rig {
                 at: [100.0, 200.0, 30.0],
                 ..Default::default()
             },
+            held: false,
         }
     }
 
@@ -124,12 +127,15 @@ impl Rig {
     /// The walker until it stops asking for clicks.
     pub(super) fn walk(&mut self) {
         for _ in 0..50 {
-            step(&self.nav, &mut self.feet);
+            step(&self.nav, &mut self.feet, self.held);
         }
     }
 
     pub(super) fn events(&self) -> Vec<String> {
-        let read = self.events.read(0, 100, std::time::Duration::ZERO);
+        let all = crate::events::Filter::default();
+        let read = self
+            .events
+            .read(Some(0), 100, std::time::Duration::ZERO, &all);
         read.events
             .iter()
             .map(|e| format!("{} {}", e["event"].as_str().unwrap(), e["args"]))

@@ -2,7 +2,7 @@
 //! per request. Requests that need the game (Lua, status, screenshots) are queued to the game loop
 //! and answered from there; event reads are served straight from the shared log.
 
-use crate::events::EventLog;
+use crate::events::{EventLog, Filter};
 use crossbeam_channel::Sender;
 use serde_json::{json, Value};
 use std::io::Read;
@@ -16,6 +16,8 @@ const VIEW: &str = include_str!("view.html");
 const GAME_TIMEOUT: Duration = Duration::from_secs(60);
 /// The longest an events read may wait for the next event.
 const MAX_WAIT: Duration = Duration::from_secs(30);
+/// Events one read returns unless it names a `limit`: few enough for a language model to read.
+const DEFAULT_EVENTS: usize = 100;
 /// Lua chunks larger than this are refused.
 const MAX_BODY: usize = 1 << 20;
 
@@ -209,17 +211,23 @@ fn route(shared: &Port, request: &mut HttpRequest) -> Reply {
             }
         }
         (Method::Get, "/events") => {
-            let since = param("since").and_then(|s| s.parse().ok()).unwrap_or(0);
+            // No `since` reads from now (only what arrives during `wait_ms`); `since=0` is the
+            // whole retained buffer.
+            let since = param("since").and_then(|s| s.parse().ok());
             let limit = param("limit")
                 .and_then(|s| s.parse().ok())
-                .unwrap_or(1_000usize)
+                .unwrap_or(DEFAULT_EVENTS)
                 .clamp(1, 10_000);
             let wait = param("wait_ms")
                 .and_then(|s| s.parse().ok())
                 .map(Duration::from_millis)
                 .unwrap_or(Duration::ZERO)
                 .min(MAX_WAIT);
-            let read = shared.events.read(since, limit, wait);
+            let filter = Filter::parse(
+                param("names").map(|v| percent_decode(&v)).as_deref(),
+                param("exclude").map(|v| percent_decode(&v)).as_deref(),
+            );
+            let read = shared.events.read(since, limit, wait, &filter);
             json_response(
                 200,
                 &json!({"events": read.events, "next": read.next, "missed": read.missed}),
@@ -230,6 +238,31 @@ fn route(shared: &Port, request: &mut HttpRequest) -> Reply {
             &json!({"error": "unknown route", "routes": ["GET /status", "POST /lua", "GET /screenshot", "GET /events", "GET /view", "GET|PUT|DELETE /files/<module>"]}),
         ),
     }
+}
+
+/// A query value with its `%XX` escapes and `+` undone (a client's URL encoder writes the commas
+/// of `names=A,B` as `%2C`). A broken escape is kept as written.
+fn percent_decode(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let hex = (bytes[i] == b'%')
+            .then(|| value.get(i + 1..i + 3))
+            .flatten()
+            .and_then(|h| u8::from_str_radix(h, 16).ok());
+        match hex {
+            Some(byte) => {
+                out.push(byte);
+                i += 3;
+            }
+            None => {
+                out.push(if bytes[i] == b'+' { b' ' } else { bytes[i] });
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 /// The agent's modules: `GET /files` lists them, `GET|PUT|DELETE /files/<module>` reads, writes
@@ -311,163 +344,5 @@ fn json_response(status: u16, value: &Value) -> Reply {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::io::Write;
-
-    #[test]
-    fn screenshots_are_png_unless_jpeg_is_asked_for() {
-        assert_eq!(Format::parse(None, None), Format::Png);
-        assert_eq!(Format::parse(Some("png"), Some("50")), Format::Png);
-        assert_eq!(Format::parse(Some("jpeg"), None), Format::Jpeg(85));
-        assert_eq!(Format::parse(Some("jpg"), Some("90")), Format::Jpeg(90));
-        assert_eq!(Format::parse(Some("jpeg"), Some("0")), Format::Jpeg(1));
-        assert_eq!(Format::parse(Some("jpeg"), Some("250")), Format::Jpeg(100));
-        assert_eq!(Format::parse(Some("jpeg"), Some("high")), Format::Jpeg(85));
-        assert_eq!(Format::Jpeg(90).content_type(), "image/jpeg");
-    }
-
-    /// A raw HTTP/1.1 exchange, so the tests need no client crate.
-    fn call(address: std::net::SocketAddr, request: &str) -> (u16, String) {
-        let mut stream = std::net::TcpStream::connect(address).unwrap();
-        stream.write_all(request.as_bytes()).unwrap();
-        let mut response = String::new();
-        stream.read_to_string(&mut response).unwrap();
-        let status = response[9..12].parse().unwrap();
-        let body = response.split_once("\r\n\r\n").unwrap().1.to_owned();
-        (status, body)
-    }
-
-    fn get(address: std::net::SocketAddr, path: &str, token: &str) -> (u16, String) {
-        call(
-            address,
-            &format!("GET {path} HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {token}\r\nConnection: close\r\n\r\n"),
-        )
-    }
-
-    const TOKEN: &str = "test-token-0123456789";
-
-    /// A port with a stand-in game loop that answers Lua with the code it was sent.
-    fn port() -> (std::net::SocketAddr, Arc<EventLog>) {
-        let (jobs, queue) = crossbeam_channel::unbounded::<Job>();
-        let events = Arc::new(EventLog::new());
-        let address = start(
-            0,
-            Port {
-                token: TOKEN.into(),
-                jobs,
-                events: events.clone(),
-                scripts: std::env::temp_dir()
-                    .join(format!("wp-agent-port-test-{}", std::process::id())),
-            },
-        )
-        .unwrap();
-        std::thread::spawn(move || {
-            for job in queue {
-                match job {
-                    Job::Lua {
-                        code,
-                        budget,
-                        reply,
-                    } => {
-                        let _ = reply.send(json!({"ok": true, "values": [code], "budget": budget}));
-                    }
-                    Job::Status { reply } => {
-                        let _ = reply.send(json!({"state": "Login"}));
-                    }
-                    Job::Screenshot { reply, .. } => {
-                        let _ = reply.send(Err("no window in tests".into()));
-                    }
-                }
-            }
-        });
-        (address, events)
-    }
-
-    #[test]
-    fn every_route_needs_the_token() {
-        let (address, _) = port();
-        assert_eq!(get(address, "/status", "wrong-token").0, 401);
-        let (status, _) = call(
-            address,
-            "GET /status HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n",
-        );
-        assert_eq!(status, 401);
-        assert_eq!(
-            get(address, "/status", TOKEN),
-            (200, r#"{"state":"Login"}"#.into())
-        );
-    }
-
-    #[test]
-    fn lua_goes_to_the_game_loop_with_its_budget() {
-        let (address, _) = port();
-        let code = "return UnitName('player')";
-        let (status, body) = call(
-            address,
-            &format!(
-                "POST /lua?budget=5000 HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {TOKEN}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{code}",
-                code.len()
-            ),
-        );
-        assert_eq!(status, 200);
-        let body: Value = serde_json::from_str(&body).unwrap();
-        assert_eq!(body["values"][0], code);
-        assert_eq!(body["budget"], 5000);
-    }
-
-    #[test]
-    fn events_are_read_by_cursor_and_unknown_routes_list_the_real_ones() {
-        let (address, events) = port();
-        events.push([json!({"event": "PLAYER_LOGIN", "args": []})]);
-        let (status, body) = get(address, "/events?since=0&wait_ms=10", TOKEN);
-        assert_eq!(status, 200);
-        let body: Value = serde_json::from_str(&body).unwrap();
-        assert_eq!(body["events"][0]["event"], "PLAYER_LOGIN");
-        assert_eq!(body["next"], 2);
-        let (status, body) = get(address, "/nope", TOKEN);
-        assert_eq!(status, 404);
-        assert!(body.contains("POST /lua"));
-        assert_eq!(get(address, "/screenshot", TOKEN).0, 500);
-    }
-
-    #[test]
-    fn the_view_takes_its_token_from_the_address_and_carries_it() {
-        let (address, _) = port();
-        let (status, page) = call(
-            address,
-            &format!("GET /view?token={TOKEN} HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n"),
-        );
-        assert_eq!(status, 200);
-        assert!(page.contains(&format!("const TOKEN = \"{TOKEN}\";")));
-        let wrong = "GET /view?token=nope HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n";
-        assert_eq!(call(address, wrong).0, 401);
-        // The address-bar token opens the page only, not the API.
-        let api =
-            format!("GET /status?token={TOKEN} HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
-        assert_eq!(call(address, &api).0, 401);
-    }
-
-    #[test]
-    fn modules_are_saved_listed_read_and_deleted_inside_the_scripts_folder() {
-        let (address, _) = port();
-        let auth = format!("Authorization: Bearer {TOKEN}\r\nConnection: close\r\n");
-        let source = "return { hello = true }";
-        let put = format!(
-            "PUT /files/grind.loop HTTP/1.1\r\nHost: x\r\n{auth}Content-Length: {}\r\n\r\n{source}",
-            source.len()
-        );
-        assert_eq!(call(address, &put).0, 200);
-        let (status, body) = get(address, "/files", TOKEN);
-        assert_eq!(status, 200);
-        assert!(body.contains("\"grind.loop\""));
-        assert_eq!(
-            get(address, "/files/grind.loop", TOKEN),
-            (200, source.to_string())
-        );
-        assert_eq!(get(address, "/files/..%2Fetc", TOKEN).0, 400);
-        let delete = format!("DELETE /files/grind.loop HTTP/1.1\r\nHost: x\r\n{auth}\r\n");
-        assert_eq!(call(address, &delete).0, 200);
-        assert_eq!(get(address, "/files/grind.loop", TOKEN).0, 404);
-    }
-}
+#[path = "server_tests.rs"]
+mod tests;
