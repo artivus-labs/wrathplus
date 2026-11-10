@@ -87,6 +87,18 @@ fn guild_bank_tabs_money_and_staged_rank_rights() {
     let staged = s.wrath_guild_bank_staged_rights(0).unwrap();
     assert_eq!(staged.tabs[0], (2 | 4, 100_000));
     assert_eq!(staged.money_per_day, 1_000_000_000);
+    s.run("SetGuildBankWithdrawLimit(-5)").unwrap();
+    let staged = s.wrath_guild_bank_staged_rights(0).unwrap();
+    assert_eq!(
+        staged.money_per_day, 1_000_000_000,
+        "unsigned compare (`0x5cb6d9`)"
+    );
+    s.model_mut().wrath_friends.staged[0].money_per_day = u32::MAX;
+    assert_eq!(
+        s.eval::<i64>("return GetGuildBankWithdrawLimit()").unwrap(),
+        -1,
+        "the unlimited word is not divided (`0x5cb71e`)"
+    );
 }
 
 #[test]

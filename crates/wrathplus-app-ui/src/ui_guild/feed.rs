@@ -288,7 +288,6 @@ pub(super) fn index_of(order: &[u64], guid: u64) -> u32 {
 pub(super) fn drain_guild(
     script: Option<NonSendMut<UiScript>>,
     mut guild: ResMut<GuildState>,
-    native: Res<super::wrath::NativeGuild>,
     commands: Res<NetCommands>,
     time: Res<Time<Real>>,
 ) {
@@ -364,7 +363,7 @@ pub(super) fn drain_guild(
                 let Some(name) = capped_rank_name(name) else {
                     continue;
                 };
-                let bank = rank_bank(&script, &native, rank_index);
+                let bank = rank_bank(&script, rank_index);
                 let _ = commands.0.send(ClientCommand::NativeGuildRank(SaveRank {
                     rank: rank_index,
                     flags: rights,
@@ -399,24 +398,16 @@ pub(super) fn drain_guild(
     }
 }
 
-/// The bank rights a 3.3.5 rank save carries for 0-based `rank`: the guild-control pane's staged
-/// edit of that rank (`wrath_guild_bank_staged_rights`, the row the setters wrote, as
-/// `0x5cb25f`-`0x5cb2e5` reads `[0xad07a8]`), else the rank's words from the last roster.
-fn rank_bank(
-    script: &UiScript,
-    native: &super::wrath::NativeGuild,
-    rank: u32,
-) -> WrathGuildBankRankRights {
-    script
+/// The bank words a 3.3.5 rank save carries for 0-based `rank`: the guild-control pane's staged
+/// row of that rank (`wrath_guild_bank_staged_rights`, the row the setters wrote, as
+/// `0x5cb25f`-`0x5cb2e5` reads `[0xad07a8]`), its money word times 10000 (`imul` at `0x5cb274`):
+/// `SetGuildBankWithdrawLimit` stores gold.
+fn rank_bank(script: &UiScript, rank: u32) -> WrathGuildBankRankRights {
+    let mut bank = script
         .wrath_guild_bank_staged_rights(rank)
-        .unwrap_or_else(|| {
-            native
-                .rank(rank)
-                .map_or_else(Default::default, |r| WrathGuildBankRankRights {
-                    money_per_day: r.money_limit,
-                    tabs: r.tabs,
-                })
-        })
+        .unwrap_or_default();
+    bank.money_per_day = bank.money_per_day.wrapping_mul(10_000);
+    bank
 }
 
 /// A note verb: resolve the row to the member, write the note locally, and send only if it

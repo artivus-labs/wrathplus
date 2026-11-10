@@ -375,13 +375,18 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             int(withdrawals),
         ]))
     })?;
-    // GetGuildBankWithdrawLimit() (`0x5cb700`): the edited rank's daily copper as gold.
+    // GetGuildBankWithdrawLimit() (`0x5cb700`): the edited rank's signed money word, divided by
+    // 10000 only when not negative (`0x5cb71e`), so the guild master's unlimited word answers -1.
     set(lua, "GetGuildBankWithdrawLimit", |lua, _| {
         let model = lua.app_data_ref::<Model>().expect("model app_data");
-        let copper = edited_rank(&model)
+        let word = edited_rank(&model)
             .and_then(|r| model.wrath_friends.staged.get(r))
-            .map_or(0, |r| r.money_per_day);
-        Ok(MultiValue::from_vec(vec![int(copper / 10_000)]))
+            .map_or(0, |r| r.money_per_day as i32);
+        Ok(MultiValue::from_vec(vec![int(if word >= 0 {
+            word / 10_000
+        } else {
+            word
+        })]))
     })?;
     // SetGuildBankTabPermissions(tab, index, enabled) (`0x5cb470`): index 1 view, 2 deposit,
     // 3 update text, on the edited rank's staged rights.
@@ -432,14 +437,15 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         }
         none()
     })?;
-    // SetGuildBankWithdrawLimit(amount) (`0x5cb6a0`): at most 1000000000 copper.
+    // SetGuildBankWithdrawLimit(amount) (`0x5cb6a0`): the truncated gold figure, stored raw; an
+    // unsigned compare caps it at 1000000000 (`0x5cb6d9`), so a negative one lands there too.
     set(lua, "SetGuildBankWithdrawLimit", |lua, args| {
         let Some(a) = number(lua, &arg(&args, 0)) else {
             return Err(mlua::Error::runtime(
                 "Usage: Script_SetGuildBankWithdrawLimit(amount)",
             ));
         };
-        let amount = (a.trunc().max(0.0) as u64).min(1_000_000_000) as u32;
+        let amount = (super::binding_abi::ftol(a) as u32).min(1_000_000_000);
         let mut model = lua.app_data_mut::<Model>().expect("model app_data");
         if let Some(r) = edited_rank(&model) {
             if let Some(rights) = model.wrath_friends.staged.get_mut(r) {

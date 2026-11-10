@@ -103,10 +103,14 @@ fn a_rank_save_carries_the_saved_ranks_staged_bank_words() {
         ..Default::default()
     });
     script
-        .run("GuildControlSetRank(2) SetGuildBankTabWithdraw(1, 7)")
+        .run("GuildControlSetRank(2) SetGuildBankTabWithdraw(1, 7) SetGuildBankWithdrawLimit(100)")
         .unwrap();
-    let bank = rank_bank(&script, &crate::ui_guild::NativeGuild::default(), 1);
+    let bank = rank_bank(&script, 1);
     assert_eq!(bank.tabs[0], (1, 7), "rank index 1's staged edit");
+    assert_eq!(
+        bank.money_per_day, 1_000_000,
+        "100 gold goes out as copper (`0x5cb274`)"
+    );
 }
 
 #[test]
