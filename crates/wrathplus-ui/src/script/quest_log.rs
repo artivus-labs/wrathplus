@@ -268,9 +268,17 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
 
     g.set(
         "SelectQuestLogEntry",
-        lua.create_function(|lua, i: u32| {
+        // `0x5e02f0` → `0x5dffa0`: the index truncates and a non-number raises; a header row keeps
+        // the selection, a row out of range clears it (`0x5dfff3`), a quest row takes it.
+        lua.create_function(|lua, i: Value| {
+            let n = number_arg(lua, i, "Usage: SelectQuestLogEntry(index)")?;
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-            model.quest_log_selection = i;
+            let row = usize::try_from(n).ok().and_then(|n| n.checked_sub(1));
+            match row.and_then(|r| model.quest_log.entries.get(r)) {
+                Some(e) if e.is_header => {}
+                Some(_) => model.quest_log_selection = n as u32,
+                None => model.quest_log_selection = 0,
+            }
             Ok(())
         })?,
     )?;
@@ -981,7 +989,7 @@ mod tests {
     }
 
     #[test]
-    fn a_header_selection_has_no_detail() {
+    fn a_header_select_keeps_the_selection_and_a_miss_clears_it() {
         let mut s = UiScript::new().unwrap();
         let mut state = two_quests();
         state.entries.insert(
@@ -998,6 +1006,15 @@ mod tests {
                 "SelectQuestLogEntry(1); local d = GetQuestLogQuestText(); return d == ''"
             )
             .unwrap());
+        // `0x5dffa0`: a header keeps the quest selected, a miss clears it to 0.
+        let sel = |s: &UiScript, lua: &str| s.eval::<i64>(lua).unwrap();
+        let header =
+            "SelectQuestLogEntry(3.9) SelectQuestLogEntry(1) return GetQuestLogSelection()";
+        assert_eq!(sel(&s, header), 3);
+        assert_eq!(
+            sel(&s, "SelectQuestLogEntry(9) return GetQuestLogSelection()"),
+            0
+        );
     }
 
     #[test]
