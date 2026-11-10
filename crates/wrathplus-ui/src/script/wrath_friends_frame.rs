@@ -285,6 +285,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         let Some(n) = number(lua, &arg(&args, 0)) else {
             return Err(mlua::Error::runtime("Usage: GetGuildBankTabInfo(tab)"));
         };
+        // Truncated (`fistp` under `or 0xc00`, `0x5a6867`); the rank bindings likewise
+        // (`0x5cb5ac`, `0x5cb4bf`, `0x5cb7a6`), and none here goes through `lua_tointeger`.
         let tab = i64::from(super::binding_abi::ftol(n));
         let (row, rights, remaining, has_player) = {
             let model = lua.app_data_ref::<Model>().expect("model app_data");

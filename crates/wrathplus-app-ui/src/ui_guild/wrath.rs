@@ -22,7 +22,8 @@ pub(crate) struct NativeGuild {
 }
 
 impl NativeGuild {
-    /// A rank's bank words as the roster last sent them.
+    /// A rank's row of the table.
+    #[cfg(test)]
     pub(crate) fn rank(&self, rank: u32) -> Option<&Rank> {
         self.ranks.get(usize::try_from(rank).ok()?)
     }

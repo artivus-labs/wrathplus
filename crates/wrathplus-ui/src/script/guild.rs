@@ -260,9 +260,10 @@ fn name_or_nil(lua: &Lua, name: &str) -> mlua::Result<Value> {
 /// The `guildShowOffline` CVar (`[0xbd0970]`, default "1"), as the bindings read its int value
 /// (`[CVar+0x30]`, `0x5ca1e8`).
 fn show_offline(model: &Model) -> bool {
-    model.cvars.get("guildshowoffline").map_or(true, |c| {
-        c.value.trim().parse::<i64>().map_or(false, |v| v != 0)
-    })
+    model
+        .cvars
+        .get("guildshowoffline")
+        .is_none_or(|c| c.value.trim().parse::<i64>().is_ok_and(|v| v != 0))
 }
 
 /// Whether the player's own rank holds right `index`, 1-based into [`RANK_RIGHT_BITS`].
