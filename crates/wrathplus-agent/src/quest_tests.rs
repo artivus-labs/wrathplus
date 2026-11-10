@@ -109,7 +109,7 @@ fn a_visit_hands_in_then_takes_what_is_on_offer() {
     script
         .run(
             "remy.quest = 'reward' \
-             GetGossipActiveQuests = function() return 'Old', 5, false, true end \
+             GetGossipActiveQuests = function() return 'A', 5, nil, nil, 'B', 5, nil, nil, 'Old', 5, nil, 1, 'D', 5, nil, nil end \
              SelectGossipActiveQuest = function(i) calls[#calls + 1] = 'turn in ' .. i end \
              IsQuestCompletable = function() return true end \
              CompleteQuest = function() calls[#calls + 1] = 'complete' end \
@@ -131,7 +131,7 @@ fn a_visit_hands_in_then_takes_what_is_on_offer() {
     assert!(!script.eval::<bool>("return Quests.busy()").unwrap());
     assert_eq!(
         calls(&script),
-        "interact 0xR | turn in 1 | complete | reward 1 | interact 0xR | select 1 | accept | PARTY: Handed in: Quest 1. Picked up: Quest 2."
+        "interact 0xR | turn in 3 | complete | reward 1 | interact 0xR | select 1 | accept | PARTY: Handed in: Quest 1. Picked up: Quest 2."
     );
 }
 
