@@ -278,15 +278,33 @@ fn live_rights(model: &Model, rank_one_based: u32) -> u32 {
         .unwrap_or(0)
 }
 
-/// The rank-name gate `GuildControlSaveRank` (`0x4d20d0`) and `GuildControlAddRank` (`0x4d2210`)
-/// run before any packet: the name up to the first NUL must be 1 to 16 UTF-16 code units
-/// (`0x65b250`), untrimmed, and is sent as measured. vmangos kicks a name over 15 code points; the
-/// app caps that at the send (`ui_guild::feed::capped_rank_name`).
-fn gated_rank_name(name: &str) -> Option<&str> {
+/// The rank name `GuildControlSaveRank` (`0x5cb170`) and `GuildControlAddRank` (`0x5cb330`) send:
+/// `lua_isstring` or the usage error; an empty name is a silent no-op (`0x5cb1b5`, `0x5cb371`);
+/// otherwise `0x7e1830(name, buf, 0x10, 0x40, 1)` copies at most 63 bytes, dropping every `|`
+/// (`0x7e17f0`), cuts at a CR, LF or `\n` (`0x7e1640`) and keeps 15 UTF-8 characters
+/// (`0x7e1890`-`0x7e18b0`). Nothing is refused for its length.
+fn rank_name_arg(lua: &Lua, v: Value, usage: &'static str) -> mlua::Result<Option<String>> {
+    let name = binding_abi::string_arg(lua, v, usage)?;
     let c_name = name.split('\0').next().unwrap_or_default();
-    (1..=16)
-        .contains(&c_name.encode_utf16().count())
-        .then_some(c_name)
+    if c_name.is_empty() {
+        return Ok(None);
+    }
+    let mut out: Vec<u8> = c_name.bytes().filter(|b| *b != b'|').take(63).collect();
+    let line_end = (0..out.len()).find(|&i| {
+        matches!(out[i], b'\r' | b'\n') || (out[i] == b'\\' && out.get(i + 1) == Some(&b'n'))
+    });
+    if let Some(cut) = line_end {
+        out.truncate(cut);
+    }
+    let mut chars = 0;
+    let sixteenth = out.iter().position(|b| {
+        chars += usize::from(b & 0xc0 != 0x80);
+        chars == 16
+    });
+    if let Some(cut) = sixteenth {
+        out.truncate(cut);
+    }
+    Ok(Some(String::from_utf8_lossy(&out).into_owned()))
 }
 
 /// Register the guild globals.
@@ -682,16 +700,17 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // GuildControlSaveRank(name) (`0x5cb170`): the edit box's name (`FriendsFrame.lua:839`) and the
-    // staged flags as one `CMSG_GUILD_RANK` for the loaded rank. A name failing `gated_rank_name`
-    // is a silent no-op; vmangos stores an empty one (`Handlers/GuildHandler.cpp:586`). The fold
+    // GuildControlSaveRank(name) (`0x5cb170`): the edit box's name (`FriendsFrame.lua:839`), as
+    // `rank_name_arg` sanitises it, and the staged flags as one `CMSG_GUILD_RANK` for the loaded
+    // rank. The fold
     // sets or clears each staged bit over the freshly read live rights (`or mask[k]` /
     // `and ~mask[k]`), so a right can be turned off and bits outside the seventeen, such as `0x40`,
     // which the reference never tests, ride through as the server sent them.
     g.set(
         "GuildControlSaveRank",
-        lua.create_function(|lua, name: String| {
-            let Some(name) = gated_rank_name(&name).map(str::to_string) else {
+        lua.create_function(|lua, name: Value| {
+            let usage = "Usage: GuildControlSaveRank(name)";
+            let Some(name) = rank_name_arg(lua, name, usage)? else {
                 return Ok(());
             };
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
@@ -717,12 +736,13 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // GuildControlAddRank(name) (`0x4d2210`): the same name gate, and a silent refusal at
-    // `MAX_RANKS`, both before any packet.
+    // GuildControlAddRank(name) (`0x5cb330`): the same name rule, and a silent refusal at
+    // `MAX_RANKS` (`0x5cb388`), both before any packet.
     g.set(
         "GuildControlAddRank",
-        lua.create_function(|lua, name: String| {
-            let Some(name) = gated_rank_name(&name).map(str::to_string) else {
+        lua.create_function(|lua, name: Value| {
+            let usage = "Usage: GuildControlAddRank(name)";
+            let Some(name) = rank_name_arg(lua, name, usage)? else {
                 return Ok(());
             };
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");

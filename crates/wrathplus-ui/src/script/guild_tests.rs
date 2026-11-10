@@ -87,55 +87,66 @@ fn guild_with_ranks(n: usize) -> crate::script::UiScript {
     s
 }
 
-/// `0x4d20d0` refuses silently: a name outside 1 to 16 UTF-16 units (`0x65b250` counts them
-/// plus the NUL), no rank loaded, or a rank past the count.
+/// `0x5cb170` is a silent no-op for an empty name, no rank loaded, or a rank past the count;
+/// every other name is sanitised by `0x7e1830` and sent, never refused for its length.
 #[test]
 fn saving_a_rank_refuses_what_the_reference_refuses() {
     let mut s = guild_with_ranks(5);
     let saves = |s: &mut crate::script::UiScript| {
         s.take_guild_requests()
             .into_iter()
-            .filter(|r| matches!(r, GuildRequest::SaveRank { .. }))
-            .count()
+            .filter_map(|r| match r {
+                GuildRequest::SaveRank { name, .. } => Some(name),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
     };
 
     s.run(r#"GuildControlSetRank(2); GuildControlSaveRank("")"#)
         .unwrap();
-    assert_eq!(saves(&mut s), 0, "an empty name is a silent no-op");
+    assert!(saves(&mut s).is_empty(), "an empty name is a silent no-op");
 
-    // Sixteen UTF-16 units is the ceiling; seventeen is refused.
-    s.run(r#"GuildControlSetRank(2); GuildControlSaveRank(string.rep("a", 16))"#)
+    // Fifteen characters are kept, not bytes; `|` is dropped and a line break ends the name.
+    for (lua, sent) in [
+        (r#"string.rep("a", 17)"#, "a".repeat(15)),
+        (r#"string.rep("é", 16)"#, "é".repeat(15)),
+        (
+            r#""|cffffffffOfficer|r""#,
+            "cffffffffOfficer"[..15].to_string(),
+        ),
+        (r#""Raid\nLead""#, "Raid".to_string()),
+        (r#"" ""#, " ".to_string()),
+        (r#""||""#, String::new()),
+    ] {
+        s.run(&format!(
+            "GuildControlSetRank(2); GuildControlSaveRank({lua})"
+        ))
         .unwrap();
-    assert_eq!(saves(&mut s), 1);
-    s.run(r#"GuildControlSetRank(2); GuildControlSaveRank(string.rep("a", 17))"#)
-        .unwrap();
-    assert_eq!(saves(&mut s), 0, "seventeen units");
-    // Units, not bytes: sixteen two-byte letters are sixteen units.
-    s.run(r#"GuildControlSetRank(2); GuildControlSaveRank(string.rep("é", 16))"#)
-        .unwrap();
-    assert_eq!(saves(&mut s), 1, "32 bytes, 16 units");
-    // Whitespace is not empty to the reference.
-    s.run(r#"GuildControlSetRank(2); GuildControlSaveRank(" ")"#)
-        .unwrap();
-    assert_eq!(saves(&mut s), 1);
+        assert_eq!(saves(&mut s), [sent], "{lua}");
+    }
+    let err = s.run("GuildControlSaveRank()").unwrap_err().to_string();
+    assert!(err.contains("Usage: GuildControlSaveRank(name)"), "{err}");
 
     // No rank loaded in a fresh popup (the selection persists across saves, as `[0x84966c]`
     // does), or one past the count.
     let mut fresh = guild_with_ranks(5);
     fresh.run(r#"GuildControlSaveRank("Officer")"#).unwrap();
-    assert_eq!(saves(&mut fresh), 0, "nothing selected");
+    assert!(saves(&mut fresh).is_empty(), "nothing selected");
     s.run(r#"GuildControlSetRank(6); GuildControlSaveRank("Officer")"#)
         .unwrap();
-    assert_eq!(saves(&mut s), 0, "rank index 5 >= 5 ranks");
+    assert!(saves(&mut s).is_empty(), "rank index 5 >= 5 ranks");
 }
 
-/// `0x4d2210` runs the same name gate; a whitespace name passes it.
+/// `0x5cb330` runs the same name rule; a whitespace name passes it.
 #[test]
-fn adding_a_rank_runs_the_same_name_gate() {
+fn adding_a_rank_runs_the_same_name_rule() {
     let mut s = guild_with_ranks(5);
     s.run(r#"GuildControlAddRank(""); GuildControlAddRank(string.rep("a", 17))"#)
         .unwrap();
-    assert!(s.take_guild_requests().is_empty());
+    assert_eq!(
+        s.take_guild_requests(),
+        [GuildRequest::AddRank("a".repeat(15))]
+    );
     s.run(r#"GuildControlAddRank(" ")"#).unwrap();
     assert_eq!(s.take_guild_requests().len(), 1);
 }

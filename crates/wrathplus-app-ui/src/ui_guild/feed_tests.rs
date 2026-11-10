@@ -69,19 +69,6 @@ fn the_shown_order_maps_both_ways() {
     assert_eq!(index_of(&[11, 22], 0), 0, "nothing selected");
 }
 
-#[test]
-fn an_over_long_rank_name_is_refused() {
-    assert_eq!(
-        capped_rank_name("Officer".into()).as_deref(),
-        Some("Officer")
-    );
-    assert!(capped_rank_name("A".repeat(GUILD_RANK_MAX_LENGTH)).is_some());
-    assert_eq!(
-        capped_rank_name("A".repeat(GUILD_RANK_MAX_LENGTH + 1)),
-        None
-    );
-}
-
 /// `GuildControlSaveRank` sends the bank words of the rank it saves, the row the setters wrote
 /// (`0x5cb25f`-`0x5cb2e5` and `0x5cb7cb`-`0x5cb7e1`, both `[0xad07a8]`): an officer's save must not
 /// carry the guild master's row.

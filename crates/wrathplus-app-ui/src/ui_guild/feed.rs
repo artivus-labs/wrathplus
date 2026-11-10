@@ -7,7 +7,6 @@ use bevy::prelude::*;
 use wrathplus_formats::AreaTableCatalog;
 use wrathplus_protocol::types::{
     guild_presence, GuildInfo, GuildRosterMember, GUILD_RANKS_MAX_COUNT, GUILD_RANKS_MIN_COUNT,
-    GUILD_RANK_MAX_LENGTH,
 };
 use wrathplus_ui::script::{
     GuildMemberInfo, GuildRankInfo, GuildRequest, GuildState as VmGuild, ScriptValue, UiScript,
@@ -360,9 +359,6 @@ pub(super) fn drain_guild(
                 rights,
                 name,
             } => {
-                let Some(name) = capped_rank_name(name) else {
-                    continue;
-                };
                 let bank = rank_bank(&script, rank_index);
                 let _ = commands.0.send(ClientCommand::NativeGuildRank(SaveRank {
                     rank: rank_index,
@@ -382,9 +378,7 @@ pub(super) fn drain_guild(
                 // `GuildControlAddRank` (`0x4d2271`) and `GuildControlDelRank` (`0x4d22e6`) check
                 // silently; the stock buttons follow them (`FriendsFrame.lua:887`, `:908`).
                 if guild.rank_rights.len() < GUILD_RANKS_MAX_COUNT {
-                    if let Some(name) = capped_rank_name(name) {
-                        let _ = commands.0.send(ClientCommand::GuildAddRank { name });
-                    }
+                    let _ = commands.0.send(ClientCommand::GuildAddRank { name });
                 }
             }
             GuildRequest::DelRank => {
@@ -439,21 +433,6 @@ fn set_note(
         ClientCommand::GuildSetPublicNote { name, note }
     };
     let _ = commands.0.send(command);
-}
-
-/// The rank name, or `None` past vmangos's cap of 15, where it kicks the session
-/// (`Handlers/GuildHandler.cpp:580-584`, `:600-604`); the stock edit box stops at 15. Deviation: a
-/// script's 16-letter name, which the reference's bindings pass (1 to 16 units, `0x4d20d0`,
-/// `0x4d2210`), is dropped rather than sent or truncated, because vmangos would kick the session.
-fn capped_rank_name(name: String) -> Option<String> {
-    if name.chars().count() > GUILD_RANK_MAX_LENGTH {
-        warn!(
-            "guild: refusing a {}-character rank name (the server kicks over {GUILD_RANK_MAX_LENGTH})",
-            name.chars().count()
-        );
-        return None;
-    }
-    Some(name)
 }
 
 #[cfg(test)]
