@@ -457,11 +457,12 @@ pub(super) fn commit(
     target_store: Option<&ObjectStore>,
     engaged: bool,
     self_guid: Option<u64>,
+    pet_guid: u64,
     new_attackable: bool,
 ) -> CommitOutcome {
-    // `IsSelectable`, before the dedup (`0x4935ec`–`0x4935f3`): a non-selectable unit is a complete
+    // `IsSelectable`, before the dedup (`0x524cf8`–`0x524d06`): a non-selectable unit is a complete
     // no-op that keeps the current target, for every selection writer.
-    if !super::relations::is_selectable(target_store, self_guid) {
+    if !super::relations::is_selectable(target_store, self_guid, pet_guid) {
         return CommitOutcome::default();
     }
     if selection.guid == Some(guid) {
@@ -503,6 +504,7 @@ pub(super) fn cycle(
     selection: &mut Selection,
     seam: &mut crate::creature_anim::AttackSeam,
     engaged: bool,
+    pet_guid: u64,
 ) {
     history.enter(side);
     history.prune(now);
@@ -562,8 +564,9 @@ pub(super) fn cycle(
         guid,
         scan.store_at(entity),
         engaged,
-        // `IsSelectable`'s `CREATEDBY` clause reads it.
+        // `IsSelectable`'s own-pet clause reads both.
         scan.self_guid(),
+        pet_guid,
         // `Attack 0x5ecb70`'s validation, which a mode-2 pick fails (reaction >= 4 against
         // `CanAttack`'s < 4). A duelling friendly passes `CanAttack`'s duel arm, which reads no
         // reaction, so the reference's `Attack` would re-swing at it; here it gets none.
@@ -637,6 +640,8 @@ impl AttackPick<'_, '_> {
                 selection,
                 seam,
                 engaged,
+                // No pet slot: the enemy pool is `CanAttack`'s, which refuses `NOT_SELECTABLE`.
+                0,
             );
         }
         let Some(guid) = selection.guid else {
@@ -811,11 +816,15 @@ pub(super) fn auto_acquire_attacker(
     mut swings: MessageReader<SwingMessage>,
     self_player: Query<(Entity, &Guid), With<SelfPlayer>>,
     guids: Query<&Guid>,
-    // For `IsSelectable`: a `NOT_SELECTABLE` attacker is not acquired.
+    // For `IsSelectable`: a `NOT_SELECTABLE` attacker is not acquired, bar our own pet.
     stores: Query<&ObjectStore>,
+    pet: Option<Res<crate::app_core::state::PetBar>>,
     mut selection: ResMut<Selection>,
     mut seam: crate::creature_anim::AttackSeam,
 ) {
+    let pet_guid = pet
+        .as_deref()
+        .map_or(0, crate::app_core::state::PetBar::guid);
     for s in swings.read() {
         if selection.target.is_some() {
             continue;
@@ -842,6 +851,7 @@ pub(super) fn auto_acquire_attacker(
             stores.get(s.attacker).ok(),
             false,
             Some(my_guid.0),
+            pet_guid,
             false,
         );
     }
@@ -864,8 +874,11 @@ mod tests {
         go_with(world, guid, None, engaged, self_guid, attackable)
     }
 
+    /// The pet slot every test commit runs with.
+    const PET: u64 = 0xC;
+
     /// `go` with the new target's descriptor; `None` is an unresolved object, which skips
-    /// `IsSelectable` (`0x4935c8`).
+    /// `IsSelectable` (`0x524cd7`).
     fn go_with(
         world: &mut World,
         guid: u64,
@@ -887,6 +900,7 @@ mod tests {
                         store.as_ref(),
                         engaged,
                         self_guid,
+                        PET,
                         attackable,
                     )
                 },
@@ -1168,9 +1182,18 @@ mod tests {
             "the target already in hand survives the refused click"
         );
 
-        // The `CREATEDBY` clause: the same flag on a unit I created still selects (my totem).
-        let mine = unit(&[(FLAGS, NOT_SELECTABLE), (CREATEDBY, 1), (CREATEDBY + 1, 0)]);
-        assert!(go_with(&mut world, 0xC, Some(mine), false, Some(1), true).changed);
+        // The own-pet clause: the same flag on a unit I created selects only if it is my pet.
+        let mine = |guid: u64| {
+            unit(&[
+                (FLAGS, NOT_SELECTABLE),
+                (CREATEDBY, 1),
+                (CREATEDBY + 1, 0),
+                (Field::ObjectGuid.index(), guid as u32),
+            ])
+        };
+        assert!(!go_with(&mut world, 0xF, Some(mine(0xF)), false, Some(1), true).changed);
+        assert_eq!(sent(&rx), 0);
+        assert!(go_with(&mut world, PET, Some(mine(PET)), false, Some(1), true).changed);
         assert_eq!(sent(&rx), 1);
 
         // Somebody else's flagged creation is not mine to click.

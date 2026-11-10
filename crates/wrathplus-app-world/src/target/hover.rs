@@ -91,6 +91,8 @@ pub(super) struct PickPose<'w, 's> {
 pub(super) struct TargetHoverState<'w, 's> {
     /// For `IsSelectable`'s `UNIT_FIELD_CREATEDBY` clause and the pick filter's possession clause.
     self_guid: Res<'w, crate::app_core::session::SelfGuid>,
+    /// `IsSelectable`'s pet slot; `Option` for harnesses without the pet bar.
+    pet: Option<Res<'w, crate::app_core::state::PetBar>>,
     /// `0x6e61a0`'s pick flag `0x20`, as the frame began.
     picks_self: Res<'w, crate::spell::PicksSelf>,
     /// The corpse leg's word, as the frame began.
@@ -417,17 +419,21 @@ pub(super) fn update_hover(
     // Switch on type at the end, as the reference does: the one pick lands in the unit slot or the
     // corpse slot, and a unit the `IsSelectable` grader refuses in neither.
     if let Some((t, entity)) = best {
+        let pet_guid = target_state
+            .pet
+            .as_deref()
+            .map_or(0, crate::app_core::state::PetBar::guid);
         if let Ok((guid, net)) = units.get(entity) {
             if net.kind == EntityKind::Corpse {
                 hovered.corpse = Some(entity);
                 hovered.corpse_guid = Some(guid.0);
-            } else if selectable_pick(entity, &roots, target_state.self_guid.0) {
+            } else if selectable_pick(entity, &roots, target_state.self_guid.0, pet_guid) {
                 hovered.target = Some(entity);
                 hovered.guid = Some(guid.0);
             } else {
                 hovered.refused = true;
             }
-        } else if selectable_pick(entity, &roots, target_state.self_guid.0) {
+        } else if selectable_pick(entity, &roots, target_state.self_guid.0, pet_guid) {
             hovered.target = Some(entity);
         } else {
             hovered.refused = true;
@@ -468,9 +474,10 @@ fn selectable_pick(
         With<Guid>,
     >,
     self_guid: Option<u64>,
+    pet_guid: u64,
 ) -> bool {
     let store = roots.get(entity).ok().and_then(|r| r.6);
-    super::relations::is_selectable(store, self_guid)
+    super::relations::is_selectable(store, self_guid, pet_guid)
 }
 
 /// The GameObject picker's state as one [`SystemParam`] (the picker is at Bevy's 16-param limit):

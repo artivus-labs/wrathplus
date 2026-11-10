@@ -113,7 +113,8 @@ impl NameConfig {
     ///   or ours, else `EnemyPetName`; the creator-only flag-`0x200` case by
     ///   `NonCombatCreatureName`.
     ///
-    /// Unresolved, labelled: the leading `vtable+0xa8` and `[0xac80a8]` legs; the owner is
+    /// The leading `IsSelectable` leg (`0x729cd6`, vtable `+0xa8` `0x6e6ec0` → `0x71a390`) is
+    /// [`drive_nameplates`]'s. Unresolved, labelled: the `[0xac80a8]` leg; the owner is
     /// [`crate::vplates::unit_sort`]'s, where this virtual takes the charmer else the creator.
     pub(crate) fn shows(self, u: &NameSubject) -> bool {
         use crate::vplates::UnitSort;
@@ -387,6 +388,8 @@ pub(crate) fn drive_nameplates(
         Res<NameConfig>,
         // `CanAttack`'s controller lookup, for a kind's reaction.
         crate::target::RelationInputs,
+        // `IsSelectable`'s pet slot; `Option` for harnesses without the pet bar.
+        Option<Res<crate::app_core::state::PetBar>>,
     ),
     names: Res<NameCache>,
     // The guild cache, the a5 line's text; `ResMut` because a miss sends `CMSG_GUILD_QUERY`.
@@ -408,7 +411,10 @@ pub(crate) fn drive_nameplates(
         Query<(), With<crate::entities::mount::MountChild>>,
     ),
 ) {
-    let (selection, flash, rig, vplates, bubbles, group, name_cfg, relations) = gates;
+    let (selection, flash, rig, vplates, bubbles, group, name_cfg, relations, pet_bar) = gates;
+    let pet_guid = pet_bar
+        .as_deref()
+        .map_or(0, crate::app_core::state::PetBar::guid);
     let (Ok(cam_tf), Some(atlas)) = (camera.single(), atlas.as_mut()) else {
         return;
     };
@@ -451,6 +457,10 @@ pub(crate) fn drive_nameplates(
     }
     // The billboard facing: screen-aligned (the camera's own rotation), this frame's camera.
     let facing = cam_tf.rotation;
+    let own = self_store.single().ok();
+    let me = own.and_then(|o| {
+        o.0.get_field_guid(wrathplus_protocol::types::Field::ObjectGuid, 0)
+    });
     let mut seen = bevy::ecs::entity::EntityHashSet::default();
     for (entity, net, guid, tf, store, is_self, drawn) in &units {
         // A name needs a drawn body; this precedes the ShouldShowName ladder.
@@ -459,9 +469,13 @@ pub(crate) fn drive_nameplates(
         }
         // No distance cull: the name's update, cull and build (`0x6c6d40`, `0x6c6e00`,
         // `0x6c6e90`) compare none; the 20-yard cap (`0x60f600`) is the V-key frame's.
-        // ShouldShowName's order (`0x729c70`): own unit by its CVar, the target, the kind CVar.
+        // ShouldShowName's order (`0x729c70`): `IsSelectable` (`0x729cd6`), own unit by its CVar,
+        // the target, the kind CVar.
         // A V-key plate or chat bubble suppresses the name.
-        let show = if vplates.0.contains(&entity) || bubbles.0.contains(&entity) {
+        let show = if vplates.0.contains(&entity)
+            || bubbles.0.contains(&entity)
+            || !crate::target::relations::is_selectable(store, me, pet_guid)
+        {
             false
         } else if is_self {
             // The own CVar, before the rescue; no name over a fully faded first-person avatar
@@ -475,7 +489,6 @@ pub(crate) fn drive_nameplates(
             true
         } else {
             let is_player = net.kind == EntityKind::Player;
-            let own = self_store.single().ok();
             let friendly = crate::target::ring::plate_is_friendly(
                 factions.as_deref(),
                 &reputations,
@@ -495,9 +508,6 @@ pub(crate) fn drive_nameplates(
                 own,
                 relations.context(),
             );
-            let me = own.and_then(|o| {
-                o.0.get_field_guid(wrathplus_protocol::types::Field::ObjectGuid, 0)
-            });
             matches!(net.kind, EntityKind::Player | EntityKind::Unit)
                 && store.is_some_and(|s| {
                     let linked = |g: Option<u64>| g.filter(|&g| g != 0);
@@ -868,6 +878,23 @@ mod tests {
             creator_flag_200: true,
             ..subject(UnitSort::Guardian)
         }));
+        // `IsSelectable` (`0x71a390`) leads: a `NOT_SELECTABLE` unit is nameless unless it is
+        // ours and our pet; the Steam Cloud's flags are `0x02000300`.
+        use wrathplus_protocol::types::Field;
+        const ME: u64 = 0x1;
+        const PET: u64 = 0x50;
+        let flagged = |guid: u64, creator: u64| {
+            ObjectStore(wrathplus_protocol::ObjectFields::from_pairs(&[
+                (Field::ObjectGuid.index(), guid as u32),
+                (Field::UnitFlags.index(), 0x0200_0300),
+                (Field::UnitCreatedby.index(), creator as u32),
+            ]))
+        };
+        let selectable =
+            |s: ObjectStore| crate::target::relations::is_selectable(Some(&s), Some(ME), PET);
+        assert!(!selectable(flagged(0x40, 0)), "the Steam Cloud");
+        assert!(!selectable(flagged(0x40, ME)), "ours, not the pet");
+        assert!(selectable(flagged(PET, ME)), "ours and the pet");
     }
 
     /// `>` not `>=` at the knee and `0.075*d` beyond: the jump at the knee is the reference's.

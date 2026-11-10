@@ -533,6 +533,8 @@ pub struct SelectCommit<'w, 's> {
     names: Option<Res<'w, NameCache>>,
     /// `assistAttack`, the assist tail's second leg.
     assist_attack: Res<'w, super::AssistAttack>,
+    /// `IsSelectable`'s pet slot; `Option` for harnesses without the pet bar.
+    pet: Option<Res<'w, crate::app_core::state::PetBar>>,
 }
 
 impl super::StoreLookup for SelectCommit<'_, '_> {
@@ -542,6 +544,13 @@ impl super::StoreLookup for SelectCommit<'_, '_> {
 }
 
 impl SelectCommit<'_, '_> {
+    /// PetInfo's pet slot 0 (`0x5d3390(0)`), the `SMSG_PET_SPELLS` guid; 0 with no pet.
+    pub(super) fn pet_guid(&self) -> u64 {
+        self.pet
+            .as_deref()
+            .map_or(0, crate::app_core::state::PetBar::guid)
+    }
+
     /// The shared assist tail (`0x489bb2`-`0x489c07`, byte-identical in `AssistByName` at
     /// `0x489cae`-`0x489d07`): select the basis unit's `UNIT_FIELD_TARGET` if it is streamed.
     /// Every miss is silent and deselects nothing: no basis, a basis targeting nothing, or an
@@ -619,6 +628,7 @@ impl SelectCommit<'_, '_> {
             me.and_then(|(_, store, _)| store),
             super::RelationContext::new(self.names.as_deref(), self),
         );
+        let pet_guid = self.pet_guid();
         scan::commit(
             &mut self.selection,
             &mut self.seam,
@@ -627,6 +637,7 @@ impl SelectCommit<'_, '_> {
             self.stores.get(entity).ok(),
             me.is_some_and(|(_, _, engaged)| engaged),
             me.map(|(g, _, _)| g.0),
+            pet_guid,
             attackable,
         );
     }
