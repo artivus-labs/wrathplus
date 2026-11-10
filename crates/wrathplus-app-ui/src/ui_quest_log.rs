@@ -700,6 +700,10 @@ pub(crate) fn feed_quest_log(
     // ── Section headers ─────────────────────────────────────────────────────────────────────────
     // One per `ZoneOrSort`: a positive id names an `AreaTable` zone, a negative a `QuestSort`.
     let player_level = store.0.unit_level().unwrap_or(0);
+    // `PLAYER_FIELD_MAX_LEVEL`, the cap the log's money and XP getters test (`[desc+0x11ac]`).
+    let at_cap = (store.0)
+        .get(wrathplus_protocol::types::Field::PlayerMaxLevel)
+        .is_some_and(|cap| player_level >= cap);
     let ordered = {
         let keyed: Vec<GroupRow> = rows
             .iter()
@@ -803,6 +807,8 @@ pub(crate) fn feed_quest_log(
                                     macros.subject,
                                 );
                             }
+                            let max_money = t.money_max_level;
+                            crate::quest_rewards::at_level_cap(&mut detail, max_money, at_cap);
                             detail
                         }),
                     ),
@@ -1839,12 +1845,15 @@ mod tests {
             t.quest_id = id;
             t.zone_or_sort = zos;
             t.title = title.into();
-            // A scales with the player: its log level is the player's 10 (`0x5e0d7a`).
+            // A scales with the player: its log level is the player's 10 (`0x5e0d7a`). At the
+            // cap, 10, its money is the max-level amount (`0x5e4928`).
             t.level = if id == A { -1 } else { 1 };
+            t.money_max_level = 250;
             log.insert_template(t);
             pairs.push((quest_id_field(slot), id));
         }
         pairs.push((Field::UnitLevel.span().unwrap().index, 10));
+        pairs.push((Field::PlayerMaxLevel.span().unwrap().index, 10));
         app.insert_resource(log);
         app.world_mut().spawn((
             ObjectStore(ObjectFields::from_pairs(&pairs)),
@@ -1879,6 +1888,7 @@ mod tests {
                 .unwrap()
         };
         assert_eq!(eval(&app, "return select(2, GetQuestLogTitle(2))"), 10);
+        assert_eq!(eval(&app, "return GetQuestLogRewardMoney(2)"), 250);
         // Folded, A moves after every visible row and stays selected there: numEntries drops
         // (`0x5e0b80`) and a collapse never writes the selection `[0xc23ad8]`.
         run(&mut app, "SelectQuestLogEntry(2); CollapseQuestHeader(1)");

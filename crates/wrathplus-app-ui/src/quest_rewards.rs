@@ -95,6 +95,21 @@ impl QuestRewardTables {
     }
 }
 
+/// The log's rewards at the player's level cap, `PLAYER_FIELD_MAX_LEVEL` (`[desc+0x11ac]`):
+/// `GetQuestLogRewardMoney` answers the larger of the reward and the template's max-level money,
+/// compared signed (`0x5e4928`-`0x5e4981`), and `GetQuestLogRewardXP` answers 0 (`0x5e4a21`).
+pub(crate) fn at_level_cap(
+    detail: &mut wrathplus_ui::script::QuestLogDetail,
+    money_max_level: u32,
+    at_cap: bool,
+) {
+    if at_cap {
+        let max_level = i64::from(money_max_level as i32);
+        detail.reward_money = i64::from(detail.reward_money).max(max_level) as u32;
+        detail.reward_xp = 0;
+    }
+}
+
 fn title_text(
     row: &wrathplus_formats::CharTitle,
     subject: &crate::npc_text::Subject,
@@ -232,6 +247,22 @@ mod tests {
         );
         assert_eq!(partial.honor(7, 1.0, Some(20)), Some(8));
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn the_level_cap_pays_the_max_level_money_and_no_xp() {
+        let mut detail = wrathplus_ui::script::QuestLogDetail {
+            reward_money: 100,
+            reward_xp: 500,
+            ..Default::default()
+        };
+        at_level_cap(&mut detail, 250, false);
+        assert_eq!((detail.reward_money, detail.reward_xp), (100, 500));
+        at_level_cap(&mut detail, 250, true);
+        assert_eq!((detail.reward_money, detail.reward_xp), (250, 0));
+        // Signed: a max-level money of -1 loses to the reward (`0x5e497d`).
+        at_level_cap(&mut detail, u32::MAX, true);
+        assert_eq!(detail.reward_money, 250);
     }
     #[test]
     fn title_uses_actual_gender_and_formats_player_name() {
