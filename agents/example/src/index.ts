@@ -20,6 +20,7 @@ import { controlFiles, ModuleVersions } from "./modules.ts";
 import { claudeAuth, loadEnv } from "./env.ts";
 import { Notes } from "./notes.ts";
 import { outsideNote, tailNotes } from "./outside.ts";
+import { haikuSpeak } from "./say.ts";
 import { Policy } from "./policy.ts";
 import { kickoff } from "./prompt.ts";
 import { FACTS_LUA, Reflection, XP_LUA, type XpSample } from "./reflect.ts";
@@ -190,7 +191,10 @@ export async function runAgent(config: Config, options: RunOptions): Promise<voi
         )
       : undefined;
   // Small talk (`triage.ts`): sorted by Jev, or batched without it; never one planner turn a line.
-  const chatter = new SmallTalk(jev ? { jev, lua } : {});
+  // With Jev, a remark that wants words back gets one line in character from Claude Haiku
+  // (`say.ts`); WRATHPLUS_AGENT_SAY=0 keeps it to emotes.
+  const speaking = process.env.WRATHPLUS_AGENT_SAY !== "0" ? { speak: haikuSpeak(), memory: () => notes.memory() } : {};
+  const chatter = new SmallTalk(jev ? { jev, lua, ...speaking } : {});
   const opening = kickoff(config.goal, notes.briefing());
   inbox.push(opening);
   let self: string | undefined;

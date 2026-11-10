@@ -42,6 +42,14 @@ On the public beta realm, see [Play on the WrathPlus open beta](../../docs/BETA.
     at it) does not wake it line by line: with the fast tier Jev waves, nods, says hello, ignores
     it or passes on what needs thought (`SmallTalk` in `src/triage.ts`); without it the lines ride
     along with the next wake-up and wake the planner by themselves at most once in ten minutes.
+    When Jev judges that a remark or greeting wants a spoken reply in character rather than an
+    emote, one short Claude Haiku 5.5 call (`src/say.ts`, the same login as the planner, no
+    tools, no session) writes the line from the character (name, race, class, level, zone), who
+    spoke and what, the last few lines of chat and the last few hundred characters of MEMORY.md;
+    it is cut to one plain line of at most 120 characters and said in `/say`. At most one such
+    line every 30 s and 20 an hour, one answer per speaker per 2 minutes; a failure or a line
+    not written within 10 s becomes a wave or a nod. Each appears under "Said to you nearby" as
+    `said "<line>" to <speaker>`. `WRATHPLUS_AGENT_SAY=0` keeps small talk to emotes.
   - **The fast tier** (`src/policy.ts`, on when `TYPESAFE_API_KEY` is set) asks Jev, TypeSafe's
     System One decision model, only when woken: an activity ended (`AGENT_INTENT_DONE`), the
     planner sent a plan, a decision opened, combat started or ended, death, loot, gossip or quest
@@ -138,6 +146,7 @@ bun run agent dashboard             # http://127.0.0.1:17900: every running agen
 | `WOW_NAV_MMAPS` | the managed server's `mmaps` | the navmesh for `AgentMoveTo` |
 | `WRATHPLUS_AGENT_MODEL` | `claude-haiku-5-5` | when `--model` is not given |
 | `WRATHPLUS_AGENT_CHECKIN_SECONDS` | `0` (off) | idle check-in |
+| `WRATHPLUS_AGENT_SAY` | on | `0`: small talk gets emotes only, no line from Claude Haiku |
 | `WRATHPLUS_JEV_MODEL`, `WRATHPLUS_JEV_HEARTBEAT_MS` | `jev-latest`, `20000` | the fast tier's model and safety heartbeat |
 
 Against a client you started some other way, `src/index.ts` takes the control port from
