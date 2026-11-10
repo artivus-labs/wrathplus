@@ -5,6 +5,7 @@
 //   bun run agent add <name>          a realm account, control port and token for a new agent
 //   bun run agent list
 //   bun run agent run <name> [--character <name>] [--model haiku|sonnet|<id>] [goal...]
+//   bun run agent note <name> <text...> an outside note for the agent while it runs
 //   bun run agent dashboard [--port 17900]
 //
 // Agents (each its own realm account, control port and token) are the Manager's: made here with
@@ -15,6 +16,7 @@ import { parseArgs } from "node:util";
 import { serveDashboard } from "./dashboard.ts";
 import { claudeAuth, envFile, loadEnv } from "./env.ts";
 import { runAgent, type Config } from "./index.ts";
+import { sendNote } from "./outside.ts";
 import {
   agentDir,
   answering,
@@ -41,6 +43,7 @@ const usage = () => `Usage:
   bun run agent add <name>
   bun run agent list
   bun run agent run <name> [--character <name>] [--model haiku|sonnet|<id>] [goal...]
+  bun run agent note <name> <text...>
   bun run agent dashboard [--port 17900]
 
 Agents are shared with the Manager's Agents page. Keys: ${envFile()}`;
@@ -151,6 +154,18 @@ async function run(argv: string[]): Promise<void> {
   }
 }
 
+/** An outside note for a running agent: its planner hears it as it hears a line on its terminal. */
+export function note(argv: string[], home = stateHome()): string {
+  const [name, ...words] = argv;
+  if (!name || !words.join(" ").trim()) throw new Error(usage());
+  const agent = findAgent(loadAgents(home), name);
+  if (!agent) throw new Error(`No agent "${name}": bun run agent list.`);
+  // Only a running agent reads its notes file, from where it stood when it started.
+  if (!runningOf(home, agent)) throw new Error(`${agent.name} is not being driven by the example agent; a note would never be read.`);
+  sendNote(join(agentDir(home, agent.account), "notes"), words.join(" "));
+  return `Note left for ${agent.name}. Nobody is waiting for a reply.`;
+}
+
 async function main(): Promise<void> {
   loadEnv();
   const [command, ...rest] = process.argv.slice(2);
@@ -166,6 +181,9 @@ async function main(): Promise<void> {
       return list();
     case "run":
       return run(rest);
+    case "note":
+      console.log(note(rest));
+      return;
     case "dashboard": {
       const { values } = parseArgs({ args: rest, options: { port: { type: "string" } } });
       const server = serveDashboard(Number(values.port ?? 17900));

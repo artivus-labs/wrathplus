@@ -1,7 +1,8 @@
 #!/usr/bin/env bun
 // The example agent: Claude plans and writes Lua through the client's MCP tools; game events
 // arrive as messages while it works. Nobody operates it: it decides everything itself. A line typed
-// on stdin reaches it as an outside note, which it is told never to wait for.
+// on stdin, or sent with `bun run agent note <name> "text"`, reaches it as an outside note, which it
+// is told never to wait for.
 //
 //   WRATHPLUS_AGENT_URL=http://127.0.0.1:17950 WRATHPLUS_AGENT_TOKEN=… \
 //     bun run agents/example/src/index.ts "Reach level 5 in Northshire"
@@ -18,6 +19,7 @@ import { Jev } from "./jev.ts";
 import { controlFiles, ModuleVersions } from "./modules.ts";
 import { claudeAuth, loadEnv } from "./env.ts";
 import { Notes } from "./notes.ts";
+import { outsideNote, tailNotes } from "./outside.ts";
 import { Policy } from "./policy.ts";
 import { kickoff } from "./prompt.ts";
 import { FACTS_LUA, Reflection, XP_LUA, type XpSample } from "./reflect.ts";
@@ -243,14 +245,16 @@ export async function runAgent(config: Config, options: RunOptions): Promise<voi
       tell("events", text);
     },
   });
-  // Outside notes from stdin: rare, and never promised (the prompt says not to wait for one).
+  // Outside notes from stdin and from `bun run agent note` (`outside.ts`): rare, and never promised
+  // (the prompt says not to wait for one).
   if (options.stdin ?? true) {
     void (async () => {
       for await (const line of console) {
-        if (line.trim()) tell("outside note", `Outside note (nobody is waiting for a reply, and no further note is promised): ${line.trim()}`);
+        if (line.trim()) tell("outside note", outsideNote(line));
       }
     })();
   }
+  tailNotes(notes.home, (text) => tell("outside note", text), abortController.signal);
   const mcpEntry = fileURLToPath(new URL("../../mcp/src/index.ts", import.meta.url));
   let checkIn: ReturnType<typeof setTimeout> | undefined;
   console.log(`WrathPlus example agent · ${config.model} (${claudeAuth()}) · ${config.url}\nGoal: ${config.goal}\n`);

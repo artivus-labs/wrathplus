@@ -102,6 +102,7 @@ cp ../.env.example ../.env          # optional: your own keys (see above); it ma
 bun run agent add Scout             # a realm account (AGENTSCOUT), control port and token
 bun run agent run Scout --character Scoutly "Reach level 5 in Northshire."
 bun run agent list                  # every agent, its client and whether a planner drives it
+bun run agent note Scout "text"     # an outside note for a running agent
 bun run agent dashboard             # http://127.0.0.1:17900: every running agent on one page
 ```
 
@@ -112,6 +113,12 @@ bun run agent dashboard             # http://127.0.0.1:17900: every running agen
   it is told is rare and never to wait for. A client `run`
   started is restarted into the same character if it exits or is disconnected (back at the login
   screen), so the planner carries on.
+- **Outside notes without a terminal:** `bun run agent note Scout "The Westfall road is open."`
+  reaches a running agent the same way, worded so that nobody is waiting for a reply. It appends to
+  `notes/outside.jsonl` in the agent's state folder, which the running agent reads every second
+  from where it was when it started; a note for an agent nobody drives is refused, since it would
+  never be read. Use it when the agent's stdin is not yours to type into (started by the Manager,
+  a detached pane).
 - **Several at once:** one `run` per terminal; each agent has its own account and port.
 - **Watching:** each client serves a live view (`run` prints its address); the dashboard shows
   all of them side by side, with what each planner last said and did.
