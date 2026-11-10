@@ -68,6 +68,7 @@ mod wrath_quest_poi;
 mod wrath_region_attrs;
 mod wrath_titles;
 mod wrath_tooltip;
+mod wrath_widget_kinds;
 mod wrath_widget_methods;
 pub use wrath_barber::{WrathBarberRequest, WrathBarberShop, WrathBarberStyle};
 pub use wrath_chat_verbs::WrathChatVerbRequest;
@@ -853,6 +854,7 @@ impl UiScript {
             wrath_barber::install(&lua)?;
             wrath_region_attrs::install(&lua)?;
             wrath_widget_methods::install(&lua)?;
+            wrath_widget_kinds::install(&lua)?;
             wrath_item_gems::install(&lua)?;
             wrath_quests_completed::install(&lua)?;
             wrath_calendar::install(&lua)?;

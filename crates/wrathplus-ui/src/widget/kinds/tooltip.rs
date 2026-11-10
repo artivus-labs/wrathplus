@@ -20,7 +20,7 @@ pub struct TooltipState {
     pub min_width: f32,
     /// `FadeOut()`'s start on the `GetTime` clock; any fresh content or `Show` cancels the fade.
     pub fade_start: Option<f64>,
-    /// The guid of the unit this tooltip shows (`+0x368`/`+0x36c`, stored at `0x52a070`), whose
+    /// The guid of the unit this tooltip shows (12340 `+0x328`/`+0x32c`, read at `0x61daff`), whose
     /// health watcher (`0x467e70`, registered at `0x52a0a8`) drives the bar; a `set_unit` push of
     /// that unit, under any token, re-drives it.
     pub unit_guid: Option<u64>,
