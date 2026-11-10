@@ -40,6 +40,9 @@ const NOTABLE: Record<string, (args: unknown[]) => string | null> = {
       ? `Your walk ended ${a[0]}: AgentWalk().note says why; route around it or pick another way.`
       : null,
   AGENT_COMBAT_REVIEW: (a) => `${a[0]} Worth a look: is the rotation the right one, in the right order? Rework Rotation.list (and keep it in a module) if not.`,
+  AGENT_PULL_REFUSED: (a) =>
+    `Combat refused to pull ${a[0]}: ${a[1]}. Pick a safer mob or place, rest or repair first; Combat.engage(guid, { force = true }) only if you are sure.`,
+  AGENT_FLEEING: (a) => `Running from a fight (${a[0]}). What made it unwinnable: the mob's level, a second mob, your health at the pull, your weapon?`,
   PLAYER_CAMPING: () => "The client is logging out (20 s): CancelLogout() to stay in the world.",
 };
 
@@ -64,6 +67,8 @@ export const PLANNER_EVENTS = new Set([
   "AGENT_WALK_DONE",
   "PLAYER_CAMPING",
   "AGENT_COMBAT_REVIEW",
+  "AGENT_PULL_REFUSED",
+  "AGENT_FLEEING",
 ]);
 
 /** Game errors that keep coming back (the same red line `times` times within `windowMs`): the

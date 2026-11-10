@@ -1,11 +1,16 @@
 -- wp.upkeep: the chores a player does without thinking, so the tiers above need not. Loaded for
--- every agent as the global `Upkeep`; set `on`, `equip`, `sell` or `train` false to do one yourself.
+-- every agent as the global `Upkeep`; set `on`, `equip`, `sell`, `buy` or `train` false to do one
+-- yourself.
 --
 --   Equip:  out of combat, wear what is in the bags when the slot is empty, or when it is a clear
---           upgrade (a higher item level, no lower quality) of the same armour type. Weapons and
---           shields only fill an empty slot (two-hander or sword and board is the agent's call),
---           and a shield never goes on beside a two-hander.
+--           upgrade (a higher item level, no lower quality) of the same armour type. A weapon or
+--           shield replaces one of its own kind (a better two-handed sword for a two-handed
+--           sword: the same hands, a skill we have); a change of kind (two-hander or sword and
+--           board) is the agent's call, and a shield never goes on beside a two-hander.
 --   Sell:   at a merchant, sell grey (junk) items, and repair if the money covers it.
+--   Buy:    at a merchant that sells it, food (and drink for a mana user) of the best level we
+--           can use, up to `food_stock` in the bags, for at most `food_share` of our money: what
+--           Goals' rest eats between fights.
 --   Train:  at a class trainer, learn every available rank the money covers, then close the
 --           window. Upkeep.trainer() is the nearest trainer of your own class ("Warrior
 --           Trainer"); after a level-up the fast tier is offered train_skills when one is in sight.
@@ -16,7 +21,8 @@
 --
 -- `Upkeep.log` keeps the last few things it did ("equipped Outfitter Belt", ...).
 
-local U = { on = true, equip = true, sell = true, train = true, loot = "upgrades", log = {} }
+local U = { on = true, equip = true, sell = true, buy = true, train = true, loot = "upgrades", log = {},
+  food_stock = 20, food_share = 0.34 }
 
 local function did(text)
   U.log[#U.log + 1] = text
@@ -71,6 +77,10 @@ local function better(item, worn)
   return item.ilevel > worn.ilevel and item.quality >= worn.quality
 end
 
+-- How often each item has been put on: one the game keeps refusing (a bow without the skill) is
+-- left in the bags after two tries, not picked up for ever.
+local tried = {}
+
 -- The best piece in the bags for each slot it could fill, and one of them worn per pass
 -- (equipping changes the bags).
 local function equip_pass()
@@ -79,10 +89,11 @@ local function equip_pass()
   for bag = 0, 4 do
     for slot = 1, (GetContainerNumSlots(bag) or 0) do
       local item = info(GetContainerItemLink(bag, slot))
-      if item and wearable(item) then
+      if item and wearable(item) and (tried[item.link] or 0) < 2 then
         for _, inv in ipairs(SLOTS[item.equip]) do
           local worn = info(GetInventoryItemLink("player", inv))
-          local blocked = WEAPON_SLOTS[inv] and worn
+          -- A weapon only replaces one of its own kind (better() asks the same subclass too).
+          local blocked = (WEAPON_SLOTS[inv] and worn and worn.equip ~= item.equip)
             or (inv == 17 and main and main.equip == "INVTYPE_2HWEAPON")
           local rival = best[inv]
           if not blocked and better(item, worn)
@@ -97,6 +108,7 @@ local function equip_pass()
   for inv = 1, 19 do
     local pick = best[inv]
     if pick then
+      tried[pick.item.link] = (tried[pick.item.link] or 0) + 1
       PickupContainerItem(pick.bag, pick.slot)
       EquipCursorItem(inv)
       did("equipped " .. pick.item.name)
@@ -107,7 +119,7 @@ local function equip_pass()
 end
 
 local function sell_and_repair()
-  local sold, earned = 0, 0
+  local sold, earned, spent = 0, 0, 0
   for bag = 0, 4 do
     for slot = 1, (GetContainerNumSlots(bag) or 0) do
       local item = info(GetContainerItemLink(bag, slot))
@@ -123,9 +135,60 @@ local function sell_and_repair()
     local cost = GetRepairAllCost()
     if cost and cost > 0 and cost <= (GetMoney() or 0) + earned then
       RepairAllItems()
+      spent = cost
       did(string.format("repaired for %dc", cost))
     end
   end
+  return spent
+end
+
+-- How many of the bags' items are used as `spell` ("Food", "Drink").
+local function stock(spell)
+  local n = 0
+  for bag = 0, 4 do
+    for slot = 1, (GetContainerNumSlots(bag) or 0) do
+      local link = GetContainerItemLink(bag, slot)
+      if link and GetItemSpell and GetItemSpell(link) == spell then
+        local _, count = GetContainerItemInfo(bag, slot)
+        n = n + (count or 1)
+      end
+    end
+  end
+  return n
+end
+
+-- Buy what the merchant has of `spell` ("Food", "Drink"): the highest level we can use, a stack
+-- at a time, to `food_stock` in the bags and `budget` copper. Returns what is left of the budget.
+local function buy(spell, budget)
+  if not (GetMerchantNumItems and GetMerchantItemLink and GetItemSpell and BuyMerchantItem) then return budget end
+  local have = stock(spell)
+  if have >= U.food_stock / 2 then return budget end
+  local pick
+  for i = 1, (GetMerchantNumItems() or 0) do
+    local link = GetMerchantItemLink(i)
+    local item = link and GetItemSpell(link) == spell and info(link)
+    if item and item.minlevel <= (UnitLevel("player") or 1) then
+      local _, _, price, quantity, available = GetMerchantItemInfo(i)
+      price, quantity = price or 0, math.max(quantity or 1, 1)
+      if price > 0 and price <= budget and available ~= 0 and (not pick or item.minlevel > pick.item.minlevel) then
+        pick = { index = i, item = item, price = price, quantity = quantity }
+      end
+    end
+  end
+  if not pick then return budget end
+  local bought = 0
+  while have + bought < U.food_stock and pick.price <= budget do
+    BuyMerchantItem(pick.index, 1)
+    bought, budget = bought + pick.quantity, budget - pick.price
+  end
+  if bought > 0 then did(string.format("bought %d %s", bought, pick.item.name)) end
+  return budget
+end
+
+local function buy_food(spent)
+  local budget = math.floor(((GetMoney() or 0) - (spent or 0)) * U.food_share)
+  budget = buy("Food", budget)
+  if UnitPowerType and UnitPowerType("player") == 0 then buy("Drink", budget) end
 end
 
 -- The nearest trainer of our own class: a class trainer whose title names it ("Warrior Trainer").
@@ -224,8 +287,10 @@ frame:SetScript("OnEvent", function(_, event, a1, a2)
   elseif event == "CONFIRM_LOOT_ROLL" and rolled[a1] == a2 then
     -- Bind on pickup: confirm only a roll this module made.
     ConfirmLootRoll(a1, a2)
-  elseif event == "MERCHANT_SHOW" and U.sell then
-    sell_and_repair()
+  elseif event == "MERCHANT_SHOW" then
+    -- Repairs come out of the purse before food does.
+    local spent = U.sell and sell_and_repair() or 0
+    if U.buy then buy_food(spent) end
   elseif event == "TRAINER_SHOW" and U.train then
     train()
   else

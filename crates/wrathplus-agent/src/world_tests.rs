@@ -125,3 +125,47 @@ fn npc_services_come_from_the_flags_and_find_the_nearest_provider() {
         "{error}"
     );
 }
+
+#[test]
+fn creature_ranks_and_critters_reach_lua() {
+    // AzerothCore's CreatureEliteType: normal, elite, rare elite, boss, rare.
+    assert_eq!(RANK_WORDS[1], "elite");
+    assert_eq!(RANK_WORDS[4], "rare");
+    let (handles, _link) = link();
+    handles.snapshot.lock().unwrap().objects = vec![
+        Seen {
+            guid: 0x1,
+            kind: "unit",
+            name: Some("Hogger".into()),
+            classification: Some("elite"),
+            distance: 5.0,
+            ..Default::default()
+        },
+        Seen {
+            guid: 0x2,
+            kind: "unit",
+            name: Some("Sheep".into()),
+            classification: Some("normal"),
+            critter: true,
+            distance: 9.0,
+            ..Default::default()
+        },
+        // A template not answered yet: no word, not "normal".
+        Seen {
+            guid: 0x3,
+            kind: "unit",
+            distance: 12.0,
+            ..Default::default()
+        },
+    ];
+    let lua = Lua::new();
+    install(&lua, &handles).unwrap();
+    let read: String = lua
+        .load(
+            "local n = AgentNearby() return n[1].classification .. ' ' .. tostring(n[1].critter) .. ' ' \
+             .. n[2].classification .. ' ' .. tostring(n[2].critter) .. ' ' .. tostring(n[3].classification)",
+        )
+        .eval()
+        .unwrap();
+    assert_eq!(read, "elite nil normal true nil");
+}

@@ -4,7 +4,9 @@ use wrathplus_ui::script::UiScript;
 
 const GAME: &str = r#"
 calls = {}
-wolf = { guid = "0xW", name = "Mangy Wolf", x = 20, y = 0, z = 0, distance = 20, dead = false }
+wolf = { guid = "0xW", name = "Mangy Wolf", kind = "unit", reaction = "hostile", level = 5, x = 20, y = 0, z = 0,
+  distance = 20, dead = false }
+UnitLevel = function() return 5 end
 walking = false
 AgentNearby = function() return wolf and { wolf } or {} end
 AgentTarget = function(g) calls[#calls + 1] = "target " .. g end
@@ -175,7 +177,7 @@ fn attacked_with_no_fight_of_its_own_it_fights_back_and_turns_on_a_closer_attack
     script
         .run(
             "Combat.defend = true \
-             far = { guid = '0xF', name = 'Far Wolf', x = 40, y = 0, z = 0, distance = 40 } \
+             far = { guid = '0xF', name = 'Far Wolf', kind = 'unit', reaction = 'hostile', level = 5, x = 40, y = 0, z = 0, distance = 40 } \
              wolf.distance = 2 \
              AgentNearby = function() return { far, wolf } end \
              Combat.engage('0xF')",
@@ -206,4 +208,35 @@ fn a_walk_a_defensive_fight_broke_off_is_walked_on_after_it() {
         script.tick(0.25);
     }
     assert_eq!(calls(&script), "stop | move -8880");
+}
+
+#[test]
+fn an_attack_that_is_not_landing_is_started_again() {
+    let mut script = combat();
+    // In reach, but the wolf's health does not move (the live check: a level 5 character stood
+    // at a spider for ten seconds without a hit landing, then ran from it at 94% health).
+    script
+        .run(
+            "started = 0 StartAttack = function() started = started + 1 end \
+             UnitGUID = function() return '0xME' end \
+             wolf.distance, wolf.health, wolf.in_combat, wolf.target = 2, 100, true, '0xME' \
+             Combat.engage('0xW')",
+        )
+        .unwrap();
+    for _ in 0..12 {
+        script.tick(0.25);
+    }
+    assert_eq!(script.eval::<i64>("return started").unwrap(), 0);
+    // Four seconds without a scratch on it: the attack is started again, facing it.
+    for _ in 0..8 {
+        script.tick(0.25);
+    }
+    assert_eq!(script.eval::<i64>("return started").unwrap(), 1);
+    // Once the hits land, nothing more is forced.
+    for _ in 0..20 {
+        script.run("wolf.health = wolf.health - 2").unwrap();
+        script.tick(0.25);
+    }
+    assert_eq!(script.eval::<i64>("return started").unwrap(), 1);
+    assert!(script.eval::<bool>("return Combat.fleeing == nil").unwrap());
 }
