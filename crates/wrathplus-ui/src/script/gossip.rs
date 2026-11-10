@@ -13,6 +13,7 @@
 
 use mlua::{Lua, MultiValue, Value};
 
+use super::binding_abi::flag;
 use super::Model;
 
 /// One gossip option; its 1-based index is its place in [`GossipMenu::options`].
@@ -33,7 +34,6 @@ pub struct GossipQuestRow {
     /// The row's third wire field, signed: a level -1 quest answers -1 (`fild` at `0x58b3e8`).
     pub level: i32,
     pub active: bool,
-    pub trivial: bool,
     pub daily: bool,
     pub repeatable: bool,
     pub complete: bool,
@@ -133,27 +133,29 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
 
     // ══ The two quest lists ══
     // The reference splits the quest rows by wire icon, 3 and 4 active and the rest available,
-    // behind two vararg verbs (`0x4e2430`, `0x4e2580`); the app splits them at parse time.
+    // behind two vararg verbs (`0x58b3a0`, `0x58b490`); the app splits them at parse time. Each row
+    // is title, level, then 1 or nil: trivial by the player's level now (`0x58aba0`), then daily
+    // and repeatable, or complete.
     fn quest_rows(lua: &Lua, active: bool) -> mlua::Result<MultiValue> {
         let model = lua.app_data_ref::<Model>().expect("model app_data");
-        let rows: Vec<GossipQuestRow> = model.gossip.as_ref().map_or_else(Vec::new, |m| {
+        let rows: Vec<(GossipQuestRow, bool)> = model.gossip.as_ref().map_or_else(Vec::new, |m| {
             m.quests
                 .iter()
                 .filter(|q| q.active == active)
-                .cloned()
+                .map(|q| (q.clone(), super::quest_log::quest_trivial(&model, q.level)))
                 .collect()
         });
         drop(model);
         let mut out = Vec::new();
-        for q in rows {
+        for (q, trivial) in rows {
             out.push(Value::String(lua.create_string(&q.title)?));
             out.push(Value::Integer(i64::from(q.level)));
-            out.push(Value::Boolean(q.trivial));
+            out.push(flag(trivial));
             if active {
-                out.push(Value::Boolean(q.complete));
+                out.push(flag(q.complete));
             } else {
-                out.push(Value::Boolean(q.daily));
-                out.push(Value::Boolean(q.repeatable));
+                out.push(flag(q.daily));
+                out.push(flag(q.repeatable));
             }
         }
         Ok(MultiValue::from_vec(out))
@@ -365,7 +367,6 @@ mod tests {
                 title: "Done".into(),
                 level: 70,
                 active: true,
-                trivial: true,
                 complete: true,
                 ..Default::default()
             },
@@ -376,10 +377,18 @@ mod tests {
             },
         ];
         s.set_gossip(Some(m));
+        // At level 80 the margin is 8 (`0xa12fd0`): 70 is trivial, 80 is not. Flags are 1 or nil.
+        s.set_unit(
+            "player",
+            Some(crate::script::UnitState {
+                level: 80,
+                ..Default::default()
+            }),
+        );
         assert_eq!(s.arity("GetGossipAvailableQuests()").unwrap(), 10);
         assert_eq!(s.arity("GetGossipActiveQuests()").unwrap(), 4);
-        assert!(s.eval::<bool>("local t,l,tr,d,r,t2,l2,tr2,d2,r2 = GetGossipAvailableQuests(); return t == 'Daily' and l == 80 and tr == false and d and r and t2 == 'Other' and not tr2 and not d2 and not r2").unwrap());
-        assert!(s.eval::<bool>("local t,l,tr,c = GetGossipActiveQuests(); return t == 'Done' and l == 70 and tr and c").unwrap());
+        assert!(s.eval::<bool>("local t,l,tr,d,r,t2,l2,tr2,d2,r2 = GetGossipAvailableQuests(); return t == 'Daily' and l == 80 and tr == nil and d == 1 and r == 1 and t2 == 'Other' and tr2 == nil and d2 == nil and r2 == nil").unwrap());
+        assert!(s.eval::<bool>("local t,l,tr,c = GetGossipActiveQuests(); return t == 'Done' and l == 70 and tr == 1 and c == 1").unwrap());
         assert_eq!(s.eval::<(u32,u32,u32)>("return GetNumGossipAvailableQuests(), GetNumGossipActiveQuests(), GetNumGossipOptions()").unwrap(), (2,1,2));
         s.set_gossip(None);
         assert_eq!(s.arity("GetGossipAvailableQuests()").unwrap(), 0);
