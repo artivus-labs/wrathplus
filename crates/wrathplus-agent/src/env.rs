@@ -228,11 +228,11 @@ mod hot_loop_tests;
 #[path = "goals_safety_tests.rs"]
 mod goals_safety_tests;
 #[cfg(test)]
-#[path = "survive_tests.rs"]
-mod survive_tests;
-#[cfg(test)]
 #[path = "services_tests.rs"]
 mod services_tests;
+#[cfg(test)]
+#[path = "survive_tests.rs"]
+mod survive_tests;
 
 #[cfg(test)]
 mod tests {
