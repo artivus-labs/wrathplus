@@ -369,7 +369,6 @@ mod tests {
         assert_eq!(difficulty_color(10, 20, 5), "|cff808080");
         assert_eq!(difficulty_color(15, 20, 5), "|cff40c040");
         // Folded under the first of two headers, Wolves answers 1, not both (`0x5deae0`).
-        let mut s = s;
         {
             let mut m = s.model_mut();
             let mut wolves = m.quest_log.entries.remove(1);
