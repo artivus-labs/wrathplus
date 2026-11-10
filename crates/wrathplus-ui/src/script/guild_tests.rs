@@ -16,6 +16,9 @@ fn a_recognised_but_unresolved_unit_answers_nils_and_only_an_unknown_token_raise
     assert!(s
         .eval::<i64>(r#"return GetGuildInfo("nosuchunit")"#)
         .is_err());
+    // A non-string raises its usage (`0x5eab09`); WrathPlus answered the nil triple.
+    let err = s.run("GetGuildInfo()").unwrap_err().to_string();
+    assert!(err.contains(r#"Usage: GetGuildInfo("unit")"#), "{err}");
 }
 
 #[test]

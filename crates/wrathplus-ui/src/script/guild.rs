@@ -338,13 +338,14 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     // fields are public: it reads the unit snapshot, not the player's guild. The resolver
     // (`0x60abf0`) never raises; a token naming nobody, a non-player, a guildless player and an
     // unarrived guild record all answer `nil, nil, 0`, the third the number 0 (`mov eax,3` on
-    // both legs). Stock
+    // both legs). Only a non-string raises its usage (`lua_isstring`, `0x5eaafd`). Stock
     // `PaperDollFrame_SetGuild` calls it for `"player"` unguarded (`PaperDollFrame.lua:117`).
     g.set(
         "GetGuildInfo",
-        lua.create_function(|lua, unit: Option<String>| {
+        lua.create_function(|lua, unit: Value| {
+            let unit = binding_abi::string_arg(lua, unit, "Usage: GetGuildInfo(\"unit\")")?;
             let model = lua.app_data_ref::<Model>().expect("model app_data");
-            let Some(state) = unit.as_deref().and_then(|u| model.unit(u)) else {
+            let Some(state) = model.unit(&unit) else {
                 return Ok((Value::Nil, Value::Nil, Value::Integer(0)));
             };
             let Some(guild) = state.guild.as_ref() else {
@@ -377,10 +378,9 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     )?;
 
     // GetGuildRosterInfo(index) → name, rank, rankIndex, level, class, zone, note, officernote,
-    // online, status (`0x4d1200`). Ten returns: only the status view takes the tenth
-    // (`FriendsFrame.lua:541`), every other call site nine. Out of range answers ten nils rather
-    // than raising: `GuildStatus_Update` passes the selection, 0 when none, before testing it
-    // (`FriendsFrame.lua:344`, `:347`).
+    // online, status, classFileName (`0x5cc9c0`), eleven returns. Out of range answers the miss
+    // shape rather than raising: `GuildStatus_Update` passes the selection, 0 when none, before
+    // testing it (`FriendsFrame.lua:344`, `:347`).
     g.set(
         "GetGuildRosterInfo",
         lua.create_function(|lua, index: Value| {
@@ -409,7 +409,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // GetGuildRosterLastOnline(index) → years, months, days, hours (`0x4d14a0`), all 0 for an
+    // GetGuildRosterLastOnline(index) → years, months, days, hours (`0x5cabb0`), all 0 for an
     // online member, whom the wire sends no time for.
     g.set(
         "GetGuildRosterLastOnline",
@@ -578,7 +578,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         )?;
     }
 
-    // GuildRosterSetPublicNote(index, note) (`0x4d15e0`) / GuildRosterSetOfficerNote (`0x4d1700`)
+    // GuildRosterSetPublicNote(index, note) (`0x5cad00`) / GuildRosterSetOfficerNote (`0x5cae20`)
     // take a roster row, which the app resolves to the name the wire carries.
     for (global, make) in [
         (
@@ -644,7 +644,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // GuildControlGetRankName(index) (`0x4d1e90`): 1-based, the dropdown's ID.
+    // GuildControlGetRankName(index) (`0x5ccc90`): 1-based, the dropdown's ID.
     g.set(
         "GuildControlGetRankName",
         lua.create_function(|lua, index: Value| {
@@ -660,7 +660,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // GuildControlSetRank(index) (`0x4d1fa0`): load a 1-based rank into the staging buffer, each
+    // GuildControlSetRank(index) (`0x5ca260`): load a 1-based rank into the staging buffer, each
     // slot seeded from its live rights. 0 clears the selection rather than loading rank 1, so a
     // 0-based `rankIndex` passed by mistake loads nothing.
     g.set(

@@ -258,7 +258,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     // ── gestures ──
     for (global, usage) in [
         ("QueryGuildBankTab", "Usage: QueryGuildBankTab(tab)"),
-        ("QueryGuildBankText", "Usage: QueryGuildBankText(tab)"),
+        // 12340 raises the log's usage string here too (`0xa161b0`, pushed at `0x5a7129`).
+        ("QueryGuildBankText", "Usage: QueryGuildBankLog(tab)"),
         ("QueryGuildBankLog", "Usage: QueryGuildBankLog(tab)"),
     ] {
         set(lua, global, move |lua, args| {

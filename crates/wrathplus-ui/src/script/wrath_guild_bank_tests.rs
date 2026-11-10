@@ -69,6 +69,9 @@ fn slots_links_and_tab_selection() {
 #[test]
 fn logs_text_and_gestures() {
     let mut s = vm();
+    // `QueryGuildBankText` raises the log's usage string (`0x5a7129`).
+    let err = s.run("QueryGuildBankText()").unwrap_err().to_string();
+    assert!(err.contains("Usage: QueryGuildBankLog(tab)"), "{err}");
     assert_eq!(
         s.eval::<(String, String, i64, i64, i64, i64, i64)>(
             "return GetGuildBankMoneyTransaction(1)"
