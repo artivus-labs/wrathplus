@@ -782,10 +782,10 @@ impl EmoteSounds {
 /// passes the larger (`0x60b312`) to `0x6174b0`, which stores the product (`0x617501`), and the
 /// unit model build `0x5fb9dd` runs it for every unit.
 ///
-/// The `max` is a floor, not a second multiplier: `SCALE_X` already folds the DBC scales in
-/// (vmangos `Unit.cpp:9579`) and is the whole render scale (`0x613fc9`); it bites only where a
-/// shrink aura or a `display_scale` override sinks `SCALE_X` under the display's column. The
-/// display is the native one (`UNIT_FIELD_NATIVEDISPLAYID`, index 132 at `0x60b270`), so a
+/// That `max` is 1.12's law, which assumed `SCALE_X` folds the DBC scales in (vmangos
+/// `Unit.cpp:9579`); AzerothCore's does not, and 12340 stores `collisionHeight × k(native display)
+/// × max(SCALE_X, 1.0)` at `CMovement+0xcc` (`0x725f50` → `0x6e9570`), `k` the unit model scale
+/// of `entities::live_display`. The display is the native one (`UNIT_FIELD_NATIVEDISPLAYID`, index 132 at `0x60b270`), so a
 /// transform keeps the unit's own depth lines. Not the movement capsule,
 /// [`crate::player::CAPSULE_HEIGHT`].
 #[derive(Component, Clone, Copy, Debug, PartialEq)]
