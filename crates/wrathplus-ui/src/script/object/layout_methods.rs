@@ -213,7 +213,7 @@ pub(super) fn install(lua: &Lua, m: &Table) -> mlua::Result<()> {
     )?;
 
     // GetLeft/GetRight/GetTop/GetBottom: the resolved edges in the frame's own units, y-up from
-    // the screen bottom (`GetRect 0x768320`); nil before the first resolve.
+    // the screen bottom (the rect fetch 12340 `0x489230`); nil before the first resolve.
     for (name, pick) in [
         ("GetLeft", 0u8),
         ("GetRight", 1u8),
@@ -236,32 +236,6 @@ pub(super) fn install(lua: &Lua, m: &Table) -> mlua::Result<()> {
         })?;
     }
 
-    // IsMouseOver([top, bottom, left, right]) (12340 `0x49e100`, the Frame table alone): each
-    // offset a number or 0, independently, ADDED to its edge in the frame's own units; the cursor
-    // must be strictly inside (`0x488570`). A boolean, false before the first resolve.
-    m.set(
-        "IsMouseOver",
-        lua.create_function(|lua, (this, args): (Table, mlua::Variadic<Value>)| {
-            let h = frame_handle_of(lua, &this)?;
-            let off = |i: usize| {
-                args.get(i)
-                    .cloned()
-                    .and_then(|v| lua.coerce_number(v).ok().flatten())
-                    .map_or(0.0, |n| n as f32)
-            };
-            let (top, bottom, left, right) = (off(0), off(1), off(2), off(3));
-            settle(lua);
-            let model = lua.app_data_ref::<Model>().expect("model");
-            let inv = 1.0 / eff_scale(&model, h);
-            let (x, y) = (model.cursor_pos.0 * inv, model.cursor_pos.1 * inv);
-            Ok(model.resolved.get(&h).is_some_and(|r| {
-                r.left * inv + left < x
-                    && x < r.right * inv + right
-                    && r.bottom * inv + bottom < y
-                    && y < r.top * inv + top
-            }))
-        })?,
-    )?;
     Ok(())
 }
 
@@ -269,7 +243,7 @@ pub(super) fn install(lua: &Lua, m: &Table) -> mlua::Result<()> {
 /// current layout; a settled tree costs one epoch compare. Deviation: `OnSizeChanged` fires at the
 /// next `UiScript::resolve`, a tick after the reference's (`ApplyRect 0x76b580`), because running
 /// Lua handlers inside a binding risks a borrow panic or unbounded recursion.
-fn settle(lua: &Lua) {
+pub(crate) fn settle(lua: &Lua) {
     // A frame anchored to a re-texted FontString moves with its new box.
     crate::script::measure::measure_pending(lua, None);
     let mut model = lua.app_data_mut::<Model>().expect("model");

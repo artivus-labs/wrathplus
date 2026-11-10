@@ -98,7 +98,7 @@ pub(super) fn region_wrapper(lua: &Lua, id: u32) -> mlua::Result<Table> {
     let t = lua.create_table()?;
     t.raw_set(0, Value::LightUserData(id_to_lud(id)))?;
     // The metatable is chosen once, here, not per call: a title region
-    // (`CreateTitleRegion 0x773910`) answers only the 19 Region methods.
+    // (`CreateTitleRegion 0x773910`) answers only the Region table's methods.
     let kind = {
         let model = lua.app_data_ref::<Model>().expect("model");
         model

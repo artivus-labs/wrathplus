@@ -117,6 +117,8 @@ pub struct Frame {
     /// stamps it (`0x7652e5`), so the cache also requires `movable` or `resizable`, at write and
     /// at apply.
     pub user_placed: bool,
+    /// `SetDontSavePosition` (12340 `0x4a08c0`, `+0xb4 & 0x80000`): the layout cache skips it.
+    pub dont_save_position: bool,
     /// `SetToplevel` (`0x775440`): bit `0x1` of the flag word `[frame+0xb4]` (`movable` `0x100`,
     /// `resizable` `0x200`, all set by `0x76a3c0`). It raises nothing; `CSimpleTop::Raise`
     /// (`0x7650f0`) raises the nearest toplevel self-or-ancestor of a clicked or shown frame.
@@ -362,6 +364,7 @@ impl WidgetArena {
             min_resize: (0.0, 0.0),
             max_resize: (0.0, 0.0),
             user_placed: false,
+            dont_save_position: false,
             toplevel: false,
             scale: 1.0,
             effective_scale: parent_scale,
