@@ -23,7 +23,9 @@ pub const CLIENT_VERSION: (u8, u8, u8) = (3, 3, 5);
 
 const GAME_NAME_WOW: u32 = 0x0057_6f57;
 const PLATFORM_X86: u32 = 0x0078_3836;
-const OS_WINDOWS: u32 = 0x0057_696e;
+// Every platform's build signs in as the Mac 12340 client. AzerothCore starts Warden for an
+// account whose client says `Win` (`Warden.Enabled = 1` is its default) and has no Mac Warden;
+// this client has no Warden, so a `Win` sign-in is refused at the world handshake.
 const OS_MACOS: u32 = 0x004f_5358;
 const LOCALE_EN_US: u32 = 0x656e_5553;
 
@@ -37,14 +39,6 @@ const REALM_FLAG_SPECIFY_BUILD: u8 = 0x04;
 // C-string searches subordinate to that framing even when the peer is hostile.
 const MAX_REALM_LIST_FRAME: usize = u16::MAX as usize;
 const MIN_REALM_LIST_FRAME: usize = 8; // u32 header, u16 count, u16 footer
-
-fn client_os() -> u32 {
-    if cfg!(target_os = "macos") {
-        OS_MACOS
-    } else {
-        OS_WINDOWS
-    }
-}
 
 /// SRP inputs from a successful Wrath logon challenge.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -136,7 +130,7 @@ pub fn write_logon_challenge(w: &mut impl Write, account_name: &str) -> Result<(
     body.extend_from_slice(&[CLIENT_VERSION.0, CLIENT_VERSION.1, CLIENT_VERSION.2]);
     body.extend_from_slice(&CLIENT_BUILD.to_le_bytes());
     body.extend_from_slice(&PLATFORM_X86.to_le_bytes());
-    body.extend_from_slice(&client_os().to_le_bytes());
+    body.extend_from_slice(&OS_MACOS.to_le_bytes());
     body.extend_from_slice(&LOCALE_EN_US.to_le_bytes());
     body.extend_from_slice(&0u32.to_le_bytes());
     body.extend_from_slice(&Ipv4Addr::LOCALHOST.octets());
@@ -192,12 +186,9 @@ pub fn read_challenge_reply(r: &mut impl Read) -> Result<ChallengeReply> {
     })
 }
 
-// AzerothCore build_info hashes for build 12340. They are deliberately local to Wrath: the
-// build-5875 integrity material in auth.rs is not valid for StrictVersionCheck here.
-const INTEGRITY_HASH_12340_WINDOWS: [u8; 20] = [
-    0xcd, 0xcb, 0xbd, 0x51, 0x88, 0x31, 0x5e, 0x6b, 0x4d, 0x19, 0x44, 0x9d, 0x49, 0x2d, 0xbc, 0xfa,
-    0xf1, 0x56, 0xa3, 0x47,
-];
+// AzerothCore's build_info hash for the Mac build 12340, matching `OS_MACOS`. It is deliberately
+// local to Wrath: the build-5875 integrity material in auth.rs is not valid for StrictVersionCheck
+// here.
 const INTEGRITY_HASH_12340_MACOS: [u8; 20] = [
     0xb7, 0x06, 0xd1, 0x3f, 0xf2, 0xf4, 0x01, 0x88, 0x39, 0x72, 0x94, 0x61, 0xe3, 0xf8, 0xa0, 0xe2,
     0xb5, 0xfd, 0xc0, 0x34,
@@ -205,14 +196,9 @@ const INTEGRITY_HASH_12340_MACOS: [u8; 20] = [
 
 /// Compute AzerothCore's strict build-12340 version proof, `SHA1(A[32] || build_hash[20])`.
 pub fn version_proof(client_public_key: &[u8; 32]) -> [u8; 20] {
-    let build_hash = if cfg!(target_os = "macos") {
-        INTEGRITY_HASH_12340_MACOS
-    } else {
-        INTEGRITY_HASH_12340_WINDOWS
-    };
     let mut sha = Sha1::new();
     sha.update(client_public_key);
-    sha.update(build_hash);
+    sha.update(INTEGRITY_HASH_12340_MACOS);
     sha.finalize().into()
 }
 
@@ -428,10 +414,9 @@ mod tests {
     fn emitted_challenge_is_protocol_eight_build_12340_version_335() {
         let mut packet = Vec::new();
         write_logon_challenge(&mut packet, "TEST").unwrap();
-        let os = client_os().to_le_bytes();
         let mut expected = vec![0x00, 0x08, 0x22, 0x00, b'W', b'o', b'W', 0];
         expected.extend_from_slice(&[3, 3, 5, 0x34, 0x30, b'6', b'8', b'x', 0]);
-        expected.extend_from_slice(&os);
+        expected.extend_from_slice(b"XSO\0");
         expected.extend_from_slice(b"SUne");
         expected.extend_from_slice(&[0, 0, 0, 0]); // timezone
         expected.extend_from_slice(&[127, 0, 0, 1, 4, b'T', b'E', b'S', b'T']);
@@ -441,11 +426,7 @@ mod tests {
     #[test]
     fn version_proof_uses_build_12340_integrity_hash() {
         let a: [u8; 32] = std::array::from_fn(|i| (i as u8).wrapping_mul(7).wrapping_add(9));
-        let expected = if cfg!(target_os = "macos") {
-            "8d575a807990bf3d47041e02c48311adfb5732c2"
-        } else {
-            "28b5a0305f9754854703c17579b0e7e8c0295184"
-        };
+        let expected = "8d575a807990bf3d47041e02c48311adfb5732c2";
         assert_eq!(
             version_proof(&a)
                 .iter()
