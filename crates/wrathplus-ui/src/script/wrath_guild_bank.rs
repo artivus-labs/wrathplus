@@ -560,12 +560,15 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             )]))
         })?;
     }
-    // CanEditGuildTabInfo() (`0x5cc290`): the guild master. Labelled: from AC, where only the
-    // leader renames tabs.
-    set(lua, "CanEditGuildTabInfo", |lua, _| {
+    // CanEditGuildTabInfo(tab) (`0x5cc290`): flag 0x4 (update text) of the player's own rank on
+    // the truncated tab (`0x5cc325`); nil with no player or a tab past six.
+    set(lua, "CanEditGuildTabInfo", |lua, args| {
+        let tab =
+            super::binding_abi::ftol_arg(lua, arg(&args, 0), "Usage: CanEditGuildTabInfo(tab)")?;
         let model = lua.app_data_ref::<Model>().expect("model app_data");
+        let tab = usize::try_from(i64::from(tab) - 1).ok().filter(|t| *t < 6);
         Ok(MultiValue::from_vec(vec![super::binding_abi::flag(
-            model.guild.in_guild && model.guild.is_leader,
+            model.unit_guids.player != 0 && tab.is_some_and(|t| tab_right(&model, t, 4)),
         )]))
     })?;
     // GameTooltip:SetGuildBankItem(tab, slot) (`0x6304a0`): the slot's item, its suffix, enchant

@@ -221,6 +221,16 @@ fn rank_rights_gate_withdraw_and_repair() {
     assert!(s
         .eval::<bool>("return CanWithdrawGuildBankMoney() == 1 and CanGuildBankRepair() == nil")
         .unwrap());
+    // Tab text editing is the own rank's flag 0x4 on that tab (`0x5cc325`), not guild master.
+    s.model_mut().wrath_friends.bank.rank_rights[0].tabs[1] = (4, 0);
+    assert!(s
+        .eval::<bool>(
+            "return CanEditGuildTabInfo(2) == 1 and CanEditGuildTabInfo(2.9) == 1 \
+             and CanEditGuildTabInfo(1) == nil and CanEditGuildTabInfo(7) == nil"
+        )
+        .unwrap());
+    let err = s.run("CanEditGuildTabInfo()").unwrap_err().to_string();
+    assert!(err.contains("Usage: CanEditGuildTabInfo(tab)"), "{err}");
     // Repair tests its right alone (`0x5cc23a`): no money word needed.
     {
         let mut m = s.model_mut();
