@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 // The example agent: Claude plans and writes Lua through the client's MCP tools; game events
-// arrive as messages while it works. Lines typed on stdin go to it too, as operator notes.
+// arrive as messages while it works. Nobody operates it: it decides everything itself. A line typed
+// on stdin reaches it as an outside note, which it is told never to wait for.
 //
 //   WRATHPLUS_AGENT_URL=http://127.0.0.1:17950 WRATHPLUS_AGENT_TOKEN=… \
 //     bun run agents/example/src/index.ts "Reach level 5 in Northshire"
@@ -20,7 +21,9 @@ import { Notes } from "./notes.ts";
 import { Policy } from "./policy.ts";
 import { kickoff } from "./prompt.ts";
 import { Reflection, XP_LUA, type XpSample } from "./reflect.ts";
-import { Triage } from "./triage.ts";
+import { RunnerLock } from "./runner.ts";
+import { SmallTalk, Triage } from "./triage.ts";
+import { HoldGate, idleWakeRefusal } from "./waits.ts";
 import { statusLine, Waker } from "./wake.ts";
 import { watch } from "./watch.ts";
 
@@ -55,7 +58,7 @@ export interface RunOptions {
   /** Where the agent keeps its notes (memory, to-dos, session logs). */
   notesHome: string;
   abortController: AbortController;
-  /** Read operator notes from stdin (one agent per terminal). */
+  /** Read outside notes from stdin (one agent per terminal). */
   stdin?: boolean;
 }
 
@@ -68,6 +71,8 @@ export async function runAgent(config: Config, options: RunOptions): Promise<voi
   // so do requests the fast tier carried out for the party.
   let heard: string[] = [];
   let handled: string[] = [];
+  // Small talk said to the character (NPCs, bots, strangers in /say), with what was done about it.
+  let said: string[] = [];
   // Everything that reaches the planner also goes in the session log, with the character's
   // status at that moment, so a wake-up needs no calls to see where things stand.
   // A half-size frame of the game rides along with a wake-up, at most one every 30 s, so the
@@ -91,9 +96,11 @@ export async function runAgent(config: Config, options: RunOptions): Promise<voi
     void Promise.all([statusLine(config.url, config.token), glance()]).then(([status, png]) => {
       const nearby = heard.length ? `\n\nHeard nearby (no need to answer):\n- ${heard.join("\n- ")}` : "";
       const done = handled.length ? `\n\nDone for the party by the fast loop (already answered):\n- ${handled.join("\n- ")}` : "";
+      const talk = said.length ? `\n\nSaid to you nearby (small talk: answer in passing if you like; it needs no turn of its own):\n- ${said.join("\n- ")}` : "";
       heard = [];
       handled = [];
-      const message = status ? `${text}${done}${nearby}\n\n[Now: ${status}]` : `${text}${done}${nearby}`;
+      said = [];
+      const message = status ? `${text}${done}${talk}${nearby}\n\n[Now: ${status}]` : `${text}${done}${talk}${nearby}`;
       notes.record(kind, png ? `${message}\n\n[with a screenshot]` : message);
       inbox.push(message, png);
     });
@@ -108,17 +115,24 @@ export async function runAgent(config: Config, options: RunOptions): Promise<voi
         heartbeatMs: Number(process.env.WRATHPLUS_JEV_HEARTBEAT_MS ?? 20_000),
         goal: config.goal,
         onNotify: (summary) => tell("fast loop", summary),
+        onHold: (decision) => {
+          if (decision.choice === "stop_waiting") holdGate.stopped(decision.reason);
+          else if (decision.seconds) holdGate.placed(decision.seconds);
+        },
         log: (line) => console.log(line),
       })
     : undefined;
   if (policy) void policy.run(abortController.signal);
   const lua = controlLua(config.url, config.token);
+  const jev = process.env.TYPESAFE_API_KEY ? new Jev(process.env.TYPESAFE_API_KEY, process.env.WRATHPLUS_JEV_MODEL ?? "jev-latest") : undefined;
+  // Nobody is coming (`waits.ts`): holds that wait for a person are refused, and so is a wait the
+  // fast loop already ended.
+  const holdGate = new HoldGate({ lua, ...(jev ? { jev } : {}) });
   // The goal runner (wp.goals) is off in a bare client, so a manual MCP session never plays by
   // itself; the example agent turns it on (WRATHPLUS_AGENT_GOALS=0 leaves it off) and off on exit.
+  // While it runs the runner stays on, whatever the planner's Lua sets (`runner.ts`).
   if (process.env.WRATHPLUS_AGENT_GOALS !== "0") {
-    const on = await lua("if Goals then Goals.on = true return true end return false").catch(() => undefined);
-    console.log(on?.ok && on.values?.[0] === true ? "Goal runner: on" : "Goal runner: unavailable (this client has no wp.goals)");
-    abortController.signal.addEventListener("abort", () => void lua("if Goals then Goals.on = false end return true").catch(() => undefined));
+    void new RunnerLock(lua, (text) => tell("harness", text), (line) => console.log(line)).run(abortController.signal);
   }
   // Every module the planner saves is kept as a version in its notes, for rollback (`modules.ts`).
   const versions = new ModuleVersions(notes.home);
@@ -166,6 +180,8 @@ export async function runAgent(config: Config, options: RunOptions): Promise<voi
           },
         )
       : undefined;
+  // Small talk (`triage.ts`): sorted by Jev, or batched without it; never one planner turn a line.
+  const chatter = new SmallTalk(jev ? { jev, lua } : {});
   const opening = kickoff(config.goal, notes.briefing());
   inbox.push(opening);
   let self: string | undefined;
@@ -197,6 +213,11 @@ export async function runAgent(config: Config, options: RunOptions): Promise<voi
     party: () => party,
     npcReplies: process.env.WRATHPLUS_AGENT_NPC_REPLIES !== "0",
     ...(triage ? { triage: async (request) => triage.handle(request, await statusLine(config.url, config.token), policy?.plan) } : {}),
+    smallTalk: async (items) => {
+      const sorted = await chatter.handle(items, jev ? await statusLine(config.url, config.token) : undefined);
+      said = [...said, ...sorted.later].slice(-8);
+      return sorted.wake;
+    },
     onHandled: (note) => {
       handled = [...handled, note].slice(-8);
     },
@@ -215,11 +236,11 @@ export async function runAgent(config: Config, options: RunOptions): Promise<voi
       tell("events", text);
     },
   });
-  // Operator notes from stdin.
+  // Outside notes from stdin: rare, and never promised (the prompt says not to wait for one).
   if (options.stdin ?? true) {
     void (async () => {
       for await (const line of console) {
-        if (line.trim()) tell("operator", `Note from the operator: ${line.trim()}`);
+        if (line.trim()) tell("outside note", `Outside note (nobody is waiting for a reply, and no further note is promised): ${line.trim()}`);
       }
     })();
   }
@@ -230,7 +251,7 @@ export async function runAgent(config: Config, options: RunOptions): Promise<voi
   console.log(`Notes: ${notes.home}`);
   const compactAt = Number(process.env.WRATHPLUS_AGENT_COMPACT_AT ?? 400_000);
   let begun = false;
-  for await (const message of think(inbox, { ...config, mcpEntry, abortController, notes, waker, compactAt, ...(policy ? { policy } : {}), lua, modules: { versions, files } })) {
+  for await (const message of think(inbox, { ...config, mcpEntry, abortController, notes, waker, compactAt, ...(policy ? { policy } : {}), lua, holdGate, wakeGate: (seconds) => idleWakeRefusal(lua, seconds), modules: { versions, files } })) {
     if (message.type === "system" && message.subtype === "init") {
       console.log(`[session ${message.session_id}]`);
       if (!begun) {

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ModuleVersions } from "../src/modules.ts";
 import type { Decision, HoldDecision, TimeShares } from "../src/policy.ts";
-import { Reflection, type ReflectOptions, type Score } from "../src/reflect.ts";
+import { GUIDANCE, Reflection, STALL_GUIDANCE, stalled, type ReflectOptions, type Score } from "../src/reflect.ts";
 
 const event = (name: string, args: unknown[] = []) => ({ seq: 1, time: 0, event: name, args });
 const MIN = 60_000;
@@ -132,4 +132,42 @@ test("the scoreboard: XP/hour across a level-up, quests, fights, idle share sinc
   expect(r.score().idle_pct).toBe(0);
   expect(r.reviews).toBe(1);
   rmSync(home, { recursive: true });
+});
+
+test("a window spent standing still leads with that, says no one is coming, and asks for the cause to be fixed", () => {
+  let time: TimeShares = { busy: 0, idle: 0, hold: 0, other: 0 };
+  const { clock, r } = setup({ fast: () => ({ decisions: [], holds: [], time }) });
+  r.sample({ level: 11, xp: 100, max: 8700 });
+  clock.now = 30 * MIN;
+  time = { busy: 2 * MIN, idle: 10 * MIN, hold: 18 * MIN, other: 0 };
+  r.sample({ level: 11, xp: 100, max: 8700 });
+  const text = r.reflect();
+  const parts = text.split("\n\n");
+  expect(parts[0]).toStartWith("Reflection (asked for)");
+  expect(parts[1]).toStartWith("THE PROBLEM: your character did nothing for 93% of this window (idle 33%, on hold 60%), 30 min in all.");
+  expect(parts[1]).toContain("No one is coming: there is no operator and no user");
+  expect(parts[2]).toStartWith("Scoreboard");
+  expect(parts.at(-1)).toBe(STALL_GUIDANCE);
+  expect(text).not.toContain(GUIDANCE);
+  expect(STALL_GUIDANCE).toContain("Goals.zones()");
+  expect(STALL_GUIDANCE).toContain("Goals.rest_below");
+  expect(STALL_GUIDANCE).toContain("Goals.fits");
+  expect(STALL_GUIDANCE).toContain('"No change"');
+  expect(GUIDANCE).toContain("If nothing needs changing, say so in a line");
+
+  // A working window keeps the ordinary guidance.
+  clock.now = 60 * MIN;
+  time = { busy: 30 * MIN, idle: 12 * MIN, hold: 18 * MIN, other: 0 };
+  const next = r.reflect();
+  expect(next).not.toContain("THE PROBLEM");
+  expect(next.split("\n\n").at(-1)).toBe(GUIDANCE);
+});
+
+test("without the fast tier, a long window with no experience, kill or quest is a stall too", () => {
+  const score = { window_minutes: 30, idle_pct: null, hold_pct: null } as Score;
+  expect(stalled(score, { xp: 0, kills: 0, quests: 0 })).toContain("gained no experience, won no fight and handed in no quest");
+  expect(stalled(score, { xp: 0, kills: 2, quests: 0 })).toBeNull();
+  expect(stalled({ ...score, window_minutes: 5 }, { xp: 0, kills: 0, quests: 0 })).toBeNull();
+  expect(stalled({ ...score, idle_pct: 50, hold_pct: 29 }, { xp: 0, kills: 0, quests: 0 })).toBeNull();
+  expect(stalled({ ...score, idle_pct: 50, hold_pct: 30 }, { xp: 900, kills: 4, quests: 0 })).toContain("did nothing for 80%");
 });

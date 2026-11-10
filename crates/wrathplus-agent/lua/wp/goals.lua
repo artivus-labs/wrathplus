@@ -57,6 +57,8 @@ local G = {
   rest_below = 0.5, mana_below = 0.35,
   -- Mobs this many levels above us still count for XP.
   above = 2,
+  -- A walk that ends within this many yards of a quest's hand-in point has arrived at it.
+  hand_in_reach = 60,
   failures = {}, current = nil, held = nil, after = nil,
 }
 
@@ -811,6 +813,30 @@ end
 
 local quest_visit = {}
 
+-- Where a finished quest is handed in, if the client knows and it is on this continent.
+local function hand_in_of(q)
+  local w = q.complete and Quests.where and Quests.where(q.id)
+  local h, pos = w and w.hand_in, me()
+  if h and h.map and pos and pos.map and h.map ~= pos.map then return nil end
+  return h
+end
+
+-- A hand-in that could not be made, said so the planner can act on it: which quest, where, how
+-- far short the walk ended, and what the quest log says (the NPC and the town it names).
+local function hand_in_failure(outcome)
+  local t, pos = quest_visit.target, me()
+  if not t then return "nobody to hand in to here" end
+  local short = pos and math.floor(far(pos, t)) or 0
+  local says = Quests.text and Quests.text(t.id)
+  says = says and (' The quest log says: "' .. says .. '"') or ""
+  if short > G.hand_in_reach then
+    return string.format("the walk to the hand-in of %s at (%d, %d) ended %d yards short (%s): no route on foot from here, so go by another way (a waypoint through the town gate, a road).%s",
+      t.title, t.x, t.y, short, tostring(outcome), says)
+  end
+  return string.format("nobody in sight takes %s at its hand-in (%d, %d): the point is the centre of a map area, so look within %d yards for the NPC or object the quest names.%s",
+    t.title, t.x, t.y, G.hand_in_reach, says)
+end
+
 G.action({
   name = "hand_in_quests",
   stop = function() Move.free() end,
@@ -821,8 +847,7 @@ G.action({
     if pass.hand_in == nil then
       pass.hand_in = false
       for _, q in ipairs(quests()) do
-        local w = q.complete and Quests.where(q.id)
-        if w and w.hand_in and not G.cooling("hand_in_quests:" .. q.title) then pass.hand_in = true end
+        if hand_in_of(q) and not G.cooling("hand_in_quests:" .. q.title) then pass.hand_in = true end
       end
     end
     return pass.hand_in
@@ -837,11 +862,12 @@ G.action({
       return Quests.hand_in()
     end
     for _, q in ipairs(Quests.list()) do
-      local w = q.complete and Quests.where(q.id)
-      if w and w.hand_in and not G.cooling("hand_in_quests:" .. q.title) then
+      local h = hand_in_of(q)
+      if h and not G.cooling("hand_in_quests:" .. q.title) then
         args.subject = q.title
-        local ok, why = Move.to(w.hand_in.x, w.hand_in.y)
-        assert(ok, why)
+        quest_visit.target = { id = q.id, title = q.title, x = h.x, y = h.y }
+        local ok, why = Move.to(h.x, h.y)
+        if not ok then error(hand_in_failure("no way: " .. tostring(why)), 0) end
         return
       end
     end
@@ -856,7 +882,7 @@ G.action({
         Quests.hand_in()
       elseif not walking() then
         local arrived, outcome = walk_over()
-        return true, false, arrived and "nobody to hand in to at the quest's hand-in" or ("walk " .. tostring(outcome))
+        return true, false, hand_in_failure(arrived and "the route stops there" or ("walk " .. tostring(outcome)))
       end
       return false
     end

@@ -209,6 +209,10 @@ mod avoid_tests;
 mod goals_tests;
 
 #[cfg(test)]
+#[path = "hand_in_tests.rs"]
+mod hand_in_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

@@ -1,5 +1,5 @@
 // The planner: Claude through the Agent SDK, with only the WrathPlus MCP tools, fed a stream of
-// user messages (the goal first, then game events and operator notes as they arrive).
+// user messages (the goal first, then game events and the rare outside note as they arrive).
 
 import {
   createSdkMcpServer,
@@ -14,7 +14,8 @@ import { z } from "zod";
 import type { Policy } from "./policy.ts";
 import { claudeEnv } from "./env.ts";
 import { NOTE_TOOLS, notesServer, type Notes } from "./notes.ts";
-import { sleepGuard, WAKE_TOOLS, wakeServer, type Waker } from "./wake.ts";
+import { sleepGuard, WAKE_TOOLS, wakeServer, type Waker, type WakeGate } from "./wake.ts";
+import { duration, type HoldGate } from "./waits.ts";
 import { systemPrompt } from "./prompt.ts";
 import { dropGoalLua, GOAL_NAME, GOALS_LUA, holdLua, DEFAULT_HOLD_SECONDS, MAX_HOLD_SECONDS, outcome, pushGoalLua, type Lua } from "./goals.ts";
 import { harnessServer, MODULE_TOOLS, SAVE_MODULE_TOOL, versionHooks, type ModuleFiles, type ModuleVersions } from "./modules.ts";
@@ -87,6 +88,10 @@ export interface BrainOptions {
   waker?: Waker;
   /** Lua over the control port: with it, the planner gets the goal tools. */
   lua?: Lua;
+  /** Refuses holds that wait for a person, or that the fast loop already ended (`waits.ts`). */
+  holdGate?: HoldGate;
+  /** Refuses a long sleep while nothing runs in the game (`waits.ts`). */
+  wakeGate?: WakeGate;
   /** Versions of its saved modules (in its notes folder): with them, the history and rollback tools. */
   modules?: { versions: ModuleVersions; files: ModuleFiles };
 }
@@ -152,8 +157,8 @@ export function think(inbox: Inbox, options: BrainOptions): AsyncIterable<SDKMes
         },
         ...(options.policy ? { plan: planServer(options.policy) } : {}),
         ...(options.notes ? { notes: notesServer(options.notes) } : {}),
-        ...(options.waker ? { wake: wakeServer(options.waker) } : {}),
-        ...(options.lua ? { goals: goalsServer(options.lua) } : {}),
+        ...(options.waker ? { wake: wakeServer(options.waker, options.wakeGate) } : {}),
+        ...(options.lua ? { goals: goalsServer(options.lua, options.holdGate) } : {}),
         ...(options.lua && options.modules ? { harness: harnessServer(options.modules.versions, options.modules.files, options.lua) } : {}),
       },
       ...(options.maxTurns ? { maxTurns: options.maxTurns } : {}),
@@ -239,7 +244,7 @@ export const GOAL_TOOLS = ["push_goal", "drop_goal", "goals", "hold"].map((name)
 const reply = (value: string) => ({ content: [{ type: "text" as const, text: value }] });
 
 /** The planner's goals: the client's GOAP runner plans and runs actions toward the top one. */
-export function goalsServer(lua: Lua) {
+export function goalsServer(lua: Lua, gate?: HoldGate) {
   return createSdkMcpServer({
     name: "goals",
     version: "0.1.0",
@@ -279,7 +284,7 @@ export function goalsServer(lua: Lua) {
       ),
       tool(
         "hold",
-        `Pause the goal runner for a while (Goals.hold), with the reason: waiting for your companion, for a respawn, for a group to form. Keep it short: ${DEFAULT_HOLD_SECONDS} s unless you give seconds, a few minutes at most (hard limit ${MAX_HOLD_SECONDS} s); when it runs out, the fast loop decides whether to keep waiting or get on, from who is actually there. seconds 0 ends the current hold.`,
+        `Pause the goal runner for a while (Goals.hold), with the reason: something in the game that will happen without anyone outside deciding it (your companion who is online, a respawn, a cooldown, a group forming). A hold that waits for a person outside the game (an operator, a user, an answer, an instruction, a permission) is refused: nobody will answer, so decide yourself. So is a hold the fast loop has just ended, asked again. Keep it short: ${DEFAULT_HOLD_SECONDS} s unless you give seconds, a few minutes at most (hard limit ${MAX_HOLD_SECONDS} s); when it runs out, the fast loop decides whether to keep waiting or get on, from who is actually there. seconds 0 ends the current hold.`,
         {
           reason: z.string().describe("What you are waiting for, plainly: the fast loop reads it."),
           seconds: z
@@ -290,8 +295,19 @@ export function goalsServer(lua: Lua) {
             .optional()
             .describe(`Default ${DEFAULT_HOLD_SECONDS}; 0 ends the current hold.`),
         },
-        async ({ reason, seconds = DEFAULT_HOLD_SECONDS }) =>
-          reply(outcome(await lua(holdLua(reason, seconds)), seconds > 0 ? `Holding for ${seconds}s: ${reason}.` : "Hold released; the runner carries on.")),
+        async ({ reason, seconds = DEFAULT_HOLD_SECONDS }) => {
+          if (seconds > 0 && gate) {
+            const refusal = await gate.check(reason);
+            if (refusal) return { ...reply(refusal), isError: true };
+          }
+          const result = await lua(holdLua(reason, seconds));
+          if (gate && result.ok && result.values?.[0] !== false) {
+            if (seconds > 0) gate.placed(seconds);
+            else gate.released();
+          }
+          const total = gate ? ` Held ${duration(gate.totalSeconds)} in all this session${seconds > 0 ? ", before this hold" : ""}.` : "";
+          return reply(outcome(result, seconds > 0 ? `Holding for ${seconds}s: ${reason}.${total}` : `Hold released; the runner carries on.${total}`));
+        },
       ),
     ],
   });

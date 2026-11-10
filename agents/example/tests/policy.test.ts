@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { Jev } from "../src/jev.ts";
-import { holdContext, luaString, Policy, registerLua, WAIT_WHEN, type PolicyOptions } from "../src/policy.ts";
+import { holdContext, idleNotice, luaString, Policy, registerLua, WAIT_WHEN, type PolicyOptions } from "../src/policy.ts";
 
 type Asked = { state: { woke_because: string[]; plan: string; hold_expired?: Record<string, unknown> }; questions: Record<string, { criteria?: Record<string, string> }> };
 
@@ -166,14 +166,14 @@ test("hold context: online and in sight is here; unknown online counts as online
   expect(context.goals).toEqual([]);
 });
 
-test("idle is not fine forever: wait is offered for a grace period, then dropped, and the planner hears once", async () => {
+test("idle is not fine forever: wait is offered for a grace period, then dropped, and the planner hears, again while it lasts", async () => {
   let now = 0;
   let activity: unknown = null;
   let hold: unknown = null;
   const f = fake(
     () => ({ registered: [{ name: "grind", when: "Mobs near." }], decisions: [], activity, hold, goals: [{ name: "progress", status: "blocked", note: "no mobs" }] }),
     () => choose("wait"),
-    { now: () => now, idleGraceMs: 60_000, idleNotifyMs: 180_000 },
+    { now: () => now, idleGraceMs: 60_000, idleNotifyMs: 180_000, idleRepeatMs: 600_000 },
   );
   const waitOffered = (i: number) => f.asked[i]?.questions.next?.criteria?.wait;
   await f.policy.tick(["heartbeat"], false);
@@ -188,7 +188,7 @@ test("idle is not fine forever: wait is offered for a grace period, then dropped
   await f.policy.tick(["heartbeat"], false);
   const told = f.notes.filter((n) => n.includes("stood idle"));
   expect(told).toHaveLength(1);
-  expect(told[0]).toContain("progress (blocked: no mobs)");
+  expect(told[0]).toContain("- progress: blocked: no mobs");
   // A hold makes waiting right again, and ends the idle stretch.
   hold = { reason: "respawn", waited: 10, remaining: 50 };
   now = 250_000;
@@ -213,5 +213,60 @@ test("a blocked goal and a goal action that keeps failing reach the planner", as
   for (let i = 0; i < 3; i++) f.policy.notice([{ seq: i, time: i, event: "AGENT_INTENT_DONE", args: ["goal:grind", false, "no mobs"] }]);
   expect(f.notes.filter((n) => n.includes('"reach_westfall" is blocked: no path'))).toHaveLength(1);
   expect(f.notes.filter((n) => n.includes('goal action "grind" has failed 3 times'))).toHaveLength(1);
+  f.stop();
+});
+
+test("an idle character is told of again and again, more plainly, with what the runner would do", async () => {
+  let now = 0;
+  const f = fake(
+    () => ({
+      registered: [],
+      decisions: [],
+      activity: null,
+      goals: [
+        { name: "safe_zone", priority: 60, status: "blocked", note: "no plan reaches safe_zone = true now" },
+        { name: "progress", priority: 0, status: "active", plan: ["travel_to_zone", "grind"] },
+      ],
+    }),
+    () => ({}),
+    { now: () => now, idleNotifyMs: 180_000, idleRepeatMs: 600_000 },
+  );
+  for (const at of [0, 180_000, 500_000, 780_000, 1_000_000, 1_380_000]) {
+    now = at;
+    await f.policy.tick(["heartbeat"], false);
+  }
+  const told = f.notes.filter((n) => n.includes("stood idle"));
+  expect(told).toHaveLength(3);
+  expect(told[0]).toContain("stood idle for 180s");
+  expect(told[0]).not.toContain("There is no operator");
+  expect(told[1]).toContain("stood idle for 780s: no activity, no hold, and nothing started. You were told once already");
+  expect(told[1]).toContain("There is no operator and no user");
+  expect(told[1]).toContain("- safe_zone (priority 60): blocked: no plan reaches safe_zone = true now");
+  expect(told[1]).toContain("- progress (priority 0): active; next: travel_to_zone → grind");
+  expect(told[1]).toContain("Do not end the turn with the character idle.");
+  expect(told[2]).toContain("You were told 2 times already");
+  expect(idleNotice(200, [])).toContain("- none (is wp.goals loaded?)");
+  f.stop();
+});
+
+test("hold decisions are passed on, so an ended wait can be refused when asked again", async () => {
+  const seen: [string, string, number | undefined][] = [];
+  let hold = "keep_waiting";
+  const f = fake(
+    () => ({ registered: [], decisions: [], activity: null }),
+    () => ({ hold: { type: "choice", choice: hold, confidence: 1, probabilities: {} }, hold_for: { type: "choice", choice: "few_minutes", confidence: 1, probabilities: {} } }),
+    { onHold: (d) => seen.push([d.reason, d.choice, d.seconds]) },
+  );
+  f.policy.notice([{ seq: 1, time: 0, event: "AGENT_HOLD_EXPIRED", args: ["Still no operator zone decision", 600] }]);
+  await f.policy.tick(["a hold ran out"], true);
+  hold = "stop_waiting";
+  f.policy.notice([{ seq: 2, time: 0, event: "AGENT_HOLD_EXPIRED", args: ["Still no operator zone decision", 180] }]);
+  await f.policy.tick(["a hold ran out"], true);
+  expect(seen).toEqual([
+    ["Still no operator zone decision", "keep_waiting", 180],
+    ["Still no operator zone decision", "stop_waiting", undefined],
+  ]);
+  // Jev is told that a wait for someone outside the game is one to stop.
+  expect(f.asked[0]?.questions.hold?.criteria?.stop_waiting).toContain("nobody outside the game will ever answer");
   f.stop();
 });

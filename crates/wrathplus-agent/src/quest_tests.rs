@@ -177,3 +177,51 @@ fn visit(script: &mut UiScript) {
         script.tick(0.6);
     }
 }
+
+#[test]
+fn where_gives_the_hand_in_with_its_map_and_text_reads_the_log_without_moving_its_selection() {
+    let script = quests();
+    script
+        .run(
+            r#"
+            AgentQuestPOI = function(id)
+              if id == 37 then
+                return { { objective = -1, map = 0, x = -9336, y = -986 }, { objective = 0, map = 0, x = -9400, y = -900 } }
+              end
+              if id == 5 then return {} end
+            end
+            LOG = { { "Elwynn Forest", true }, { "Find the Lost Guards", false, 37 }, { "Elmore's Task", false, 1097 } }
+            GetNumQuestLogEntries = function() return #LOG end
+            GetQuestLogTitle = function(i) return LOG[i][1], 10, nil, 0, LOG[i][2] or nil, nil, 1, nil, LOG[i][3] end
+            selected, selections = 2, {}
+            GetQuestLogSelection = function() return selected end
+            SelectQuestLogEntry = function(i) selected = i selections[#selections + 1] = i end
+            GetQuestLogQuestText = function()
+              if selected == 3 then return "A story.", "Speak with Grimand Elmore in Stormwind." end
+              return "A story.", ""
+            end
+            "#,
+        )
+        .unwrap();
+    let found: String = script
+        .eval(
+            "local w = Quests.where(37) return w.hand_in.x .. ' ' .. w.hand_in.y .. ' ' .. w.hand_in.map \
+             .. ' ' .. #w.objectives .. ' ' .. w.objectives[1].map",
+        )
+        .unwrap();
+    assert_eq!(found, "-9336 -986 0 1 0");
+    // Not answered yet is nil; answered with no areas is a quest with no known hand-in.
+    assert!(script
+        .eval::<bool>("return Quests.where(1097) == nil and Quests.where(5).hand_in == nil")
+        .unwrap());
+    let said: String = script
+        .eval("return tostring(Quests.text(1097)) .. ' / ' .. tostring(Quests.text(37)) .. ' / ' .. tostring(Quests.text(999))")
+        .unwrap();
+    assert_eq!(said, "Speak with Grimand Elmore in Stormwind. / nil / nil");
+    assert_eq!(
+        script
+            .eval::<String>("return selected .. ' ' .. table.concat(selections, ' ')")
+            .unwrap(),
+        "2 3 2 2"
+    );
+}
