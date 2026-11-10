@@ -1,5 +1,6 @@
 //! `nav`'s unit tests: targets, the no-navmesh answers and the straight-approach fallback.
 
+use super::walker::*;
 use super::*;
 
 #[test]
@@ -81,4 +82,119 @@ fn a_far_interaction_without_a_navmesh_falls_back_to_the_straight_approach() {
         Ok(world::Order::Interact(0x10))
     ));
     assert_eq!(handles.walk.lock().unwrap().then_interact, None);
+}
+
+/// A bump is marked a step ahead toward the corner the walk fell short of, or on the corner
+/// itself when that is nearer, with the radius a fresh route goes round.
+#[test]
+fn a_bump_is_marked_just_ahead_toward_the_corner() {
+    assert_eq!(
+        bump([0.0, 0.0, 5.0], [10.0, 0.0, 9.0]),
+        [BUMP_AHEAD, 0.0, BUMP_RADIUS]
+    );
+    let diagonal = bump([-3.0, -4.0, 0.0], [0.0, 0.0, 0.0]);
+    assert!((diagonal[0] + 2.1).abs() < 1e-4 && (diagonal[1] + 2.8).abs() < 1e-4);
+    assert_eq!(
+        bump([1.0, 1.0, 0.0], [1.5, 1.0, 0.0]),
+        [1.5, 1.0, BUMP_RADIUS]
+    );
+    assert_eq!(
+        bump([1.0, 1.0, 0.0], [1.0, 1.0, 3.0]),
+        [1.0, 1.0, BUMP_RADIUS]
+    );
+}
+
+/// The stall this walker had at Goldshire's inn (#82, live on the beta realm): the navmesh's
+/// route into the Lion's Pride hugs the timber foot at the building's corner, which the client's
+/// collision does not let a player past, from either side. A fresh route from the same spot was
+/// the same route; told of the bump, it leaves the corner out and still arrives. Each walk keeps
+/// its own bumps, and `AgentAvoid`'s circles stay as the agent set them.
+///
+/// Needs real mmaps: `WRATHPLUS_MMAPS=<server data>/mmaps cargo test -p wrathplus-agent -- --ignored`.
+#[test]
+#[ignore = "needs the server's extracted mmaps"]
+fn a_walk_stuck_on_the_inn_corner_routes_round_it() {
+    let dir = std::env::var("WRATHPLUS_MMAPS").expect("set WRATHPLUS_MMAPS");
+    let (handles, _) = link(
+        Arc::new(crate::events::EventLog::new()),
+        std::time::Instant::now(),
+        crossbeam_channel::unbounded().0,
+    );
+    {
+        let mut mesh = handles.mesh.lock().unwrap();
+        mesh.dir = Some(PathBuf::from(dir));
+        mesh.avoid = vec![[0.0, 0.0, 1.0]];
+    }
+    let near = |route: &Route, p: [f32; 2]| {
+        route
+            .points
+            .iter()
+            .skip(1)
+            .any(|q| (q[0] - p[0]).hypot(q[1] - p[1]) < 1.0)
+    };
+    // (where the player stood, the goal, the corner the walk fell short of), as recorded live:
+    // into the inn from the east, and past it from the west.
+    let cases = [
+        (
+            [-9454.67, 44.46, 56.62],
+            [-9462.66, 16.19, 56.96],
+            [-9457.6, 44.8, 57.1],
+        ),
+        (
+            [-9456.88, 45.22, 56.65],
+            [-9440.0, 38.0, 58.0],
+            [-9450.7, 42.7, 57.4],
+        ),
+    ];
+    for (at, goal, corner) in cases {
+        let me = world::Me {
+            pos: at,
+            facing: 0.0,
+            map: 0,
+        };
+        let plain = route_in(&handles.mesh, me, goal, &[]).unwrap();
+        assert!(
+            plain.complete && near(&plain, [corner[0], corner[1]]),
+            "the plain route takes the corner: {plain:?}"
+        );
+        let mut bumps = Vec::new();
+        let round = route_round(&handles.mesh, &mut bumps, me, corner, goal).unwrap();
+        assert_eq!(bumps, [bump(at, corner)]);
+        assert!(round.complete, "{round:?}");
+        assert!(
+            !near(&round, [corner[0], corner[1]]) && round != plain,
+            "the fresh route leaves the corner out: {round:?}"
+        );
+        // The walk's bumps are its own: the next plain route is the first again.
+        assert_eq!(route_in(&handles.mesh, me, goal, &[]).unwrap(), plain);
+    }
+    assert_eq!(handles.mesh.lock().unwrap().avoid, [[0.0, 0.0, 1.0]]);
+}
+
+/// The push before a second try is the forward key held with one press of the jump key, on a VM
+/// an agent drives, and its end lets forward go: nothing stays down after it. It lasts the run to
+/// the corner, between a jump's worth and a few yards'.
+#[test]
+fn the_push_holds_forward_with_a_jump_and_lets_go() {
+    use wrathplus_ui::script::{BindingInput, FiredInput, HeldInput, UiScript};
+    let mut script = UiScript::new().unwrap();
+    script.set_agent_input(true);
+    script.run(PUSH).unwrap();
+    assert_eq!(
+        script.take_binding_input(),
+        [
+            BindingInput::Start(HeldInput::MoveForward),
+            BindingInput::Fire(FiredInput::Jump),
+            BindingInput::Start(HeldInput::Ascend),
+            BindingInput::Stop(HeldInput::Ascend),
+        ]
+    );
+    script.run(PUSH_END).unwrap();
+    assert_eq!(
+        script.take_binding_input(),
+        [BindingInput::Stop(HeldInput::MoveForward)]
+    );
+    assert_eq!(push_secs(0.5), 0.3);
+    assert_eq!(push_secs(3.5), 0.5);
+    assert_eq!(push_secs(235.0), 0.7);
 }

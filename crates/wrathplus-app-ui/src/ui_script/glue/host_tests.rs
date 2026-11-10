@@ -295,3 +295,107 @@ fn the_stock_character_select_drives_the_roster_pick_and_booth() {
         ClientState::Login
     );
 }
+
+/// Two realms up, the list shown, and a frame counting `OPEN_REALM_LIST` on the VM in place.
+fn show_realm_list(app: &mut App) {
+    count_realm_list_opens(app);
+    let mut realms = app
+        .world_mut()
+        .resource_mut::<crate::app_core::ui_flags::Realms>();
+    realms.realms = ["AzerothCore", "Second"]
+        .into_iter()
+        .map(|name| wrathplus_protocol::RealmInfo {
+            name: name.into(),
+            address: "127.0.0.1:8085".into(),
+            population: 1.0,
+            characters: 1,
+            realm_type: 0,
+            flags: 0,
+            category: 1,
+            id: 1,
+        })
+        .collect();
+    realms.shown = true;
+}
+
+fn count_realm_list_opens(app: &mut App) {
+    app.world_mut()
+        .non_send_resource_mut::<UiScript>()
+        .run(
+            "local f = CreateFrame('Frame') f:RegisterEvent('OPEN_REALM_LIST') \
+             f:SetScript('OnEvent', function() OPENED = (OPENED or 0) + 1 end)",
+        )
+        .unwrap();
+}
+
+fn realm_list_opens(app: &mut App) -> i64 {
+    app.world_mut()
+        .non_send_resource_mut::<UiScript>()
+        .eval::<i64>("return OPENED or 0")
+        .unwrap()
+}
+
+/// A realm list raised before the glue VM is built is shown on the glue VM when it comes: an
+/// auto-submitted login reaches the list while the startup cover still holds the glue VM back,
+/// and the list had gone to the VM before it, leaving the login screen up with no list on it.
+#[test]
+fn a_realm_list_raised_before_the_glue_vm_is_shown_on_it() {
+    let (mut app, _rx) = app();
+    show_realm_list(&mut app);
+    app.update();
+    assert_eq!(realm_list_opens(&mut app), 1);
+    // The glue VM replaces the one the list went to; nothing about the list changes.
+    app.insert_non_send_resource(vm());
+    count_realm_list_opens(&mut app);
+    app.update();
+    assert_eq!(realm_list_opens(&mut app), 1, "shown on the new VM");
+    assert_eq!(
+        app.world_mut()
+            .non_send_resource_mut::<UiScript>()
+            .eval::<String>("return (GetRealmInfo(1, 2))")
+            .unwrap(),
+        "Second",
+        "with its rows"
+    );
+    app.update();
+    assert_eq!(realm_list_opens(&mut app), 1, "and once");
+}
+
+/// #70: `ChangeRealm` from a script leaves the stock frame up (only the stock Okay hides it
+/// first), and the frame's `OnUpdate` asks for the list again, which opens it over character
+/// select. World entry takes it down with the rest of the glue: it was left set, and in the world
+/// the native dialog drew over the game.
+#[test]
+fn world_entry_takes_down_a_realm_list_a_script_left_open() {
+    use crate::app_core::state::ClientState;
+    let shown = |app: &App| {
+        app.world()
+            .resource::<crate::app_core::ui_flags::Realms>()
+            .shown
+    };
+    let lua = |app: &mut App, code: &str| {
+        app.world_mut()
+            .non_send_resource_mut::<UiScript>()
+            .run(code)
+            .unwrap();
+        app.update();
+    };
+    let (mut app, _rx) = app();
+    crate::realm_select::hide_at_world_entry(&mut app);
+    show_realm_list(&mut app);
+    app.update();
+    lua(&mut app, "ChangeRealm(1, 1)");
+    assert!(!shown(&app));
+    // The roster arrives: character select, the stock frame still up and polling.
+    app.world_mut()
+        .resource_mut::<NextState<ClientState>>()
+        .set(ClientState::CharSelect);
+    app.update();
+    lua(&mut app, "RequestRealmList(1)");
+    assert!(shown(&app), "the poll opens the list over character select");
+    app.world_mut()
+        .resource_mut::<NextState<ClientState>>()
+        .set(ClientState::InWorld);
+    app.update();
+    assert!(!shown(&app), "nothing of the glue survives world entry");
+}
