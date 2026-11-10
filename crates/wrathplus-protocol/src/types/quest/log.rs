@@ -51,7 +51,8 @@ pub struct QuestTemplate {
     pub wrath: Option<super::giver::WrathQuestInfo>,
     pub quest_id: u32,
     pub method: u32,
-    pub level: u32,
+    /// Signed: -1 is a quest at the player's own level (12340 `0x5e0d7a`).
+    pub level: i32,
     pub zone_or_sort: i32,
     pub quest_type: u32,
     pub rep_objective_faction: u32,

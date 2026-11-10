@@ -61,7 +61,7 @@ pub struct QuestGreetingInfo {
     /// The row's quest and level off the wire; `GetActiveTitle`'s completion (`0x58bcb0`) and the
     /// trivial test (`0x58aba0`) read them against the log and the player at call time.
     pub quest_id: u32,
-    pub level: u32,
+    pub level: i32,
     pub daily: bool,
     pub repeatable: bool,
 }

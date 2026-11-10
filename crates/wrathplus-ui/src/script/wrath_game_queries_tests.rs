@@ -245,23 +245,26 @@ fn quest_panel_flags_and_greeting_levels() {
         ..Default::default()
     };
     s.set_quest(Some(QuestState {
-        active_info: vec![row(75)],
-        available_info: vec![row(80), row(60)],
+        active_info: vec![row(75), row(-1)],
+        available_info: vec![row(80), row(60), row(-1)],
         ..Default::default()
     }));
+    // A level -1 quest scales with the player: the row answers the signed -1 (`0x58c072`).
     assert_eq!(
         s.eval::<(f64, f64, f64, f64, f64)>(
             "return GetActiveLevel(1), GetActiveLevel(2), GetAvailableLevel(2.9), \
              GetAvailableLevel('1'), GetAvailableLevel(0)"
         )
         .unwrap(),
-        (75.0, 0.0, 60.0, 80.0, 0.0)
+        (75.0, -1.0, 60.0, 80.0, 0.0)
     );
-    // Level 80's band is 8: 60 is trivial, 80 is not, and a missing row reads level 0.
+    // Level 80's band is 8: 60 is trivial, 80 is not, -1 never is (`0x58aba7`), and a missing
+    // row reads level 0.
     assert!(s
         .eval::<bool>(
             "return IsAvailableQuestTrivial(1) == nil and IsAvailableQuestTrivial(2) == 1 \
-             and IsAvailableQuestTrivial(3) == 1"
+             and IsAvailableQuestTrivial(3) == nil and IsAvailableQuestTrivial(4) == 1 \
+             and not IsActiveQuestTrivial(2)"
         )
         .unwrap());
     let err = s.run("GetActiveLevel()").unwrap_err().to_string();

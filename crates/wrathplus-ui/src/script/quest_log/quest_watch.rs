@@ -108,14 +108,15 @@ pub(crate) fn quest_done(model: &Model, quest_id: u32) -> bool {
 }
 
 /// `0x58aba0`, the grey-quest test: the player is above the quest's level by more than
-/// `[0xa12fd0][player level / 5]` (4, 4, 5, 5, 6, 6, 7, 7, then 8). No player, not trivial.
-pub(crate) fn quest_trivial(model: &Model, quest_level: u32) -> bool {
-    const MARGIN: [u32; 8] = [4, 4, 5, 5, 6, 6, 7, 7];
-    let Some(player) = model.unit("player").map(|u| u.level) else {
+/// `[0xa12fd0][player level / 5]` (4, 4, 5, 5, 6, 6, 7, 7, then 8), compared signed. A level -1
+/// quest scales with the player and is never trivial (`0x58aba7`). No player, not trivial.
+pub(crate) fn quest_trivial(model: &Model, quest_level: i32) -> bool {
+    const MARGIN: [i64; 8] = [4, 4, 5, 5, 6, 6, 7, 7];
+    let Some(player) = model.unit("player").map(|u| i64::from(u.level)) else {
         return false;
     };
     let margin = MARGIN.get(player as usize / 5).copied().unwrap_or(8);
-    quest_level + margin < player
+    quest_level != -1 && i64::from(quest_level) + margin < player
 }
 
 pub(super) fn install(lua: &Lua) -> mlua::Result<()> {

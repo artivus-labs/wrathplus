@@ -556,6 +556,12 @@ fn feed_server_clock(
     script.set_server_unix_time(now);
 }
 
+/// A quest's log level (`0x5e0d20`): a template level of -1 answers the player's own level
+/// (`0x5e0d7a`), which the row sort (`0x5e08f0`) and `GetQuestLogTitle` both read.
+fn log_level(level: i32, player: u32) -> u32 {
+    u32::try_from(level).unwrap_or(player)
+}
+
 /// The reference's header for `zoneOrSort` 0 (`0x84b4ec`). Only a cached template makes a header
 /// (`0x4de6f6`), so it never stands for a template in flight.
 const MISSING_HEADER: &str = "Missing header! (quest designers)";
@@ -692,6 +698,7 @@ pub(crate) fn feed_quest_log(
 
     // ── Section headers ─────────────────────────────────────────────────────────────────────────
     // One per `ZoneOrSort`: a positive id names an `AreaTable` zone, a negative a `QuestSort`.
+    let player_level = store.0.unit_level().unwrap_or(0);
     let ordered = {
         let keyed: Vec<GroupRow> = rows
             .iter()
@@ -709,7 +716,7 @@ pub(crate) fn feed_quest_log(
                             .unwrap_or_default()
                             .to_string()
                     },
-                    level: t.map(|t| t.level).unwrap_or(0),
+                    level: t.map_or(0, |t| log_level(t.level, player_level)),
                     title: t.map(|t| t.title.clone()).unwrap_or_default(),
                     slot: r.slot,
                 }
@@ -754,7 +761,7 @@ pub(crate) fn feed_quest_log(
                 match quest_log.template(r.quest_id, &commands) {
                     Some(t) => (
                         t.title.clone(),
-                        t.level,
+                        log_level(t.level, player_level),
                         // The tag: `Type` is a `QuestInfo.dbc` id, 0 naming none. No table gives
                         // `None`, never `""`: the row's Lua tests presence.
                         tag_names
@@ -1822,9 +1829,12 @@ mod tests {
             t.quest_id = id;
             t.zone_or_sort = zos;
             t.title = title.into();
+            // A scales with the player: its log level is the player's 10 (`0x5e0d7a`).
+            t.level = if id == A { -1 } else { 1 };
             log.insert_template(t);
             pairs.push((quest_id_field(slot), id));
         }
+        pairs.push((Field::UnitLevel.span().unwrap().index, 10));
         app.insert_resource(log);
         app.world_mut().spawn((
             ObjectStore(ObjectFields::from_pairs(&pairs)),
@@ -1852,6 +1862,13 @@ mod tests {
 
         app.update();
         assert_eq!(app.world().resource::<QuestLog>().tooltip_rows.len(), 3);
+        let eval = |app: &App, lua: &str| {
+            app.world()
+                .non_send_resource::<UiScript>()
+                .eval::<i64>(lua)
+                .unwrap()
+        };
+        assert_eq!(eval(&app, "return select(2, GetQuestLogTitle(2))"), 10);
         run(&mut app, "SelectQuestLogEntry(4); SetAbandonQuest()");
         assert_eq!(
             app.world()

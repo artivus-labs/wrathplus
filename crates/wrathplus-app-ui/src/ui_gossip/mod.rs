@@ -303,7 +303,7 @@ pub(crate) trait GossipGreeting {
         npc: u64,
         text_id: u32,
         options: Vec<GossipOption>,
-        quests: Vec<(u32, u32, u32, String)>,
+        quests: Vec<(u32, u32, i32, String)>,
         npc_gender: u8,
     ) -> bool;
     /// Cache a `SMSG_NPC_TEXT_UPDATE` record and resolve the menu waiting on it, if any.
@@ -325,7 +325,7 @@ impl GossipGreeting for GossipState {
         npc: u64,
         text_id: u32,
         options: Vec<GossipOption>,
-        quests: Vec<(u32, u32, u32, String)>,
+        quests: Vec<(u32, u32, i32, String)>,
         npc_gender: u8,
     ) -> bool {
         self.npc = Some(npc);

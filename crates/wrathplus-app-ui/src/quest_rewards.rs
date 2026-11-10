@@ -37,7 +37,7 @@ impl QuestRewardTables {
         &self,
         detail: &mut wrathplus_ui::script::QuestLogDetail,
         native: &wrathplus_protocol::types::WrathQuestInfo,
-        quest_level: u32,
+        quest_level: i32,
         player_level: Option<u32>,
         subject: Option<&crate::npc_text::Subject>,
     ) {
@@ -75,16 +75,13 @@ impl QuestRewardTables {
 
     pub(crate) fn xp(
         &self,
-        quest_level: u32,
+        quest_level: i32,
         difficulty: u32,
         player_level: Option<u32>,
     ) -> Option<u32> {
         let player = player_level?;
-        let level = if quest_level == u32::MAX {
-            player
-        } else {
-            quest_level
-        };
+        // A level -1 quest scales with the player (`0x5e0d7a`).
+        let level = u32::try_from(quest_level).unwrap_or(player);
         let base = self.xp.as_ref()?.xp(level, difficulty as usize)?;
         Some(scale_xp(base, level, player))
     }
@@ -198,7 +195,7 @@ mod tests {
         );
         assert_eq!(tables.title(7, Some(&subject)), None); // mask != title ID
         assert_eq!(tables.title(123, None), None);
-        assert_eq!(tables.xp(u32::MAX, 9, Some(20)), Some(525));
+        assert_eq!(tables.xp(-1, 9, Some(20)), Some(525));
         assert_eq!(tables.xp(20, 0, Some(26)), Some(800));
         assert_eq!(tables.xp(20, 10, Some(20)), None);
         assert_eq!(tables.xp(21, 0, Some(20)), None);
@@ -217,7 +214,7 @@ mod tests {
             ..Default::default()
         };
         let mut detail = wrathplus_ui::script::QuestLogDetail::default();
-        tables.fill_log(&mut detail, &native, u32::MAX, Some(20), Some(&subject));
+        tables.fill_log(&mut detail, &native, -1, Some(20), Some(&subject));
         assert_eq!((detail.reward_xp, detail.reward_honor), (525, 8));
         assert_eq!(detail.reward_title.as_deref(), Some("Dame Ada"));
         QuestRewardTables::default().fill_log(&mut detail, &native, 20, Some(20), Some(&subject));

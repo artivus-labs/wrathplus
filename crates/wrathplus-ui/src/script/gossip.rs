@@ -30,9 +30,8 @@ pub struct GossipOptionView {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct GossipQuestRow {
     pub title: String,
-    /// The row's third wire field. 1.12 never shows it, but the verbs return `(title, level)` pairs
-    /// and `GossipFrame.lua:66` strides by 2 over them.
-    pub level: u32,
+    /// The row's third wire field, signed: a level -1 quest answers -1 (`fild` at `0x58b3e8`).
+    pub level: i32,
     pub active: bool,
     pub trivial: bool,
     pub daily: bool,
@@ -301,7 +300,7 @@ mod tests {
         m.quests = vec![
             GossipQuestRow {
                 title: "Report to Goldshire".into(),
-                level: 5,
+                level: -1,
                 active: true,
                 ..Default::default()
             },
@@ -337,7 +336,7 @@ mod tests {
         assert_eq!(
             s.eval::<(String, i64)>("return GetGossipActiveQuests()")
                 .unwrap(),
-            ("Report to Goldshire".to_string(), 5)
+            ("Report to Goldshire".to_string(), -1)
         );
 
         // Available #2 is the menu's third row.

@@ -306,7 +306,7 @@ fn gossip_message(r: &mut Cursor<&[u8]>) -> io::Result<Vec<SessionEvent>> {
     for _ in 0..u32_le(r)? {
         let quest = u32_le(r)?;
         let icon = u32_le(r)?;
-        let level = u32_le(r)?;
+        let level = u32_le(r)? as i32;
         let flags = u32_le(r)?;
         let repeatable = u8_le(r)? != 0;
         quest_info.push(WrathQuestInfo {
@@ -336,7 +336,7 @@ fn quest_list(r: &mut Cursor<&[u8]>) -> io::Result<QuestGiverList> {
     for _ in 0..u8_le(r)? {
         let quest_id = u32_le(r)?;
         let icon = u32_le(r)?;
-        let level = u32_le(r)?;
+        let level = u32_le(r)? as i32;
         let flags = u32_le(r)?;
         let repeatable = u8_le(r)? != 0;
         quests.push(QuestListEntry {
@@ -500,7 +500,7 @@ fn quest_template(r: &mut Cursor<&[u8]>) -> io::Result<QuestTemplate> {
     let mut native = WrathQuestInfo::default();
     let quest_id = u32_le(r)?;
     let method = u32_le(r)?;
-    let level = u32_le(r)?;
+    let level = u32_le(r)? as i32;
     let _min_level = u32_le(r)?;
     let zone_or_sort = u32_le(r)? as i32;
     let quest_type = u32_le(r)?;

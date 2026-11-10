@@ -47,7 +47,7 @@ fn ignored(lua: &Lua, model: &Model, arg: &str) -> bool {
 
 /// A greeting list's level at a 1-based index, truncated (`0x58c031`, the x87 control word set to
 /// chop), 0 outside the list.
-fn greeting_level(model: &Model, index: i32, active: bool) -> u32 {
+fn greeting_level(model: &Model, index: i32, active: bool) -> i32 {
     let Some(q) = model.quest.as_ref() else {
         return 0;
     };
