@@ -541,17 +541,18 @@ mod tests {
         assert!(rx.try_iter().any(|c| matches!(c,
             ClientCommand::GossipSelectOption { code: Some(code), .. } if code == "1234")));
 
-        // Controls: a real end still closes, and a first visit from a closed frame stays shut
-        // until its text answers.
+        // Controls: a real end still closes, keeping the last menu's text (`0x58a550`), and a
+        // first visit from a closed frame stays shut until its text answers.
         state(&mut app).clear();
+        let bank = "The bank is north of here.".to_string();
         assert_eq!(
             tick(&mut app),
-            (vec!["GOSSIP_CLOSED".to_string()], String::new())
+            (vec!["GOSSIP_CLOSED".to_string()], bank.clone())
         );
         assert!(state(&mut app).open_menu(GUARD, 52, option("Goodbye"), Vec::new(), 0));
         assert_eq!(
             tick(&mut app),
-            (Vec::new(), String::new()),
+            (Vec::new(), bank),
             "hidden stays hidden through the hold"
         );
         state(&mut app).text_arrived(52, record("Yes?"), 0);

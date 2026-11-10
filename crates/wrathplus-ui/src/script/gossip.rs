@@ -54,9 +54,13 @@ pub struct GossipMenu {
 }
 
 impl super::UiScript {
-    /// Push (or clear, with `None`) the open gossip menu.
+    /// Push the open gossip menu; `None` is a close, after which the getters keep answering the
+    /// last menu, as 12340's close (`CloseGossip` `0x58aa40`, `SMSG_GOSSIP_COMPLETE` `0x58a840`)
+    /// zeroes only the NPC guid (`0x58a550`).
     pub fn set_gossip(&mut self, menu: Option<GossipMenu>) {
-        self.model_mut().gossip = menu;
+        if let Some(menu) = menu {
+            self.model_mut().gossip = Some(menu);
+        }
     }
 
     /// Drain the selects `SelectGossipOption` sent since the last call: the 1-based option
@@ -80,17 +84,13 @@ impl super::UiScript {
 pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     let g = lua.globals();
 
+    // The greeting buffer `0xc00ef0`, pushed as-is (`0x58a900`): "" before any menu.
     g.set(
         "GetGossipText",
         lua.create_function(|lua, ()| {
-            let text = {
-                let model = lua.app_data_ref::<Model>().expect("model app_data");
-                model.gossip.as_ref().map(|m| m.greeting.clone())
-            };
-            match text {
-                Some(t) => Ok(Value::String(lua.create_string(&t)?)),
-                None => Ok(Value::Nil),
-            }
+            let model = lua.app_data_ref::<Model>().expect("model app_data");
+            let text = model.gossip.as_ref().map_or("", |m| m.greeting.as_str());
+            lua.create_string(text)
         })?,
     )?;
 
@@ -295,7 +295,7 @@ mod tests {
     #[test]
     fn gossip_snapshot_reads_and_selects_queue() {
         let mut s = UiScript::new().unwrap();
-        assert!(s.eval::<bool>("return GetGossipText() == nil").unwrap());
+        assert!(s.eval::<bool>("return GetGossipText() == ''").unwrap());
         assert_eq!(s.arity("GetGossipOptions()").unwrap(), 0);
 
         s.set_gossip(Some(menu()));
@@ -460,20 +460,18 @@ mod tests {
         assert!(s.eval::<bool>("local t,l,tr,d,r,t2,l2,tr2,d2,r2 = GetGossipAvailableQuests(); return t == 'Daily' and l == 80 and tr == nil and d == 1 and r == 1 and t2 == 'Other' and tr2 == nil and d2 == nil and r2 == nil").unwrap());
         assert!(s.eval::<bool>("local t,l,tr,c = GetGossipActiveQuests(); return t == 'Done' and l == 70 and tr == 1 and c == 1").unwrap());
         assert_eq!(s.eval::<(u32,u32,u32)>("return GetNumGossipAvailableQuests(), GetNumGossipActiveQuests(), GetNumGossipOptions()").unwrap(), (2,1,2));
-        s.set_gossip(None);
-        assert_eq!(s.arity("GetGossipAvailableQuests()").unwrap(), 0);
-        assert_eq!(
-            s.eval::<u32>("return GetNumGossipActiveQuests()").unwrap(),
-            0
-        );
     }
 
+    /// 12340's close zeroes only the NPC guid (`0x58a550`): the option rows, their count
+    /// `[0xc016fc]` and the greeting buffer stay until the next menu.
     #[test]
-    fn clearing_the_menu_empties_it() {
+    fn a_close_keeps_the_last_menu() {
         let mut s = UiScript::new().unwrap();
         s.set_gossip(Some(menu()));
         s.set_gossip(None);
-        assert!(s.eval::<bool>("return GetGossipText() == nil").unwrap());
-        assert_eq!(s.arity("GetGossipOptions()").unwrap(), 0);
+        assert!(s
+            .eval::<bool>("return GetGossipText() == 'Greetings, traveler.'")
+            .unwrap());
+        assert_eq!(s.arity("GetGossipOptions()").unwrap(), 4);
     }
 }
