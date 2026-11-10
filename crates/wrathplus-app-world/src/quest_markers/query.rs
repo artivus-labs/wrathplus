@@ -81,11 +81,20 @@ pub(super) fn query_statuses(
     mut ecs: Commands,
     mut state: Local<QueryState>,
 ) {
+    // No self store: out of the world, or the frame after the login burst created us and the
+    // units around us, before `tag_self_player`'s deferred `SelfPlayer` lands. That frame still
+    // spends every change tick, so the session's memory goes (its asked keys would match the same
+    // spawns next session) and the next self frame is fresh.
     let Some(store) = self_q.iter().next() else {
+        if state.in_session {
+            *state = QueryState::default();
+        }
         return;
     };
+    // The first frame of a session asks every unit in view, as each one's create path does.
+    let fresh = !std::mem::replace(&mut state.in_session, true);
     // The descriptor walk runs only when our store changed; the epoch is a plain counter.
-    if store.is_changed() {
+    if store.is_changed() || fresh {
         state.fields = self_generation(&store.0);
     }
     // Deliberate conservative superset, authorised for Wrath: the native refresh body
@@ -103,7 +112,8 @@ pub(super) fn query_statuses(
     // Compared only between frames that both saw the field, or the template's arrival at login
     // would fire a full sweep.
     let my_faction = store.0.unit_faction_template();
-    let full = (alive && state.was_dead)
+    let full = fresh
+        || (alive && state.was_dead)
         || (my_faction.is_some() && state.my_faction.is_some() && state.my_faction != my_faction);
     state.was_dead = !alive;
     if my_faction.is_some() {
@@ -285,6 +295,8 @@ impl PvpRefresh {
 /// [`query_statuses`]'s memory across frames.
 #[derive(Default)]
 pub(super) struct QueryState {
+    /// A self store was seen since the last frame without one: the session's state is live.
+    in_session: bool,
     pvp_refresh: PvpRefresh,
     /// The last [`self_generation`], kept so the walk runs only when our store changes.
     fields: u64,
@@ -292,8 +304,8 @@ pub(super) struct QueryState {
     generation: u64,
     /// Each asked guid's [`unit_ask_key`]; pruned by object lifetime only, never by a sweep.
     asked: HashMap<u64, u64>,
-    /// Last frame's alive state and faction template, the two full-sweep edges; the first frame in
-    /// a world is never a full sweep.
+    /// Last frame's alive state and faction template, the two full-sweep edges, which the first
+    /// frame of a session never reads as edges: that frame is a full sweep of its own.
     was_dead: bool,
     my_faction: Option<u32>,
 }
@@ -302,22 +314,6 @@ pub(super) struct QueryState {
 mod tests {
     use super::*;
     use wrathplus_protocol::types::Field;
-
-    #[test]
-    fn pvp_refresh_coalesces_edges_and_retains_pending_work() {
-        use std::time::{Duration, Instant};
-        let now = Instant::now();
-        let mut state = PvpRefresh::default();
-        assert!(!state.poll(Some((false, false)), now));
-        assert!(state.poll(Some((true, false)), now));
-        assert!(!state.poll(Some((true, true)), now + Duration::from_millis(100)));
-        assert!(!state.poll(Some((false, false)), now + Duration::from_millis(200)));
-        assert!(!state.poll(Some((false, false)), now + Duration::from_millis(999)));
-        assert!(state.poll(Some((false, false)), now + Duration::from_secs(1)));
-        assert!(!state.poll(Some((false, false)), now + Duration::from_secs(2)));
-        assert!(!state.poll(None, now + Duration::from_secs(2)));
-        assert!(!state.poll(Some((true, true)), now + Duration::from_secs(2)));
-    }
 
     #[test]
     fn wrath_own_pvp_edges_refresh_unchanged_markers_with_native_taxi_gate() {
@@ -1214,3 +1210,7 @@ mod tests {
         assert_eq!(asked(&mut app), 0, "exactly once");
     }
 }
+
+#[cfg(test)]
+#[path = "query_login_tests.rs"]
+mod login_tests;
