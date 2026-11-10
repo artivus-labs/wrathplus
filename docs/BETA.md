@@ -100,7 +100,7 @@ The control port's token comes from `WOW_AGENT_TOKEN` (16+ characters) for the s
 | `WOW_PIPE_WARM=1` | optional: compile every shader pipeline at start-up, as the windowed client does. A headless client skips that pass by default and compiles each pipeline when it is first drawn, which starts faster and uses far less memory at the cost of brief pop-in |
 | `WRATHPLUS_HOME` | a folder of this agent's own for settings, cache and its Lua modules |
 | `WOW_AGENT_TOKEN` | the control port's bearer token |
-| `WOW_NAV_MMAPS` | optional: an `mmaps` folder, for `AgentMoveTo` and `AgentPath` (see [the example agent](#the-example-agent)) |
+| `WOW_NAV_MMAPS` | optional: your own `mmaps` folder. Without it the beta realm routes `AgentMoveTo` and `AgentPath` for you (see [Walking](#walking)) |
 
 | Argument | |
 |---|---|
@@ -203,7 +203,7 @@ Local HTTP on `127.0.0.1` only, bearer token on every request, open only when th
 
 | Route | |
 |---|---|
-| `GET /status` | `{state, in_world, ui_ready, time, player}` |
+| `GET /status` | `{state, in_world, ui_ready, time, player, nav}`; `nav` says where walking routes come from |
 | `POST /lua[?budget=N]` | run the body in the UI's Lua: `{ok, values, output}` or `{ok:false, error, output}` |
 | `GET /screenshot[?scale=0.5][&format=jpeg[&quality=85]]` | the next rendered frame, PNG or JPEG |
 | `GET /events?since=N[&wait_ms=M][&limit=K]` | UI events since cursor `N`, long-polling: `{events, next, missed}` |
@@ -215,6 +215,34 @@ Lua is the stock addon API plus a few agent functions (`AgentNearby`, `AgentFind
 `AgentMoveTo`, `AgentStop`, `AgentWalk`), and with the port open the movement verbs
 (`MoveForwardStart`, `TurnLeftStart`, …) work from any Lua. Built-in modules: `wp.engine`,
 `wp.values`, `wp.goals`.
+
+### Walking
+
+`AgentMoveTo(x, y[, z] | guid)` walks a route over the navigation mesh: through doors, round
+buildings, and round hostile mobs when a fair detour exists. `Move.to`, combat's chase and the
+goal runner are built on it. You need no navmesh of your own on the beta: the realm has one, and
+your client asks it for each route over the game connection it is already logged in on (the
+realm's `mod-agent-nav`; no extra port, no extra credentials).
+
+- The route takes a round trip to arrive. `AgentMoveTo` returns `{pending = true}` at once,
+  `AgentWalk().status` is `routing` until the route lands and `walking` after; a walk ends, as
+  ever, with `AGENT_WALK_DONE`. If the realm refuses or does not answer within 8 seconds, the
+  walk ends `failed` and `AgentWalk().note` says why.
+- Given as `x, y` alone, the target's floor is looked for on other levels too (a quest area in a
+  town on several levels), by the realm as by a local search.
+- `AgentPath(x, y[, z])` also returns `{pending = true}` the first time. `AGENT_PATH_READY`
+  fires when the answer is in, and the next call for the same place returns the route.
+- The realm limits each character: 5 requests a second and 240 a minute, 1500 yards a request
+  (the client walks farther goals a leg at a time), 256 corners, 64 circles to avoid. The client
+  keeps within them by itself; a refusal names the limit.
+- `GET /status` says which source is in use: `nav.source` is `realm`, `local` or `none`, and
+  `nav.detail` puts it in a sentence.
+
+If you have made `mmaps` from your own game files (the Manager's **Server** page: **Prepare server
+data**, then **Make navigation meshes**; it needs Docker and takes hours), point `WOW_NAV_MMAPS`
+at the folder and the client uses them instead: no round trip, and no load on the realm. On a
+realm without `mod-agent-nav` that is the only way to walk routes, and without it `AgentMoveTo`
+fails with "no navmesh", naming both.
 
 ### The MCP server
 
@@ -255,11 +283,7 @@ nothing of ours is required.
   or your own Anthropic API key as `WRATHPLUS_ANTHROPIC_API_KEY`.
 - **Jev, the fast tier (optional):** your own `TYPESAFE_API_KEY`. Without it the agent runs on the
   planner, the built-in Lua and the goal runner; its README says exactly what is missing.
-- **A navmesh, for walking:** `WOW_NAV_MMAPS` set for the *client* (the start script passes your
-  environment through), pointing at an `mmaps` folder made from your own game files with the
-  Manager (**Server** page: **Prepare server data**, then **Make navigation meshes**; that needs
-  Docker and takes hours). Without it `AgentMoveTo` fails with "no navmesh", and the goal runner
-  cannot travel.
+- **Nothing for walking:** the beta realm routes walks for you (see [Walking](#walking)).
 
 Against the client started above:
 

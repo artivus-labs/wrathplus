@@ -114,7 +114,8 @@ local function tick(now)
     return
   end
   local walk = AgentWalk()
-  local zones = circles(now, walk.status == "walking" and walk.goal or nil)
+  local bound = walk.status == "walking" or walk.status == "routing"
+  local zones = circles(now, bound and walk.goal or nil)
   M.zones = zones
   AgentAvoid(zones)
   if decided or not (Agent and Agent.decide) then return end

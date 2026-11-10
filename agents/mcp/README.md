@@ -9,7 +9,7 @@ tool is one HTTP call to the port.
 | `lua(code, budget?)` | `POST /lua[?budget=N]` | `{ok, values, output}` or `{ok:false, error, output}` (a tool error) |
 | `screenshot(scale?)` | `GET /screenshot?scale=S` | PNG image content, scale 0.5 by default |
 | `events(since?, wait_ms?, limit?)` | `GET /events` | `{events, next, missed}`; pass `next` as the next `since` |
-| `status()` | `GET /status` | `{state, in_world, ui_ready, time, player}` |
+| `status()` | `GET /status` | `{state, in_world, ui_ready, time, player, nav}` (`nav`: where walking routes come from) |
 | `modules(name?)` | `GET /files[/<name>]` | the saved module list, or one module's source |
 | `save_module(name, source)` | `PUT /files/<name>` | `{saved, bytes}`; `require(name)` or `AgentReload(name)` in Lua loads it |
 

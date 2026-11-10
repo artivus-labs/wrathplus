@@ -68,6 +68,12 @@ pub(crate) const STANDARD: &[Standard] = &[
         origin: Origin::Bundled("packaging/server/modules/mod-party-quest-share"),
         about: "Share a quest and every bot in your party that can take it accepts, whoever leads the party. Without it only bots you added yourself do. Needs Playerbots.",
     },
+    Standard {
+        name: "mod-agent-nav",
+        title: "Agent navigation",
+        origin: Origin::Bundled("packaging/server/modules/mod-agent-nav"),
+        about: "Answers agent clients' route requests from the realm's navigation meshes, so agents on other machines can walk routes without making meshes of their own. Needs Make navigation meshes; agents the Manager starts here read the meshes directly.",
+    },
 ];
 
 pub(crate) fn is_standard(name: &str) -> bool {

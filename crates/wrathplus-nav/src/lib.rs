@@ -6,6 +6,11 @@
 //! 56-byte `MmapTileHeader` (magic `0x4d4d4150`, mmap version 20) followed by a Detour tile.
 //! `gx`/`gy` are the server's grid indices, `floor(32 - coord / 533.3333)` of WoW x and y. Detour
 //! works in Recast order `{y, z, x}` of WoW coordinates; this crate takes and returns WoW `[x, y, z]`.
+//!
+//! [`remote`] is the other way to a route: asked of the realm (`mod-agent-nav`), for a client with
+//! no mmaps of its own.
+
+pub mod remote;
 
 use std::collections::HashSet;
 use std::ffi::c_int;

@@ -118,10 +118,17 @@ the same headless client in about 2 GiB and 0.6 of a core.
 
 ## Walking routes (`AgentMoveTo`)
 
-`AgentMoveTo` and `AgentPath` need the realm's navigation mesh: start the client with
-`WOW_NAV_MMAPS=/path/to/mmaps`. Without it they return
-`no navmesh: start the client with WOW_NAV_MMAPS=<server data>/mmaps`; the stock movement
-functions (`MoveForwardStart`...) and `AgentInteract`'s straight-line walk still work.
+`AgentMoveTo` and `AgentPath` walk routes over the realm's navigation mesh. A headless client
+needs no mesh of its own on a realm that runs `mod-agent-nav`, as the open beta does: it asks the
+realm for each route over the game connection it is logged in on (see
+[Walking](BETA.md#walking)). The walk is `routing` for the round trip, then `walking`; `GET /status`
+says which source is in use (`nav.source`: `realm`, `local` or `none`).
+
+On a realm without the module the client needs a local mesh: start it with
+`WOW_NAV_MMAPS=/path/to/mmaps`. With neither, they fail with `no navmesh`, naming both ways to
+get one; the stock movement functions (`MoveForwardStart`...) and `AgentInteract`'s straight-line
+walk still work. A local mesh, when set, is always preferred: no round trip and no load on the
+realm.
 
 The mesh is built from your own game data and is not distributed. The Manager builds it with the
 local server's tools (`wrathplus-manager --make-navmesh`, see

@@ -1,27 +1,43 @@
-//! Routes and walking for agents (#68): paths over the realm's mmaps navmesh (`wrathplus-nav`,
-//! the server's own Detour), walked through the client's click-to-move one corner at a time, so
-//! the character moves as a player clicking along the way would.
+//! Routes and walking for agents (#68): paths over the realm's mmaps navmesh, walked through the
+//! client's click-to-move one corner at a time, so the character moves as a player clicking along
+//! the way would.
 //!
-//! The mmaps folder comes from `WOW_NAV_MMAPS` (the launcher passes `<server data>/mmaps`).
+//! The navmesh is local when the client has one: the mmaps folder in `WOW_NAV_MMAPS` (the launcher
+//! passes `<server data>/mmaps`), searched by `wrathplus-nav` with the server's own Detour.
+//! Without one, or for a map it lacks, the realm is asked (`realm`: `mod-agent-nav` answers route
+//! requests over the game connection, probed on entering the world); the same search runs there.
+//! A realm route takes a round trip, so the walk is `routing` until it arrives. `/status` says
+//! which source is in use.
 //!
-//! Lua: `AgentPath(x, y[, z] | guid)` → `{complete, length, points = {{x, y, z}, ...}}` (without
-//! `z` the floor is looked for: the player's height first, then others, see `heights`);
-//! `AgentMoveTo(x, y, z | guid)` starts walking; `AgentInteract(guid)` from farther than a few
+//! Lua (`api`): `AgentPath(x, y[, z] | guid)` → `{complete, length, points = {{x, y, z}, ...}}`
+//! (without `z` the floor is looked for: the player's height first, then others, see `heights`;
+//! a realm asked for the route runs the same search); `AgentMoveTo(x, y[, z] | guid)` starts
+//! walking; `AgentInteract(guid)` from farther than a few
 //! yards walks the route, then interacts; `AgentStop()`; `AgentWalk()` → `{status,
 //! remaining, goal, note, route, interact}` (`route`: the corners still ahead; `interact`: the
-//! guid the walk ends talking to) with status `idle`, `walking`, `arrived`, `stopped`, `failed` (refused)
-//! or `stuck` (a corner not reached). Each end but `stopped` is put on the event stream as
-//! `AGENT_WALK_DONE` with the status. `AgentAvoid({{x, y, radius}, ...})` gives circles every later
-//! route goes round when a fair detour exists (an agent's hostile mobs); `AgentAvoid({})` clears.
+//! guid the walk ends talking to) with status `idle`, `routing` (the realm's route is on its way),
+//! `walking`, `arrived`, `stopped`, `failed` (refused, or no route) or `stuck` (a corner not
+//! reached). Each end but `stopped` is put on the event stream as `AGENT_WALK_DONE` with the
+//! status. `AgentAvoid({{x, y, radius}, ...})` gives circles every later route goes round when a
+//! fair detour exists (an agent's hostile mobs); `AgentAvoid({})` clears.
 //!
 //! A corner click-to-move falls short of is tried again after a push (forward held with a jump),
 //! then the walk is routed round the spot, twice at most, before it ends as `stuck` (`walker`).
 
+mod api;
+mod realm;
+mod walker;
+
+pub(crate) use api::{exchange, install};
+pub(crate) use walker::walk;
+use walker::{PUSH_END, SETTLE};
+
 use crate::world;
 use bevy::prelude::*;
-use mlua::{Lua, MultiValue, Table, Value};
+use realm::{Ask, Outcome, Purpose, Remote, Source};
 use std::collections::VecDeque;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use wrathplus_nav::{NavMesh, Route};
 
@@ -43,67 +59,111 @@ pub(crate) struct Walk {
     /// player stood.
     map: u32,
     replans: u8,
+    /// Which walk this is: a realm route asked for an earlier one is dropped when it arrives.
+    ticket: u32,
+    /// The route under way is a leg toward a goal past the realm's distance limit, begun here.
+    leg: bool,
+    leg_from: Option<[f32; 3]>,
+    /// The route awaited replaces one the walk was already on (a stuck corner, the next leg).
+    rerouting: bool,
+    /// The goal's height is the player's, a guess: the route search may look on other levels.
+    any_height: bool,
     /// Where this walk bumped into something the navmesh does not know (`[x, y, radius]`): each
     /// fresh route goes round them, with `AgentAvoid`'s circles.
     bumps: Vec<[f32; 3]>,
     /// Frames a new walk's first step may still be refused before the walk fails ([`walker::SETTLE`]).
     settle: u8,
-    /// When the push before a second try ends ([`walker::PUSH`]); forward is held until then.
-    pushing: Option<std::time::Instant>,
+    /// When the push before a second try ends ([`walker::PUSH`]), on [`Handles::now`]'s clock;
+    /// forward is held until then.
+    pushing: Option<f64>,
+}
+
+/// `AgentPath`'s last answer from the realm, kept for the call that reads it.
+struct PathAnswer {
+    from: [f32; 3],
+    to: [f32; 3],
+    at: f64,
+    result: Result<Route, String>,
 }
 
 pub(crate) struct Mesh {
     dir: Option<PathBuf>,
     mesh: Option<NavMesh>,
+    /// The map the local folder was last found not to cover, and why.
+    missing: Option<(u32, String)>,
     /// `AgentAvoid`'s circles, WoW `[x, y, radius]`, applied to each route.
     avoid: Vec<[f32; 3]>,
+    remote: Remote,
+    path: Option<PathAnswer>,
 }
 
+/// Everything the Lua functions, the walker and the realm pump share.
 #[derive(Clone)]
 pub(crate) struct Handles {
     walk: Arc<Mutex<Walk>>,
     mesh: Arc<Mutex<Mesh>>,
-}
-
-#[derive(Resource)]
-pub(crate) struct NavLink {
-    walk: Arc<Mutex<Walk>>,
+    tickets: Arc<AtomicU32>,
+    /// Milliseconds added to the clock: tests move time on with it.
+    ahead: Arc<AtomicU32>,
     /// Where a walk's end is announced (`AGENT_WALK_DONE`), to wake the tiers above.
     events: Arc<crate::events::EventLog>,
     started: std::time::Instant,
     /// The world's orders, for the interaction a walk ends in.
     orders: crossbeam_channel::Sender<world::Order>,
-    /// The navmesh, to route a stuck walk again from where the player stands.
-    mesh: Arc<Mutex<Mesh>>,
 }
+
+#[derive(Resource)]
+pub(crate) struct NavLink(Handles);
 
 pub(crate) fn link(
     events: Arc<crate::events::EventLog>,
     started: std::time::Instant,
     orders: crossbeam_channel::Sender<world::Order>,
 ) -> (Handles, NavLink) {
-    let walk = Arc::new(Mutex::new(Walk {
-        status: "idle",
-        ..Default::default()
-    }));
-    let mesh = Arc::new(Mutex::new(Mesh {
-        dir: std::env::var_os("WOW_NAV_MMAPS").map(PathBuf::from),
-        mesh: None,
-        avoid: Vec::new(),
-    }));
-    (
-        Handles {
-            walk: walk.clone(),
-            mesh: mesh.clone(),
-        },
-        NavLink {
-            walk,
-            events,
-            started,
-            orders,
-            mesh,
-        },
-    )
+    let handles = Handles {
+        walk: Arc::new(Mutex::new(Walk {
+            status: "idle",
+            ..Default::default()
+        })),
+        mesh: Arc::new(Mutex::new(Mesh {
+            dir: std::env::var_os("WOW_NAV_MMAPS").map(PathBuf::from),
+            mesh: None,
+            missing: None,
+            avoid: Vec::new(),
+            remote: Remote::new(),
+            path: None,
+        })),
+        tickets: Arc::new(AtomicU32::new(0)),
+        ahead: Arc::new(AtomicU32::new(0)),
+        events,
+        started,
+        orders,
+    };
+    (handles.clone(), NavLink(handles))
+}
+
+impl Handles {
+    fn now(&self) -> f64 {
+        self.started.elapsed().as_secs_f64()
+            + f64::from(self.ahead.load(Ordering::Relaxed)) / 1000.0
+    }
+
+    fn ticket(&self) -> u32 {
+        self.tickets.fetch_add(1, Ordering::Relaxed) + 1
+    }
+
+    /// Put a walk's end on the event stream.
+    fn announce(&self, event: &str, args: serde_json::Value) {
+        self.events.push([serde_json::json!({
+            "time": self.now(),
+            "event": event,
+            "args": args,
+        })]);
+    }
+
+    fn walk_done(&self, status: &str) {
+        self.announce("AGENT_WALK_DONE", serde_json::json!([status]));
+    }
 }
 
 /// World coordinates to Bevy (x right, y up, z back), as `wrathplus_assets::coords::wow_to_bevy`.
@@ -115,25 +175,40 @@ fn to_wow(b: Vec3) -> [f32; 3] {
     [-b.z, -b.x, b.y]
 }
 
-/// The route to `to`. With `any_height` its height is a guess (the player's own): when no complete
-/// route ends there, other heights are tried, and the first that gives one is taken.
-fn route_to(
-    handles: &Handles,
-    me: world::Me,
-    to: [f32; 3],
-    any_height: bool,
-) -> Result<Route, String> {
-    if let Ok(mut walk) = handles.walk.lock() {
-        walk.map = me.map;
+fn level(a: [f32; 3], b: [f32; 3]) -> f32 {
+    (a[0] - b[0]).hypot(a[1] - b[1])
+}
+
+/// A route now (local mmaps), or asked of the realm: its [`Outcome`] comes through [`pump`].
+#[derive(Debug)]
+pub(crate) enum Plan {
+    Ready(Route),
+    Asked,
+}
+
+/// How long `AgentPath` may read the realm's answer to its last question, and how far (yards) the
+/// player may have moved meanwhile.
+const PATH_FRESH: f64 = 30.0;
+const PATH_NEAR: f32 = 5.0;
+
+impl Mesh {
+    /// Open the local navmesh for `map`; `Err` says why there is none (`None`: no folder set).
+    fn local(&mut self, map: u32) -> Result<&mut NavMesh, Option<String>> {
+        if let Some((_, why)) = self.missing.as_ref().filter(|(m, _)| *m == map) {
+            return Err(Some(why.clone()));
+        }
+        if self.mesh.as_ref().is_none_or(|m| m.map() != map) {
+            let dir = self.dir.clone().ok_or(None)?;
+            match NavMesh::open(&dir, map) {
+                Ok(mesh) => self.mesh = Some(mesh),
+                Err(why) => {
+                    self.missing = Some((map, why.clone()));
+                    return Err(Some(why));
+                }
+            }
+        }
+        Ok(self.mesh.as_mut().expect("opened above"))
     }
-    let route = route_in(&handles.mesh, me, to, &[]);
-    if !any_height || route.as_ref().is_ok_and(|r| r.complete) {
-        return route;
-    }
-    heights(to[2])
-        .filter_map(|z| route_in(&handles.mesh, me, [to[0], to[1], z], &[]).ok())
-        .find(|r| r.complete)
-        .map_or(route, Ok)
 }
 
 /// How far apart, and how many each way, the heights tried for a target given without one.
@@ -144,7 +219,8 @@ const HEIGHT_TRIES: u8 = 10;
 /// first, up then down. A quest's map area, a zone's centre and a remembered spot are flat
 /// points, and in a town on several levels the floor under one is rarely at the height the walk
 /// starts from: from Goldshire (z 58) the Dwarven District's smithy floor (z 95) is not what the
-/// search box finds first, and the route ends 148 yards short on another level.
+/// search box finds first, and the route ends 148 yards short on another level. `mod-agent-nav`
+/// tries the same heights (`AgentNavRoute.h`, `Heights`) for a request marked `h`.
 pub(crate) fn heights(z: f32) -> impl Iterator<Item = f32> {
     (1..=HEIGHT_TRIES).flat_map(move |i| {
         let d = HEIGHT_STEP * f32::from(i);
@@ -152,112 +228,96 @@ pub(crate) fn heights(z: f32) -> impl Iterator<Item = f32> {
     })
 }
 
-/// A route over the map's navmesh, round `AgentAvoid`'s circles and `bumps` (a walk's own).
+/// A route over the map's navmesh, round `AgentAvoid`'s circles and `bumps` (a walk's own): at
+/// once from local mmaps, or asked of the realm for `purpose`. With `any_height` the target's
+/// height is a guess (the player's own): when no complete route ends there, other heights are
+/// tried ([`heights`]), and the first that gives one is taken; the realm does the same.
 fn route_in(
     mesh: &Mutex<Mesh>,
     me: world::Me,
     to: [f32; 3],
     bumps: &[[f32; 3]],
-) -> Result<Route, String> {
+    any_height: bool,
+    purpose: Purpose,
+    now: f64,
+) -> Result<Plan, String> {
     let mut mesh = mesh
         .lock()
         .map_err(|_| "navmesh lock poisoned".to_string())?;
-    if mesh.mesh.as_ref().is_none_or(|m| m.map() != me.map) {
-        let dir = mesh
-            .dir
-            .clone()
-            .ok_or("no navmesh: start the client with WOW_NAV_MMAPS=<server data>/mmaps")?;
-        mesh.mesh = Some(NavMesh::open(&dir, me.map)?);
-    }
     let avoid: Vec<[f32; 3]> = mesh.avoid.iter().chain(bumps).copied().collect();
-    let nav = mesh.mesh.as_mut().expect("opened above");
-    nav.set_avoid(&avoid);
-    nav.route(me.pos, to)
-}
-
-/// The target point from Lua arguments: `x, y[, z]` (no height: the player's, and the route search
-/// finds the ground: see `height_given`) or a `"0x…"` guid from `AgentNearby`.
-fn target(args: &MultiValue, snapshot: &world::Snapshot) -> Result<[f32; 3], String> {
-    let num = |i: usize| match args.get(i) {
-        Some(Value::Number(n)) => Some(*n as f32),
-        Some(Value::Integer(n)) => Some(*n as f32),
-        _ => None,
+    let why = match mesh.local(me.map) {
+        Ok(nav) => {
+            nav.set_avoid(&avoid);
+            let route = nav.route(me.pos, to);
+            if !any_height || route.as_ref().is_ok_and(|r| r.complete) {
+                return route.map(Plan::Ready);
+            }
+            return heights(to[2])
+                .filter_map(|z| nav.route(me.pos, [to[0], to[1], z]).ok())
+                .find(|r| r.complete)
+                .map_or(route, Ok)
+                .map(Plan::Ready);
+        }
+        Err(why) => why,
     };
-    if let (Some(x), Some(y)) = (num(0), num(1)) {
-        let z = num(2).or(snapshot.me.map(|m| m.pos[2])).unwrap_or(0.0);
-        return Ok([x, y, z]);
+    if realm::choose(false, &mesh.remote.realm) != Source::Realm {
+        return Err(mesh.remote.no_navmesh(why.as_deref()));
     }
-    let Some(Value::String(text)) = args.front() else {
-        return Err("expected x, y[, z] or a guid".into());
-    };
-    let text = text.to_string_lossy();
-    let guid = world::parse_guid(&text).ok_or_else(|| format!("not a guid: {text}"))?;
-    snapshot
-        .objects
-        .iter()
-        .find(|o| o.guid == guid)
-        .map(|o| o.pos)
-        .ok_or_else(|| format!("{text} is not near (not in AgentNearby)"))
-}
-
-/// Whether the target's height is known: a guid's is, and so is `x, y, z`; `x, y` alone borrows
-/// the player's, and the route search may look on other levels (`heights`).
-fn height_given(args: &MultiValue) -> bool {
-    !matches!(
-        (args.front(), args.get(2)),
-        (
-            Some(Value::Number(_) | Value::Integer(_)),
-            None | Some(Value::Nil)
-        )
-    )
-}
-
-fn route_table(lua: &Lua, route: &Route) -> mlua::Result<Table> {
-    let t = lua.create_table()?;
-    let points = lua.create_table()?;
-    let mut length = 0.0f32;
-    for (i, p) in route.points.iter().enumerate() {
-        points.push(vec![p[0], p[1], p[2]])?;
-        if i > 0 {
-            let q = route.points[i - 1];
-            length +=
-                ((p[0] - q[0]).powi(2) + (p[1] - q[1]).powi(2) + (p[2] - q[2]).powi(2)).sqrt();
+    // `AgentPath` asked before: the answer, while it is fresh and we have not moved on.
+    if purpose == Purpose::Path {
+        let fits = |p: &PathAnswer| {
+            now - p.at < PATH_FRESH && level(p.to, to) < 1.0 && level(p.from, me.pos) < PATH_NEAR
+        };
+        if let Some(answer) = mesh.path.take_if(|p| fits(p)) {
+            return answer.result.map(Plan::Ready);
         }
     }
-    t.set("points", points)?;
-    t.set("complete", route.complete)?;
-    t.set("length", (length * 10.0).round() / 10.0)?;
-    Ok(t)
+    let from = me.pos;
+    mesh.remote.ask(
+        Ask {
+            purpose,
+            from,
+            to,
+            avoid,
+            any_height,
+        },
+        now,
+    );
+    Ok(Plan::Asked)
 }
 
-/// Within this many yards `AgentInteract` uses the stock right-click approach, a straight line;
-/// farther, it walks the navmesh route first (a straight line stalls on walls and counters).
-const INTERACT_DIRECT: f32 = 3.0;
+/// The route to `to` for a new walk or `AgentPath`; `any_height` as [`route_in`]'s.
+fn route_to(
+    nav: &Handles,
+    me: world::Me,
+    to: [f32; 3],
+    any_height: bool,
+    purpose: Purpose,
+) -> Result<Plan, String> {
+    if let (Purpose::Walk { .. }, Ok(mut walk)) = (purpose, nav.walk.lock()) {
+        walk.map = me.map;
+    }
+    route_in(&nav.mesh, me, to, &[], any_height, purpose, nav.now())
+}
 
-/// Start walking a route, and interact with `then_interact` on arrival.
-fn start(lua: &Lua, nav: &Handles, route: &Route, then_interact: Option<u64>) {
-    // Click-to-move carries the walk; an agent client has its own settings.
-    if let Ok(set) = lua.globals().get::<mlua::Function>("SetCVar") {
-        let _ = set.call::<()>(("autoInteract", "1"));
-    }
-    let Ok(mut walk) = nav.walk.lock() else {
-        return;
-    };
-    // A new walk ends the push of the one before it.
-    if walk.pushing.take().is_some() {
-        let _ = lua.load(PUSH_END).exec();
-    }
-    // The first corner is where we stand.
-    walk.queue = route.points.iter().skip(1).copied().collect();
-    walk.goal = route.points.last().copied();
-    walk.status = "walking";
-    walk.note = if !route.complete {
+fn note_for(route: &Route, leg: bool) -> Option<String> {
+    if leg {
+        Some("a long way: the realm routes it a leg at a time".to_string())
+    } else if !route.complete {
         Some("partial route: walking as far as the navmesh reaches".to_string())
     } else if route.steep {
         Some("the only route crosses steep ground, which may not be climbable".to_string())
     } else {
         None
-    };
+    }
+}
+
+/// A new walk: what the one before it left behind is cleared, its push included (`lua` lets
+/// forward go).
+fn renew(lua: &mlua::Lua, walk: &mut Walk, then_interact: Option<u64>, ticket: u32) {
+    if walk.pushing.take().is_some() {
+        let _ = lua.load(PUSH_END).exec();
+    }
     walk.stop = false;
     walk.corner = None;
     walk.retried = false;
@@ -265,138 +325,175 @@ fn start(lua: &Lua, nav: &Handles, route: &Route, then_interact: Option<u64>) {
     walk.bumps.clear();
     walk.settle = SETTLE;
     walk.then_interact = then_interact;
+    walk.ticket = ticket;
+    (walk.leg, walk.leg_from, walk.rerouting) = (false, None, false);
 }
 
-pub(crate) fn install(lua: &Lua, nav: &Handles, world: &world::Handles) -> mlua::Result<()> {
-    let g = lua.globals();
-    let plan = |args: MultiValue, nav: &Handles, world: &world::Handles| -> Result<Route, String> {
-        let snapshot = world
-            .snapshot
-            .lock()
-            .map_err(|_| "snapshot lock".to_string())?;
-        let me = snapshot.me.ok_or("not in the world yet")?;
-        let to = target(&args, &snapshot)?;
-        drop(snapshot);
-        route_to(nav, me, to, !height_given(&args))
+/// Start walking a route, and interact with `then_interact` on arrival.
+fn start(lua: &mlua::Lua, nav: &Handles, route: &Route, then_interact: Option<u64>, ticket: u32) {
+    let Ok(mut walk) = nav.walk.lock() else {
+        return;
     };
-    let (n, w) = (nav.clone(), world.clone());
-    g.set(
-        "AgentPath",
-        lua.create_function(move |lua, args: MultiValue| match plan(args, &n, &w) {
-            Ok(route) => Ok((Some(route_table(lua, &route)?), None)),
-            Err(e) => Ok((None, Some(e))),
-        })?,
-    )?;
-    let (n, w) = (nav.clone(), world.clone());
-    g.set(
-        "AgentMoveTo",
-        lua.create_function(move |lua, args: MultiValue| {
-            let route = match plan(args, &n, &w) {
-                Ok(route) => route,
-                Err(e) => {
-                    // Announced like any walk's end, so whoever waits on it is woken.
-                    if let Ok(mut walk) = n.walk.lock() {
-                        walk.queue.clear();
-                        walk.corner = None;
-                        walk.then_interact = None;
-                        walk.status = "failed";
-                        walk.note = Some(e.clone());
-                        walk.failed = true;
-                    }
-                    return Ok((None, Some(e)));
-                }
-            };
-            start(lua, &n, &route, None);
-            let summary = route_table(lua, &route)?;
-            Ok((Some(summary), None))
-        })?,
-    )?;
-    // `AgentInteract` (from `world`) walks the navmesh route first unless the object is close.
-    let direct: mlua::Function = g.get("AgentInteract")?;
-    let (n, w) = (nav.clone(), world.clone());
-    g.set(
-        "AgentInteract",
-        lua.create_function(move |lua, guid: String| {
-            let far = world::parse_guid(&guid).filter(|g| {
-                w.snapshot.lock().ok().is_some_and(|s| {
-                    s.objects
-                        .iter()
-                        .any(|o| o.guid == *g && o.distance > INTERACT_DIRECT)
-                })
-            });
-            if let Some(object) = far {
-                let args = MultiValue::from_iter([Value::String(lua.create_string(&guid)?)]);
-                // No navmesh, or no route: fall back to the straight approach.
-                if let Ok(route) = plan(args, &n, &w) {
-                    start(lua, &n, &route, Some(object));
-                    return Ok(true);
-                }
-            }
-            direct.call::<bool>(guid)
-        })?,
-    )?;
-    let n = nav.clone();
-    g.set(
-        "AgentAvoid",
-        lua.create_function(move |_, zones: Option<Vec<Table>>| {
-            let zones: Vec<[f32; 3]> = zones
-                .unwrap_or_default()
-                .iter()
-                .filter_map(|z| {
-                    let get = |i: i64, k: &str| -> Option<f32> {
-                        z.get::<Option<f32>>(k)
-                            .ok()
-                            .flatten()
-                            .or_else(|| z.get(i).ok())
-                    };
-                    Some([get(1, "x")?, get(2, "y")?, get(3, "r")?])
-                })
-                .collect();
-            let count = zones.len();
-            if let Ok(mut mesh) = n.mesh.lock() {
-                mesh.avoid = zones;
-            }
-            Ok(count)
-        })?,
-    )?;
-    let n = nav.clone();
-    g.set(
-        "AgentStop",
-        lua.create_function(move |_, ()| {
-            if let Ok(mut walk) = n.walk.lock() {
-                walk.stop = true;
-            }
-            Ok(())
-        })?,
-    )?;
-    let n = nav.clone();
-    g.set(
-        "AgentWalk",
-        lua.create_function(move |lua, ()| {
-            let t = lua.create_table()?;
-            if let Ok(walk) = n.walk.lock() {
-                t.set("status", walk.status)?;
-                t.set("remaining", walk.queue.len())?;
-                t.set("goal", walk.goal.map(|g| vec![g[0], g[1], g[2]]))?;
-                t.set("note", walk.note.clone())?;
-                let ahead = walk.corner.iter().chain(walk.queue.iter());
-                t.set(
-                    "route",
-                    ahead.map(|p| vec![p[0], p[1], p[2]]).collect::<Vec<_>>(),
-                )?;
-                t.set("interact", walk.then_interact.map(world::guid_text))?;
-            }
-            Ok(t)
-        })?,
-    )?;
-    Ok(())
+    renew(lua, &mut walk, then_interact, ticket);
+    // The first corner is where we stand.
+    walk.queue = route.points.iter().skip(1).copied().collect();
+    walk.goal = route.points.last().copied();
+    walk.any_height = false;
+    walk.status = "walking";
+    walk.note = note_for(route, false);
 }
 
-#[path = "nav_walk.rs"]
-mod walker;
-pub(crate) use walker::walk;
-use walker::{PUSH_END, SETTLE};
+/// The realm has been asked for the walk's route: `routing` until [`pump`] brings it.
+fn begin_routing(
+    lua: &mlua::Lua,
+    nav: &Handles,
+    goal: [f32; 3],
+    any_height: bool,
+    then_interact: Option<u64>,
+    ticket: u32,
+) {
+    let Ok(mut walk) = nav.walk.lock() else {
+        return;
+    };
+    renew(lua, &mut walk, then_interact, ticket);
+    walk.queue.clear();
+    walk.goal = Some(goal);
+    walk.any_height = any_height;
+    walk.status = "routing";
+    walk.note = None;
+}
+
+/// Whether the realm is already being asked for this very walk (callers ask again every tick a
+/// walk is not `walking`).
+fn routing_to(nav: &Handles, goal: [f32; 3], then_interact: Option<u64>) -> bool {
+    nav.walk.lock().is_ok_and(|w| {
+        w.status == "routing"
+            && !w.stop
+            && w.then_interact == then_interact
+            && w.goal.is_some_and(|g| level(g, goal) < 1.0)
+    })
+}
+
+/// Put the realm's answer where it was wanted: the waiting walk, or `AgentPath`'s next call.
+fn apply(nav: &Handles, outcome: Outcome) {
+    let (ask, result, leg) = match outcome {
+        Outcome::Route { ask, route, leg } => (ask, Ok(route), leg),
+        Outcome::Failed { ask, note } => (ask, Err(note), false),
+    };
+    let Purpose::Walk { ticket } = ask.purpose else {
+        let said = match &result {
+            Ok(route) => serde_json::json!([true, route.complete]),
+            Err(note) => serde_json::json!([false, note]),
+        };
+        if let Ok(mut mesh) = nav.mesh.lock() {
+            mesh.path = Some(PathAnswer {
+                from: ask.from,
+                to: ask.to,
+                at: nav.now(),
+                result,
+            });
+        }
+        return nav.announce("AGENT_PATH_READY", said);
+    };
+    let Ok(mut walk) = nav.walk.lock() else {
+        return;
+    };
+    if walk.status != "routing" || walk.ticket != ticket {
+        return;
+    }
+    match result {
+        Ok(route) => {
+            walk.queue = route.points.iter().skip(1).copied().collect();
+            walk.status = "walking";
+            walk.note = note_for(&route, leg);
+            if !leg {
+                // The realm found the floor: the goal's height is known from here on.
+                walk.goal = route.points.last().copied();
+                walk.any_height = false;
+            }
+            if !std::mem::take(&mut walk.rerouting) {
+                walk.replans = 0;
+            }
+            walk.leg = leg;
+        }
+        Err(note) => {
+            // An interaction falls back to the straight approach, as without a navmesh.
+            let interact = walk.then_interact.take();
+            walker::end(&mut walk, "failed", note);
+            match interact {
+                Some(guid) => {
+                    walk.status = "idle";
+                    let _ = nav.orders.send(world::Order::Interact(guid));
+                }
+                None => nav.walk_done("failed"),
+            }
+        }
+    }
+}
+
+/// The realm's lines among this frame's events (`CHAT_MSG_ADDON` with our prefix), taken out of
+/// the stream: the message and who sent it.
+pub(crate) fn take_lines(
+    events: &mut Vec<(String, Vec<wrathplus_ui::script::ScriptValue>)>,
+) -> Vec<(String, String)> {
+    use wrathplus_ui::script::ScriptValue::Str;
+    let mut lines = Vec::new();
+    events.retain(|(event, args)| match (event.as_str(), args.as_slice()) {
+        ("CHAT_MSG_ADDON", [Str(prefix), Str(message), _, Str(sender), ..])
+            if prefix == wrathplus_nav::remote::PREFIX =>
+        {
+            lines.push((message.clone(), sender.clone()));
+            false
+        }
+        _ => true,
+    });
+    lines
+}
+
+/// Once a frame: follow the client into the world (the probe), hand the realm's lines to the
+/// route source, apply what came of them, and say what waits to be sent. `me` is the player's
+/// name once known: lines are ours only when we whispered them, and nothing is sent before.
+pub(crate) fn pump(nav: &Handles, lines: Vec<(String, String)>, me: Option<&str>) -> Vec<String> {
+    let now = nav.now();
+    let Ok(mut mesh) = nav.mesh.lock() else {
+        return Vec::new();
+    };
+    let remote = &mut mesh.remote;
+    let mut outcomes = remote.world(me.is_some(), now);
+    for (line, sender) in lines {
+        if me.is_some_and(|me| me.eq_ignore_ascii_case(&sender)) {
+            outcomes.extend(remote.receive(&line, now));
+        }
+    }
+    outcomes.extend(remote.tick(now));
+    let outbox = std::mem::take(&mut remote.outbox);
+    drop(mesh);
+    for outcome in outcomes {
+        apply(nav, outcome);
+    }
+    outbox
+}
+
+/// Which navmesh routes come from, for `/status`.
+pub(crate) fn status(nav: &Handles) -> serde_json::Value {
+    let Ok(mesh) = nav.mesh.lock() else {
+        return serde_json::Value::Null;
+    };
+    let local = mesh.dir.as_ref().filter(|dir| dir.is_dir());
+    let (source, detail) = match (realm::choose(local.is_some(), &mesh.remote.realm), local) {
+        (Source::Local, Some(dir)) => (
+            "local",
+            format!("routes come from local mmaps ({})", dir.display()),
+        ),
+        (Source::Realm, _) => ("realm", mesh.remote.describe()),
+        _ => ("none", mesh.remote.describe()),
+    };
+    serde_json::json!({"source": source, "detail": detail})
+}
 
 #[cfg(test)]
 #[path = "nav_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "nav_walk_tests.rs"]
+mod walk_tests;

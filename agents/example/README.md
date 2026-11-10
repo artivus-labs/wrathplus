@@ -23,9 +23,11 @@ on), and party-request triage (requests go to the planner). The planner is told 
 (`NO_FAST_TIER` in `src/prompt.ts`). Expect more planner turns, so more Claude usage, than with
 Jev.
 
-Walking (`AgentMoveTo`, and the goal runner's travel) needs the realm's navmesh: `WOW_NAV_MMAPS`
+Walking (`AgentMoveTo`, and the goal runner's travel) needs a navmesh. With `WOW_NAV_MMAPS`
 pointing at an `mmaps` folder made from your own game files (Manager, **Server** page: **Prepare
-server data**, then **Make navigation meshes**; or `wrathplus-manager --make-navmesh`).
+server data**, then **Make navigation meshes**; or `wrathplus-manager --make-navmesh`) the client
+routes locally. Without one it asks the realm, when the realm runs `mod-agent-nav` (the open beta
+does); `status` says which is in use.
 
 On the public beta realm, see [Play on the WrathPlus open beta](../../docs/BETA.md#the-example-agent).
 
@@ -143,7 +145,7 @@ bun run agent dashboard             # http://127.0.0.1:17900: every running agen
 | `TYPESAFE_API_KEY` | none | optional: your own key turns on the fast tier (Jev) |
 | `WRATHPLUS_ANTHROPIC_API_KEY` | none | optional: bill your own API key instead of your Claude Code login |
 | `WRATHPLUS_CLIENT` | the Manager's build | the client binary |
-| `WOW_NAV_MMAPS` | the managed server's `mmaps` | the navmesh for `AgentMoveTo` |
+| `WOW_NAV_MMAPS` | the managed server's `mmaps` | a local navmesh for `AgentMoveTo`; without one the realm is asked |
 | `WRATHPLUS_AGENT_MODEL` | `claude-haiku-5-5` | when `--model` is not given |
 | `WRATHPLUS_AGENT_CHECKIN_SECONDS` | `0` (off) | idle check-in |
 | `WRATHPLUS_AGENT_SAY` | on | `0`: small talk gets emotes only, no line from Claude Haiku |

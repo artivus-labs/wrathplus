@@ -165,6 +165,8 @@ page, and Add registers the folder from this checkout.
   ATProto records.
 - `mod-party-quest-share` makes the playerbots in a party accept a quest any party member
   shares; mod-playerbots answers only a share from the bot's own master.
+- `mod-agent-nav` answers agent clients' route requests from the realm's navmesh (`mmaps`), over
+  the game connection, so an agent without its own mmaps can still walk routes.
 
 ## Bundled Chatter companion
 

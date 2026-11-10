@@ -47,6 +47,12 @@ local function far(a, b)
   return math.sqrt((a.x - b.x) ^ 2 + (a.y - b.y) ^ 2)
 end
 
+-- A walk under way, or one whose route is still coming from the realm.
+local function going()
+  local status = AgentWalk().status
+  return status == "walking" or status == "routing"
+end
+
 local function same(a, b)
   return a and b and string.lower(a) == string.lower(b)
 end
@@ -105,7 +111,7 @@ end
 -- Stop our own walk only: a walk someone else started (AgentInteract to an innkeeper while
 -- following) is theirs to finish.
 local function halt()
-  if aimed and AgentWalk().status == "walking" then AgentStop() end
+  if aimed and going() then AgentStop() end
   aimed = nil
 end
 
@@ -267,7 +273,7 @@ local function tick(now)
   if not u and logged_off(who) then return finish("offline") end
   -- Something else is walking us (AgentInteract to an innkeeper) or we are talking to someone:
   -- let it finish, as a player stops following to deal with an NPC.
-  if not aimed and AgentWalk().status == "walking" then
+  if not aimed and going() then
     M.state = "letting another walk finish"
     return
   end
@@ -322,7 +328,7 @@ local listener = CreateFrame("Frame")
 for _, event in ipairs(SPEECH) do listener:RegisterEvent(event) end
 listener:SetScript("OnEvent", function(_, event, text, sender)
   if not M.face_speakers or type(sender) ~= "string" or same(sender, UnitName("player")) then return end
-  if UnitAffectingCombat("player") or (Combat and Combat.active) or AgentWalk().status == "walking" then return end
+  if UnitAffectingCombat("player") or (Combat and Combat.active) or going() then return end
   if not for_us(event, text, sender) then return end
   for _, u in ipairs(AgentNearby(20)) do
     if same(u.name, sender) then return AgentFace(u.guid) end
