@@ -1,8 +1,33 @@
 # Example agent
 
 A WrathPlus agent in three tiers: **Claude plans, Jev decides, Lua plays.** It runs on the
-[Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk), so it uses this machine's Claude
-Code login (a Claude subscription works; no API key), with **Claude Haiku 5.5** by default.
+[Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk), with **Claude Haiku 5.5** by default.
+
+## What you need: bring your own
+
+Nothing of ours is required: no key, account or path of the project's.
+
+| Tier | Needs | |
+|---|---|---|
+| Planner (Claude) | **your own** Claude Code login on this machine (sign in once with `claude`; a Claude subscription works, no API key), **or** your own Anthropic API key as `WRATHPLUS_ANTHROPIC_API_KEY` | required |
+| Fast tier (Jev) | your own `TYPESAFE_API_KEY` ([typesafe.ai](https://typesafe.ai)) | optional |
+| Lua and the goal runner | a WrathPlus client with the agent port open; `wp.engine`, `wp.values` and `wp.goals` are built into it | required, no key |
+
+**Without `TYPESAFE_API_KEY`** the agent starts and says `Fast tier: off`. What still runs: the
+planner with the client, notes, wake-up, goal and module tools; the goal runner, which the agent
+switches on and which plans and runs actions toward the top goal by itself (`progress` is always
+underneath); the built-in Lua; the event watcher (deaths, whispers, party chat, invites, trades);
+and reflection. What is missing: `set_plan` / `fast_loop_status`, answers to `Agent.decide` (its
+default applies at its timeout), extending a hold that ran out (it ends and the runner carries
+on), and party-request triage (requests go to the planner). The planner is told so
+(`NO_FAST_TIER` in `src/prompt.ts`). Expect more planner turns, so more Claude usage, than with
+Jev.
+
+Walking (`AgentMoveTo`, and the goal runner's travel) needs the realm's navmesh: `WOW_NAV_MMAPS`
+pointing at an `mmaps` folder made from your own game files (Manager, **Server** page: **Prepare
+server data**, then **Make navigation meshes**; or `wrathplus-manager --make-navmesh`).
+
+On the public beta realm, see [Play on the WrathPlus open beta](../../docs/BETA.md#the-example-agent).
 
 - **The planner** has exactly the six tools of the client's MCP server (`../mcp`): `lua`,
   `screenshot`, `events`, `status`, `modules`, `save_module`. It has no files, shell or web.
@@ -54,7 +79,7 @@ port, shared with the Manager's **Agents** page. The managed realm must be runni
 
 ```sh
 cd agents/mcp && bun install && cd ../example && bun install
-cp ../.env.example ../.env          # then fill in TYPESAFE_API_KEY (for Jev)
+cp ../.env.example ../.env          # optional: your own keys (see above); it may stay empty
 
 bun run agent add Scout             # a realm account (AGENTSCOUT), control port and token
 bun run agent run Scout --character Scoutly "Reach level 5 in Northshire."
@@ -72,7 +97,7 @@ bun run agent dashboard             # http://127.0.0.1:17900: every running agen
 - **Watching:** each client serves a live view (`run` prints its address); the dashboard shows
   all of them side by side, with what each planner last said and did.
 - **The planner model:** `--model haiku` (Claude Haiku 5.5, the default) or `--model sonnet` or
-  any model id. It runs on this machine's Claude Code login (a Claude subscription) and ignores an
+  any model id. It runs on this machine's Claude Code login (yours: a Claude subscription) and ignores an
   `ANTHROPIC_API_KEY` in the shell; put `WRATHPLUS_ANTHROPIC_API_KEY` in `agents/.env` to bill an
   API key instead. It is isolated from your own Claude Code setup (no CLAUDE.md, settings or MCP
   servers) and works in its own notes folder.
@@ -81,8 +106,8 @@ bun run agent dashboard             # http://127.0.0.1:17900: every running agen
 
 | Env (shell or `agents/.env`) | Default | |
 |---|---|---|
-| `TYPESAFE_API_KEY` | none | turns on the fast tier (Jev) |
-| `WRATHPLUS_ANTHROPIC_API_KEY` | none | bill this key instead of the Claude Code login |
+| `TYPESAFE_API_KEY` | none | optional: your own key turns on the fast tier (Jev) |
+| `WRATHPLUS_ANTHROPIC_API_KEY` | none | optional: bill your own API key instead of your Claude Code login |
 | `WRATHPLUS_CLIENT` | the Manager's build | the client binary |
 | `WOW_NAV_MMAPS` | the managed server's `mmaps` | the navmesh for `AgentMoveTo` |
 | `WRATHPLUS_AGENT_MODEL` | `claude-haiku-5-5` | when `--model` is not given |
@@ -90,7 +115,10 @@ bun run agent dashboard             # http://127.0.0.1:17900: every running agen
 | `WRATHPLUS_JEV_MODEL`, `WRATHPLUS_JEV_HEARTBEAT_MS` | `jev-latest`, `20000` | the fast tier's model and safety heartbeat |
 
 Against a client you started some other way, `src/index.ts` takes the control port from
-`WRATHPLUS_AGENT_URL` and `WRATHPLUS_AGENT_TOKEN` (and `WRATHPLUS_AGENT_MAX_TURNS` for smoke runs).
+`WRATHPLUS_AGENT_URL` and `WRATHPLUS_AGENT_TOKEN` (and `WRATHPLUS_AGENT_MAX_TURNS` for smoke runs);
+its notes go to `WRATHPLUS_AGENT_HOME`, else `~/.local/share/wrathplus-agents/agent-<port>`. This
+is the way to run it on a realm other than the Manager's, such as the open beta: `bun run agent`
+only knows the managed local realm.
 
 ## Not yet
 

@@ -73,6 +73,12 @@ function page(title: string, body: string): string {
 <body><main>${body}</main></body></html>`;
 }
 
+/** The public guide: how to play, what is published and how to delete it. */
+export const BETA_GUIDE = "https://github.com/artivus-labs/wrathplus/blob/main/docs/BETA.md";
+
+/** What playing publishes, in one plain line, on the sign-in and account pages. */
+const DISCLOSURE = `<p><small>Playing publishes your characters and their level and achievement milestones as public records in your own ATProto repository; they are yours to delete. <a href="${BETA_GUIDE}#what-is-published" rel="noopener">What is published</a></small></p>`;
+
 const hidden = (name: string, value: string) => `<input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(value)}">`;
 
 /** Sign in. `next` is where to continue afterwards (only the client sign-in uses it). */
@@ -87,7 +93,8 @@ export function homePage(next?: string, intro?: string): string {
   ${next ? hidden("next", next) : ""}
   <button type="submit">Sign in</button>
 </form>
-<p><small>Agents: <code>POST /api/agent/login</code> with your handle and an app password. See the project README.</small></p>`,
+${DISCLOSURE}
+<p><small>Agents: <code>POST /api/agent/login</code> with your handle and an app password. <a href="${BETA_GUIDE}#agents" rel="noopener">Beta guide</a></small></p>`,
   );
 }
 
@@ -112,7 +119,8 @@ ${v.notice ? `<div class="note">${escapeHtml(v.notice)}</div>` : ""}
   <dt>Realm</dt><dd class="copyable"><span id="realm">${escapeHtml(v.realm)}</span>${copyButton("realm", "realm address")}</dd>
 </dl>
 <script src="/copy.js" defer></script>
-<p><small>Passwords are not case-sensitive in game.</small></p>
+<p><small>Passwords are not case-sensitive in game. <a href="${BETA_GUIDE}" rel="noopener">How to play</a></small></p>
+${DISCLOSURE}
 <div class="row">
   <form method="post" action="/account/reset">${hidden("csrf", v.csrf)}<button type="submit">Reset password</button></form>
   <form method="post" action="/logout">${hidden("csrf", v.csrf)}<button class="quiet" type="submit">Sign out</button></form>

@@ -9,7 +9,15 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { mainCheckout } from "./manager.ts";
 
-export const envFile = () => join(mainCheckout(), "agents", ".env");
+/** `agents/.env` in the main checkout; outside a git checkout (a source archive), the one beside
+ *  this package. */
+export function envFile(from = import.meta.dir): string {
+  try {
+    return join(mainCheckout(from), "agents", ".env");
+  } catch {
+    return join(from, "..", "..", ".env");
+  }
+}
 
 export function parseEnv(text: string): Record<string, string> {
   const out: Record<string, string> = {};
