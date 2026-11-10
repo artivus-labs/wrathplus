@@ -53,7 +53,9 @@ fn at_the_hand_in_with_nobody_marked_it_says_to_look_for_who_the_quest_names() {
     let mut script = goals();
     script.run(ELMORE).unwrap();
     ticks(&mut script, 0.75);
-    script.run("walking = false pos = { x = 396, y = 300, z = 0, map = 0 }").unwrap();
+    script
+        .run("walking = false pos = { x = 396, y = 300, z = 0, map = 0 }")
+        .unwrap();
     ticks(&mut script, 1.5);
     assert_eq!(
         text(&script, "return heard('ACTION_FAILED')"),

@@ -41,7 +41,7 @@ fn without_mmaps_a_route_says_how_to_get_one() {
         facing: 0.0,
         map: 0,
     };
-    assert!(route_to(&handles, me, [1.0, 1.0, 0.0])
+    assert!(route_to(&handles, me, [1.0, 1.0, 0.0], false)
         .unwrap_err()
         .contains("WOW_NAV_MMAPS"));
 }
@@ -197,4 +197,50 @@ fn the_push_holds_forward_with_a_jump_and_lets_go() {
     assert_eq!(push_secs(0.5), 0.3);
     assert_eq!(push_secs(3.5), 0.5);
     assert_eq!(push_secs(235.0), 0.7);
+}
+
+#[test]
+fn a_target_without_a_height_is_looked_for_on_other_levels_nearest_first() {
+    let lua = Lua::new();
+    let args = |code: &str| lua.load(code).eval::<MultiValue>().unwrap();
+    assert!(!height_given(&args("return -8387, 685")));
+    assert!(!height_given(&args("return -8387, 685, nil")));
+    assert!(height_given(&args("return -8387, 685, 95")));
+    assert!(height_given(&args("return '0x0000000000000010'")));
+    let tried: Vec<f32> = heights(58.0).collect();
+    assert_eq!(tried[..4], [73.0, 43.0, 88.0, 28.0]);
+    assert_eq!(tried.len(), 20);
+    assert_eq!(tried[18..], [208.0, -92.0]);
+}
+
+/// Needs real mmaps: `WRATHPLUS_MMAPS=<server data>/mmaps cargo test -p wrathplus-agent -- --ignored`.
+/// Elmore's Task is handed in at the quest area (-8387, 685), in Stormwind's Dwarven District on
+/// a floor at z 95; from Goldshire (z 58) the flat point alone gave a route ending on another level.
+#[test]
+#[ignore = "needs the server's extracted mmaps"]
+fn a_quest_hand_in_in_stormwind_is_reached_from_goldshire_without_its_height() {
+    let dir = std::env::var("WRATHPLUS_MMAPS").expect("set WRATHPLUS_MMAPS");
+    let (handles, _) = link(
+        Arc::new(crate::events::EventLog::new()),
+        std::time::Instant::now(),
+        crossbeam_channel::unbounded().0,
+    );
+    handles.mesh.lock().unwrap().dir = Some(dir.into());
+    let me = world::Me {
+        pos: [-9462.0, 88.0, 58.0],
+        facing: 0.0,
+        map: 0,
+    };
+    let flat = [-8387.0, 685.0, 58.0];
+    let at_my_height = route_to(&handles, me, flat, false).unwrap();
+    assert!(!at_my_height.complete, "{:?}", at_my_height.points.last());
+    let found = route_to(&handles, me, flat, true).unwrap();
+    assert!(found.complete, "{:?}", found.points.last());
+    let end = found.points.last().unwrap();
+    assert!(
+        (end[0] + 8387.0).abs() < 2.0
+            && (end[1] - 685.0).abs() < 2.0
+            && (end[2] - 95.0).abs() < 3.0,
+        "{end:?}"
+    );
 }

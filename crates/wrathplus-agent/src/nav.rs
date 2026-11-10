@@ -4,7 +4,8 @@
 //!
 //! The mmaps folder comes from `WOW_NAV_MMAPS` (the launcher passes `<server data>/mmaps`).
 //!
-//! Lua: `AgentPath(x, y, z | guid)` → `{complete, length, points = {{x, y, z}, ...}}`;
+//! Lua: `AgentPath(x, y[, z] | guid)` → `{complete, length, points = {{x, y, z}, ...}}` (without
+//! `z` the floor is looked for: the player's height first, then others, see `heights`);
 //! `AgentMoveTo(x, y, z | guid)` starts walking; `AgentInteract(guid)` from farther than a few
 //! yards walks the route, then interacts; `AgentStop()`; `AgentWalk()` → `{status,
 //! remaining, goal, note, route, interact}` (`route`: the corners still ahead; `interact`: the
@@ -114,11 +115,41 @@ fn to_wow(b: Vec3) -> [f32; 3] {
     [-b.z, -b.x, b.y]
 }
 
-fn route_to(handles: &Handles, me: world::Me, to: [f32; 3]) -> Result<Route, String> {
+/// The route to `to`. With `any_height` its height is a guess (the player's own): when no complete
+/// route ends there, other heights are tried, and the first that gives one is taken.
+fn route_to(
+    handles: &Handles,
+    me: world::Me,
+    to: [f32; 3],
+    any_height: bool,
+) -> Result<Route, String> {
     if let Ok(mut walk) = handles.walk.lock() {
         walk.map = me.map;
     }
-    route_in(&handles.mesh, me, to, &[])
+    let route = route_in(&handles.mesh, me, to, &[]);
+    if !any_height || route.as_ref().is_ok_and(|r| r.complete) {
+        return route;
+    }
+    heights(to[2])
+        .filter_map(|z| route_in(&handles.mesh, me, [to[0], to[1], z], &[]).ok())
+        .find(|r| r.complete)
+        .map_or(route, Ok)
+}
+
+/// How far apart, and how many each way, the heights tried for a target given without one.
+const HEIGHT_STEP: f32 = 15.0;
+const HEIGHT_TRIES: u8 = 10;
+
+/// The heights to try for a target given as `x, y` alone, after the player's own: the nearest
+/// first, up then down. A quest's map area, a zone's centre and a remembered spot are flat
+/// points, and in a town on several levels the floor under one is rarely at the height the walk
+/// starts from: from Goldshire (z 58) the Dwarven District's smithy floor (z 95) is not what the
+/// search box finds first, and the route ends 148 yards short on another level.
+pub(crate) fn heights(z: f32) -> impl Iterator<Item = f32> {
+    (1..=HEIGHT_TRIES).flat_map(move |i| {
+        let d = HEIGHT_STEP * f32::from(i);
+        [z + d, z - d]
+    })
 }
 
 /// A route over the map's navmesh, round `AgentAvoid`'s circles and `bumps` (a walk's own).
@@ -145,7 +176,7 @@ fn route_in(
 }
 
 /// The target point from Lua arguments: `x, y[, z]` (no height: the player's, and the route search
-/// finds the ground) or a `"0x…"` guid from `AgentNearby`.
+/// finds the ground: see `height_given`) or a `"0x…"` guid from `AgentNearby`.
 fn target(args: &MultiValue, snapshot: &world::Snapshot) -> Result<[f32; 3], String> {
     let num = |i: usize| match args.get(i) {
         Some(Value::Number(n)) => Some(*n as f32),
@@ -167,6 +198,18 @@ fn target(args: &MultiValue, snapshot: &world::Snapshot) -> Result<[f32; 3], Str
         .find(|o| o.guid == guid)
         .map(|o| o.pos)
         .ok_or_else(|| format!("{text} is not near (not in AgentNearby)"))
+}
+
+/// Whether the target's height is known: a guid's is, and so is `x, y, z`; `x, y` alone borrows
+/// the player's, and the route search may look on other levels (`heights`).
+fn height_given(args: &MultiValue) -> bool {
+    !matches!(
+        (args.front(), args.get(2)),
+        (
+            Some(Value::Number(_) | Value::Integer(_)),
+            None | Some(Value::Nil)
+        )
+    )
 }
 
 fn route_table(lua: &Lua, route: &Route) -> mlua::Result<Table> {
@@ -234,7 +277,7 @@ pub(crate) fn install(lua: &Lua, nav: &Handles, world: &world::Handles) -> mlua:
         let me = snapshot.me.ok_or("not in the world yet")?;
         let to = target(&args, &snapshot)?;
         drop(snapshot);
-        route_to(nav, me, to)
+        route_to(nav, me, to, !height_given(&args))
     };
     let (n, w) = (nav.clone(), world.clone());
     g.set(
