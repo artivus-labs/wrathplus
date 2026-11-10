@@ -302,7 +302,7 @@ fn a_cinematic_hides_the_target_without_losing_it() {
     );
     // A target really gone after the cinematic is still lost, counted from its end.
     script
-        .run("Combat.lose_after = 0.5 shown = { guid = '0xR', name = 'Rabbit', x = 9, y = 0, z = 0, distance = 9, dead = false } Combat.engage('0xR') cinematic = 'held'")
+        .run("Combat.lose_after = 0.5 shown = { guid = '0xR', name = 'Rabbit', x = 9, y = 0, z = 0, distance = 9, dead = false } Combat.engage('0xR', { force = true }) cinematic = 'held'")
         .unwrap();
     for _ in 0..8 {
         script.tick(0.25);

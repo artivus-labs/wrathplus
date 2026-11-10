@@ -252,11 +252,9 @@ pub(crate) fn snapshot(
                 let rank = record.map(|r| gated_rank(Some(r), Some(store)) as usize);
                 s.classification = rank.and_then(|r| RANK_WORDS.get(r).copied());
                 s.critter = record.is_some_and(|r| r.creature_type == 8);
-                if net.kind == EntityKind::Unit {
-                    s.creature_type = record.and_then(|r| {
-                        wrathplus_app_net::creature_type::creature_type_word(r.creature_type)
-                    });
-                }
+                s.creature_type = record.and_then(|r| {
+                    wrathplus_app_net::creature_type::creature_type_word(r.creature_type)
+                });
             } else if net.kind == EntityKind::GameObject {
                 s.name = templates
                     .as_ref()

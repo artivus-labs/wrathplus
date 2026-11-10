@@ -150,7 +150,7 @@ function S.fits(u)
   if u.reaction ~= "hostile" and u.reaction ~= "neutral" then return false, "friendly" end
   if u.npc then return false, "an NPC with a service" end
   if u.tapped and not u.tapped_by_me then return false, "another player's" end
-  if u.critter then return false, "a critter" end
+  if u.critter or u.creature_type == "Critter" then return false, "a critter" end
   if RANKS[u.classification or ""] then return false, RANKS[u.classification] end
   if not u.level then return false, "its level is unknown" end
   local low, high = S.band()
@@ -178,7 +178,7 @@ end
 function S.adds(u, list)
   local n, first, weight = 0, nil, 0
   for _, o in ipairs(list or seen(100)) do
-    if o.guid ~= u.guid and o.kind == "unit" and not o.dead and o.reaction == "hostile" and o.x and not o.critter
+    if o.guid ~= u.guid and o.kind == "unit" and not o.dead and o.reaction == "hostile" and o.x and not (o.critter or o.creature_type == "Critter")
       and not (o.tapped and not o.tapped_by_me) then
       local d = far(o, u)
       if d < S.assist or d < S.aggro(o.level) then
