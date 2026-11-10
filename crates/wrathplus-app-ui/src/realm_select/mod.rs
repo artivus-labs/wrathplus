@@ -91,7 +91,22 @@ impl Plugin for RealmSelectPlugin {
                     .after(wrathplus_world::schedule::WorldStage::Net)
                     .before(crate::glue::GlueVisuals),
             );
+        hide_at_world_entry(app);
     }
+}
+
+/// World entry takes the realm list down with the rest of the glue: the reference builds the
+/// world's interface on a Lua state of its own (`crate::ui_script`'s entry load), so no glue
+/// frame is left to draw, whatever was open. The stock Okay hides the frame before it calls
+/// `ChangeRealm`; a script calling `ChangeRealm` alone leaves the frame up, and its `OnUpdate`
+/// goes on asking for the list, which opens it over character select again (#70). Left set in
+/// the world, [`Realms::shown`] drew the native dialog over it (the stock glue no longer hosts
+/// the screen there) and made the next published list a refresh, never answered.
+pub(crate) fn hide_at_world_entry(app: &mut App) {
+    app.add_systems(
+        OnEnter(crate::app_core::state::ClientState::InWorld),
+        |mut realms: ResMut<Realms>| realms.hide(),
+    );
 }
 
 /// Answer the realm park, or raise the dialog; the policy for both parks, in every state.

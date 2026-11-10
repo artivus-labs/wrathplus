@@ -56,6 +56,8 @@ pub(crate) fn stock_glue(
         MessageReader<crate::net::CharListMessage>,
         Local<crate::app_core::vm_memo::VmMemo<(bool, u64)>>,
     ),
+    // Whether the realm list up now has been shown on this VM.
+    mut realm_list_shown: Local<crate::app_core::vm_memo::VmMemo<bool>>,
 ) {
     use crate::app_core::state::ClientState;
     let Some(mut script) = script else {
@@ -178,8 +180,13 @@ pub(crate) fn stock_glue(
     // Reaching the realm list ends the connecting dialog, as `CGlueMgr::UpdateGlueDialog`
     // (`0x46b140`) does once the login state passes `LOGIN_STATE_CONNECTING`. The realm list to
     // show, or a refresh of the one shown: the snapshot, then the engine's `OPEN_REALM_LIST`
-    // (shows the frame, or redraws it).
-    if realms.shown && realms.is_changed() {
+    // (shows the frame, or redraws it). A list raised before this VM was built is shown on it too:
+    // an auto-submitted login reaches the realm list while the startup cover still holds the glue
+    // VM back, and the list went to the boot VM, leaving the login screen up with nothing on it.
+    let listed = realm_list_shown.get(&script);
+    *listed &= realms.shown;
+    if realms.shown && (realms.is_changed() || !*listed) {
+        *listed = true;
         use crate::realm_select::RealmsCategory;
         script.fire_event("CLOSE_STATUS_DIALOG", vec![]);
         let tabs = crate::realm_select::glue_tabs(realms.bypass_change_detection());
