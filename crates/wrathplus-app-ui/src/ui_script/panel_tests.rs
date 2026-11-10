@@ -204,18 +204,19 @@ fn shipped_gossip_frame_renders_quest_rows_above_options() {
     load_xml(&mut s, r"Interface\FrameXML\StaticPopup.xml");
     load_xml(&mut s, "Interface\\FrameXML\\GossipFrame.xml");
 
+    // Level 60 rows, the VM's default player's own, so neither greys as trivial (`0x58aba0`).
     s.set_gossip(Some(GossipMenu {
         greeting: "A word, traveler.".into(),
         quests: vec![
             GossipQuestRow {
                 title: "Report to Goldshire".into(),
-                level: 5,
+                level: 60,
                 active: true,
                 ..Default::default()
             },
             GossipQuestRow {
                 title: "A Threat Within".into(),
-                level: 7,
+                level: 60,
                 active: false,
                 ..Default::default()
             },
