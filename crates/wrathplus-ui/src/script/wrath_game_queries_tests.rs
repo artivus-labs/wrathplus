@@ -264,7 +264,8 @@ fn quest_panel_flags_and_greeting_levels() {
         .eval::<bool>(
             "return IsAvailableQuestTrivial(1) == nil and IsAvailableQuestTrivial(2) == 1 \
              and IsAvailableQuestTrivial(3) == nil and IsAvailableQuestTrivial(4) == 1 \
-             and not IsActiveQuestTrivial(2)"
+             and IsActiveQuestTrivial(1) == nil and IsActiveQuestTrivial(2) == nil \
+             and IsActiveQuestTrivial(3) == 1 and GetAvailableQuestInfo(2) == 1"
         )
         .unwrap());
     let err = s.run("GetActiveLevel()").unwrap_err().to_string();

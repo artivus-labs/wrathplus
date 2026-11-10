@@ -45,22 +45,21 @@ fn ignored(lua: &Lua, model: &Model, arg: &str) -> bool {
             .is_some_and(|g| with_char(lua, |c| c.ignore_guids.contains(&g)))
 }
 
-/// A greeting list's level at a 1-based index, truncated (`0x58c031`, the x87 control word set to
-/// chop), 0 outside the list.
-fn greeting_level(model: &Model, index: i32, active: bool) -> i32 {
-    let Some(q) = model.quest.as_ref() else {
-        return 0;
-    };
+/// A greeting list's row at a 1-based index, truncated (`0x58c031`, the x87 control word set to
+/// chop).
+fn greeting_row(model: &Model, index: i32, active: bool) -> Option<&super::QuestGreetingInfo> {
+    let q = model.quest.as_ref()?;
     let list = if active {
         &q.active_info
     } else {
         &q.available_info
     };
-    usize::try_from(index)
-        .ok()
-        .and_then(|i| i.checked_sub(1))
-        .and_then(|i| list.get(i))
-        .map_or(0, |row| row.level)
+    list.get(usize::try_from(index).ok()?.checked_sub(1)?)
+}
+
+/// A greeting row's level, 0 outside the list.
+fn greeting_level(model: &Model, index: i32, active: bool) -> i32 {
+    greeting_row(model, index, active).map_or(0, |row| row.level)
 }
 
 pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
@@ -189,15 +188,45 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             })?,
         )?;
     }
-    // IsAvailableQuestTrivial(index) (`0x58d370`): `0x58aba0` on the available row's level, 0
-    // outside the list, so an index past it reads trivial once the player outgrows level 0.
+    // IsAvailableQuestTrivial(index) (`0x58d370`) and IsActiveQuestTrivial(index) (`0x58d420`):
+    // `0x58aba0` on the row's level, 0 outside the list, so an index past it reads trivial once
+    // the player outgrows level 0; 1 or nil.
+    for (name, usage, active) in [
+        (
+            "IsAvailableQuestTrivial",
+            "Usage: IsAvailableQuestTrivial(index)",
+            false,
+        ),
+        (
+            "IsActiveQuestTrivial",
+            "Usage: IsActiveQuestTrivial(index)",
+            true,
+        ),
+    ] {
+        g.set(
+            name,
+            lua.create_function(move |lua, index: Value| {
+                let index = number_arg(lua, index, usage)?;
+                let model = model(lua);
+                let level = greeting_level(&model, index, active);
+                Ok(flag(super::quest_log::quest_trivial(&model, level)))
+            })?,
+        )?;
+    }
+    // GetAvailableQuestInfo(index) (`0x58dbc0`): trivial as above, then daily and repeatable, all
+    // 1 or nil; outside the list the trivial test still runs on level 0.
     g.set(
-        "IsAvailableQuestTrivial",
+        "GetAvailableQuestInfo",
         lua.create_function(|lua, index: Value| {
-            let index = number_arg(lua, index, "Usage: IsAvailableQuestTrivial(index)")?;
+            let index = number_arg(lua, index, "Usage: GetAvailableQuestInfo(index)")?;
             let model = model(lua);
             let level = greeting_level(&model, index, false);
-            Ok(flag(super::quest_log::quest_trivial(&model, level)))
+            let row = greeting_row(&model, index, false);
+            Ok((
+                flag(super::quest_log::quest_trivial(&model, level)),
+                flag(row.is_some_and(|r| r.daily)),
+                flag(row.is_some_and(|r| r.repeatable)),
+            ))
         })?,
     )?;
     // GetActiveLevel(index) (`0x58c010`) and GetAvailableLevel(index) (`0x58bf70`): the greeting
