@@ -51,6 +51,8 @@ export interface GoalSpec {
   standing?: boolean;
   /** The facts it wants (true, or equal): what the planner searches toward, e.g. { quest_ready: true }. */
   want?: Record<string, boolean | number | string>;
+  /** The zone travel_to_zone heads for (`data.zone`); the client refuses one above our level. */
+  zone?: string;
 }
 
 const FACT_NAME = /^[a-z_][a-z0-9_]*$/;
@@ -65,7 +67,9 @@ export function pushGoalLua(goal: GoalSpec): string {
     const pairs = Object.entries(goal.want).filter(([k]) => FACT_NAME.test(k));
     if (pairs.length) fields.push(`want = { ${pairs.map(([k, v]) => `${k} = ${value(v)}`).join(", ")} }`);
   }
-  return `${NEED_GOALS}\nGoals.push{ ${fields.join(", ")} }\nreturn true`;
+  if (goal.zone) fields.push(`data = { zone = ${luaString(goal.zone)} }`);
+  // A refusal (a zone above our level) comes back as the reason, not as a Lua error.
+  return `${NEED_GOALS}\nlocal ok, err = pcall(Goals.push, { ${fields.join(", ")} })\nif not ok then return false, tostring(err) end\nreturn true`;
 }
 
 export function dropGoalLua(name: string): string {

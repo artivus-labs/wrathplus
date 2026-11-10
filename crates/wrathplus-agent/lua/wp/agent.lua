@@ -87,9 +87,11 @@ local function finish(ok, why)
 end
 
 -- Start an intent's activity (called by the fast tier). Returns ok and run's result or error.
+-- Choosing the activity already running carries on with it: it never replaces itself.
 function A.run(name)
   local spec = A.intents[name]
   if not spec then return false, "no intent " .. tostring(name) end
+  if A.current and A.current.name == name then return true, "already doing " .. name end
   if A.current then finish(false, "replaced by " .. name) end
   A.current = { name = name, since = GetTime(), spec = spec }
   local ok, result = pcall(spec.run)

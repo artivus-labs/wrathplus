@@ -151,8 +151,8 @@ export function describe(events: GameEvent[], self?: string, kinds?: Set<string>
     const line = say?.(e.args);
     if (line) lines.push(line);
   }
-  // A repeated error in a burst is one line.
-  return lines.filter((line, i) => lines.indexOf(line) === i);
+  // A repeated line in a burst is one line, with its count.
+  return collapse(lines);
 }
 
 /** Small talk: said to us in passing by someone who is not in our party. An NPC naming us, a line
@@ -269,7 +269,7 @@ export async function watch(options: WatchOptions): Promise<void> {
       pending.push(...lines);
       if (batch.missed) pending.push(`(${batch.missed} game events were missed.)`);
       if (pending.length && Date.now() >= flushAt) {
-        onMessage(`Game events:\n- ${pending.join("\n- ")}`);
+        onMessage(`Game events:\n- ${collapse(pending).join("\n- ")}`);
         pending = [];
       }
     } catch (error) {
@@ -277,6 +277,18 @@ export async function watch(options: WatchOptions): Promise<void> {
       await Bun.sleep(2000);
     }
   }
+}
+
+/** Identical lines once each, in first-seen order, with how many times they came: a walk that fails
+ *  in a hot loop is one line ("Your walk ended failed: ... ×8500"), not thousands. */
+export function collapse(lines: string[]): string[] {
+  const counts = new Map<string, number>();
+  for (const line of lines) {
+    // A line already collapsed in an earlier batch adds its own count.
+    const [, text = line, n = "1"] = /^(.*) ×(\d+)$/s.exec(line) ?? [];
+    counts.set(text, (counts.get(text) ?? 0) + Number(n));
+  }
+  return [...counts].map(([line, n]) => (n > 1 ? `${line} ×${n}` : line));
 }
 
 async function read(url: string, token: string, since: number, wait: number, signal: AbortSignal) {

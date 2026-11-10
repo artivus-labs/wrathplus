@@ -7,9 +7,11 @@
 //
 // Small talk (`SmallTalk`, below) is sorted the same way: an NPC, a bot or a stranger saying
 // something to the character in passing is answered with a courtesy or ignored, not given a
-// planner turn each.
+// planner turn each. A remark or greeting that a spoken reply fits better is answered with one
+// short line in character (`say`, written by Claude Haiku in `say.ts`), within its own caps.
 
 import { choice, noul, type Jev } from "./jev.ts";
+import { CHARACTER_LUA, memorySlice, sayLine, sayPrompt, type Character, type Speak } from "./say.ts";
 
 export interface Request {
   sender: string;
@@ -178,6 +180,12 @@ export const COURTESIES: Record<string, Courtesy> = {
   greet: line("Hello there.", "They greet the agent in words and a spoken greeting back fits better than a wave."),
 };
 
+/** The say step's criterion: offered only with a writer and while its caps allow. */
+export const SAY_WHEN =
+  "A remark or a greeting that a short spoken reply in character fits better than an emote: someone talking to the agent, wanting a few friendly words back, not a decision.";
+
+const GREETING = /\b(hi|hello|hey|greetings|well met|good (?:morning|day|evening)|bye|goodbye|farewell)\b/i;
+
 const IGNORE = "Idle chatter that wants no answer (a remark to nobody in particular, a complaint, a rumour, a repeat of what was just said), or an answer was given moments ago.";
 const NEEDS_THOUGHT =
   "A real request, question, invitation, offer or warning that deserves a proper answer or a decision: an invitation to group, a trade or help offered or asked for, a question about what the agent is doing, directions that matter to its quests.";
@@ -194,6 +202,15 @@ export interface SmallTalkOptions {
   perSpeakerMs?: number;
   /** How sure Jev must be to act (or to wake the planner) rather than let the line ride along. */
   confidence?: number;
+  /** The say step's writer (`haikuSpeak`); without it, or without Jev, there is no say step. */
+  speak?: Speak;
+  /** MEMORY.md, whose tail flavours a said line. */
+  memory?: () => string;
+  /** At most one say per this long (ms, default 30 s), and `sayPerHour` (default 20) an hour. */
+  sayGapMs?: number;
+  sayPerHour?: number;
+  /** A line not written within this long is given up for an emote (ms, default 10 s). */
+  sayTimeoutMs?: number;
 }
 
 /** What became of a batch of small talk. */
@@ -211,6 +228,8 @@ export class SmallTalk {
   calls = 0;
   #answered = new Map<string, number>();
   #wokeAt = -Infinity;
+  #said: number[] = [];
+  #chat: string[] = [];
 
   constructor(readonly options: SmallTalkOptions = {}) {}
 
@@ -224,6 +243,8 @@ export class SmallTalk {
     for (const item of items) {
       if (!this.options.jev || !this.options.lua) unsorted.push(item);
       else if (!(await this.#sort(item, game, sorted))) unsorted.push(item);
+      // The last few lines, for the next say's context.
+      this.#chat = [...this.#chat, chatterLine(item)].slice(-6);
     }
     if (!unsorted.length) return sorted;
     // Nobody to sort these: one wake-up per `wakeEveryMs` at most, the rest ride along.
@@ -247,6 +268,7 @@ export class SmallTalk {
     const criteria: Record<string, string> = { ignore: IGNORE, needs_thought: NEEDS_THOUGHT };
     // Answered a moment ago: one courtesy is enough, so only ignore or the planner are offered.
     if (!recently) for (const [name, c] of Object.entries(COURTESIES)) criteria[name] = c.when;
+    if (!recently && this.#maySay(now)) criteria.say = SAY_WHEN;
     let answer;
     try {
       const response = await jev.ask(
@@ -271,7 +293,17 @@ export class SmallTalk {
       else sorted.later.push(text);
       return true;
     }
-    const courtesy = recently ? undefined : COURTESIES[answer.choice];
+    if (answer.choice === "say" && sure && criteria.say) {
+      const said = await this.#say(item, now);
+      if (said) {
+        this.#answered.set(item.speaker, now);
+        sorted.later.push(`${text} (the fast loop said "${said}" to ${item.speaker})`);
+        return true;
+      }
+    }
+    // A say that could not be written falls back to the emote that fits.
+    const fallback = answer.choice === "say" && criteria.say ? (GREETING.test(item.text) ? "wave" : "nod") : answer.choice;
+    const courtesy = recently ? undefined : COURTESIES[fallback];
     if (!courtesy || !sure) {
       sorted.later.push(`${text} (ignored)`);
       return true;
@@ -280,5 +312,46 @@ export class SmallTalk {
     if (result.ok) this.#answered.set(item.speaker, now);
     sorted.later.push(`${text} (the fast loop ${result.ok ? courtesy.did : "could not answer"})`);
     return true;
+  }
+
+  /** Whether a say is allowed now: a writer, and under both caps. */
+  #maySay(now: number): boolean {
+    if (!this.options.speak) return false;
+    this.#said = this.#said.filter((t) => now - t < 3_600_000);
+    const last = this.#said.at(-1) ?? -Infinity;
+    return now - last >= (this.options.sayGapMs ?? 30_000) && this.#said.length < (this.options.sayPerHour ?? 20);
+  }
+
+  /** Write and say one line; null on any failure, a timeout or an empty line. */
+  async #say(item: Chatter, now: number): Promise<string | null> {
+    const lua = this.options.lua!;
+    const abort = new AbortController();
+    const timeout = setTimeout(() => abort.abort(), this.options.sayTimeoutMs ?? 10_000);
+    try {
+      const me = await lua(CHARACTER_LUA);
+      const character = (me.ok ? me.values?.[0] : undefined) as Character | undefined;
+      const prompt = sayPrompt({
+        character: character ?? {},
+        speaker: item.speaker,
+        text: item.text,
+        kind: item.kind,
+        chat: this.#chat.slice(-4),
+        memory: memorySlice(this.options.memory?.() ?? ""),
+      });
+      const written = await Promise.race([
+        this.options.speak!(prompt, abort.signal),
+        new Promise<never>((_, reject) => abort.signal.addEventListener("abort", () => reject(new Error("say timed out")))),
+      ]);
+      const line = sayLine(written);
+      if (!line) return null;
+      const result = await lua(`SendChatMessage(${q(line)}, "SAY") return true`);
+      if (!result.ok) return null;
+      this.#said.push(now);
+      return line;
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 }
