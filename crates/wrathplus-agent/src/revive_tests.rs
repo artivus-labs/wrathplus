@@ -149,3 +149,40 @@ fn an_agents_own_spirit_healer_ask_is_left_to_it() {
         calls(&script)
     );
 }
+
+#[test]
+fn the_spirit_healer_out_of_sight_from_the_corpse_is_run_back_to() {
+    let mut script = revive("healer-far");
+    // Released at the graveyard, the healer beside us: remembered, with where it stands. From the
+    // corpse 400 yards on it is out of sight (in the playtest the ghost then stood at its corpse
+    // for good, interacting with a unit the client no longer had).
+    script
+        .run(
+            "dead, ghost = false, true \
+             healer = { guid = '0xF1300018BB000001', name = 'Spirit Healer', x = -300, y = 0, z = 0 } \
+             AgentFindNpc = function() if math.abs(me.x - healer.x) < 60 then return healer end end \
+             me = { x = -295, y = 0, z = 0 } Revive.spirit_after = 2",
+        )
+        .unwrap();
+    ticks(&mut script, 1);
+    script
+        .run("me = { x = 99, y = 0, z = 0 } walking = false calls = {}")
+        .unwrap();
+    wolf_at(&script, 101);
+    ticks(&mut script, 5);
+    assert_eq!(calls(&script), "move 70,0 move -300,0");
+    assert_eq!(
+        state(&script),
+        "ghost, running back to the spirit healer (the corpse stayed unsafe)"
+    );
+    // Back in sight of it: ask.
+    script
+        .run("me = { x = -290, y = 0, z = 0 } walking = false")
+        .unwrap();
+    ticks(&mut script, 1);
+    assert!(
+        calls(&script).ends_with("interact 0xF1300018BB000001"),
+        "{}",
+        calls(&script)
+    );
+}

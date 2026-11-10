@@ -212,7 +212,8 @@ local function fight(leader)
     return true
   end
   local g = foe(leader)
-  if g and Combat.engage(g) then
+  -- Their fight is ours: no pull check on a mob the companion is already on.
+  if g and Combat.engage(g, { force = true }) then
     M.state = "fighting"
     return true
   end

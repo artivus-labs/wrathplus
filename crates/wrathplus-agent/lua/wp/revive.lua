@@ -8,8 +8,9 @@
 --   Ghost: run back toward the corpse (AgentCorpse) through the navmesh, to a spot clear of the
 --          hostiles standing over it; once the server's reclaim delay is over and nothing hostile
 --          is close, RetrieveCorpse. If hostiles keep the corpse unsafe for `spirit_after`
---          seconds, give up on it and resurrect at the graveyard's spirit healer instead
---          (interact, then accept the CONFIRM_XP_LOSS it raises: a durability cost).
+--          seconds, give up on it and resurrect at the graveyard's spirit healer instead (run
+--          back to where it stood, interact, then accept the CONFIRM_XP_LOSS it raises: a
+--          durability cost).
 --
 -- `clear`, `safe` (yards) and the timings are fields, so code can tune them live.
 -- `Revive.state` says what it is doing ("waiting 21s for the reclaim delay", ...), nil when alive.
@@ -31,14 +32,14 @@ local R = {
 
 -- Per death: when it died, where to stand up, the last reclaim, since when hostiles have kept
 -- the corpse unsafe, the graveyard's spirit healer, and when it was last asked.
-local died_at, spot, tried_at, blocked_since, healer, asked_healer
+local died_at, spot, tried_at, blocked_since, healer, asked_healer, to_healer
 
 local function say(state)
   R.state = state
 end
 
 local function reset()
-  died_at, spot, tried_at, blocked_since, healer, asked_healer = nil, nil, nil, nil, nil, nil
+  died_at, spot, tried_at, blocked_since, healer, asked_healer, to_healer = nil, nil, nil, nil, nil, nil, nil
 end
 
 local function far(a, b)
@@ -69,11 +70,22 @@ local function choose_spot(corpse)
   return { x = corpse.x + dx / len * R.clear, y = corpse.y + dy / len * R.clear, z = corpse.z }
 end
 
--- The corpse stayed unsafe too long: the spirit healer (AgentInteract walks there first).
+-- The corpse stayed unsafe too long: the spirit healer. From the corpse it is out of sight (the
+-- client only knows what is near), so run back to where it stood first; in sight, AgentInteract
+-- walks up to it.
 local function use_healer(now)
+  local near = AgentFindNpc and AgentFindNpc("spirithealer", 60)
+  if not near and healer.x then
+    -- Once, and again if that walk ended short of it.
+    if not to_healer or (AgentWalk().status ~= "walking" and now - to_healer >= 3) then
+      to_healer = now
+      AgentMoveTo(healer.x, healer.y, healer.z)
+    end
+    return say("ghost, running back to the spirit healer (the corpse stayed unsafe)")
+  end
   if not asked_healer or now - asked_healer >= 10 then
     asked_healer = now
-    AgentInteract(healer.guid)
+    AgentInteract((near or healer).guid)
   end
   return say("ghost, resurrecting at the spirit healer (the corpse stayed unsafe)")
 end

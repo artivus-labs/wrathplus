@@ -2,19 +2,18 @@
 //! library, kept across relogs and restarts as files in the agent's scripts folder.
 //!
 //! The UI VM is sandboxed (no `require`, `io`, `os`), as addons expect. This adds back exactly one
-//! door: `require(name)` reads `<scripts>/<name with dots as slashes>.lua`, or a built-in module
-//! (`wp.engine`, `wp.values`, `wp.agent`, `wp.revive`, `wp.upkeep`, `wp.rotation`, `wp.combat`,
-//! `wp.move`, `wp.quest`, `wp.avoid`, `wp.goals`), and nothing else. `wp.agent` is preloaded as
-//! the global `Agent`: the registry of intents and decisions the fast tier chooses among;
-//! `wp.revive` as `Revive`, which gets a dead character back up; `wp.upkeep` as `Upkeep`, which
-//! wears upgrades, sells junk and trains; `wp.rotation` as `Rotation`, a fight's priority list;
-//! `wp.combat` as `Combat`, fighting a target kept in range; `wp.move` as `Move`, going to a unit,
-//! following one and holding a spot; `wp.quest` as `Quests`, quest givers' dialogs and the party's
-//! quests; `wp.avoid` as `Avoid`, walks kept clear of hostiles; `wp.goals` as `Goals`, the goals,
-//! a GOAP planner over facts and actions toward the top one, and the runner that keeps the agent
-//! busy with them. `AgentReload(name)` forgets a module and loads it
-//! again; `AgentModules()` lists the agent's files. If `autoexec.lua` exists, every new in-game
-//! VM runs it, so an agent's logic comes back after `ReloadUI()` or a restart.
+//! door: `require(name)` reads `<scripts>/<name with dots as slashes>.lua`, or a built-in module,
+//! and nothing else. Built-ins preloaded as globals: `wp.agent` as `Agent`, the intents and
+//! decisions the fast tier chooses among; `wp.revive` as `Revive`, getting a dead character back
+//! up; `wp.upkeep` as `Upkeep`, which wears upgrades, sells junk, buys food and trains;
+//! `wp.survive` as `Survive`, which judges pulls and fights (safe targets, potions, when to run);
+//! `wp.rotation` as `Rotation`, a fight's priority list; `wp.combat` as `Combat`, fighting a target
+//! kept in range; `wp.move` as `Move`, going to a unit, following one and holding a spot;
+//! `wp.quest` as `Quests`, quest givers' dialogs and the party's quests; `wp.avoid` as `Avoid`,
+//! walks kept clear of hostiles; `wp.goals` as `Goals`, the goals, a GOAP planner over facts and
+//! actions toward the top one, and the runner that keeps the agent busy with them (`wp.engine` and
+//! `wp.values` load on `require`). `AgentReload(name)` loads a module again; `AgentModules()` lists
+//! the agent's files; an `autoexec.lua` runs in every new in-game VM (after `ReloadUI()`, a restart).
 
 use mlua::{Lua, Value};
 use std::path::{Path, PathBuf};
@@ -27,6 +26,7 @@ const BUILT_IN: &[(&str, &str)] = &[
     ("wp.agent", include_str!("../lua/wp/agent.lua")),
     ("wp.revive", include_str!("../lua/wp/revive.lua")),
     ("wp.upkeep", include_str!("../lua/wp/upkeep.lua")),
+    ("wp.survive", include_str!("../lua/wp/survive.lua")),
     ("wp.rotation", include_str!("../lua/wp/rotation.lua")),
     ("wp.combat", include_str!("../lua/wp/combat.lua")),
     ("wp.move", include_str!("../lua/wp/move.lua")),
@@ -125,6 +125,9 @@ pub(crate) fn install(script: &UiScript, dir: PathBuf) -> mlua::Result<bool> {
     // Chores: wear upgrades, sell junk and repair at merchants, train at class trainers.
     let upkeep = load_module(lua, &dir, "wp.upkeep")?;
     lua.globals().set("Upkeep", upkeep)?;
+    // Staying alive: which pulls are safe, potions and emergency buttons, when to run (`Survive`).
+    let survive = load_module(lua, &dir, "wp.survive")?;
+    lua.globals().set("Survive", survive)?;
     // What to cast in a fight, as a priority list (`Rotation.list`), and fighting a target kept in
     // range (`Combat.engage(guid)`), which runs it.
     let rotation = load_module(lua, &dir, "wp.rotation")?;
@@ -223,6 +226,13 @@ mod zone_guard_tests;
 #[cfg(test)]
 #[path = "hot_loop_tests.rs"]
 mod hot_loop_tests;
+
+#[cfg(test)]
+#[path = "goals_safety_tests.rs"]
+mod goals_safety_tests;
+#[cfg(test)]
+#[path = "survive_tests.rs"]
+mod survive_tests;
 
 #[cfg(test)]
 mod tests {

@@ -19,10 +19,13 @@
 --       sell and repair, rest, else grind, else look further afield or travel to a better zone.
 -- Facts, the planner's world state, read fresh each pass (Goals.facts(); Goals.fact(name, fn) adds
 --   one): quest_ready, objectives_open, quest_giver_near, hand_in_near, bags_full, needs_repair,
---   can_train, trainer_known, vendor_known, repair_known (seen this session, and where:
---   Goals.places), hp_low,
---   mana_low, mobs_for_xp (living hostiles in sight that give XP), zone_fit ("low": the zone is
---   below us, "ok", "high": above us), in_combat, dead.
+--   can_train, trainer_known, vendor_known, repair_known, food_vendor_known (seen this session,
+--   and where: Goals.places), hp_low, mana_low (below what a fight is started at), gear_broken
+--   (the main hand cannot swing), pull_ok (fit to start a fight: none of those three),
+--   needs_food (nothing to eat, or to drink for a mana user, and money for some), recent_deaths
+--   (in the last ten minutes: each lowers the levels pulled, Survive.band), mobs_for_xp (a mob in
+--   sight that gives XP and is a safe pull: Survive.pull_ok), zone_fit ("low": the zone is below
+--   us, "ok", "high": above us), in_combat, dead.
 -- Actions:
 --   Goals.action{ name, why, pre = { fact = value } | fn(facts), effects = { fact = value },
 --                 cost = n | fn(facts), run = fn(args), done = fn() → finished, ok, why, timeout,
@@ -30,8 +33,11 @@
 --       `args` is { goal, data, facts }; `run` may set args.subject (the quest objective, the zone)
 --       so a failure backs off that one, not the whole action; `stop` undoes what an action that
 --       ended badly left going (its fight, its walk). Built in: hand_in_quests,
---       pick_up_quests, work_objective, train, sell_and_repair, rest, grind, seek_mobs,
---       travel_to_zone. A plan is the cheapest chain of actions (A* over the facts) from now to
+--       pick_up_quests, work_objective, train, sell_and_repair, buy_food, rest, grind, seek_mobs,
+--       travel_to_zone. Fights are only started when Survive.pull_ok says so (grind and
+--       work_objective take the nearest safe mob, and wait for or give up on an unsafe one),
+--       and whatever the plan, the runner rests first when hurt.
+--       A plan is the cheapest chain of actions (A* over the facts) from now to
 --       the goal's `want`; plans are made again on the agent's signals (an activity's end, a
 --       kill, a quest visit) and the client's (level up, quest log, death, zone), else every
 --       `replan_every` seconds.
@@ -62,12 +68,17 @@ local G = {
   -- An action that fails within this many seconds of starting is not tried again before its
   -- backoff is over, even by the standing goal that never idles.
   quick_fail = 2,
-  -- Health below this out of combat is hp_low; mana below `mana_below` is mana_low.
-  rest_below = 0.5, mana_below = 0.35,
-  -- Mobs this many levels above us still count for XP.
+  -- Health below this out of combat is hp_low; mana below `mana_below` is mana_low. Resting
+  -- goes on to `rest_until`.
+  rest_below = 0.7, mana_below = 0.4, rest_until = 0.9,
+  -- Mobs this many levels above us still count when reading how a zone suits us (zone_fit).
   above = 2,
   -- A walk that ends within this many yards of a quest's hand-in point has arrived at it.
   hand_in_reach = 60,
+  -- An objective's mob that is no safe pull is waited on this long before the objective is left;
+  -- an objective whose area is too dangerous is left alone for `danger_wait`; food is bought
+  -- with at least this much money (copper).
+  unsafe_wait = 20, danger_wait = 600, food_money = 50,
   failures = {}, current = nil, held = nil, after = nil,
 }
 
@@ -124,12 +135,20 @@ local function grey(lvl)
 end
 
 -- Whether a unit is worth fighting for XP: alive, not friendly, not someone else's tap, no NPC
--- service, and not grey nor too far above us.
+-- service, no elite, rare or critter, and inside the levels we pull (Survive.fits, Survive.band).
 function G.fits(u)
+  if Survive then return (Survive.fits(u)) end
   local lvl = level()
   return u.kind == "unit" and not u.dead and (u.reaction == "hostile" or u.reaction == "neutral")
     and not (u.tapped and not u.tapped_by_me) and not u.npc and u.level ~= nil
     and u.level > grey(lvl) and u.level <= lvl + G.above
+end
+
+-- Whether to start a fight with a unit now (Survive.pull_ok): ok, else why not.
+function G.safe(u, list)
+  if Survive then return Survive.pull_ok(u, list) end
+  if not G.fits(u) then return false, "not a mob for us" end
+  return true
 end
 
 -- Where mobs that fit were seen (one spot per 20 yards), for seek_mobs to walk back to.
@@ -261,6 +280,17 @@ function G.facts()
   return out, fact_errors
 end
 
+local FOOD_TITLES = { "food", "butcher", "baker", "bread", "meat", "cheese", "fruit", "fish", "mushroom",
+  "grocer", "cook", "bartender", "barmaid", "tavern", "drink", "waitress" }
+
+local function sells_food(title)
+  title = (title or ""):lower()
+  for _, word in ipairs(FOOD_TITLES) do
+    if title:find(word, 1, true) then return true end
+  end
+  return false
+end
+
 -- Remember where the NPCs we need stood, as a player remembers the trainer's house.
 local function remember(list)
   local class = UnitClass and UnitClass("player")
@@ -278,6 +308,8 @@ local function remember(list)
         elseif s == "vendor" and not (G.places.repair and G.places.repair.guid == u.guid) then
           G.places.vendor = place
         end
+        -- Innkeepers sell food and drink; so do the vendors whose title says so.
+        if s == "innkeeper" or (s == "vendor" and sells_food(u.title)) then G.places.food = place end
       end
     end
   end
@@ -349,7 +381,21 @@ end
 local BUILT_IN_FACTS = {
   { "in_combat", function() return UnitAffectingCombat("player") and true or false end },
   { "dead", function() return UnitIsDeadOrGhost("player") and true or false end },
-  { "hp_low", function() return ratio(UnitHealth("player"), UnitHealthMax("player")) < G.rest_below end },
+  { "hp_low", function()
+    local hp = ratio(UnitHealth("player"), UnitHealthMax("player"))
+    if hp < G.rest_below then return true end
+    if not Survive or hp >= G.rest_until then return false end
+    -- Above the mark, but every mob we could pull here wants more health than we have (they
+    -- are above our level): rest for them too.
+    local some = false
+    for _, u in ipairs(nearby()) do
+      if G.fits(u) and not Survive.crowded(u, nearby()) then
+        if hp >= Survive.health_for(u.level) then return false end
+        some = true
+      end
+    end
+    return some
+  end },
   { "mana_low", function()
     if UnitPowerType and UnitPowerType("player") ~= 0 then return false end
     return ratio(UnitPower("player", 0), UnitPowerMax("player", 0)) < G.mana_below
@@ -390,12 +436,25 @@ local BUILT_IN_FACTS = {
   { "vendor_known", function() return (place("repair") or place("vendor")) ~= nil end },
   -- Repairs need a repair NPC: any vendor buys junk, but only some fix gear.
   { "repair_known", function() return place("repair") ~= nil end },
+  { "gear_broken", function() return Survive ~= nil and Survive.weapon_broken() end },
+  { "pull_ok", function() return Survive == nil or (Survive.ready()) end },
+  { "recent_deaths", function() return Survive and Survive.recent_deaths() or 0 end },
+  { "food_vendor_known", function() return place("food") ~= nil end },
+  { "needs_food", function()
+    if not Survive or (GetMoney and GetMoney() or 0) < G.food_money then return false end
+    local mana_user = UnitPowerType ~= nil and UnitPowerType("player") == 0
+    return Survive.count("Food") == 0 or (mana_user and Survive.count("Drink") == 0)
+  end },
   { "mobs_for_xp", function()
     local any = false
     for _, u in ipairs(nearby()) do
       if G.fits(u) then
-        any = true
         G.sighted(u)
+        -- Our own state is the plan's business (rest, repair): here, only whether the mob is.
+        if not any and not (Survive and Survive.crowded(u, nearby()))
+          and not (Survive and u.x and Survive.death_near(u)) then
+          any = true
+        end
       end
     end
     return any
@@ -604,7 +663,7 @@ end
 -- The runner
 
 -- Ends that are not the action's fault: the backoff is for actions that fail on their own.
-local INTERRUPTIONS = { "^replaced by", "^died", "^hold", "^attacked" }
+local INTERRUPTIONS = { "^replaced by", "^died", "^hold", "^attacked", "^hurt", "^fled" }
 
 local function interrupted(why)
   for _, p in ipairs(INTERRUPTIONS) do
@@ -629,7 +688,10 @@ local function ended(ok, why)
   else
     local f = G.failures[key] or { n = 0 }
     f.n, f.why, f.quick = f.n + 1, why, now() - c.since < G.quick_fail
-    f.until_ = now() + math.min(G.retry_cap, G.retry_after * 2 ^ (f.n - 1))
+    local wait = math.min(G.retry_cap, G.retry_after * 2 ^ (f.n - 1))
+    -- A place that would kill us is not tried again in twenty seconds.
+    if tostring(why):find("^too dangerous") then wait = math.max(wait, G.danger_wait) end
+    f.until_ = now() + wait
     f.waiting = true
     G.failures[key] = f
     note(c.action.name .. " failed: " .. tostring(why))
@@ -671,6 +733,7 @@ register = function(action)
       local a = Agent.activity()
       if a and a.name == name then return true end
       return not UnitIsDeadOrGhost("player") and not UnitAffectingCombat("player") and not (Combat and Combat.active)
+        and not (Combat and Combat.fleeing)
     end,
     run = function()
       local goal = G.goals[offered[name] and offered[name].goal or "progress"] or G.goals.progress
@@ -698,6 +761,8 @@ end
 local function busy()
   if UnitIsDeadOrGhost("player") then return "dead" end
   if UnitAffectingCombat("player") or (Combat and Combat.active) then return "fighting" end
+  -- Running from a fight is still the fight: no walk of the runner's takes the legs over.
+  if Combat and Combat.fleeing then return "fleeing" end
   local a = Agent and Agent.activity and Agent.activity()
   if a then return "on " .. a.name end
   if Quests and Quests.busy and Quests.busy() then return "at a quest giver" end
@@ -783,8 +848,14 @@ local function tick(t)
   end
   for _, goal in ipairs(ordered()) do
     if goal.status == "active" and goal.plan[1] then
-      G.state = goal.name .. ": " .. goal.plan[1].name
-      return start(goal, goal.plan[1])
+      local action = goal.plan[1]
+      -- Hurt or dry: rest before anything else, whatever the plan (a walk meets mobs too).
+      local rest = G.actions.rest
+      if rest and action ~= rest and (last_facts.hp_low or last_facts.mana_low) and not G.cooling("rest") then
+        action = rest
+      end
+      G.state = goal.name .. ": " .. action.name
+      return start(goal, action)
     end
   end
   G.state = "nothing achievable"
@@ -792,10 +863,23 @@ end
 
 local frame = CreateFrame("Frame")
 for _, event in ipairs({ "PLAYER_LEVEL_UP", "QUEST_LOG_UPDATE", "PLAYER_DEAD", "PLAYER_ALIVE", "PLAYER_UNGHOST",
-  "PLAYER_REGEN_ENABLED", "ZONE_CHANGED_NEW_AREA", "PLAYER_ENTERING_WORLD", "MERCHANT_SHOW", "TRAINER_SHOW" }) do
+  "PLAYER_REGEN_ENABLED", "ZONE_CHANGED_NEW_AREA", "PLAYER_ENTERING_WORLD", "MERCHANT_SHOW", "TRAINER_SHOW",
+  "GOSSIP_SHOW" }) do
   frame:RegisterEvent(event)
 end
+-- What an NPC visit under way is there for ("trainer", "vendor"): a trainer or innkeeper who
+-- greets with a gossip window first is asked for it.
+local gossip_want
 frame:SetScript("OnEvent", function(_, event)
+  if event == "GOSSIP_SHOW" then
+    if gossip_want and G.current and GetGossipOptions and SelectGossipOption then
+      local options = { GetGossipOptions() }
+      for i = 1, #options / 2 do
+        if options[i * 2] == gossip_want then return SelectGossipOption(i) end
+      end
+    end
+    return
+  end
   dirty = true
   if event == "MERCHANT_SHOW" then G.merchant_at = now() end
 end)
@@ -1018,20 +1102,54 @@ local function objectives()
 end
 
 -- What the objective wants dealt with, in sight: a mob or an object of its name, or (an item
--- with no object of its name) a mob that fits near its area.
+-- with no object of its name) a mob that fits near its area. A mob that is a safe pull now
+-- (G.safe) comes before one that is not; the second return says why the one found is not.
 local function objective_target(o)
   local lower = o.name:lower()
+  local list = seen(100)
   local best
-  for _, u in ipairs(seen(60)) do
-    local named = u.name and u.name:lower() == lower
-    local fight = u.kind == "unit" and not u.dead and u.reaction ~= "friendly" and not (u.tapped and not u.tapped_by_me)
-    local ok = (named and (fight or u.kind == "gameobject"))
-      or (o.kind == "item" and fight and G.fits(u) and (not o.poi or far(u, o.poi) < 60))
-    if ok and (not best or (named and not best.named) or (named == best.named and u.distance < best.u.distance)) then
-      best = { u = u, named = named }
+  for _, u in ipairs(list) do
+    if u.distance <= 60 then
+      local named = u.name and u.name:lower() == lower
+      local fight = u.kind == "unit" and not u.dead and u.reaction ~= "friendly" and not (u.tapped and not u.tapped_by_me)
+      local ok = (named and (fight or u.kind == "gameobject"))
+        or (o.kind == "item" and fight and G.fits(u) and (not o.poi or far(u, o.poi) < 60))
+      if ok then
+        local safe, why = true, nil
+        if fight and u.kind == "unit" then safe, why = G.safe(u, list) end
+        local c = { u = u, named = named, safe = safe, why = why }
+        local better = not best
+        if best and c.safe ~= best.safe then
+          better = c.safe
+        elseif best and c.named ~= best.named then
+          better = c.named
+        elseif best then
+          better = u.distance < best.u.distance
+        end
+        if better then best = c end
+      end
     end
   end
-  return best and best.u
+  if not best then return nil end
+  return best.u, (not best.safe) and (best.why or "not a safe fight") or nil
+end
+
+-- Whether the hostiles in sight make this a place to stay out of: three or more, most of them
+-- above the levels we pull. Returns the reason, or nil.
+local function danger()
+  if not Survive then return nil end
+  local _, high = Survive.band()
+  local n, above, low, top = 0, 0, nil, nil
+  for _, u in ipairs(seen(70)) do
+    if u.kind == "unit" and not u.dead and u.reaction == "hostile" and u.level and not u.critter then
+      n = n + 1
+      if u.level > high then above = above + 1 end
+      low, top = math.min(low or u.level, u.level), math.max(top or u.level, u.level)
+    end
+  end
+  if n >= 3 and above * 2 > n then
+    return string.format("%d hostile mobs of level %d-%d here, and we pull to level %d", n, low, top, high)
+  end
 end
 
 -- The objective to work: one with something to do in sight, else the nearest with an area.
@@ -1057,7 +1175,7 @@ G.action({
   end,
   why = "Work a quest objective: go to its area, fight the mob or use the object it names.",
   pre = function(f)
-    if f.hp_low or f.mana_low or not f.objectives_open then return false end
+    if f.hp_low or f.mana_low or f.gear_broken or not f.objectives_open then return false end
     -- Once per planning pass: the search asks for every state it visits.
     if pass.objective == nil then pass.objective = pick_objective() or false end
     return pass.objective ~= false
@@ -1086,8 +1204,27 @@ G.action({
       local _, _, outcome = Combat.engaged(job.fighting)
       job.fighting = nil
       if outcome == "died" then return true, false, "died fighting" end
+      if outcome == "fled" then return true, false, "fled a fight" end
     end
-    local t = objective_target(o)
+    local t, unsafe = objective_target(o)
+    if t and unsafe then
+      -- Our own state first: hurt (a fight on the way) means rest, not giving the objective up.
+      local ready, why = true, nil
+      if Survive then ready, why = Survive.ready() end
+      if not ready then return true, false, "hurt: " .. tostring(why) end
+      -- The mob itself: stand off a little while (a patrol moves on, a pack spreads), then leave
+      -- the objective for later rather than die on it.
+      if walking() then Move.free() end
+      job.unsafe_since = job.unsafe_since or now()
+      if now() - job.unsafe_since < G.unsafe_wait then return false end
+      return true, false, string.format("%s is not a safe fight now: %s", tostring(t.name), unsafe)
+    end
+    job.unsafe_since = nil
+    -- Nothing to fight for it, and what is in sight would kill us: out, and not back for a while.
+    if not t or t.kind == "gameobject" then
+      local risk = danger()
+      if risk then return true, false, "too dangerous for now: " .. risk end
+    end
     if t then
       if walking() then Move.free() end
       if t.kind == "gameobject" then
@@ -1128,7 +1265,10 @@ local function npc_action(name, kind, why, pre, effects, finished)
   local st = {}
   G.action({
     name = name, why = why, pre = pre, effects = effects,
-    stop = function() Move.free() end,
+    stop = function()
+      gossip_want = nil
+      Move.free()
+    end,
     -- Further away costs more, but never so much that grinding beats it for good.
     cost = function()
       local p, pos = place(kind) or (kind == "repair" and place("vendor")), me()
@@ -1137,11 +1277,13 @@ local function npc_action(name, kind, why, pre, effects, finished)
     run = function()
       st = { since = now(), place = place(kind) or (kind == "repair" and place("vendor")) }
       assert(st.place, "no " .. kind .. " known")
+      gossip_want = kind == "trainer" and "trainer" or "vendor"
     end,
     done = function()
       local over, ok, reason = finished(st)
-      if over then return over, ok, reason end
-      return visit(st.place == G.places.vendor and "vendor" or kind, st)
+      if not over then over, ok, reason = visit(st.place == G.places.vendor and "vendor" or kind, st) end
+      if over then gossip_want = nil end
+      return over, ok, reason
     end,
     timeout = 900,
   })
@@ -1153,7 +1295,7 @@ npc_action("train", "trainer", "Learn the new ranks from our class trainer.",
 
 npc_action("sell_and_repair", "repair", "Sell the junk and repair at a merchant.",
   function(f) return (f.bags_full and f.vendor_known) or (f.needs_repair and f.repair_known) end,
-  { bags_full = false, needs_repair = false, progressed = true },
+  { bags_full = false, needs_repair = false, gear_broken = false, progressed = true },
   function(st)
     if not (G.merchant_at and G.merchant_at >= st.since) then return false end
     if now() - G.merchant_at < 1.5 then return false end
@@ -1163,13 +1305,22 @@ npc_action("sell_and_repair", "repair", "Sell the junk and repair at a merchant.
     return true, true
   end)
 
--- What to eat or drink from the bags: the item whose use is Food (health) or Drink (mana).
-local function provision(want)
-  for bag = 0, 4 do
-    for slot = 1, (GetContainerNumSlots(bag) or 0) do
-      local link = GetContainerItemLink(bag, slot)
-      local spell = link and GetItemSpell and GetItemSpell(link)
-      if spell == want or spell == "Refreshment" then return bag, slot end
+npc_action("buy_food", "food", "Buy food (and drink) where it is sold: eating between fights is how health comes back.",
+  { needs_food = true, food_vendor_known = true }, { needs_food = false, progressed = true },
+  function(st)
+    if not (G.merchant_at and G.merchant_at >= st.since) then return false end
+    if now() - G.merchant_at < 1.5 then return false end
+    if CloseMerchant then CloseMerchant() end
+    if G.facts().needs_food then return true, false, tostring(st.place.name) .. " sold nothing we can eat and afford" end
+    return true, true
+  end)
+
+-- A living hostile close enough to notice us where we stand (its aggro radius and a margin).
+local function hostile_close()
+  for _, u in ipairs(seen(60)) do
+    if u.kind == "unit" and not u.dead and u.reaction == "hostile" and not u.critter
+      and u.distance < (Survive and Survive.aggro(u.level) or 20) + 8 then
+      return u
     end
   end
 end
@@ -1178,48 +1329,66 @@ local rest = {}
 
 G.action({
   name = "rest",
-  why = "Eat, drink or sit until health and mana are back.",
+  stop = function()
+    Move.free()
+    if Survive then Survive.stand() end
+  end,
+  why = "Step clear of hostiles, then eat, drink, bandage or sit until health and mana are back.",
   pre = function(f) return (f.hp_low or f.mana_low) and not f.in_combat end,
-  effects = { hp_low = false, mana_low = false },
+  effects = { hp_low = false, mana_low = false, pull_ok = true },
   cost = 2,
   run = function()
     rest = { since = now() }
-    local used = false
-    for _, need in ipairs({ { "hp_low", "Food" }, { "mana_low", "Drink" } }) do
-      -- Not `cond and provision(...)`: `and` keeps only the first of provision's two returns.
-      local bag, slot
-      if last_facts[need[1]] then bag, slot = provision(need[2]) end
-      if bag then
-        UseContainerItem(bag, slot)
-        used = true
-      end
-    end
-    if not used and SitStandOrDescendStart then SitStandOrDescendStart() end
+    -- Not beside a mob that will wander over: move off first.
+    local p = hostile_close() and Survive and Survive.escape_point(nil)
+    if p and Move.to(p.x, p.y) then rest.moving = true end
   end,
   done = function()
     if UnitAffectingCombat("player") then return true, false, "attacked while resting" end
+    if rest.moving then
+      if walking() then return false end
+      rest.moving = nil
+    end
     local hp = ratio(UnitHealth("player"), UnitHealthMax("player"))
     local mana = (UnitPowerType and UnitPowerType("player") ~= 0) and 1 or ratio(UnitPower("player", 0), UnitPowerMax("player", 0))
-    if hp >= 0.95 and mana >= 0.95 then return true, true end
+    if hp >= G.rest_until and mana >= G.rest_until then
+      if Survive then Survive.stand() end
+      return true, true
+    end
+    if not rest.ate then
+      rest.ate = now()
+      rest.did = Survive and Survive.eat() or ""
+      note("rest: " .. tostring(rest.did))
+    elseif Survive and now() - rest.ate >= 25 and rest.did ~= "sat down" then
+      -- The food ran out before we were whole: the next one.
+      rest.ate, rest.did = now(), Survive.eat()
+    end
     return false
   end,
-  timeout = 90,
+  timeout = 240,
 })
 
 local grind = {}
 
 G.action({
   name = "grind",
-  why = "Fight the nearest mob in sight that gives XP.",
-  pre = function(f) return f.mobs_for_xp and not f.hp_low and not f.mana_low end,
+  why = "Fight the nearest mob in sight that gives XP and is a safe pull (alone, in our level band).",
+  pre = function(f) return f.mobs_for_xp and not f.hp_low and not f.mana_low and not f.gear_broken end,
   effects = { progressed = true },
   cost = function(f) return f.bags_full and 12 or 8 end,
   run = function()
-    local best
-    for _, u in ipairs(seen(100)) do
-      if G.fits(u) and (not best or u.distance < best.distance) then best = u end
+    local list = seen(100)
+    local best, why
+    for _, u in ipairs(list) do
+      if G.fits(u) then
+        local ok, reason = G.safe(u, list)
+        if ok and (not best or u.distance < best.distance) then best = u end
+        why = why or reason
+      end
     end
-    assert(best and Combat.engage(best.guid), "no mob in sight to fight")
+    assert(best, "no safe pull in sight" .. (why and (": " .. why) or ""))
+    local ok, refused = Combat.engage(best.guid)
+    assert(ok, "could not engage " .. tostring(best.name) .. ": " .. tostring(refused))
     grind.guid = best.guid
   end,
   stop = function() Combat.stop() end,
@@ -1261,13 +1430,13 @@ G.action({
   done = function()
     pass = {}
     for _, u in ipairs(nearby()) do
-      if G.fits(u) then
+      if G.safe(u, nearby()) then
         if walking() then Move.free() end
         return true, true
       end
     end
     if walking() then return false end
-    return true, false, "no mobs that give XP on the way"
+    return true, false, "no mobs that give XP and are safe to pull on the way"
   end,
   timeout = 120,
 })
@@ -1278,7 +1447,11 @@ G.action({
   name = "travel_to_zone",
   stop = function() Move.free() end,
   why = "Travel to a zone that suits our level (or the one a goal names).",
-  pre = function()
+  pre = function(f)
+    -- A zone that suits us is not left because nothing safe is in sight just now (a death has
+    -- lowered what we pull, a camp is too crowded): that is seek_mobs' to walk off. Leaving is
+    -- for a zone outgrown or too high, or the planner's choice (a goal's data.zone).
+    if f.zone_fit == "ok" and not top_zone_wish() then return false end
     if pass.travel == nil then pass.travel = travel_target(top_zone_wish()) or false end
     return pass.travel ~= false
   end,

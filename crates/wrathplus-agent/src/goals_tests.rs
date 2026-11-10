@@ -164,6 +164,7 @@ fn a_quest_objective_is_worked_before_grinding() {
         .run(
             "LOG = { { id = 7, title = 'Kobold Camp Cleanup', level = 4, objectives = { { 'Kobold Vermin slain: 0/10', 'monster', false } } } } \
              kobold = { guid = '0xK', name = 'Kobold Vermin', kind = 'unit', reaction = 'hostile', level = 3, x = 15, y = 0, z = 0, distance = 15 } \
+             wolf.x, wolf.distance = 70, 70 \
              units = { wolf, kobold } Goals.on = true",
         )
         .unwrap();
@@ -419,7 +420,7 @@ fn hurt_it_rests_eating_the_food_in_its_bags() {
              Goals.on = true",
         )
         .unwrap();
-    ticks(&mut script, 0.5);
+    ticks(&mut script, 1.0);
     assert_eq!(text(&script, "return doing()"), "goal:rest");
     assert_eq!(text(&script, "return table.concat(calls, ' ')"), "use 0,2");
 }

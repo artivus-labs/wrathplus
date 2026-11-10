@@ -78,7 +78,7 @@ export const ACTIONS: Record<string, Action> = {
     when: "They want you to attack, help with or kill what they are fighting or targeting.",
     lua: (s) => `local me for _, u in ipairs(AgentNearby(60)) do if u.name == ${q(s)} then me = u end end
       if not me or not me.target then return false, "they have no target I can see" end
-      return Combat.engage(me.target)`,
+      return Combat.engage(me.target, { force = true })`,
     ack: "On it.",
     done: "attacked their target",
   },

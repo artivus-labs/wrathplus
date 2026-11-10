@@ -202,3 +202,66 @@ fn a_visit_with_nothing_bought_says_why() {
         "nothing affordable at the trainer: 20c of skills, 5c in hand; nothing new at the trainer until level 6"
     );
 }
+
+#[test]
+fn a_better_weapon_of_the_same_kind_goes_on_and_a_refused_item_is_left_after_two_tries() {
+    let mut script = upkeep();
+    // A two-handed sword for a two-handed sword: worn. The hatchet (another kind) stays.
+    script
+        .run(
+            "ITEMS.claymore = { 'Claymore', 1, 13, 1, 'Weapon', 'Two-Handed Swords', 'INVTYPE_2HWEAPON', 900 } \
+             bags = { [0] = { 'axe', 'claymore' } }",
+        )
+        .unwrap();
+    for _ in 0..3 {
+        script.tick(1.1);
+    }
+    assert_eq!(calls(&script), "equip claymore 16");
+    // A bow the game will not let us wear (no skill): tried twice, then left in the bags.
+    script
+        .run(
+            "calls = {} ITEMS.bow = { 'Cracked Shortbow', 1, 3, 1, 'Weapon', 'Bows', 'INVTYPE_RANGED', 5 } \
+             bags = { [0] = { 'bow' } } \
+             EquipCursorItem = function(inv) calls[#calls + 1] = 'equip bow ' .. inv end",
+        )
+        .unwrap();
+    script.fire_event("BAG_UPDATE", vec![]);
+    for _ in 0..6 {
+        script.tick(1.1);
+    }
+    assert_eq!(calls(&script), "equip bow 18 | equip bow 18");
+}
+
+#[test]
+fn at_a_merchant_it_buys_food_it_can_eat_within_its_means() {
+    let mut script = upkeep();
+    script
+        .run(
+            "ITEMS.jerky = { 'Tough Jerky', 1, 5, 1, 'Consumable', 'Food & Drink', '', 6 } \
+             ITEMS.haunch = { 'Haunch of Meat', 1, 15, 5, 'Consumable', 'Food & Drink', '', 31 } \
+             ITEMS.water = { 'Refreshing Spring Water', 1, 5, 1, 'Consumable', 'Food & Drink', '', 6 } \
+             SHOP = { { 'jerky', 25, 5 }, { 'haunch', 125, 5 }, { 'water', 25, 5 } } \
+             GetMerchantNumItems = function() return #SHOP end \
+             GetMerchantItemLink = function(i) return SHOP[i][1] end \
+             GetMerchantItemInfo = function(i) return ITEMS[SHOP[i][1]][1], '', SHOP[i][2], SHOP[i][3], -1, 1 end \
+             GetItemSpell = function(link) if link == 'water' then return 'Drink' end if link == 'jerky' or link == 'haunch' then return 'Food' end end \
+             BuyMerchantItem = function(i, n) calls[#calls + 1] = 'buy ' .. SHOP[i][1] money = money - SHOP[i][2] end \
+             bags = { [0] = {} } money = 300 Upkeep.sell = false UnitPowerType = function() return 1 end",
+        )
+        .unwrap();
+    script.fire_event("MERCHANT_SHOW", vec![]);
+    // Level 4: the jerky (the haunch needs level 5), a third of 300c at 25c a stack of five; a
+    // warrior buys no water.
+    assert_eq!(
+        calls(&script),
+        "buy jerky | buy jerky | buy jerky | buy jerky"
+    );
+    let log: String = script.eval("return Upkeep.log[#Upkeep.log]").unwrap();
+    assert_eq!(log, "bought 20 Tough Jerky");
+    // Stocked already (the bags hold ten or more): nothing bought.
+    script
+        .run("calls = {} bags = { [0] = { 'jerky' } } GetContainerItemInfo = function() return nil, 12 end")
+        .unwrap();
+    script.fire_event("MERCHANT_SHOW", vec![]);
+    assert_eq!(calls(&script), "");
+}

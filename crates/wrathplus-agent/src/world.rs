@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 use wrathplus_app_core::app_core::session::{ObjectStore, SelfPlayer};
 use wrathplus_app_core::app_core::state::QuestGiver;
 use wrathplus_app_net::go_templates::GameObjectTemplates;
-use wrathplus_app_net::names::NameCache;
+use wrathplus_app_net::names::{gated_rank, NameCache};
 use wrathplus_app_net::net::{Guid, GuidIndex, NetEntity};
 use wrathplus_app_world::target::click::Interact;
 use wrathplus_app_world::target::{RelationInputs, SelectCommit};
@@ -53,6 +53,10 @@ pub(crate) struct Seen {
     pub title: Option<String>,
     /// The quest marker over it: "available", "incomplete" or "reward".
     pub quest: Option<&'static str>,
+    /// A creature's rank once its template is cached: "normal", "elite", "rareelite", "worldboss"
+    /// or "rare"; and whether it is a critter (`CreatureType.dbc` 8: a rabbit, a sheep).
+    pub classification: Option<&'static str>,
+    pub critter: bool,
     /// A player's quest log as the client has it (the server sends it for party members):
     /// quest ids, and whether each is complete.
     pub quests: Vec<(u32, bool)>,
@@ -150,6 +154,9 @@ fn reaction_name(ring: u8) -> Option<&'static str> {
     }
 }
 
+/// Creature ranks as `UnitClassification` words them (AzerothCore `CreatureEliteType` 0..4).
+pub(crate) const RANK_WORDS: [&str; 5] = ["normal", "elite", "rareelite", "worldboss", "rare"];
+
 /// Bevy (x right, y up, z back) to world coordinates, as `wrathplus_assets::coords::bevy_to_wow`.
 fn to_world(v: Vec3) -> [f32; 3] {
     [-v.z, -v.x, v.y]
@@ -223,10 +230,13 @@ pub(crate) fn snapshot(
                 s.tapped_by_me = fields.unit_tapped_by_player();
                 s.target = fields.unit_target().filter(|t| *t != 0);
                 s.npc = services(fields.unit_npc_flags());
-                s.title = names.as_ref().and_then(|n| {
-                    let entry = fields.object_entry()?;
-                    n.creature_subname(entry).map(str::to_owned)
-                });
+                let record = names
+                    .as_ref()
+                    .and_then(|n| n.creature_record(fields.object_entry()?));
+                s.title = record.and_then(|r| r.subname.clone());
+                let rank = record.map(|r| gated_rank(Some(r), Some(store)) as usize);
+                s.classification = rank.and_then(|r| RANK_WORDS.get(r).copied());
+                s.critter = record.is_some_and(|r| r.creature_type == 8);
             } else if net.kind == EntityKind::GameObject {
                 s.name = templates
                     .as_ref()
@@ -350,6 +360,8 @@ fn seen_table(lua: &Lua, s: &Seen) -> mlua::Result<Table> {
         t.set("npc", s.npc.clone())?;
     }
     t.set("quest", s.quest)?;
+    t.set("classification", s.classification)?;
+    t.set("critter", s.critter.then_some(true))?;
     t.set("go_type", s.go_type)?;
     if !s.quests.is_empty() {
         let quests = lua.create_table()?;
