@@ -2,7 +2,7 @@
 // would notice (a death, a whisper, an invite) into messages for the planner, batched so a burst
 // becomes one message.
 
-import type { Request, Triaged } from "./triage.ts";
+import type { Chatter, Request, Triaged } from "./triage.ts";
 
 export interface GameEvent {
   seq: number;
@@ -155,6 +155,23 @@ export function describe(events: GameEvent[], self?: string, kinds?: Set<string>
   return lines.filter((line, i) => lines.indexOf(line) === i);
 }
 
+/** Small talk: said to us in passing by someone who is not in our party. An NPC naming us, a line
+ *  in /say or /yell with our name (the realm's bots chatter this way; so may a stranger), an emote
+ *  aimed at us. The party's chat, whispers and NPC whispers are not small talk. */
+export function chatterOf(e: GameEvent, self?: string, party?: Set<string>, npcReplies = true): Chatter | null {
+  const text = String(e.args[0] ?? "");
+  const speaker = String(e.args[1] ?? "");
+  if (!speaker || speaker === self || party?.has(speaker.toLowerCase())) return null;
+  if (npcToUs(e, self)) return npcReplies ? { speaker, text, kind: "npc" } : null;
+  if ((e.event === "CHAT_MSG_SAY" || e.event === "CHAT_MSG_YELL") && addressed(e, self, party)) return { speaker, text, kind: "say" };
+  if (e.event === "CHAT_MSG_TEXT_EMOTE" || e.event === "CHAT_MSG_EMOTE") {
+    const atUs = /\byou\b/i.test(text) || (self !== undefined && text.toLowerCase().includes(self.toLowerCase()));
+    if (!atUs || text.startsWith("You ")) return null;
+    return { speaker, text: e.event === "CHAT_MSG_EMOTE" ? `${speaker} ${text}` : text, kind: "emote" };
+  }
+  return null;
+}
+
 /** A message meant for us that may be a request the fast tier can do itself. */
 export function requestOf(e: GameEvent, self?: string, party?: Set<string>): Request | null {
   const sender = String(e.args[1] ?? "");
@@ -179,6 +196,9 @@ export interface WatchOptions {
   npcReplies?: boolean;
   /** Sort a request before the planner hears it (`triage.ts`); a handled one does not wake it. */
   triage?: (request: Request) => Promise<Triaged>;
+  /** Sort small talk (`chatterOf`) instead of waking the planner for each line: returns the lines
+   *  that should wake it now; the rest is the caller's to hand over with the next wake-up. */
+  smallTalk?: (items: Chatter[]) => Promise<string[]>;
   /** What the fast tier did for the party, to hand over with the next wake-up. */
   onHandled?: (note: string) => void;
   /** Gather lines for this long after the first before sending (ms). */
@@ -230,7 +250,19 @@ export async function watch(options: WatchOptions): Promise<void> {
       const kept = handled.size ? batch.events.filter((e) => !handled.has(e.seq)) : batch.events;
       // The fast tier and wake-ups see what is left: a request done for the party wakes no one.
       if (kept.length) options.onEvents?.(kept);
-      const lines = [...describe(kept, options.self?.(), PLANNER_EVENTS, party, npc), ...notes, ...errors.notice(batch.events)];
+      // Small talk is sorted apart: it does not wake the planner line by line.
+      let news = kept;
+      let chatter: string[] = [];
+      if (options.smallTalk) {
+        const items: Chatter[] = [];
+        news = kept.filter((e) => {
+          const item = chatterOf(e, options.self?.(), party, npc);
+          if (item) items.push(item);
+          return !item;
+        });
+        if (items.length) chatter = await options.smallTalk(items);
+      }
+      const lines = [...describe(news, options.self?.(), PLANNER_EVENTS, party, npc), ...chatter, ...notes, ...errors.notice(batch.events)];
       const heard = overheard(batch.events, options.self?.(), party, npc);
       if (heard.length) options.onOverheard?.(heard);
       if (lines.length && !pending.length) flushAt = Date.now() + batchMs;

@@ -1,6 +1,7 @@
 import { describe as group, expect, test } from "bun:test";
 import { Inbox, summarize, TOOLS } from "../src/brain.ts";
 import { configFromEnv } from "../src/index.ts";
+import { SYSTEM_PROMPT, systemPrompt } from "../src/prompt.ts";
 import { describe, overheard, PLANNER_EVENTS, RepeatedErrors, watch, type GameEvent } from "../src/watch.ts";
 
 const event = (seq: number, name: string, args: unknown[] = []): GameEvent => ({ seq, time: seq, event: name, args });
@@ -160,6 +161,77 @@ group("events a player would notice", () => {
 });
 
 group("planner plumbing", () => {
+  test("small talk is sorted apart from the news: it wakes the planner only when the sorter says so", async () => {
+    let served = false;
+    const port = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      async fetch(request) {
+        const since = Number(new URL(request.url).searchParams.get("since"));
+        if (since >= 1_000_000) return Response.json({ events: [], next: 10, missed: 0 });
+        if (!served && since === 10) {
+          served = true;
+          return Response.json({
+            events: [
+              event(10, "CHAT_MSG_MONSTER_SAY", ["Mind the wolves, Agenttwo.", "Ma Stonefield"]),
+              event(11, "CHAT_MSG_SAY", ["Agenttwo, group for Hogger?", "Thrallson"]),
+              event(12, "CHAT_MSG_WHISPER", ["hi", "Dongle"]),
+              event(13, "CHAT_MSG_SAY", ["Agenttwo, this way", "Pallytest"]),
+            ],
+            next: 14,
+            missed: 0,
+          });
+        }
+        await Bun.sleep(50);
+        return Response.json({ events: [], next: since, missed: 0 });
+      },
+    });
+    const abort = new AbortController();
+    const messages: string[] = [];
+    const sorted: string[] = [];
+    const done = watch({
+      url: port.url.href.replace(/\/$/, ""),
+      token: "t",
+      batchMs: 100,
+      signal: abort.signal,
+      self: () => "Agenttwo",
+      party: () => new Set(["pallytest"]),
+      smallTalk: async (items) => {
+        sorted.push(...items.map((i) => `${i.kind} ${i.speaker}`));
+        return items.filter((i) => i.kind === "say").map((i) => `${i.speaker} says to you: ${i.text} (the fast loop judged this needs you)`);
+      },
+      onMessage: (m) => messages.push(m),
+    });
+    while (!messages.length) await Bun.sleep(20);
+    abort.abort();
+    await done;
+    port.stop(true);
+    expect(sorted).toEqual(["npc Ma Stonefield", "say Thrallson"]);
+    // The whisper and the party's /say wake it as ever; the NPC's line does not appear at all.
+    expect(messages).toEqual([
+      "Game events:\n- Dongle whispers: hi\n- Pallytest says: Agenttwo, this way\n- Thrallson says to you: Agenttwo, group for Hogger? (the fast loop judged this needs you)",
+    ]);
+  });
+
+  test("the prompt says early that nobody is there, and promises no person anywhere", () => {
+    const own = SYSTEM_PROMPT.indexOf("You are on your own");
+    expect(own).toBeGreaterThan(0);
+    expect(own).toBeLessThan(SYSTEM_PROMPT.indexOf("You act only through the client"));
+    expect(SYSTEM_PROMPT).toContain("There is no operator and no user.");
+    expect(SYSTEM_PROMPT).toContain("nobody will answer a question, approve a plan, give an instruction or log in");
+    expect(SYSTEM_PROMPT).toContain("is a decision you must take now with what you know: decide, note why in MEMORY.md, and act");
+    expect(SYSTEM_PROMPT).toContain('marked "Outside note". Such notes are rare and may never come');
+    expect(SYSTEM_PROMPT).not.toMatch(/operator notes|a person reading along/);
+    expect(SYSTEM_PROMPT).toContain("The goal runner is always on while you play");
+    // Shannon's lines stay.
+    expect(SYSTEM_PROMPT).toContain("Reflect regularly on your performance");
+    expect(SYSTEM_PROMPT).toContain("Work on your professions, skills, and abilities");
+    expect(SYSTEM_PROMPT).toContain("Keep your gear maintained");
+    expect(SYSTEM_PROMPT).toContain("Keep your spells and talents up to date");
+    expect(SYSTEM_PROMPT).toContain("Personality traits and behavior guidelines for your character");
+    expect(systemPrompt(false)).toContain("You are on your own");
+  });
+
   test("the inbox yields messages in order and ends when closed", async () => {
     const inbox = new Inbox();
     inbox.push("first");

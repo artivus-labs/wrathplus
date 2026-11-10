@@ -15,8 +15,14 @@
 --                      ...), headers skipped (GetQuestLogTitle's 3.3.5 order is
 --                      title, level, tag, suggestedGroup, isHeader, ..., questID).
 --   Quests.where(id)   where a logged quest's objectives are and where it is handed in, from the
---                      quest's map areas: { objectives = { { index, x, y }, ... }, hand_in = { x, y } }
---                      (nil until the client has them). Move.to(x, y) gets there.
+--                      quest's map areas (what the world map shades, and its "?" for a finished
+--                      quest): { objectives = { { index, x, y, map }, ... }, hand_in = { x, y, map } }
+--                      (nil until the server has answered; no hand_in when it has no area for
+--                      one). Move.to(x, y) gets there. The point is the area's centre, so the
+--                      NPC or object stands near it, not on it, and `map` is its continent.
+--   Quests.text(id)    what the quest log says to do ("Speak with Grimand Elmore in Stormwind."):
+--                      the name and place of whoever takes a finished quest, as a player reads
+--                      it. Stock 3.3.5 knows the hand-in from nothing else but the map area.
 --
 -- The fast tier is offered both as intents (pick_up_quests, hand_in_quests) whenever such a quest
 -- giver is near. Keeping in step: when the companion (Move.companion_now) picks up a quest or
@@ -36,12 +42,32 @@ function Q.where(id)
   local out = { objectives = {} }
   for _, p in ipairs(pois) do
     if p.objective == -1 then
-      out.hand_in = { x = p.x, y = p.y }
+      out.hand_in = { x = p.x, y = p.y, map = p.map }
     else
-      out.objectives[#out.objectives + 1] = { index = p.objective, x = p.x, y = p.y }
+      out.objectives[#out.objectives + 1] = { index = p.objective, x = p.x, y = p.y, map = p.map }
     end
   end
   return out
+end
+
+-- The quest log's objectives text for a logged quest. Reading it selects the entry, as opening
+-- the log does, so the selection is put back.
+function Q.text(id)
+  if not (SelectQuestLogEntry and GetQuestLogQuestText) then return nil end
+  local was = GetQuestLogSelection and GetQuestLogSelection()
+  local text
+  for i = 1, GetNumQuestLogEntries() or 0 do
+    local _, _, _, _, header, _, _, _, quest = GetQuestLogTitle(i)
+    if not header and quest == id then
+      SelectQuestLogEntry(i)
+      local _, objectives = GetQuestLogQuestText()
+      text = objectives
+      break
+    end
+  end
+  if was and GetQuestLogSelection() ~= was then SelectQuestLogEntry(was) end
+  if text == "" then return nil end
+  return text
 end
 
 local function did(text)

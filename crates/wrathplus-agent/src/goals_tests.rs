@@ -60,7 +60,7 @@ end
 function doing() local a = Agent.activity() return a and a.name or "idle" end
 "##;
 
-fn goals() -> UiScript {
+pub(super) fn goals() -> UiScript {
     let dir = std::env::temp_dir().join(format!("wp-agent-goals-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
@@ -70,11 +70,11 @@ fn goals() -> UiScript {
     script
 }
 
-fn text(script: &UiScript, lua: &str) -> String {
+pub(super) fn text(script: &UiScript, lua: &str) -> String {
     script.eval(lua).unwrap()
 }
 
-fn ticks(script: &mut UiScript, seconds: f32) {
+pub(super) fn ticks(script: &mut UiScript, seconds: f32) {
     let mut left = seconds;
     while left > 0.0 {
         script.tick(0.25);
