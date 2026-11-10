@@ -13,7 +13,7 @@ test("the goal tools send the Goals API's calls and say what happened", async ()
   const pushed = await call("push_goal", { name: "reach_westfall", why: "Elwynn is too easy now.", priority: 70, done_lua: 'return GetRealZoneText() == "Westfall"' });
   expect(pushed.text).toBe("Goal reach_westfall set. The goals tool shows its plan.");
   expect(sent[0]).toBe(pushGoalLua({ name: "reach_westfall", why: "Elwynn is too easy now.", priority: 70, done_lua: 'return GetRealZoneText() == "Westfall"' }));
-  expect(sent[0]).toContain('Goals.push{ name = "reach_westfall", why = [[\nElwynn is too easy now.]], priority = 70, done = [[\nreturn GetRealZoneText() == "Westfall"]] }');
+  expect(sent[0]).toContain('pcall(Goals.push, { name = "reach_westfall", why = [[\nElwynn is too easy now.]], priority = 70, done = [[\nreturn GetRealZoneText() == "Westfall"]] })');
 
   expect((await call("drop_goal", { name: "reach_westfall" })).text).toBe("Goal reach_westfall dropped.");
   expect(sent[1]).toBe(dropGoalLua("reach_westfall"));
@@ -109,4 +109,31 @@ test("a goal's want is sent as Lua facts, and unsafe fact names are dropped", ()
   const lua = pushGoalLua({ name: "to_westfall", why: "Elwynn is done.", want: { zone_fit: "ok", quest_ready: true, "bad name]]": 1 } });
   expect(lua).toContain("want = { zone_fit = [[\nok]], quest_ready = true }");
   expect(lua).not.toContain("bad name");
+});
+
+test("a travel goal names its zone, and a zone the client refuses is a tool error with its reason", async () => {
+  const sent: string[] = [];
+  const refusal =
+    "goal level_in_duskwood: Duskwood is levels 19-28, above you at level 11: a goal that travels there is refused. Zones that fit level 11: Westfall (12-17, 1500 yd).";
+  let answer: LuaResult = { ok: true, values: [false, refusal] };
+  const call = await connect(goalsServer(async (code) => (sent.push(code), answer)));
+  const refused = await call("push_goal", { name: "level_in_duskwood", why: "Duskwood is 10-18", zone: "Duskwood", want: { zone_fit: "ok" } });
+  expect(refused).toEqual({ text: `Failed: ${refusal}`, error: true });
+  expect(sent[0]).toContain("data = { zone = [[\nDuskwood]] }");
+  answer = { ok: true, values: [true] };
+  expect(await call("push_goal", { name: "to_westfall", why: "It fits.", zone: "Westfall" })).toEqual({
+    text: "Goal to_westfall set. The goals tool shows its plan.",
+    error: false,
+  });
+});
+
+test.skipIf(!Bun.which("luajit"))("a refused push comes back as false and the reason, not a Lua error", () => {
+  const stub = `Goals = { push = function(g) if g.data and g.data.zone == "Duskwood" then error("Duskwood is above you", 0) end end }
+local function run(code) local f = assert(loadstring(code)) return f() end`;
+  const script = `${stub}
+print(run(${JSON.stringify(pushGoalLua({ name: "dw", why: "x", zone: "Duskwood" }))}))
+print(run(${JSON.stringify(pushGoalLua({ name: "wf", why: "x", zone: "Westfall" }))}))`;
+  const out = Bun.spawnSync(["luajit", "-e", script]);
+  expect(out.stderr.toString()).toBe("");
+  expect(out.stdout.toString().trim().split("\n")).toEqual(["false\tDuskwood is above you", "true"]);
 });

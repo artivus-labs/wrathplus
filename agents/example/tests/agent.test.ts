@@ -232,6 +232,14 @@ group("planner plumbing", () => {
     expect(systemPrompt(false)).toContain("You are on your own");
   });
 
+  test("the prompt takes zone levels from Goals.zones() and routes travel through data.zone", () => {
+    expect(SYSTEM_PROMPT).toContain("a zone's levels come from Goals.zones()");
+    expect(SYSTEM_PROMPT).toContain("never from your memory of the game");
+    expect(SYSTEM_PROMPT).toContain("push_goal with zone set (the goal's data.zone)");
+    expect(SYSTEM_PROMPT).toContain("Never teach an action of your own that walks to another zone");
+    expect(SYSTEM_PROMPT).toContain("When a built-in keeps doing nothing, suspect your own modules first");
+  });
+
   test("the inbox yields messages in order and ends when closed", async () => {
     const inbox = new Inbox();
     inbox.push("first");

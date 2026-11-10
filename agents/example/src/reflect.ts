@@ -4,7 +4,10 @@
 // progress for a while), or, when nothing else has, a periodic review at a quiet moment. It gets a
 // digest of what happened since the last one, built from what the harness already sees (the game
 // events, fight reviews, goal and action signals, the fast loop's decisions and holds, idle time,
-// Lua errors) and a scoreboard to judge changes by.
+// Lua errors) and a scoreboard to judge changes by. Two checks point at the agent's own work: a
+// built-in that keeps ending as a no-op (AGENT_NOOP) is named with the modules the agent has
+// loaded, and a note in MEMORY.md that says there is nothing left to do is set against the live
+// facts that say otherwise.
 
 import type { Change, ModuleVersions } from "./modules.ts";
 import { line as changeLine } from "./modules.ts";
@@ -20,6 +23,9 @@ export interface XpSample {
 }
 
 export const XP_LUA = `return { level = UnitLevel("player") or 0, xp = UnitXP("player") or 0, max = UnitXPMax("player") or 0 }`;
+
+/** The goal planner's facts now (`Reflection.observe`), or false without wp.goals. */
+export const FACTS_LUA = "return Goals and Goals.facts() or false";
 
 /** What the fast tier has done, for the digest. */
 export interface FastTier {
@@ -47,6 +53,8 @@ export interface ReflectOptions {
   quiet?: () => boolean;
   fast?: () => FastTier | undefined;
   versions?: ModuleVersions;
+  /** The agent's MEMORY.md, read at each review. */
+  memory?: () => string;
 }
 
 /** The scoreboard: this window (since the last review) and the session. */
@@ -86,10 +94,18 @@ interface Window {
   holdsExpired: number;
   luaErrors: Map<string, number>;
   gameErrors: Map<string, number>;
+  noops: Map<string, Noop>;
   quests: number;
   pickedUp: number;
   xp: number;
   time: TimeShares;
+}
+
+/** A built-in that ended doing nothing: how often, the last line it gave, the modules loaded then. */
+interface Noop {
+  count: number;
+  last: string;
+  modules: string[];
 }
 
 const zeroTime = (): TimeShares => ({ busy: 0, idle: 0, hold: 0, other: 0 });
@@ -106,6 +122,7 @@ export class Reflection {
   #failuresFlagged = false;
   #combat = false;
   #timeAtReview: TimeShares = zeroTime();
+  #facts: Record<string, unknown> | undefined;
   reviews = 0;
 
   constructor(readonly options: ReflectOptions) {
@@ -134,6 +151,7 @@ export class Reflection {
       holdsExpired: 0,
       luaErrors: new Map(),
       gameErrors: new Map(),
+      noops: new Map(),
       quests: 0,
       pickedUp: 0,
       xp: 0,
@@ -226,6 +244,18 @@ export class Reflection {
         case "AGENT_LUA":
           if (a[1] === false) bump(w.luaErrors, `${String(a[2]).slice(0, 160)} (in: ${String(a[0]).slice(0, 60)})`);
           break;
+        case "AGENT_NOOP": {
+          const what = String(a[0]);
+          const noop = w.noops.get(what) ?? { count: 0, last: "", modules: [] };
+          noop.count++;
+          noop.last = String(a[1] ?? "");
+          noop.modules = String(a[2] ?? "")
+            .split(",")
+            .map((m) => m.trim())
+            .filter(Boolean);
+          w.noops.set(what, noop);
+          break;
+        }
         case "UI_ERROR_MESSAGE":
           if (typeof a[0] === "string") bump(w.gameErrors, a[0]);
           break;
@@ -258,6 +288,11 @@ export class Reflection {
       this.#session.xp += gained;
       this.#progress();
     }
+  }
+
+  /** The goal planner's facts now (sampled every minute or so), for the notes check. */
+  observe(facts: Record<string, unknown>): void {
+    this.#facts = facts;
   }
 
   /** Call now and then (every 15 s or so): fires a review when one is due. */
@@ -316,7 +351,10 @@ export class Reflection {
     const now = this.#now();
     const reasons = this.#pending.size ? [...this.#pending] : ["asked for"];
     const score = this.score();
-    const text = digest(reasons, this.#window, score, this.options.fast?.(), this.options.versions?.changelog(undefined, 200) ?? []);
+    const text = digest(reasons, this.#window, score, this.options.fast?.(), this.options.versions?.changelog(undefined, 200) ?? [], {
+      memory: this.options.memory?.() ?? "",
+      ...(this.#facts ? { facts: this.#facts } : {}),
+    });
     this.reviews++;
     this.#pending.clear();
     this.#failuresFlagged = false;
@@ -339,7 +377,14 @@ const top = (map: Map<string, number>, n = 5) =>
 const clock = (ms: number) => new Date(ms).toISOString().slice(11, 16);
 
 /** The reflection turn's text. */
-export function digest(reasons: string[], w: Window, score: Score, fast: FastTier | undefined, changes: Change[]): string {
+export function digest(
+  reasons: string[],
+  w: Window,
+  score: Score,
+  fast: FastTier | undefined,
+  changes: Change[],
+  notes: { memory?: string; facts?: Record<string, unknown> } = {},
+): string {
   const out: string[] = [];
   out.push(`Reflection (${reasons.join("; ")}). Since your last review, ${score.window_minutes} min ago:`);
   const stall = stalled(score, w);
@@ -368,6 +413,10 @@ export function digest(reasons: string[], w: Window, score: Score, fast: FastTie
     goals.push(`- Failed actions: ${top(byWhat).join(", ")}`);
   }
   if (goals.length) out.push(`Goals and actions:\n${goals.join("\n")}`);
+  const noops = noopLine(w.noops);
+  if (noops) out.push(noops);
+  const disagree = contradiction(notes.memory ?? "", notes.facts);
+  if (disagree) out.push(disagree);
   if (fast) {
     const since = w.since;
     const decisions = fast.decisions.filter((d) => d.at >= since);
@@ -397,6 +446,47 @@ export function digest(reasons: string[], w: Window, score: Score, fast: FastTie
   }
   out.push(stall ? STALL_GUIDANCE : GUIDANCE);
   return out.join("\n\n");
+}
+
+/** A built-in that ended as a no-op this many times in a window gets a line of its own. */
+export const NOOP_REPEATS = 2;
+
+/** The built-ins that kept doing nothing, with the agent's loaded modules as the first suspects. */
+export function noopLine(noops: Map<string, Noop>): string | null {
+  const repeated = [...noops].filter(([, n]) => n.count >= NOOP_REPEATS);
+  if (!repeated.length) return null;
+  const modules = [...new Set(repeated.flatMap(([, n]) => n.modules))];
+  return [
+    "Built-ins that keep doing nothing:",
+    ...repeated.map(([what, n]) => `- ${what} ×${n.count}, last: ${n.last}`),
+    `Your own modules loaded in the client: ${modules.length ? modules.join(", ") : "none"}. Does one of them cause this: a handler that declines, closes or skips what the built-in does, or a wrapper that replaces it? Read them (modules) before you blame the built-in or the game, and fix or roll back the one that does, rather than adding another.`,
+  ].join("\n");
+}
+
+/** Words in a note that say there is nothing left to do somewhere. */
+export const NOTHING_LEFT =
+  /\b(exhausted|unreachable|nothing (?:left )?to do|nothing left|no quests? left|(?:does|do) not exist|(?:does|do)n't exist|no (?:safe )?xp)\b/i;
+
+/** The live facts that say there is something to do, as the planner would put them. */
+const SOMETHING_TO_DO: [string, string][] = [
+  ["quest_giver_near", "a quest giver in reach has a quest for you"],
+  ["hand_in_near", "a quest giver in reach takes a finished quest"],
+  ["objectives_open", "your quest log has objectives still open"],
+  ["mobs_for_xp", "mobs that give you XP are in sight"],
+];
+
+/** A note in MEMORY.md that says nothing is left, while the live facts say there is something. */
+export function contradiction(memory: string, facts: Record<string, unknown> | undefined): string | null {
+  if (!facts) return null;
+  const live = SOMETHING_TO_DO.filter(([fact]) => facts[fact] === true);
+  const lines = memory
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => NOTHING_LEFT.test(l));
+  if (!live.length || !lines.length) return null;
+  const quote = (l: string) => `"${l.length > 160 ? `${l.slice(0, 157)}...` : l}"`;
+  const more = lines.length > 2 ? ` (and ${lines.length - 2} more lines like them)` : "";
+  return `Your notes and the game disagree. MEMORY.md says ${lines.slice(-2).map(quote).join(" and ")}${more}, but the client says now: ${live.map(([fact, text]) => `${text} (${fact})`).join("; ")}. The facts are live and the note is old: check the note against them, and correct or remove it (memory_write) before you act on it.`;
 }
 
 /** A window spent standing still: this share of it idle or on hold is THE problem of the review. */

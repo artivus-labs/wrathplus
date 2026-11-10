@@ -46,7 +46,10 @@
 --   the reason stays the same) or Goals.release(). Goals.holding() → reason, waited, remaining.
 -- Zones: Goals.zones() → the zones on this continent we may level in (AgentZones: our faction's
 --   and contested, no capitals), each with `fit` against our level and `distance`. The planner can
---   push its own travel goal: a goal's `data.zone` names the zone travel_to_zone heads for.
+--   push its own travel goal: a goal's `data.zone` names the zone travel_to_zone heads for. A
+--   data.zone that is not in that list, or whose fit is "high", is refused by Goals.push with the
+--   zones that fit. An action the planner taught (not built in) that walks into a zone above us
+--   is stopped there and fails with the same list.
 --
 -- `Goals.state` says what the runner is doing; `Goals.log` keeps its last few lines.
 
@@ -153,8 +156,35 @@ local function goal_text(goal)
   return table.concat(parts, ", ")
 end
 
+-- Why a goal may not send us to `name`, or nil: it must be a zone we may level in on this
+-- continent, and not one above us. Levels come from the client's tables (Goals.zones()), never
+-- from anyone's memory of them. No zone table (no client data) is nothing to check against.
+local function zone_refusal(name)
+  local zones = G.zones()
+  if #zones == 0 then return nil end
+  local target, fits = nil, {}
+  for _, z in ipairs(zones) do
+    if z.name == name then target = z end
+    if z.fit == "ok" then
+      fits[#fits + 1] = string.format("%s (%d-%d%s)", z.name, z.min, z.max, z.distance and (", " .. z.distance .. " yd") or "")
+    end
+  end
+  local fit = "Zones that fit level " .. level() .. ": " .. (#fits > 0 and table.concat(fits, ", ") or "none on this continent")
+    .. ". Zone levels come from Goals.zones(), not from memory."
+  if not target then return "no zone named " .. name .. " to level in on this continent. " .. fit end
+  if target.fit == "high" then
+    return string.format("%s is levels %d-%d, above you at level %d: a goal that travels there is refused. %s",
+      name, target.min, target.max, level(), fit)
+  end
+end
+
 function G.push(spec)
   assert(type(spec) == "table" and valid_name(spec.name), "goal names are snake_case words")
+  local zone = spec.data and spec.data.zone
+  if zone ~= nil then
+    local why = zone_refusal(tostring(zone))
+    if why then error("goal " .. spec.name .. ": " .. why, 0) end
+  end
   local done = spec.done and compile(spec.done, "goal " .. spec.name)
   assert(done == nil or type(done) == "function", "goal " .. spec.name .. ": done is a function")
   local goal = {
@@ -254,9 +284,13 @@ local function place(kind)
   return p
 end
 
+-- A giver in reach marked for us, leaving out those a visit just found had nothing (Quests.skipping).
 local function marker(kind)
   for _, u in ipairs(nearby()) do
-    if u.quest == kind and not u.dead and u.distance <= ((Quests and Quests.reach) or 30) then return u end
+    if u.quest == kind and not u.dead and u.distance <= ((Quests and Quests.reach) or 30)
+      and not (Quests and Quests.skipping and Quests.skipping(u.guid)) then
+      return u
+    end
   end
 end
 
@@ -625,7 +659,8 @@ register = function(action)
     run = function()
       local goal = G.goals[offered[name] and offered[name].goal or "progress"] or G.goals.progress
       local args = { goal = goal.name, data = goal.data, facts = last_facts }
-      G.current = { goal = goal.name, action = action, intent = name, args = args, since = now() }
+      local z = current_zone()
+      G.current = { goal = goal.name, action = action, intent = name, args = args, since = now(), zone = z and z.name }
       note("start " .. action.name .. " for " .. goal.name)
       local result = action.run(args)
       -- An action without `done` ends as `run` returns, unannounced by Agent.
@@ -689,8 +724,28 @@ local function check_hold(t)
   if G.after and t >= G.after.until_ then G.after = nil end
 end
 
+-- An action the planner taught that walks into a zone above us is stopped at its edge: travel
+-- goes through a goal's data.zone and travel_to_zone, whose zone Goals.push checks. A built-in
+-- action is not stopped (travel_to_zone's target was checked; a quest walk is the quest's).
+local function check_zone(c)
+  if not c or c.action.built_in then return end
+  local a = Agent.activity()
+  if not a or a.name ~= c.intent then return end
+  local z = current_zone()
+  if not z or z.name == c.zone or level() >= z.min - 1 then return end
+  if Move and Move.free then Move.free() end
+  if AgentStop then AgentStop() end
+  local fits = {}
+  for _, other in ipairs(G.zones()) do
+    if other.fit == "ok" then fits[#fits + 1] = string.format("%s (%d-%d)", other.name, other.min, other.max) end
+  end
+  Agent.stop(string.format("walked into %s, levels %d-%d, above you at level %d: stopped there. Zones that fit: %s. Travel with a goal's data.zone (travel_to_zone), not an action of your own.",
+    z.name, z.min, z.max, level(), #fits > 0 and table.concat(fits, ", ") or "none on this continent"))
+end
+
 local function tick(t)
   check_hold(t)
+  check_zone(G.current)
   if not G.on then return end
   -- A backed-off action may be tried again now.
   for _, f in pairs(G.failures) do
@@ -859,6 +914,7 @@ G.action({
     G.last_visit = nil
     if marker("reward") then
       quest_visit.talking = true
+      Quests.attempt("reward")
       return Quests.hand_in()
     end
     for _, q in ipairs(Quests.list()) do
@@ -879,6 +935,7 @@ G.action({
       if marker("reward") then
         if walking() then Move.free() end
         quest_visit.talking = true
+        Quests.attempt("reward")
         Quests.hand_in()
       elseif not walking() then
         local arrived, outcome = walk_over()
@@ -887,6 +944,7 @@ G.action({
       return false
     end
     if Quests.busy() then return false end
+    Quests.settle()
     local v = G.last_visit
     if v and (v.handed or 0) + (v.picked or 0) > 0 then return true, true end
     return true, false, "handed nothing in"
@@ -902,10 +960,12 @@ G.action({
   cost = 2,
   run = function()
     G.last_visit = nil
+    Quests.attempt("available")
     Quests.pick_up()
   end,
   done = function()
     if Quests.busy() then return false end
+    Quests.settle()
     local v = G.last_visit
     if v and (v.picked or 0) + (v.handed or 0) > 0 then return true, true end
     return true, false, "took nothing"
@@ -1229,6 +1289,9 @@ G.action({
   end,
   timeout = 1800,
 })
+
+-- Everything defined so far is built in; an action the planner teaches (or redefines) is not.
+for _, a in pairs(G.actions) do a.built_in = true end
 
 G.push({ name = "progress", standing = true, priority = 0, want = { progressed = true },
   why = "Keep levelling: quests first, then training and upkeep, else grind, else find a better place." })

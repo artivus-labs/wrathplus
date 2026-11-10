@@ -23,6 +23,14 @@
 --   Quests.text(id)    what the quest log says to do ("Speak with Grimand Elmore in Stormwind."):
 --                      the name and place of whoever takes a finished quest, as a player reads
 --                      it. Stock 3.3.5 knows the hand-in from nothing else but the map area.
+--   Quests.attempt(kind) / Quests.settle()   bracket one visit ("available" or "reward"); the
+--                      intents and goal actions below call them around pick_up / hand_in, so a
+--                      module that replaces those is still seen to take nothing. A visit that
+--                      leaves the quest log as it was backs off every giver it talked to:
+--                      Quests.skipping(guid) is true for `skip_base` seconds, doubling on each
+--                      repeat up to `skip_cap`, and a changed quest log or level forgets them all.
+--                      Each back-off is a line in Quests.log and AGENT_NOOP (intent, line, the
+--                      agent's own loaded modules); Quests.skipped() lists who is skipped now.
 --
 -- The fast tier is offered both as intents (pick_up_quests, hand_in_quests) whenever such a quest
 -- giver is near. Keeping in step: when the companion (Move.companion_now) picks up a quest or
@@ -30,7 +38,8 @@
 -- a quest a party member shares is accepted (`accept_shared`). In a party, a visit ends with a
 -- line in party chat of what it handed in and picked up (`announce`).
 
-local Q = { reach = 30, accept_shared = true, announce = true, state = nil, log = {} }
+local Q = { reach = 30, accept_shared = true, announce = true, state = nil, log = {},
+  skip_base = 120, skip_cap = 1800 }
 
 local job, npc, since, asked
 -- This visit's quests, for the line in party chat when it ends.
@@ -75,11 +84,33 @@ local function did(text)
   if #Q.log > 5 then table.remove(Q.log, 1) end
 end
 
--- The nearest quest giver within reach whose marker says it has something of `kind` for us.
+-- Givers backed off after a visit that changed nothing: guid -> { name, n, until_ }.
+local skipped = {}
+
+function Q.skipping(guid)
+  local s = skipped[guid]
+  return s ~= nil and GetTime() < s.until_
+end
+
+function Q.skipped()
+  local out, now = {}, GetTime()
+  for _, s in pairs(skipped) do
+    if now < s.until_ then
+      out[#out + 1] = string.format("%s (%s, %d min left)", s.name, s.what, math.ceil((s.until_ - now) / 60))
+    end
+  end
+  table.sort(out)
+  return out
+end
+
+-- The nearest quest giver within reach whose marker says it has something of `kind` for us, and
+-- who is not backed off.
 local function giver(kind)
   local best
   for _, u in ipairs(AgentNearby(Q.reach)) do
-    if u.quest == kind and not u.dead and (not best or u.distance < best.distance) then best = u end
+    if u.quest == kind and not u.dead and not Q.skipping(u.guid) and (not best or u.distance < best.distance) then
+      best = u
+    end
   end
   return best
 end
@@ -135,6 +166,57 @@ function Q.busy()
   return job ~= nil
 end
 
+-- What a visit can change: our level and which quests are in the log, finished or not.
+local function signature()
+  local parts = {}
+  local ok, list = pcall(Q.list)
+  for _, q in ipairs(ok and list or {}) do parts[#parts + 1] = tostring(q.id) .. (q.complete and "+" or "") end
+  table.sort(parts)
+  return tostring(UnitLevel and UnitLevel("player") or 0) .. ":" .. table.concat(parts, " ")
+end
+
+local attempt, skipped_at
+
+function Q.attempt(kind)
+  attempt = { kind = kind, sig = signature(), givers = {} }
+  local u = giver(kind)
+  if u then attempt.givers[u.guid] = u.name or "?" end
+end
+
+-- The agent's own modules loaded now: what to suspect when a built-in keeps doing nothing.
+local function own_modules()
+  local out = {}
+  for name in pairs(__wp_loaded or {}) do
+    if not tostring(name):find("^wp%.") then out[#out + 1] = tostring(name) end
+  end
+  table.sort(out)
+  return table.concat(out, ", ")
+end
+
+-- The visit is over: with the quest log as it was, every giver it talked to is backed off.
+-- Returns whether the visit changed anything.
+function Q.settle()
+  local a = attempt
+  attempt = nil
+  if not a then return true end
+  local sig = signature()
+  if sig ~= a.sig then return true end
+  if skipped_at ~= sig then skipped, skipped_at = {}, sig end
+  local what = a.kind == "available" and "offered nothing we took" or "took nothing we handed in"
+  for guid, name in pairs(a.givers) do
+    local s = skipped[guid] or { n = 0 }
+    local seconds = math.min(Q.skip_cap, Q.skip_base * 2 ^ s.n)
+    s.n, s.name, s.what, s.until_ = s.n + 1, name, what, GetTime() + seconds
+    skipped[guid] = s
+    local line = string.format("%s %s; skipping them for %d min", name, what, math.floor(seconds / 60 + 0.5))
+    did(line)
+    if Agent and Agent.signal then
+      Agent.signal("NOOP", a.kind == "available" and "pick_up_quests" or "hand_in_quests", line, own_modules())
+    end
+  end
+  return false
+end
+
 -- The reward to take: an upgrade we would wear, else the one that sells for most.
 local function reward()
   local n = GetNumQuestChoices() or 0
@@ -151,10 +233,16 @@ end
 
 local frame = CreateFrame("Frame")
 for _, event in ipairs({ "GOSSIP_SHOW", "QUEST_GREETING", "QUEST_DETAIL", "QUEST_PROGRESS",
-  "QUEST_COMPLETE", "QUEST_ACCEPT_CONFIRM" }) do
+  "QUEST_COMPLETE", "QUEST_ACCEPT_CONFIRM", "QUEST_LOG_UPDATE", "PLAYER_LEVEL_UP" }) do
   frame:RegisterEvent(event)
 end
 frame:SetScript("OnEvent", function(_, event)
+  if event == "QUEST_LOG_UPDATE" or event == "PLAYER_LEVEL_UP" then
+    -- A new quest, one finished or dropped, or a level: the backed-off givers may have more now.
+    -- (PLAYER_LEVEL_UP comes before UnitLevel has the new level, so it clears at once.)
+    if next(skipped) and (event == "PLAYER_LEVEL_UP" or signature() ~= skipped_at) then skipped, skipped_at = {}, nil end
+    return
+  end
   if event == "QUEST_ACCEPT_CONFIRM" then
     if Q.accept_shared then ConfirmAcceptQuest() end
     return
@@ -269,6 +357,7 @@ frame:SetScript("OnUpdate", function(_, dt)
   if not asked or now - asked >= 4 then
     asked = now
     AgentInteract(current.guid)
+    if attempt then attempt.givers[current.guid] = current.name or "?" end
   end
   Q.state = (job == "available" and "picking up quests from " or "handing in quests to ") .. (current.name or "?")
 end)
@@ -277,22 +366,36 @@ if Agent and Agent.intent then
   local function names(kind)
     local out = {}
     for _, u in ipairs(AgentNearby(Q.reach)) do
-      if u.quest == kind and not u.dead then out[#out + 1] = u.name or "?" end
+      if u.quest == kind and not u.dead and not Q.skipping(u.guid) then out[#out + 1] = u.name or "?" end
     end
     return table.concat(out, ", ")
   end
   Agent.intent("pick_up_quests", {
     when = function() return "Quest givers nearby have quests for you (" .. names("available") .. "): pick them up." end,
     available = function() return giver("available") ~= nil end,
-    run = function() Q.pick_up() end,
-    done = function() return not Q.busy() end,
+    run = function()
+      Q.attempt("available")
+      Q.pick_up()
+    end,
+    done = function()
+      if Q.busy() then return false end
+      Q.settle()
+      return true
+    end,
     timeout = 120,
   })
   Agent.intent("hand_in_quests", {
     when = function() return "You have finished quests to hand in nearby (" .. names("reward") .. ")." end,
     available = function() return giver("reward") ~= nil end,
-    run = function() Q.hand_in() end,
-    done = function() return not Q.busy() end,
+    run = function()
+      Q.attempt("reward")
+      Q.hand_in()
+    end,
+    done = function()
+      if Q.busy() then return false end
+      Q.settle()
+      return true
+    end,
     timeout = 120,
   })
 end

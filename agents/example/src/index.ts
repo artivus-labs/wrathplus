@@ -20,7 +20,7 @@ import { claudeAuth, loadEnv } from "./env.ts";
 import { Notes } from "./notes.ts";
 import { Policy } from "./policy.ts";
 import { kickoff } from "./prompt.ts";
-import { Reflection, XP_LUA, type XpSample } from "./reflect.ts";
+import { FACTS_LUA, Reflection, XP_LUA, type XpSample } from "./reflect.ts";
 import { RunnerLock } from "./runner.ts";
 import { SmallTalk, Triage } from "./triage.ts";
 import { HoldGate, idleWakeRefusal } from "./waits.ts";
@@ -151,6 +151,7 @@ export async function runAgent(config: Config, options: RunOptions): Promise<voi
           quiet: () => !inTurn,
           fast: () => (policy ? { decisions: policy.decisions, holds: policy.holds, time: policy.time } : undefined),
           versions,
+          memory: () => notes.memory(),
           periodMs: Number(process.env.WRATHPLUS_AGENT_REFLECT_MINUTES ?? 30) * 60_000,
         });
   if (reflection) {
@@ -162,6 +163,12 @@ export async function runAgent(config: Config, options: RunOptions): Promise<voi
           .then((r) => {
             const xp = r.ok ? (r.values?.[0] as XpSample | undefined) : undefined;
             if (xp && typeof xp.level === "number") reflection.sample(xp);
+          })
+          .catch(() => undefined);
+        void lua(FACTS_LUA)
+          .then((r) => {
+            const facts = r.ok ? r.values?.[0] : undefined;
+            if (facts && typeof facts === "object") reflection.observe(facts as Record<string, unknown>);
           })
           .catch(() => undefined);
       }

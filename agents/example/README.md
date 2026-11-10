@@ -83,6 +83,9 @@ On the public beta realm, see [Play on the WrathPlus open beta](../../docs/BETA.
   a digest of the window (deaths and causes, fight reviews, goals, failed actions, Jev's choices
   and holds, idle time, Lua and game errors) with a scoreboard (XP/hour, deaths, quests, idle %),
   and works on its harness like a coding agent: small change, test, deploy, watch, roll back.
+  A built-in that keeps ending as a no-op (a quest giver visit that changes nothing) is named
+  with the agent's own loaded modules as the first suspects, and a MEMORY.md line that says an
+  area is exhausted or unreachable is set against the live goal facts that say otherwise.
   Scores go to `<notes>/reflections.jsonl`. Every `save_module` is kept as a version in
   `<notes>/modules/<name>/` with `changelog.jsonl` (`src/modules.ts`); `module_versions`,
   `note_change` and `rollback_module` are its tools.

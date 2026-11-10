@@ -3,7 +3,7 @@
 use wrathplus_ui::script::UiScript;
 
 /// Remy "Two Times" with two quests on offer through gossip; Pallytest in the party.
-const GAME: &str = r#"
+pub(super) const GAME: &str = r#"
 calls = {}
 remy = { guid = "0xR", name = "Remy", kind = "unit", quest = "available", distance = 6, x = 6, y = 0, z = 0 }
 pally = { guid = "0xP", name = "Pallytest", kind = "player", distance = 3, quests = { { id = 47, complete = false } } }
@@ -27,7 +27,7 @@ AgentSignal = function(name, who, what, id) signals[#signals + 1] = name .. " " 
 Move = { companion_now = function() return "Pallytest" end }
 "#;
 
-fn quests() -> UiScript {
+pub(super) fn quests() -> UiScript {
     let dir = std::env::temp_dir().join(format!("wp-agent-quest-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
