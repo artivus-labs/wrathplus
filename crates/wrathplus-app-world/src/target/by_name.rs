@@ -100,6 +100,17 @@ fn common_prefix_len(query: &str, name: &str) -> usize {
         .count()
 }
 
+/// A follow that resolves nobody (`0x522590`-`0x5225c7`): an empty token, or `target`
+/// (`_strnicmp`, `0x76e780`), is `0xc7` `ERR_GENERIC_NO_TARGET`; anything else `0x13a`
+/// `ERR_UNIT_NOT_FOUND`.
+fn follow_miss_key(text: &str) -> &'static str {
+    if text.is_empty() || text.eq_ignore_ascii_case("target") {
+        "ERR_GENERIC_NO_TARGET"
+    } else {
+        "ERR_UNIT_NOT_FOUND"
+    }
+}
+
 /// The follow start gate (`0x60fed0`'s mode-3 chain) as a pure function, its order pinned by test:
 ///
 /// | check | site | failure |
@@ -501,7 +512,12 @@ pub(super) fn follow_requests(
             }
             None => {
                 // No subject by name or token: a follow in progress is left alone.
-                info!("follow: nothing to follow");
+                let key = follow_miss_key(match request {
+                    crate::player::FollowRequest::Unit(text)
+                    | crate::player::FollowRequest::Name { name: text, .. } => text,
+                });
+                info!("follow: nothing to follow — {key}");
+                errors.0.push(crate::app_core::errors::UiError::key(key));
             }
         }
     }
@@ -684,7 +700,7 @@ mod tests {
     }
 
     /// A dead player following a creature sees `ERR_INVALID_FOLLOW_TARGET`, not `ERR_PLAYER_DEAD`:
-    /// the two followee checks come first and share message `0x128`.
+    /// the two followee checks come first and share message `0x128`. A miss names its own line.
     #[test]
     fn the_follow_gate_refuses_in_the_references_own_order() {
         // The clean case.
@@ -722,6 +738,9 @@ mod tests {
             follow_refusal_key(true, true, true, true, true),
             Some("ERR_PLAYER_DEAD")
         );
+        // A miss: no target, then any other unresolved text.
+        assert_eq!(follow_miss_key("Target"), "ERR_GENERIC_NO_TARGET");
+        assert_eq!(follow_miss_key("Nobody"), "ERR_UNIT_NOT_FOUND");
     }
 
     #[test]
