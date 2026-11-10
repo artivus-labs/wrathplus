@@ -717,7 +717,6 @@ pub(super) fn seed(s: &mut UiScript) {
         money: 1_000_000,
         tabs: vec![WrathGuildBankTab {
             name: "Tab 1".into(),
-            viewable: true,
             ..Default::default()
         }],
         money_log: vec![WrathGuildBankMoneyLog {

@@ -221,6 +221,15 @@ fn rank_rights_gate_withdraw_and_repair() {
     assert!(s
         .eval::<bool>("return CanWithdrawGuildBankMoney() == 1 and CanGuildBankRepair() == nil")
         .unwrap());
+    // Repair tests its right alone (`0x5cc23a`): no money word needed.
+    {
+        let mut m = s.model_mut();
+        m.guild.rights = 0x40000;
+        m.wrath_friends.bank.rank_rights[0].money_per_day = 0;
+    }
+    assert!(s
+        .eval::<bool>("return CanWithdrawGuildBankMoney() == nil and CanGuildBankRepair() == 1")
+        .unwrap());
 }
 
 #[test]

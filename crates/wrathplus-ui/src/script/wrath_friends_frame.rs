@@ -21,31 +21,31 @@ pub struct WrathGuildBankTab {
     pub name: String,
     /// The icon's file name under `Interface\Icons`; empty is the question mark.
     pub icon: String,
-    pub viewable: bool,
-    pub can_deposit: bool,
-    /// Item withdrawals per day for the player's rank.
-    pub withdrawals_per_day: u32,
 }
 
-/// One rank's guild-bank rights (`0xc21e64`, stride 0xe dwords).
+/// One rank's row of 12340's rank table (`0xc21e60`, stride 0x38).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct WrathGuildBankRankRights {
     /// Copper per day (`GetGuildBankWithdrawLimit` answers it in gold).
     pub money_per_day: u32,
-    /// Per tab: flags (1 view, 2 deposit, 4 update text) and item withdrawals per day.
+    /// Per tab: flags (1 view, 2 deposit, 4 update text, `0xc21e68`) and the item limit
+    /// (`0xc21e80`).
     pub tabs: [(u32, u32); 6],
 }
 
-/// The guild bank as the host publishes it.
+/// The guild bank as the host publishes it, vault open or not.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct WrathGuildBankView {
+    /// The vault is open: the bank guid (`0xc1dc10`) is set.
+    pub open: bool,
     /// Copper in the bank (`0xc1dc20`).
     pub money: u64,
     /// Purchased tabs in order (`0xc1dc0c` of them).
     pub tabs: Vec<WrathGuildBankTab>,
     /// Item withdrawals the player has left today (`0xc1dc30`).
     pub remaining_withdrawals: u32,
-    /// Each rank's rights, rank 1 first; the rank being edited is staged from these.
+    /// Each rank's rights, rank 0 (the guild master) first, from the roster and our own row from
+    /// `MSG_GUILD_PERMISSIONS`; the rank being edited is staged from these.
     pub rank_rights: Vec<WrathGuildBankRankRights>,
     /// Per purchased tab, its occupied slots (`super::wrath_guild_bank`).
     pub slots: Vec<Vec<super::wrath_guild_bank::WrathGuildBankSlot>>,
@@ -136,10 +136,13 @@ pub(crate) struct State {
 }
 
 impl super::UiScript {
-    /// Publish the guild bank whole; the staged rank rights restart from its `rank_rights`.
+    /// Publish the guild bank whole; the staged rank rights restart when its `rank_rights` move,
+    /// as a packet overwrites the edits 12340's setters made in place.
     pub fn set_wrath_guild_bank(&mut self, bank: WrathGuildBankView) {
         let mut model = self.model_mut();
-        model.wrath_friends.staged = bank.rank_rights.clone();
+        if model.wrath_friends.bank.rank_rights != bank.rank_rights {
+            model.wrath_friends.staged = bank.rank_rights.clone();
+        }
         model.wrath_friends.bank = bank;
     }
 
@@ -200,6 +203,12 @@ fn set(
 
 fn none() -> mlua::Result<MultiValue> {
     Ok(MultiValue::new())
+}
+
+/// The player's own rank's row of the rank table, which the bank predicates read.
+pub(super) fn own_bank_rank(model: &Model) -> Option<&WrathGuildBankRankRights> {
+    let rank = usize::try_from(model.guild.rank_index).ok()?;
+    model.wrath_friends.bank.rank_rights.get(rank)
 }
 
 /// The 0-based rank `GuildControlSetRank` loaded, if any.
@@ -277,15 +286,18 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             return Err(mlua::Error::runtime("Usage: GetGuildBankTabInfo(tab)"));
         };
         let tab = n.round_ties_even() as i64;
-        let (row, remaining, has_player) = {
+        let (row, rights, remaining, has_player) = {
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             let bank = &model.wrath_friends.bank;
-            let row = usize::try_from(tab - 1)
-                .ok()
-                .filter(|i| *i < 6)
-                .and_then(|i| bank.tabs.get(i).cloned());
+            let i = usize::try_from(tab - 1).ok().filter(|i| *i < 6);
+            let row = i.and_then(|i| bank.tabs.get(i).cloned());
+            // The own rank's tab words (`0x5a41c0`, `0x5a41f0`), not the vault's.
+            let rights = i
+                .zip(own_bank_rank(&model))
+                .map_or((0, 0), |(i, r)| r.tabs[i]);
             (
                 row,
+                rights,
                 bank.remaining_withdrawals,
                 model.unit_guids.player != 0,
             )
@@ -316,9 +328,9 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         Ok(MultiValue::from_vec(vec![
             Value::String(lua.create_string(&name)?),
             Value::String(lua.create_string(format!("Interface\\Icons\\{icon}"))?),
-            flag(t.viewable),
-            flag(t.can_deposit),
-            int(t.withdrawals_per_day),
+            flag(rights.0 & 1 != 0),
+            flag(rights.0 & 2 != 0),
+            int(rights.1),
             int(remaining),
         ]))
     })?;

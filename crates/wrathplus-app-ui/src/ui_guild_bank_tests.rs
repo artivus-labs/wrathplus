@@ -215,6 +215,8 @@ fn gestures_name_the_vault_and_zero_based_coordinates() {
         dbg(None)
     );
     assert!(open.banker().is_none() && !bank.open);
+    // Closing clears the bank guid only (`0x5a4270`): money and the tab count stay readable.
+    assert_eq!(bank.tab_purchase(), (false, 1, 5_000));
     assert!(
         crate::ui_items::guild_bank_deposit(open.banker, 2, 0, 1).is_none(),
         "the vault closed"
@@ -227,6 +229,7 @@ fn the_frame_events_follow_the_view() {
         events.into_iter().map(|(e, _)| e).collect::<Vec<_>>()
     };
     let open = WrathGuildBankView {
+        open: true,
         money: 10,
         tabs: vec![WrathGuildBankTab::default()],
         slots: vec![Vec::new()],
@@ -257,6 +260,12 @@ fn the_frame_events_follow_the_view() {
         ["GUILDBANKFRAME_CLOSED"]
     );
     assert!(events(None, &WrathGuildBankView::default()).is_empty());
+    // A closed vault's published state (rank rights from the roster, kept money) opens nothing.
+    let closed = WrathGuildBankView {
+        open: false,
+        ..richer
+    };
+    assert!(events(None, &closed).is_empty());
 }
 
 #[test]

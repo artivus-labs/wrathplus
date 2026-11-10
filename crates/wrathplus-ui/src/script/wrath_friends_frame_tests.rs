@@ -14,9 +14,6 @@ fn bank() -> WrathGuildBankView {
             WrathGuildBankTab {
                 name: "Mats".into(),
                 icon: "INV_Fabric_Linen_01".into(),
-                viewable: true,
-                can_deposit: false,
-                withdrawals_per_day: 5,
             },
             WrathGuildBankTab::default(),
         ],
@@ -45,8 +42,8 @@ fn guild_bank_tabs_money_and_staged_rank_rights() {
             "Mats".into(),
             "Interface\\Icons\\INV_Fabric_Linen_01".into(),
             Some(1),
-            None,
-            5,
+            Some(1),
+            10,
             3
         )
     );

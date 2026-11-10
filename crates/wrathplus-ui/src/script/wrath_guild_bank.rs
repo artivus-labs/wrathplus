@@ -125,9 +125,7 @@ fn held_from(model: &Model, tab: Option<usize>, slot: Option<usize>) -> bool {
 
 /// The player's rank's flags on 0-based `tab` include `bit` (`0x5a41c0`: 1 view, 2 deposit).
 fn tab_right(model: &Model, tab: usize, bit: u32) -> bool {
-    usize::try_from(model.guild.rank_index)
-        .ok()
-        .and_then(|r| model.wrath_friends.bank.rank_rights.get(r))
+    super::wrath_friends_frame::own_bank_rank(model)
         .and_then(|r| r.tabs.get(tab))
         .is_some_and(|(flags, _)| flags & bit != 0)
 }
@@ -146,15 +144,14 @@ fn system_line(lua: &Lua, key: &str) -> mlua::Result<()> {
     Ok(())
 }
 
-/// Whether the player's rank holds `right` (AC `GuildRankRights`) with a daily gold allowance.
-fn rank_right(model: &Model, right: u32) -> bool {
+/// Whether the player's rank holds `right`, and with `allowance` also a non-zero money word.
+fn rank_right(model: &Model, right: u32, allowance: bool) -> bool {
     let guild = &model.guild;
     guild.in_guild
         && guild.rights & right != 0
-        && usize::try_from(guild.rank_index)
-            .ok()
-            .and_then(|r| model.wrath_friends.bank.rank_rights.get(r))
-            .is_some_and(|r| r.money_per_day != 0)
+        && (!allowance
+            || super::wrath_friends_frame::own_bank_rank(model)
+                .is_some_and(|r| r.money_per_day != 0))
 }
 
 /// The item icons the tab-icon chooser lists (`0xbeafa8`, `0xbeafa4` of them), bare file names
@@ -549,17 +546,17 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             model.wrath_friends.bank.withdraw_money_remaining as f64,
         )]))
     })?;
-    // CanWithdrawGuildBankMoney() (`0x5a5f60`): the player's rank has the withdraw-gold right
-    // (0x80000) and a daily allowance. CanGuildBankRepair() (`0x5cc200`): the repair right
-    // (0x40000, AC `GR_RIGHT_WITHDRAW_REPAIR`), likewise. Labelled: the repair bit is AC's.
-    for (global, right) in [
-        ("CanWithdrawGuildBankMoney", 0x80000u32),
-        ("CanGuildBankRepair", 0x40000),
+    // CanWithdrawGuildBankMoney() (`0x5a5f60`): the withdraw-gold right (0x80000) and a non-zero
+    // money word (`0x5a5fa2`). CanGuildBankRepair() (`0x5cc200`): the repair right (0x40000) alone
+    // (`0x5cc23a`).
+    for (global, right, allowance) in [
+        ("CanWithdrawGuildBankMoney", 0x80000u32, true),
+        ("CanGuildBankRepair", 0x40000, false),
     ] {
         set(lua, global, move |lua, _| {
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             Ok(MultiValue::from_vec(vec![super::binding_abi::flag(
-                rank_right(&model, right),
+                rank_right(&model, right, allowance),
             )]))
         })?;
     }

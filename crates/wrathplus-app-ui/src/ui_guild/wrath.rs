@@ -1,17 +1,21 @@
 //! The native guild state the shared guild events leave out (`wrath_guild::session_events`):
-//! each rank's bank words from the roster, which the rank save carries back, and the event log,
+//! 12340's one rank table of bank words (`0xc21e60`), which the bank bindings read and the rank
+//! save carries back, and the event log,
 //! pushed to Native UI's `set_wrath_guild_events` with names from the name cache and rank names
 //! from our guild's identity.
 use crate::names::NameCache;
 use crate::net::{NetCommands, NetHandlerApp};
 use bevy::prelude::*;
+use wrathplus_protocol::types::GUILD_RANKS_MAX_COUNT;
 use wrathplus_protocol::wrath_guild::{EventLogEntry, Packet, Rank};
+use wrathplus_protocol::wrath_guild_bank::Permissions;
 use wrathplus_protocol::{SessionEvent, SessionEventKind};
 use wrathplus_ui::script::{UiScript, WrathGuildEvent};
 
 #[derive(Resource, Default)]
 pub(crate) struct NativeGuild {
-    /// Per rank id, from the latest roster.
+    /// Per rank id: every row from the latest roster (`0x5cc6c7`-`0x5cc771`), our own row from a
+    /// later `MSG_GUILD_PERMISSIONS` (`0x5cb9f0`), whichever landed last.
     ranks: Vec<Rank>,
     /// The latest `MSG_GUILD_EVENT_LOG_QUERY` answer, newest first.
     log: Vec<EventLogEntry>,
@@ -26,6 +30,30 @@ impl NativeGuild {
     /// Every rank's bank words, rank 0 (the guild master) first.
     pub(crate) fn ranks(&self) -> &[Rank] {
         &self.ranks
+    }
+
+    /// `MSG_GUILD_PERMISSIONS` overwrites its rank's row: flags, money, then each tab's flags and
+    /// item limit (`0x5cba2a`-`0x5cbab7`), the limit being AzerothCore's remaining slots today.
+    pub(crate) fn apply_permissions(&mut self, p: &Permissions) {
+        let Some(rank) = usize::try_from(p.rank)
+            .ok()
+            .filter(|r| *r < GUILD_RANKS_MAX_COUNT)
+        else {
+            return;
+        };
+        let empty = Rank {
+            flags: 0,
+            money_limit: 0,
+            tabs: [(0, 0); 6],
+        };
+        if self.ranks.len() <= rank {
+            self.ranks.resize(rank + 1, empty);
+        }
+        self.ranks[rank] = Rank {
+            flags: p.flags,
+            money_limit: p.money_limit,
+            tabs: p.tabs.clone().map(|t| (t.rights, t.remaining_items)),
+        };
     }
 }
 
