@@ -163,6 +163,8 @@ page, and Add registers the folder from this checkout.
 - `mod-atproto-identity` links game accounts to ATProto identities for the open beta, with
   `services/account`: "Signed in as @handle" in game, and progress queued for publishing as
   ATProto records.
+- `mod-party-quest-share` makes the playerbots in a party accept a quest any party member
+  shares; mod-playerbots answers only a share from the bot's own master.
 
 ## Bundled Chatter companion
 
