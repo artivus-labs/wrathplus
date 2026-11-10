@@ -1217,10 +1217,10 @@ pub enum ClientCommand {
         button: u8,
         packed: u32,
     },
-    /// `CMSG_SET_ACTIONBAR_TOGGLES` (sent by `0x4e76e0`), one per call. The byte is server-owned
-    /// (`PLAYER_FIELD_BYTES` byte 2, read at `0x4e768c`; nothing in the client writes it), so it
-    /// only changes by the descriptor echo. Disconnected, a silent no-op (`0x5ab637`, `0x5379ab`,
-    /// `0x5379b6`).
+    /// `CMSG_SET_ACTIONBAR_TOGGLES` (sent by `0x5a8290`), one per call. The byte is server-owned
+    /// (`PLAYER_FIELD_BYTES` byte 2, read at `0x5a87bd`; nothing in the client writes it), so it
+    /// only changes by the descriptor echo. Disconnected, it is dropped, as the reference's send
+    /// (`0x6b0b50`) skips it with no connection (`0x6b0b5b`) and reports through `0x8889b0`.
     SetActionBarToggles {
         toggles: u8,
     },

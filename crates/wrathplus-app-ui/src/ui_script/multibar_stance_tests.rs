@@ -33,7 +33,7 @@ fn show_bars(s: &UiScript, bars: &[u32]) {
             if bars.contains(&bar) { "1" } else { "nil" }
         ));
     }
-    // …then the manage pass, which the options row runs after a toggle (UIOptionsFrame.xml:666)
+    // …then the manage pass, which the options row runs after a toggle (InterfaceOptionsPanels.lua:1195)
     // and `MultiActionBar_Update` does not.
     lua.push_str("MultiActionBar_Update() UIParent_ManageFramePositions()");
     s.run(&lua).unwrap();
@@ -557,8 +557,8 @@ fn the_vertical_multibars_exist_hidden_on_the_reference_pages() {
 }
 
 /// Each extra bar is down until its bit of `PLAYER_FIELD_BYTES` byte 2 is set; a fresh character's
-/// byte is 0, and the bits name bars only in FrameXML (`0x4e76e0`). Bar 4 also needs bar 3
-/// (MultiActionBars.lua:73), since `MultiBarLeft` anchors to `MultiBarRight`.
+/// byte is 0, and the bits name bars only in FrameXML (`0x5a8290`). Bar 4 also needs bar 3
+/// (MultiActionBars.lua:48), since `MultiBarLeft` anchors to `MultiBarRight`.
 #[test]
 fn every_extra_bar_stays_down_until_its_own_toggle_is_set() {
     wrathplus_formats::wow_data_or_skip!();
@@ -575,7 +575,7 @@ fn every_extra_bar_stays_down_until_its_own_toggle_is_set() {
     let shown =
         |s: &UiScript, bar: &str| s.eval::<bool>(&format!("return {bar}:IsShown()")).unwrap();
 
-    // The zero byte, through `MultiActionBar_Update` as at login (UIParent.lua:364-365).
+    // The zero byte, through `MultiActionBar_Update` as at login (UIParent.lua:651).
     s.run("MultiActionBar_Update()").unwrap();
     for bar in BARS {
         assert!(!shown(&s, bar), "{bar} must be down at a zero toggle byte");
@@ -885,8 +885,8 @@ fn a_held_payload_ghosts_the_empty_wells_it_opens() {
 }
 
 /// `SetActionBarToggles` posts the whole byte, bits `0x01..0x08` for bars 1-4, one packet per call
-/// (`0x4e76e0`); only the server's descriptor push moves the getter, which the
-/// PLAYER_ENTERING_WORLD arm reads once (UIParent.lua:362-365).
+/// (`0x5a8290`); only the server's descriptor push moves the getter, which the Interface Options
+/// checkboxes read (InterfaceOptionsPanels.xml:1385).
 #[test]
 fn a_bar_toggle_sends_the_byte_its_globals_pack_to() {
     wrathplus_formats::wow_data_or_skip!();

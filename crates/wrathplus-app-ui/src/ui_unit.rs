@@ -115,7 +115,7 @@ struct UnitFeedMemo {
     /// `(HIDE_HELM, HIDE_CLOAK)`, pushed on the edge only: the Options setter flips the VM's
     /// belief ahead of the server, and a per-frame push would snap it back.
     worn_hidden: Option<(bool, bool)>,
-    /// `PLAYER_FIELD_BYTES` byte 2 (`GetActionBarToggles`, `0x4e7660`); no field watch, no event.
+    /// `PLAYER_FIELD_BYTES` byte 2 (`GetActionBarToggles`, `0x5a8790`); no event.
     action_bar_toggles: Option<u8>,
 }
 
@@ -940,7 +940,7 @@ fn drain_worn_display_toggles(
     }
 }
 
-/// Drain `SetActionBarToggles` into `CMSG_SET_ACTIONBAR_TOGGLES` (sent at `0x4e771d`), one packet
+/// Drain `SetActionBarToggles` into `CMSG_SET_ACTIONBAR_TOGGLES` (sent at `0x5a8301`), one packet
 /// per call: the reference binding neither checks for a change nor coalesces.
 fn drain_action_bar_toggles(script: Option<NonSendMut<UiScript>>, commands: Res<NetCommands>) {
     let Some(mut script) = script else {
@@ -1438,9 +1438,10 @@ fn feed_units(
     }
 
     // `PLAYER_FIELD_BYTES` byte 2, the four extra bars, on the edge: the reference never writes the
-    // cell (its one access is the read at `0x4e768c`) or watches it (`0x468070`), and stock reads
-    // it once, at `PLAYER_ENTERING_WORLD` (`UIParent.lua:364`), so this goes ahead of that fire. No
-    // player and a zero byte share the four-nil branch (`0x4e7684`).
+    // cell (its one access is the read at `0x5a87bd`), and stock reads it from the Interface
+    // Options checkboxes (`InterfaceOptionsPanels.xml:1385`), so it is pushed ahead of the
+    // `PLAYER_ENTERING_WORLD` fire. No player and a zero byte share the four-nil branch
+    // (`0x5a87c3`).
     if let Some((store, _)) = self_q.iter().next() {
         let toggles = store.0.player_action_bar_toggles().unwrap_or(0);
         if memo.action_bar_toggles != Some(toggles) {

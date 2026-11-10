@@ -410,10 +410,9 @@ impl ObjectFields {
     pub fn player_release_timer_running(&self) -> bool {
         self.get(Field::PlayerFieldBytes).unwrap_or(0) & 0x08 != 0
     }
-    /// `PLAYER_FIELD_BYTES` byte 2 (private, field 1222): the four extra action bars' toggles,
-    /// bits `0x01..0x08` (`Player.h:360-363`), read by `GetActionBarToggles` (`0x4e7660`) at
-    /// `[[player+0xe68]+0x102a]`. The client never writes it and no event fires when it moves.
-    /// vmangos's `// 0x4C0` beside the field is stale; `UNIT_END + 0x40A` is right.
+    /// `PLAYER_FIELD_BYTES` byte 2 (private, field 1197): the four extra action bars' toggles,
+    /// bits `0x01..0x08`, read by `GetActionBarToggles` (`0x5a8790`) at `[[player+0x1008]+0x1066]`
+    /// (`0x5a87bd`). The client never writes it and no event fires when it moves.
     pub fn player_action_bar_toggles(&self) -> Option<u8> {
         self.get(Field::PlayerFieldBytes)
             .map(|b| ((b >> 16) & 0xff) as u8)

@@ -1,20 +1,23 @@
 //! `GetActionBarToggles` and `SetActionBarToggles`: the four extra action bars' visibility, the
 //! low nibble of the server's `PLAYER_FIELD_BYTES` byte 2.
 //!
-//! The setter (`0x4e76e0`) only posts `CMSG_SET_ACTIONBAR_TOGGLES`; the getter (`0x4e7660`) reads
-//! the live descriptor byte, written only by the `SMSG_UPDATE_OBJECT` apply (`0x466590`), with no
-//! field-change hook (`0x468070`). A `Get` right after a `Set` returns the old value for a round
-//! trip; the stock UI reads it once, at `PLAYER_ENTERING_WORLD` (`UIParent.lua:364`).
+//! The setter (`0x5a8290`) only posts `CMSG_SET_ACTIONBAR_TOGGLES` (`0x2bf`); the getter
+//! (`0x5a8790`) reads the live descriptor byte, `[[player+0x1008]+0x1066]` (`0x5a87bd`), which only
+//! the `SMSG_UPDATE_OBJECT` apply writes. A `Get` right after a `Set` returns the old value for a
+//! round trip, as `UIParent.lua:649` says where it leaves the `PLAYER_ENTERING_WORLD` read
+//! commented out; stock reads it through the Interface Options checkboxes' `GetValue`
+//! (`InterfaceOptionsPanels.xml:1385`, `:1404`, `:1423`, `:1442`).
 //!
-//! The setter builds the byte from zero out of four arguments (`0x4e76eb`, `0x4e7709`): a fifth,
-//! which `UIOptionsFrame.lua:363` passes, is dropped, and a high nibble the server held is cleared.
+//! The setter builds the byte from zero out of four arguments (`0x5a829c`, `0x5a82bb`): a fifth,
+//! which `InterfaceOptionsPanels.lua:1193` passes, is dropped, and a high nibble the server held is
+//! cleared.
 
 use mlua::{Lua, MultiValue, Value};
 
 use super::binding_abi::bool_or_default;
 use super::Model;
 
-/// Toggle bits the bindings read and write, four both ways (setter `0x4e770e`, getter `0x4e76cd`).
+/// Toggle bits the bindings read and write, four both ways (setter `0x5a82c0`, getter `0x5a8802`).
 const ACTION_BAR_TOGGLE_BITS: u32 = 4;
 
 impl super::UiScript {
@@ -24,7 +27,7 @@ impl super::UiScript {
     }
 
     /// The last pushed byte. Lua reads `None` as a zero byte, four `nil`s, as the reference does
-    /// with no local player (`0x4e7660`).
+    /// with no local player (`0x5a8798`-`0x5a87c3`).
     pub fn action_bar_toggles(&self) -> Option<u8> {
         self.model_ref().action_bar_toggles
     }
@@ -40,7 +43,7 @@ impl super::UiScript {
 pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     let g = lua.globals();
 
-    // GetActionBarToggles() -> four values, each the number 1 (`0x6f3810`) or nil (`0x6f37f0`),
+    // GetActionBarToggles() -> four values, each the number 1 (`fld1`, `0x5a87ec`) or nil (`0x5a87f7`),
     // never a boolean; return N tests bit N-1.
     g.set(
         "GetActionBarToggles",
@@ -60,8 +63,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // SetActionBarToggles(a, b, c, d) -> nothing. Arguments coerce through `0x6f1c10`, not Lua
-    // truthiness, so the Options panel's "0" is off; the default is false (`0x4e76f4`). Nothing
+    // SetActionBarToggles(a, b, c, d) -> nothing. Arguments coerce through `0x815500`, not Lua
+    // truthiness, so a "0" string is off; the default is false (`push 0`, `0x5a82a2`). Nothing
     // local is written: only the server moves the byte.
     g.set(
         "SetActionBarToggles",
@@ -86,7 +89,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
 mod tests {
     use crate::script::UiScript;
 
-    /// Argument N sets bit N-1 (`0x4e7703`).
+    /// Argument N sets bit N-1 (`0x5a82a4`, `0x5a82b9`).
     #[test]
     fn the_four_arguments_pack_into_bits_0_through_3() {
         let mut s = UiScript::new().unwrap();
@@ -107,7 +110,7 @@ mod tests {
         }
     }
 
-    /// The coercion is `0x6f1c10`: the Options panel's `"0"`, truthy in Lua, is off.
+    /// The coercion is `0x815500`: the string `"0"`, truthy in Lua, is off.
     #[test]
     fn the_arguments_are_coerced_the_binarys_way_not_luas() {
         let mut s = UiScript::new().unwrap();
@@ -119,7 +122,7 @@ mod tests {
             r#"the strings the panel passes: "0" is FALSE, where Lua truthiness says true"#
         );
 
-        // A number truncates toward zero (`0x40a2b0`).
+        // A number truncates toward zero (`__ftol2_sse`, `0x88b9c0`).
         s.run("SetActionBarToggles(0.5, -0.9, 1.5, 0)").unwrap();
         assert_eq!(
             s.take_action_bar_toggle_sends(),
@@ -175,7 +178,7 @@ mod tests {
     fn the_getter_returns_four_ones_or_nils_from_the_pushed_byte() {
         let mut s = UiScript::new().unwrap();
 
-        // Nothing pushed reads as a zero byte, as no local player does (`0x4e7660`).
+        // Nothing pushed reads as a zero byte, as no local player does (`0x5a87c3`).
         assert!(s
             .eval::<bool>(
                 "local a,b,c,d = GetActionBarToggles() \
@@ -194,7 +197,7 @@ mod tests {
         assert!(
             s.eval::<bool>("local a,b = GetActionBarToggles() return type(b) == 'number'")
                 .unwrap(),
-            "the NUMBER 1 (0x6f3810 pushes tag 3 / double 1.0), never the boolean true"
+            "the NUMBER 1 (0x84e2a0 pushes tag 3 / double 1.0), never the boolean true"
         );
 
         // The high nibble is never tested.
