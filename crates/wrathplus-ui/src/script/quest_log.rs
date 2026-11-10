@@ -603,39 +603,50 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         lua.create_function(|_, (_q, _unit): (Value, Value)| Ok(flag(false)))?,
     )?;
     // ── The party share and the quest watch ──────────────────────────────────────────────────────
-    /// The selected row, which the share verbs read.
+    /// The selected row.
     fn selected_quest(model: &Model) -> Option<&QuestLogEntryView> {
         (model.quest_log_selection as usize)
             .checked_sub(1)
             .and_then(|n| model.quest_log.entries.get(n))
     }
 
-    // The share button enables on `GetQuestLogPushable() and GetNumPartyMembers() > 0`
-    // (`QuestLogFrame.lua:301`) and clicks `QuestLogPushQuest()` (`QuestLogFrame.xml:512`), both
-    // about the selection. `GetQuestLogPushable` answers 1 or nil, never false (`0x4e12b0`).
+    // The share verbs take an optional row (`0x5df520`, `0x5e4ed0`): `tonumber` truncated, 0 or a
+    // non-number meaning the selection; a header or a miss names no quest. The log's button passes
+    // none (`QuestLogFrame.xml:512`), the tracker's menu the tracked row (`WatchFrame.lua:1010`).
+    fn share_target(lua: &Lua, model: &Model, row: Value) -> mlua::Result<Option<u32>> {
+        let row = lua.coerce_number(row)?.map_or(0, |n| n.trunc() as i64);
+        let row = if row == 0 {
+            i64::from(model.quest_log_selection)
+        } else {
+            row
+        };
+        Ok(usize::try_from(row - 1)
+            .ok()
+            .and_then(|n| model.quest_log.entries.get(n))
+            .filter(|e| !e.is_header && e.pushable)
+            .map(|e| e.quest_id))
+    }
+    // 1 for a sharable quest, else no value at all (`0x5df5c6`).
     g.set(
         "GetQuestLogPushable",
-        lua.create_function(|lua, ()| {
+        lua.create_function(|lua, row: Value| {
             let model = lua.app_data_ref::<Model>().expect("model app_data");
-            Ok(match selected_quest(&model).is_some_and(|e| e.pushable) {
-                true => Value::Integer(1),
-                false => Value::Nil,
+            Ok(match share_target(lua, &model, row)? {
+                Some(_) => MultiValue::from_vec(vec![Value::Integer(1)]),
+                None => MultiValue::new(),
             })
         })?,
     )?;
+    // The verb checks the party and the sharable bit itself (`0x5e4f78`-`0x5e4f92`), as a macro
+    // can call it solo. The id is resolved now, so a re-index cannot retarget the share.
     g.set(
         "QuestLogPushQuest",
-        lua.create_function(|lua, ()| {
+        lua.create_function(|lua, row: Value| {
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-            // The verb checks the party and the sharable bit itself (`0x4e13a6`), as a macro can
-            // call it solo. The id is resolved now; a header's `quest_id` is 0 and never queues.
             if model.party.members.is_empty() {
                 return Ok(());
             }
-            let id = selected_quest(&model)
-                .filter(|e| !e.is_header && e.pushable)
-                .map(|e| e.quest_id);
-            if let Some(id) = id {
+            if let Some(id) = share_target(lua, &model, row)? {
                 model.quest_log_pushes.push(id);
             }
             Ok(())
@@ -1269,10 +1280,12 @@ mod tests {
             Some(1)
         );
         s.run("SelectQuestLogEntry(2)").unwrap();
+        assert_eq!(s.arity("GetQuestLogPushable()").unwrap(), 0, "no value");
+        // A row argument names its own quest (`0x5df520`), whatever the selection.
         assert_eq!(
-            s.eval::<Option<i64>>("return GetQuestLogPushable()")
+            s.eval::<Option<i64>>("return GetQuestLogPushable(1.7)")
                 .unwrap(),
-            None
+            Some(1)
         );
     }
 
@@ -1343,6 +1356,10 @@ mod tests {
         s.run("QuestLogPushQuest()").unwrap();
         assert_eq!(s.take_quest_log_pushes(), vec![7], "entry 2 is quest id 7");
         assert!(s.take_quest_log_pushes().is_empty(), "drained");
+        // The tracker's share passes its row (`0x5e4ed0`): row 2, though row 1 is selected.
+        s.run("SelectQuestLogEntry(1) QuestLogPushQuest(2) QuestLogPushQuest()")
+            .unwrap();
+        assert_eq!(s.take_quest_log_pushes(), vec![7]);
     }
 
     #[test]
