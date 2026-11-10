@@ -65,7 +65,7 @@ function Q.text(id)
       break
     end
   end
-  if was and was > 0 and GetQuestLogSelection() ~= was then SelectQuestLogEntry(was) end
+  if was and GetQuestLogSelection() ~= was then SelectQuestLogEntry(was) end
   if text == "" then return nil end
   return text
 end
