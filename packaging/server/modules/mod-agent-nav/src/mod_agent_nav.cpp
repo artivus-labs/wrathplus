@@ -63,6 +63,8 @@ static_assert(AgentNav::kFlagQuestGiver == UNIT_NPC_FLAG_QUESTGIVER && AgentNav:
     AgentNav::kFlagInnkeeper == UNIT_NPC_FLAG_INNKEEPER && AgentNav::kFlagBanker == UNIT_NPC_FLAG_BANKER &&
     AgentNav::kFlagVendors == (uint32(UNIT_NPC_FLAG_VENDOR_MASK) | uint32(UNIT_NPC_FLAG_VENDOR_FOOD)), "npc flags");
 static_assert(AgentNav::kSkillCooking == SKILL_COOKING && AgentNav::kSkillFirstAid == SKILL_FIRST_AID, "skill lines");
+static_assert(AgentNav::kUnitFlagNotSelectable == UNIT_FLAG_NOT_SELECTABLE &&
+    AgentNav::kFlagExtraTrigger == CREATURE_FLAG_EXTRA_TRIGGER, "usable spawn flags");
 static_assert(std::tuple_size_v<decltype(AgentNav::Faction::enemies)> == MAX_FACTION_RELATIONS, "faction relations");
 static_assert(AgentNav::kGround == NAV_GROUND && AgentNav::kMagma == NAV_MAGMA && AgentNav::kSlime == NAV_SLIME &&
     AgentNav::kWater == NAV_WATER && AgentNav::kSteep == NAV_GROUND_STEEP, "terrain flags");
@@ -329,7 +331,7 @@ std::vector<AgentNav::Spawn> ServiceSpawns()
             continue;
         uint32 npcflag = 0, unitFlags = 0, dynamicFlags = 0;
         ObjectMgr::ChooseCreatureFlags(info, npcflag, unitFlags, dynamicFlags, &data);
-        if (!(npcflag & AgentNav::kServiceFlags))
+        if (!(npcflag & AgentNav::kServiceFlags) || !AgentNav::Usable(unitFlags, info->flags_extra))
             continue;
         AgentNav::Spawn s;
         s.entry = data.id;

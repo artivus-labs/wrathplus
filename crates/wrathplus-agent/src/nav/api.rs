@@ -291,17 +291,27 @@ pub(crate) fn exchange(lua: &Lua, nav: &Handles, lines: Vec<(String, String)>, i
 }
 
 /// The realm's lines among this frame's events (`CHAT_MSG_ADDON` with our prefix), taken out of
-/// the stream: the message and who sent it.
+/// the stream: the message and who sent it. The client fires an addon line's prefix and body as
+/// bytes (`ScriptValue::Bytes`, never decoded); a script-fired event may carry strings.
 pub(crate) fn take_lines(
     events: &mut Vec<(String, Vec<wrathplus_ui::script::ScriptValue>)>,
 ) -> Vec<(String, String)> {
-    use wrathplus_ui::script::ScriptValue::Str;
+    use wrathplus_ui::script::ScriptValue::{Bytes, Str};
+    let text = |v: &wrathplus_ui::script::ScriptValue| match v {
+        Str(s) => Some(s.clone()),
+        Bytes(b) => String::from_utf8(b.clone()).ok(),
+        _ => None,
+    };
     let mut lines = Vec::new();
     events.retain(|(event, args)| match (event.as_str(), args.as_slice()) {
-        ("CHAT_MSG_ADDON", [Str(prefix), Str(message), _, Str(sender), ..])
-            if prefix == wrathplus_nav::remote::PREFIX =>
+        ("CHAT_MSG_ADDON", [prefix, message, _, Str(sender), ..])
+            if text(prefix).as_deref() == Some(wrathplus_nav::remote::PREFIX) =>
         {
-            lines.push((message.clone(), sender.clone()));
+            match text(message) {
+                Some(message) => lines.push((message, sender.clone())),
+                // Not UTF-8: no line of ours (the protocol is ASCII), so not routed anywhere.
+                None => return true,
+            }
             false
         }
         _ => true,
