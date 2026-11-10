@@ -14,7 +14,8 @@
 --   Sell:   at a merchant, sell grey (junk) items, and repair if the money covers it. When the
 --           junk alone leaves the bags under `full_below` free slots, sell the white items
 --           `sell_when_full` gives up too (trade goods, simple gems, gear that is no upgrade),
---           never one named in `keep` (Goals.keep adds names), a quest item or the Hearthstone.
+--           never one named in `keep` (Goals.keep adds names), a quest item or the Hearthstone,
+--           nor the meat and cloth under the stock Professions.keep holds for Cooking and First Aid.
 --   Buy:    at a merchant that sells it, food (and drink for a mana user) of the best level we
 --           can use, up to `food_stock` in the bags, for at most `food_share` of our money: what
 --           Goals' rest eats between fights.
@@ -313,8 +314,9 @@ local function item_id(bag, slot)
 end
 
 -- What a full bag does with the item in this slot: "junk" (sold at every visit), "sell" (sold when
--- the bags are full), or "keep" and why.
-local function verdict(bag, slot, item)
+-- the bags are full), or "keep" and why. `left` counts what survey leaves of each item so far, for
+-- Professions.keep: meat and cloth are sold only down to the stock its professions use.
+local function verdict(bag, slot, item, left)
   if item_id(bag, slot) == HEARTHSTONE then return "keep", "hearthstone" end
   if U.keep[item.name] then return "keep", "kept" end
   if GetContainerItemQuestInfo then
@@ -325,28 +327,33 @@ local function verdict(bag, slot, item)
   if item.quality == 0 then return "junk" end
   if item.quality > 1 then return "keep", "green or better" end
   local rule = U.sell_when_full[item.class or ""] or "keep"
-  if rule == "sell" then return "sell" end
-  if rule == "unless_upgrade" then
-    if upgrade(item) then return "keep", "an upgrade" end
-    return "sell"
+  if rule == "unless_upgrade" and upgrade(item) then return "keep", "an upgrade" end
+  if rule ~= "sell" and rule ~= "unless_upgrade" then return "keep", string.lower(item.class or "kept") end
+  if left and Professions and Professions.keep then
+    local _, count = GetContainerItemInfo(bag, slot)
+    local after = (left[item.name] or 0) - (count or 1)
+    if Professions.keep(item.link, after) then return "keep", "a profession's reagent" end
+    left[item.name] = after
   end
-  return "keep", string.lower(item.class or "kept")
+  return "sell"
 end
 
 -- Every item in the bags with its verdict, and the empty slots.
 local function survey()
-  local items, empty = {}, 0
+  local items, empty, left = {}, 0, {}
   for bag = 0, 4 do
     for slot = 1, (GetContainerNumSlots(bag) or 0) do
       local item = info(GetContainerItemLink(bag, slot))
       if item then
-        local v, why = verdict(bag, slot, item)
-        items[#items + 1] = { bag = bag, slot = slot, item = item, verdict = v, why = why }
+        local _, count = GetContainerItemInfo(bag, slot)
+        left[item.name] = (left[item.name] or 0) + (count or 1)
+        items[#items + 1] = { bag = bag, slot = slot, item = item }
       elseif not GetContainerItemLink(bag, slot) then
         empty = empty + 1
       end
     end
   end
+  for _, e in ipairs(items) do e.verdict, e.why = verdict(e.bag, e.slot, e.item, left) end
   return items, empty
 end
 

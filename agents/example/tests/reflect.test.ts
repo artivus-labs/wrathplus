@@ -224,7 +224,7 @@ test("resting a lot with meat and cloth in the bags and no profession is pointed
   const { clock, r } = setup({ settleMs: 0, minGapMs: 0 });
   r.sample({ level: 11, xp: 100, max: 1000, trade: { professions: 0, reagents: 23, food: 0 } });
   clock.now = 10 * MIN;
-  const rest = event("AGENT_INTENT_DONE", ["goal:rest", true]);
+  const rest = event("AGENT_RESTED", [180, null]);
   r.notice([rest, rest, rest, event("AGENT_FOOD_BOUGHT", [5, 23, 0])]);
   r.trigger("asked");
   expect(r.check()).toContain("Professions: you rested 3 times and bought 5 food while carrying 23 meat and cloth");

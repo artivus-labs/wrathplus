@@ -335,7 +335,10 @@ GetContainerItemQuestInfo = function(bag, slot) return bags[bag][slot] == "okra"
 #[test]
 fn full_bags_also_sell_trade_goods_and_gear_it_would_not_wear_keeping_the_rest() {
     let mut script = upkeep();
-    script.run(FULL).unwrap();
+    // No Cooking or First Aid wanted (Professions.learn): the meat and cloth are no reagents.
+    script
+        .run(&format!("{FULL} Professions.learn = {{}}"))
+        .unwrap();
     script.fire_event("MERCHANT_SHOW", vec![]);
     // The junk first; one freed slot is under two, so the whites it has no use for go too.
     assert_eq!(
@@ -407,4 +410,30 @@ fn a_merchant_sells_it_the_largest_bag_when_the_money_left_covers_the_reserve() 
         .unwrap();
     script.fire_event("MERCHANT_SHOW", vec![]);
     assert_eq!(calls(&script), "repair");
+}
+
+#[test]
+fn full_bags_keep_the_meat_and_cloth_its_professions_use_up_to_the_stock() {
+    let mut script = upkeep();
+    // Fifty cloth in three stacks and three meat: Cooking and First Aid are wanted (the default).
+    script
+        .run(&format!(
+            "{FULL} bags = {{ [0] = {{ 'linen', 'linen', 'linen', 'meat', 'malachite', 'claw' }} }} \
+             STACKS = {{ 20, 20, 10, 3, 1, 1 }} \
+             GetContainerItemInfo = function(_, slot) return nil, STACKS[slot] end"
+        ))
+        .unwrap();
+    script.fire_event("MERCHANT_SHOW", vec![]);
+    // Selling a stack of 20 would leave 30 of the 40 kept: those two stay, and the 3 meat; the 10
+    // can go.
+    assert_eq!(
+        calls(&script),
+        "sell claw | sell linen | sell malachite | repair"
+    );
+    let filling: String = script.eval("return Upkeep.filling()").unwrap();
+    // What the bags hold now says why (the stub's sale leaves a hole, so only the first slots).
+    assert!(
+        filling.contains("Linen Cloth x2 (a profession's reagent)"),
+        "{filling}"
+    );
 }

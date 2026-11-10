@@ -99,7 +99,7 @@ interface Window {
   noops: Map<string, Noop>;
   quests: number;
   pickedUp: number;
-  /** Rests the goal runner took, and food bought at merchants. */
+  /** Rests taken to the end (AGENT_RESTED), and food bought at merchants. */
   rests: number;
   foodBought: number;
   /** The latest Professions.digest() sample, set as the review is built. */
@@ -244,8 +244,10 @@ export class Reflection {
         case "AGENT_FOOD_BOUGHT":
           w.foodBought += Number(a[0]) || 0;
           break;
+        case "AGENT_RESTED":
+          w.rests++;
+          break;
         case "AGENT_INTENT_DONE":
-          if (a[0] === "goal:rest") w.rests++;
           // Goal actions are counted by AGENT_ACTION_FAILED; a replaced activity did not fail.
           if (a[1] === false && !String(a[0]).startsWith("goal:") && !String(a[2] ?? "").startsWith("replaced")) {
             this.#failed(now, String(a[0]), String(a[2] ?? ""));

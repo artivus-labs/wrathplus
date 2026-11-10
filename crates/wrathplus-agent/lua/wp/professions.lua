@@ -29,7 +29,9 @@
 -- `batch` or what the stock lacks, can be made now), food_low, bandages_low (under `stock`),
 -- can_skill_up (a recipe that still gives skill can be made), profession_to_learn (a profession in
 -- `learn` is unknown or at its rank cap, and a trainer for it is known: Goals.places kinds
--- "trainer_cooking" and "trainer_first_aid", remembered from NPCs seen with those titles).
+-- "trainer_cooking" and "trainer_first_aid", fed by the realm (wp.services) or remembered from
+-- NPCs seen with those titles through Goals.learn_places; the nearest that has not said it has
+-- nothing for us).
 -- Actions: learn_professions (walk to that trainer and train), craft (out of combat: open the
 -- window, light a fire if needed, make the batch). Both make progress, so the runner takes them in
 -- the downtime between fights. A planner goal that wants can_skill_up = false (data.profession
@@ -330,20 +332,25 @@ function P.title_of(title)
   end
 end
 
-local function place_of(u)
+-- Add a trainer seen (or talked to) as a Goals.places kind, through Goals.learn_places. One already
+-- listed is left be: learning replans, and this runs every planning pass.
+local function learn_trainer(kind, u)
+  for _, p in ipairs(Goals.places[kind] or {}) do
+    if (u.guid and p.guid == u.guid) or (not u.guid and p.name == u.name) then return end
+  end
   local pos = AgentPosition and AgentPosition()
-  return { guid = u.guid, name = u.name, x = u.x, y = u.y, z = u.z, map = pos and pos.map,
-    zone = GetRealZoneText and GetRealZoneText(), at = now() }
+  Goals.learn_places({ { kind = kind, name = u.name, x = u.x, y = u.y, z = u.z, guid = u.guid,
+    map = pos and pos.map, zone = GetRealZoneText and GetRealZoneText() } })
 end
 
 -- Remember the profession trainers in sight as Goals.places kinds.
 function P.remember(list)
-  if not Goals then return end
+  if not (Goals and Goals.learn_places) then return end
   for _, u in ipairs(list) do
     local trains = false
     for _, s in ipairs(u.npc or {}) do if s == "professiontrainer" then trains = true end end
     local prof = trains and u.kind == "unit" and not u.dead and P.title_of(u.title)
-    if prof then Goals.places[SECONDARY[prof].kind] = place_of(u) end
+    if prof then learn_trainer(SECONDARY[prof].kind, u) end
   end
 end
 
@@ -360,15 +367,27 @@ local function ruled_out(npc, s)
   return n.cap == s.max or (n.level ~= nil and n.at_max == s.max and level() < n.level)
 end
 
+-- The nearest trainer of a kind on this continent that has not told us it has nothing for us.
+local function trainer(kind, s)
+  local pos, best, best_d = AgentPosition and AgentPosition(), nil, math.huge
+  for _, p in ipairs(Goals.places[kind] or {}) do
+    if not (pos and p.map and pos.map ~= p.map) and not ruled_out(p.name, s) then
+      local d = pos and math.sqrt((pos.x - p.x) ^ 2 + (pos.y - p.y) ^ 2) or 0
+      if d < best_d then best, best_d = p, d end
+    end
+  end
+  return best
+end
+
 -- The trainer to visit: { profession, kind, place }, or nil.
 function P.wanted()
-  if not (P.on and Goals and Goals.place) then return nil end
+  if not (P.on and Goals and Goals.places) then return nil end
   for _, name in ipairs(P.learn) do
     local want, s = wants(name)
     if want and SECONDARY[name] and not Goals.cooling("learn_professions:" .. name) then
       local kind = SECONDARY[name].kind
-      local p = Goals.place(kind)
-      if p and not ruled_out(p.name, s) then return { profession = name, kind = kind, place = p } end
+      local p = trainer(kind, s)
+      if p then return { profession = name, kind = kind, place = p } end
     end
   end
 end
@@ -426,7 +445,9 @@ function P.train()
   if not visit or visit.npc ~= npc then visit = { profession = prof, npc = npc, bought = {}, rounds = 0, learned = {} } end
   -- This NPC teaches it: remember where it stands, whatever its title says.
   for _, u in ipairs(AgentNearby and AgentNearby(20) or {}) do
-    if u.name == npc and u.kind == "unit" and Goals then Goals.places[SECONDARY[prof].kind] = place_of(u) end
+    if u.name == npc and u.kind == "unit" and Goals and Goals.learn_places then
+      learn_trainer(SECONDARY[prof].kind, u)
+    end
   end
   visit.rounds = visit.rounds + 1
   local learned = buy_round()
@@ -552,19 +573,28 @@ if Goals then
       local p = w and w.place
       return 3 + ((p and pos) and math.min(math.sqrt((pos.x - p.x) ^ 2 + (pos.y - p.y) ^ 2) / 200, 4) or 0)
     end,
-    stop = function() if Move then Move.free() end end,
+    stop = function()
+      G.ask_gossip(nil)
+      if Move then Move.free() end
+    end,
     run = function(args)
       local w = P.wanted()
       assert(w, "no profession trainer known")
-      args.subject = w.profession
+      args.subject, args.going = w.profession, w.place.name
       learning = { since = now(), place = w.place, kind = w.kind, profession = w.profession }
+      -- Tomas and Michelle Belle greet with gossip first: ask for their training.
+      G.ask_gossip("trainer")
     end,
     done = function()
+      local over, ok, why
       if P.trained_at and P.trained_at >= learning.since then
-        if (P.trained_learned or 0) > 0 then return true, true end
-        return true, false, "nothing to learn of " .. learning.profession .. " from " .. tostring(learning.place.name) .. " now"
+        over, ok = true, (P.trained_learned or 0) > 0
+        why = not ok and ("nothing to learn of " .. learning.profession .. " from " .. tostring(learning.place.name) .. " now") or nil
+      else
+        over, ok, why = G.visit(learning)
       end
-      return G.visit(learning.kind, learning)
+      if over then G.ask_gossip(nil) end
+      return over, ok, why
     end,
     timeout = 900,
   })

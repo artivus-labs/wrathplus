@@ -1205,9 +1205,11 @@ local function visit(st)
   return true, false, tostring(p.name) .. " is not where they stood"
 end
 
--- For modules that add actions of their own (wp.professions): a remembered place of a kind on this
--- continent, the units in sight this pass, and a visit to a remembered NPC (finished, ok, why).
-G.place, G.nearby, G.visit = place, nearby, visit
+-- For modules that add NPC visits of their own (wp.professions): the units in sight this pass, a
+-- visit to a remembered NPC (finished, ok, why), and the gossip option a greeting is answered with
+-- ("trainer", "vendor"; nil when the visit is over).
+G.nearby, G.visit = nearby, visit
+function G.ask_gossip(want) gossip_want = want end
 
 local quest_visit = {}
 

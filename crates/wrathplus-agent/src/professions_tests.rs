@@ -137,7 +137,7 @@ fn it_reads_the_professions_and_remembers_their_trainers_from_sight() {
     assert_eq!(
         text(
             &script,
-            "return Goals.places.trainer_cooking.name .. ', ' .. Goals.places.trainer_first_aid.name"
+            "return Goals.places.trainer_cooking[1].name .. ', ' .. Goals.places.trainer_first_aid[1].name"
         ),
         "Tomas, Michelle Belle"
     );
@@ -413,4 +413,37 @@ fn a_trainer_the_realm_names_is_one_to_visit() {
         text(&script, "return plan_of('progress')"),
         "learn_professions"
     );
+}
+
+#[test]
+fn the_runner_walks_to_a_cook_answers_his_greeting_and_learns() {
+    let mut script = professions();
+    script
+        .run(
+            "units = { tomas } npc = 'Tomas' \
+             GetGossipOptions = function() return 'Train me.', 'trainer', 'Goodbye.', 'gossip' end \
+             SelectGossipOption = function(i) calls[#calls + 1] = 'gossip ' .. i end \
+             SERVICES = { { 'Cooking', 'Apprentice', 'available', 100 } } Goals.on = true",
+        )
+        .unwrap();
+    ticks(&mut script, 1.0);
+    assert_eq!(text(&script, "return doing()"), "goal:learn_professions");
+    assert_eq!(calls(&script), "interact 0xT");
+    // Tomas greets with gossip: the runner asks for his training, and the window does the rest.
+    script.fire_event("GOSSIP_SHOW", vec![]);
+    assert_eq!(calls(&script), "interact 0xT | gossip 1");
+    script.fire_event("TRAINER_SHOW", vec![]);
+    script
+        .run("learn('Cooking', 1, 75) SERVICES[1][3] = 'used'")
+        .unwrap();
+    script.fire_event("TRAINER_UPDATE", vec![]);
+    ticks(&mut script, 0.5);
+    assert!(
+        calls(&script).starts_with("interact 0xT | gossip 1 | train Cooking | close trainer"),
+        "{}",
+        calls(&script)
+    );
+    // The visit is over and done: the runner moves on.
+    assert!(text(&script, "return table.concat(Goals.log, ' / ')")
+        .contains("did learn_professions for progress"));
 }
