@@ -79,7 +79,6 @@ fn landed_log() -> QuestLogState {
             detail: Some(detail),
             ..Default::default()
         }],
-        hidden_quest_ids: Vec::new(),
     }
 }
 
@@ -254,7 +253,6 @@ fn the_stock_log_reads_the_event_line_until_the_area_is_explored() {
             objectives: fargodeep_lines(state),
             ..Default::default()
         }],
-        hidden_quest_ids: Vec::new(),
     };
     s.set_quest_log(log(0, 0));
     s.fire_event("QUEST_LOG_UPDATE", vec![]);

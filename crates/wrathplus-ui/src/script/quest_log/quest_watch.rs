@@ -54,8 +54,7 @@ pub(crate) fn restore(model: &mut Model, ids: &[u32]) {
             .quest_log
             .entries
             .iter()
-            .any(|e| !e.is_header && e.quest_id == id)
-            || model.quest_log.hidden_quest_ids.contains(&id);
+            .any(|e| !e.is_header && e.quest_id == id);
         let watches = &mut model.quest_watches;
         if in_log && !watches.ids.contains(&id) && watches.ids.len() < MAX_WATCHES {
             watches.ids.push(id);
@@ -212,7 +211,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             Ok(())
         })?,
     )?;
-    // The watched quest's current 1-based row, nil when it is not a visible row.
+    // The watched quest's current 1-based row among all rows, folded ones included
+    // (`0x5df800`-`0x5df819` loop to `[0xc23ad0]`), nil when it left the log.
     g.set(
         "GetQuestIndexForWatch",
         lua.create_function(|lua, w: usize| {

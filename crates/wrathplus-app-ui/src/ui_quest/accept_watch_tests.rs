@@ -91,7 +91,6 @@ fn accepted_quests_are_tracked_expanded_and_the_button_toggles_them() {
             quest(783, "A Threat Within", "Defias Thug slain: 0/10"),
         ],
         num_quests: 2,
-        hidden_quest_ids: Vec::new(),
     });
     s.fire_event("QUEST_LOG_UPDATE", vec![]);
     app.insert_non_send_resource(s);
@@ -189,7 +188,6 @@ fn four_watches_draw_four_quests_with_the_complete_ones_own_text() {
             quest(790, "Sarkoth", "Sarkoth slain: 0/1"),
         ],
         num_quests: 4,
-        hidden_quest_ids: Vec::new(),
     });
     s.run("SelectQuestLogEntry(3) for row = 2, 5 do AddQuestWatch(row) end WatchFrame_Update()")
         .unwrap();
