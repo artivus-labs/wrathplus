@@ -377,102 +377,7 @@ pub(crate) fn feed_guild_bank(
         )
     };
     let name = |guid: u64| names.resolve(guid, &commands).map(str::to_string);
-    let view = {
-        let purchased = usize::from(bank.tab_count).min(TABS);
-        WrathGuildBankView {
-            open: bank.open,
-            money: bank.money,
-            // A tab the count names before any list has an empty record (`0x5a68a0`).
-            tabs: (0..purchased)
-                .map(|i| {
-                    let text = |b: Option<&Vec<u8>>| {
-                        b.map_or_else(String::new, |b| String::from_utf8_lossy(b).into_owned())
-                    };
-                    let t = bank.tabs.get(i);
-                    WrathGuildBankTab {
-                        name: text(t.map(|t| &t.name)),
-                        icon: text(t.map(|t| &t.icon)),
-                    }
-                })
-                .collect(),
-            remaining_withdrawals: bank.remaining_withdrawals,
-            rank_rights: native_guild
-                .ranks()
-                .iter()
-                .map(|r| WrathGuildBankRankRights {
-                    money_per_day: r.money_limit,
-                    tabs: r.tabs,
-                })
-                .collect(),
-            slots: bank.slots[..purchased]
-                .iter()
-                .map(|tab| {
-                    tab.iter()
-                        .map(|(&slot, (item_id, item))| {
-                            let (texture, link) = link(*item_id, Some(item));
-                            WrathGuildBankSlot {
-                                slot,
-                                item_id: *item_id,
-                                count: item.count as i32,
-                                random_property_id: item.random_property as i32,
-                                random_property_seed: item.random_property_seed.unwrap_or(0) as i32,
-                                enchant_id: item.enchantment as i32,
-                                charges: i32::from(item.charges),
-                                flags: item.flags as i32,
-                                gems: item.sockets.iter().map(|&(i, e)| (i, e as i32)).collect(),
-                                texture,
-                                link,
-                                locked: false,
-                            }
-                        })
-                        .collect()
-                })
-                .collect(),
-            money_log: bank
-                .logs
-                .get(&MONEY_LOG_TAB)
-                .into_iter()
-                .flat_map(|log| &log.entries)
-                .filter_map(|e| match e.payload {
-                    Payload::Money { amount } => Some(WrathGuildBankMoneyLog {
-                        kind: e.kind,
-                        player: name(e.actor),
-                        copper: amount as i32,
-                        seconds_ago: e.elapsed,
-                    }),
-                    Payload::Item { .. } => None,
-                })
-                .collect(),
-            tab_logs: (0..=MONEY_LOG_TAB)
-                .map(|tab| {
-                    bank.logs
-                        .get(&tab)
-                        .into_iter()
-                        .flat_map(|log| &log.entries)
-                        .filter_map(|e| match e.payload {
-                            Payload::Item {
-                                item,
-                                count,
-                                destination_tab,
-                            } => Some(WrathGuildBankItemLog {
-                                kind: e.kind,
-                                player: name(e.actor),
-                                link: link(item, None).1,
-                                count: count as i32,
-                                other_tab: destination_tab.map_or(0, |t| t + 1),
-                                seconds_ago: e.elapsed,
-                            }),
-                            Payload::Money { .. } => None,
-                        })
-                        .collect()
-                })
-                .collect(),
-            tab_text: (0..purchased as u8)
-                .map(|tab| bank.texts.get(&tab).cloned().unwrap_or_default())
-                .collect(),
-            withdraw_money_remaining: bank.money_remaining.map_or(0, i64::from),
-        }
-    };
+    let view = view(&bank, &native_guild, &link, &name);
     let (last, reset) = last.get_reset(&script);
     if !reset && last.as_ref() == Some(&view) {
         return;
@@ -482,6 +387,109 @@ pub(crate) fn feed_guild_bank(
     script.set_wrath_guild_bank(view.clone());
     for (event, args) in events(before.as_ref(), &view) {
         script.queue_event(event, args);
+    }
+}
+
+/// The published view, vault open or not; `link` resolves an item's icon and link, `name` a guid.
+fn view(
+    bank: &GuildBank,
+    native_guild: &crate::ui_guild::NativeGuild,
+    link: &dyn Fn(u32, Option<&Item>) -> (Option<String>, Option<String>),
+    name: &dyn Fn(u64) -> Option<String>,
+) -> WrathGuildBankView {
+    let purchased = usize::from(bank.tab_count).min(TABS);
+    WrathGuildBankView {
+        open: bank.open,
+        money: bank.money,
+        // A tab the count names before any list has an empty record (`0x5a68a0`).
+        tabs: (0..purchased)
+            .map(|i| {
+                let text = |b: Option<&Vec<u8>>| {
+                    b.map_or_else(String::new, |b| String::from_utf8_lossy(b).into_owned())
+                };
+                let t = bank.tabs.get(i);
+                WrathGuildBankTab {
+                    name: text(t.map(|t| &t.name)),
+                    icon: text(t.map(|t| &t.icon)),
+                }
+            })
+            .collect(),
+        remaining_withdrawals: bank.remaining_withdrawals,
+        rank_rights: native_guild
+            .ranks()
+            .iter()
+            .map(|r| WrathGuildBankRankRights {
+                money_per_day: r.money_limit,
+                tabs: r.tabs,
+            })
+            .collect(),
+        slots: bank.slots[..purchased]
+            .iter()
+            .map(|tab| {
+                tab.iter()
+                    .map(|(&slot, (item_id, item))| {
+                        let (texture, link) = link(*item_id, Some(item));
+                        WrathGuildBankSlot {
+                            slot,
+                            item_id: *item_id,
+                            count: item.count as i32,
+                            random_property_id: item.random_property as i32,
+                            random_property_seed: item.random_property_seed.unwrap_or(0) as i32,
+                            enchant_id: item.enchantment as i32,
+                            charges: i32::from(item.charges),
+                            flags: item.flags as i32,
+                            gems: item.sockets.iter().map(|&(i, e)| (i, e as i32)).collect(),
+                            texture,
+                            link,
+                            locked: false,
+                        }
+                    })
+                    .collect()
+            })
+            .collect(),
+        money_log: bank
+            .logs
+            .get(&MONEY_LOG_TAB)
+            .into_iter()
+            .flat_map(|log| &log.entries)
+            .filter_map(|e| match e.payload {
+                Payload::Money { amount } => Some(WrathGuildBankMoneyLog {
+                    kind: e.kind,
+                    player: name(e.actor),
+                    copper: amount as i32,
+                    seconds_ago: e.elapsed,
+                }),
+                Payload::Item { .. } => None,
+            })
+            .collect(),
+        tab_logs: (0..=MONEY_LOG_TAB)
+            .map(|tab| {
+                bank.logs
+                    .get(&tab)
+                    .into_iter()
+                    .flat_map(|log| &log.entries)
+                    .filter_map(|e| match e.payload {
+                        Payload::Item {
+                            item,
+                            count,
+                            destination_tab,
+                        } => Some(WrathGuildBankItemLog {
+                            kind: e.kind,
+                            player: name(e.actor),
+                            link: link(item, None).1,
+                            count: count as i32,
+                            other_tab: destination_tab.map_or(0, |t| t + 1),
+                            seconds_ago: e.elapsed,
+                        }),
+                        Payload::Money { .. } => None,
+                    })
+                    .collect()
+            })
+            .collect(),
+        tab_text: (0..purchased as u8)
+            .map(|tab| bank.texts.get(&tab).cloned().unwrap_or_default())
+            .collect(),
+        withdraw_money_remaining: bank.money_remaining.map_or(0, i64::from),
     }
 }
 
