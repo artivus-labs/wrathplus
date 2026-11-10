@@ -177,53 +177,11 @@ fn load_module(lua: &Lua, dir: &Path, name: &str) -> mlua::Result<Value> {
 }
 
 #[cfg(test)]
-#[path = "revive_tests.rs"]
-mod revive_tests;
-
-#[cfg(test)]
-#[path = "upkeep_tests.rs"]
-mod upkeep_tests;
-
+#[path = "avoid_tests.rs"]
+mod avoid_tests;
 #[cfg(test)]
 #[path = "combat_tests.rs"]
 mod combat_tests;
-
-#[cfg(test)]
-#[path = "move_tests.rs"]
-mod move_tests;
-
-#[cfg(test)]
-#[path = "quest_tests.rs"]
-mod quest_tests;
-
-#[cfg(test)]
-#[path = "rotation_tests.rs"]
-mod rotation_tests;
-
-#[cfg(test)]
-#[path = "avoid_tests.rs"]
-mod avoid_tests;
-
-#[cfg(test)]
-#[path = "goals_tests.rs"]
-mod goals_tests;
-
-#[cfg(test)]
-#[path = "hand_in_tests.rs"]
-mod hand_in_tests;
-
-#[cfg(test)]
-#[path = "quest_skip_tests.rs"]
-mod quest_skip_tests;
-
-#[cfg(test)]
-#[path = "zone_guard_tests.rs"]
-mod zone_guard_tests;
-
-#[cfg(test)]
-#[path = "hot_loop_tests.rs"]
-mod hot_loop_tests;
-
 #[cfg(test)]
 #[path = "goals_runner_tests.rs"]
 mod goals_runner_tests;
@@ -231,11 +189,41 @@ mod goals_runner_tests;
 #[path = "goals_safety_tests.rs"]
 mod goals_safety_tests;
 #[cfg(test)]
+#[path = "goals_tests.rs"]
+mod goals_tests;
+#[cfg(test)]
+#[path = "hand_in_tests.rs"]
+mod hand_in_tests;
+#[cfg(test)]
+#[path = "hot_loop_tests.rs"]
+mod hot_loop_tests;
+#[cfg(test)]
+#[path = "move_tests.rs"]
+mod move_tests;
+#[cfg(test)]
+#[path = "quest_skip_tests.rs"]
+mod quest_skip_tests;
+#[cfg(test)]
+#[path = "quest_tests.rs"]
+mod quest_tests;
+#[cfg(test)]
+#[path = "revive_tests.rs"]
+mod revive_tests;
+#[cfg(test)]
+#[path = "rotation_tests.rs"]
+mod rotation_tests;
+#[cfg(test)]
 #[path = "services_tests.rs"]
 mod services_tests;
 #[cfg(test)]
 #[path = "survive_tests.rs"]
 mod survive_tests;
+#[cfg(test)]
+#[path = "upkeep_tests.rs"]
+mod upkeep_tests;
+#[cfg(test)]
+#[path = "zone_guard_tests.rs"]
+mod zone_guard_tests;
 
 #[cfg(test)]
 mod tests {
