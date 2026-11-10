@@ -108,3 +108,53 @@ fn a_rank_save_carries_the_saved_ranks_staged_bank_words() {
     let bank = rank_bank(&script, &crate::ui_guild::NativeGuild::default(), 1);
     assert_eq!(bank.tabs[0], (1, 7), "rank index 1's staged edit");
 }
+
+#[test]
+fn last_online_decomposes_largest_unit_first() {
+    use wrathplus_ui::script::LastOnline;
+    // Under an hour: every unit zero.
+    assert_eq!(last_online(0.02), LastOnline::default());
+    assert_eq!(last_online(0.0), LastOnline::default());
+    // Just over an hour.
+    assert_eq!(
+        last_online(1.0 / 24.0 + 0.001),
+        LastOnline {
+            hours: 1,
+            ..Default::default()
+        }
+    );
+    // Just under and just over a day.
+    assert_eq!(last_online(0.99).days, 0);
+    assert_eq!(last_online(0.99).hours, 23);
+    assert_eq!(last_online(1.01).days, 1);
+    // Just under and just over a month (30 days).
+    assert_eq!(last_online(29.9).months, 0);
+    assert_eq!(last_online(29.9).days, 29);
+    assert_eq!(
+        last_online(30.0),
+        LastOnline {
+            months: 1,
+            ..Default::default()
+        }
+    );
+    // Just under and just over a year (365 days).
+    assert_eq!(last_online(364.9).years, 0);
+    assert_eq!(last_online(364.9).months, 12, "12 months, not 1 year");
+    assert_eq!(
+        last_online(365.0),
+        LastOnline {
+            years: 1,
+            ..Default::default()
+        }
+    );
+    // The full decomposition: 400.5 days is 1 year, 1 month, 5 days, 12 hours.
+    assert_eq!(
+        last_online(400.5),
+        LastOnline {
+            years: 1,
+            months: 1,
+            days: 5,
+            hours: 12,
+        }
+    );
+}

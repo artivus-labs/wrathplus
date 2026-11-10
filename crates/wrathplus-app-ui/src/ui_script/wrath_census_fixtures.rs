@@ -210,7 +210,6 @@ pub(super) fn seed(s: &mut UiScript) {
             class_file: "MAGE".into(),
             ..Default::default()
         }],
-        num_members: 1,
         ..Default::default()
     });
 

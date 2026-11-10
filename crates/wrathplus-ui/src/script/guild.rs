@@ -139,19 +139,14 @@ pub struct GuildState {
     /// The `GuildInfoFrame` body.
     pub info_text: String,
     /// The whole roster, sorted and never filtered: `GetGuildRosterInfo`,
-    /// `GetGuildRosterLastOnline` and `SetGuildRosterSelection` index it 1-based.
+    /// `GetGuildRosterLastOnline` and `SetGuildRosterSelection` index it 1-based, against the full
+    /// count (`0xc22ab0`), so an index past `GetNumGuildMembers()` still returns an offline member.
     pub roster: Vec<GuildMemberInfo>,
-    /// `GetNumGuildMembers()`, the UI's loop bound, which respects [`Self::show_offline`]. The
-    /// index-taking bindings bound against the full count (`[0xb73118]`) and never read the flag,
-    /// so an index past this still returns a real offline member.
-    pub num_members: usize,
     /// Every rank, 0 the guild master; the length is `GuildControlGetNumRanks`.
     pub ranks: Vec<GuildRankInfo>,
     /// The selected row, 1-based into [`Self::roster`], 0 for none (`FriendsFrame.lua:347` tests
     /// `> 0`).
     pub selection: u32,
-    /// Changes [`Self::num_members`] only, never [`Self::roster`].
-    pub show_offline: bool,
 }
 
 /// The rank-control popup's staging buffer, kept out of [`GuildState`] so a push mid-edit does not
@@ -215,8 +210,6 @@ pub enum GuildRequest {
     QueryEventLog,
     /// `SetGuildRosterSelection(index)`, mirrored so the next push agrees.
     Select(u32),
-    /// `SetGuildRosterShowOffline(flag)`, mirrored so the next push agrees.
-    SetShowOffline(bool),
     /// `SortGuildRoster(field)`: `"name"`, `"zone"`, `"level"`, `"class"`, `"rank"`, `"note"` or
     /// `"online"`, the headers' `sortType`s (`FriendsFrame.xml:1895-1940`, `:2086-2131`). Sorting
     /// is client-side: the app re-orders its roster and pushes it back.
@@ -260,6 +253,14 @@ fn truthy(value: &Value) -> bool {
         Value::Number(n) => *n != 0.0,
         _ => true,
     }
+}
+
+/// The `guildShowOffline` CVar (`[0xbd0970]`, default "1"), as the bindings read its int value
+/// (`[CVar+0x30]`, `0x5ca1e8`).
+fn show_offline(model: &Model) -> bool {
+    model.cvars.get("guildshowoffline").map_or(true, |c| {
+        c.value.trim().parse::<i64>().map_or(false, |v| v != 0)
+    })
 }
 
 /// Whether the player's own rank holds right `index`, 1-based into [`RANK_RIGHT_BITS`].
@@ -337,13 +338,18 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     )?;
 
     // ── The roster ───────────────────────────────────────────────────────────────────────────
-    // GetNumGuildMembers() (`0x4d1190`): the loop bound (`FriendsFrame.lua:446`), which respects
-    // show-offline, not the addressable range (`GuildState::num_members`).
+    // GetNumGuildMembers() (`0x5ca130`): the loop bound (`FriendsFrame.lua:446`), the whole roster
+    // (`0xc22ab0`) with show-offline on, else the online tally (`0xc22ab4`).
     g.set(
         "GetNumGuildMembers",
         lua.create_function(|lua, ()| {
             let model = lua.app_data_ref::<Model>().expect("model app_data");
-            Ok(model.guild.num_members as i64)
+            let roster = &model.guild.roster;
+            Ok(if show_offline(&model) {
+                roster.len()
+            } else {
+                roster.iter().filter(|m| m.online).count()
+            } as i64)
         })?,
     )?;
 
@@ -440,26 +446,22 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // GetGuildRosterShowOffline() (`0x4d1e30`) / SetGuildRosterShowOffline(flag): written in
-    // place and mirrored, as the selection is.
+    // GetGuildRosterShowOffline() (`0x5ca1e0`) reads the `guildShowOffline` CVar;
+    // SetGuildRosterShowOffline(flag) (`0x5ca1b0`) sets it from `0x815500(L, 1, 1)`, so no argument
+    // is on and nil is off. The host's CVar callback re-sorts the roster.
     g.set(
         "GetGuildRosterShowOffline",
         lua.create_function(|lua, ()| {
             let model = lua.app_data_ref::<Model>().expect("model app_data");
-            Ok(binding_abi::flag(model.guild.show_offline))
+            Ok(binding_abi::flag(show_offline(&model)))
         })?,
     )?;
-    // With no argument it turns show-offline on, unlike an explicit `nil`, hence `MultiValue`.
     g.set(
         "SetGuildRosterShowOffline",
         lua.create_function(|lua, args: MultiValue| {
-            let on = match args.into_iter().next() {
-                None => true,
-                Some(flag) => truthy(&flag),
-            };
+            let on = binding_abi::bool_or_default(args.front(), true);
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-            model.guild.show_offline = on;
-            model.guild_requests.push(GuildRequest::SetShowOffline(on));
+            super::cvars::write_cvar(&mut model, "guildShowOffline", u8::from(on).to_string());
             Ok(())
         })?,
     )?;

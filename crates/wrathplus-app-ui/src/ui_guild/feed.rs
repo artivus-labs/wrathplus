@@ -37,6 +37,7 @@ pub(super) struct FedGuild {
 pub(super) fn feed_guild(
     script: Option<NonSendMut<UiScript>>,
     mut guild: ResMut<GuildState>,
+    show_offline: Res<super::GuildShowOffline>,
     self_q: Query<&ObjectStore, With<SelfPlayer>>,
     areas: Option<Res<AreaTableRes>>,
     commands: Res<NetCommands>,
@@ -75,7 +76,8 @@ pub(super) fn feed_guild(
     // The away tag is the string table's, by key, as `GetGuildRosterInfo` (`0x5cc9c0`) reads it.
     let get = |key: &str| script.lua().globals().get::<String>(key).ok();
     let away = |presence: u8| status_key(presence).and_then(&get).unwrap_or_default();
-    let rows = display_rows(&guild, areas.as_deref().map(|a| &a.0), identity, &away);
+    let areas = areas.as_deref().map(|a| &a.0);
+    let rows = display_rows(&guild, show_offline.0, areas, identity, &away);
     let display_order: Vec<u64> = rows.iter().map(|r| r.guid).collect();
     let selection = index_of(&display_order, guild.selection);
     guild.display_order = display_order;
@@ -92,7 +94,6 @@ pub(super) fn feed_guild(
         rights: guild.own_rights(),
         motd: guild.motd.clone(),
         info_text: guild.info_text.clone(),
-        num_members: guild.num_members(),
         roster: rows.into_iter().map(|r| r.info).collect(),
         ranks: guild
             .rank_rights
@@ -106,7 +107,6 @@ pub(super) fn feed_guild(
             })
             .collect(),
         selection,
-        show_offline: guild.show_offline,
     });
 
     // `GUILD_ROSTER_UPDATE`; `super::RosterUpdate` decides whether it carries arg1.
@@ -200,10 +200,12 @@ fn ginfo_lines(script: &UiScript, info: &GuildInfo) -> Vec<crate::ui_action::Sho
     .collect()
 }
 
-/// The roster in display order: every member, sorted, never filtered. Until the guild query
-/// answers, only the rank-name column is empty.
+/// The roster in display order: every member, sorted, never filtered; with show-offline off the
+/// offline rows sink below `GetNumGuildMembers()`. Until the guild query answers, only the
+/// rank-name column is empty.
 pub(super) fn display_rows(
     guild: &GuildState,
+    show_offline: bool,
     areas: Option<&AreaTableCatalog>,
     identity: Option<&Identity>,
     away: &dyn Fn(u8) -> String,
@@ -213,7 +215,7 @@ pub(super) fn display_rows(
         .iter()
         .map(|m| row(m, areas, identity, away))
         .collect();
-    guild.sort.order(&mut rows, guild.show_offline);
+    guild.sort.order(&mut rows, show_offline);
     rows
 }
 
@@ -282,7 +284,7 @@ pub(super) fn index_of(order: &[u64], guid: u64) -> u32 {
 }
 
 /// Turn the Lua guild intents into their sends. The note verbs carry a 1-based display row where
-/// the wire wants a name; select, sort and show-offline are local and send nothing.
+/// the wire wants a name; select and sort are local and send nothing.
 pub(super) fn drain_guild(
     script: Option<NonSendMut<UiScript>>,
     mut guild: ResMut<GuildState>,
@@ -392,7 +394,6 @@ pub(super) fn drain_guild(
                 }
             }
             GuildRequest::Select(index) => guild.select(index),
-            GuildRequest::SetShowOffline(on) => guild.set_show_offline(on),
             GuildRequest::Sort(field) => guild.sort_by(&field),
         }
     }

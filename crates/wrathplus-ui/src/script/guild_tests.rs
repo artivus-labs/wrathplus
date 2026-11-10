@@ -162,3 +162,33 @@ fn member_lookup_is_one_based_and_tolerates_zero() {
     assert!(member_at(&roster, 3).is_none(), "past the end");
     assert!(member_at(&roster, -1).is_none(), "negative");
 }
+
+/// `guildShowOffline` (`0x51e1e2`, default "1"): the getter reads it (`0x5ca1e0`), the setter
+/// writes it (`0x5ca1b0`: no argument is on, nil off), and `GetNumGuildMembers` (`0x5ca130`) counts
+/// the whole roster or the online tally by it.
+#[test]
+fn show_offline_is_the_guild_show_offline_cvar() {
+    let mut s = crate::script::UiScript::new().unwrap();
+    s.register_cvars([("guildShowOffline", "1")]);
+    let member = |online| GuildMemberInfo {
+        online,
+        ..Default::default()
+    };
+    s.set_guild(GuildState {
+        in_guild: true,
+        roster: vec![member(true), member(false)],
+        ..Default::default()
+    });
+    let read = |s: &crate::script::UiScript| {
+        s.eval::<(Option<i64>, i64)>("return GetGuildRosterShowOffline(), GetNumGuildMembers()")
+            .unwrap()
+    };
+    assert_eq!(read(&s), (Some(1), 2), "on by default");
+    s.run("SetGuildRosterShowOffline(nil)").unwrap();
+    assert_eq!(s.cvar("guildShowOffline").as_deref(), Some("0"));
+    assert_eq!(read(&s), (None, 1));
+    s.run("SetGuildRosterShowOffline()").unwrap();
+    assert_eq!(s.cvar("guildShowOffline").as_deref(), Some("1"));
+    s.run("SetGuildRosterShowOffline('0')").unwrap();
+    assert_eq!(read(&s), (None, 1), "a \"0\" string is off");
+}

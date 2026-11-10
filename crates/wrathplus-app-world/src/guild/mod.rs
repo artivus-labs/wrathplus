@@ -80,6 +80,17 @@ impl RosterUpdate {
 #[derive(Resource, Default)]
 pub struct GuildMemberNotify(pub bool);
 
+/// The `guildShowOffline` CVar (registered at `0x51e1e2`, default "1"): offline members count and
+/// sort in place. Its callback (`0x512730` -> `0x5ca870`) re-sorts and fires the roster update.
+#[derive(Resource)]
+pub struct GuildShowOffline(pub bool);
+
+impl Default for GuildShowOffline {
+    fn default() -> Self {
+        Self(true)
+    }
+}
+
 /// The guild session mirror: filled by the packet handlers, read by the feed, reset on disconnect.
 #[derive(Resource, Default)]
 pub struct GuildState {
@@ -102,9 +113,6 @@ pub struct GuildState {
     /// The members, in wire order.
     pub members: Vec<GuildRosterMember>,
     pub sort: SortStack,
-    /// `SetGuildRosterShowOffline`, off at start like the reference's `0xb73124` (`0x4d0a25`); the
-    /// FrameXML restores the saved value at `VARIABLES_LOADED`.
-    pub show_offline: bool,
     /// The selected member as a guid, `0` for none, as `SetGuildRosterSelection 0x4d1820` stores
     /// it (`0xb73128`, at `0x4d186a`/`0x4d1872`): a re-sort keeps the same player selected.
     pub selection: u64,
@@ -336,15 +344,6 @@ impl GuildState {
         self.note_roster_update(RosterUpdate::Applied);
     }
 
-    /// `SetGuildRosterShowOffline(flag)`: re-sort and repaint; an unchanged value does nothing,
-    /// as in the reference (`0x4d0f70`).
-    pub fn set_show_offline(&mut self, on: bool) {
-        if self.show_offline != on {
-            self.show_offline = on;
-            self.note_roster_update(RosterUpdate::Applied);
-        }
-    }
-
     /// `SetGuildRosterSelection(index)`: store the row's guid. No event: the stock click handler
     /// repaints itself (`FriendsFrame.lua:706`).
     pub fn select(&mut self, index: u32) {
@@ -367,17 +366,6 @@ impl GuildState {
     pub fn member_at_mut(&mut self, index: u32) -> Option<&mut GuildRosterMember> {
         let guid = self.guid_at(index)?;
         self.members.iter_mut().find(|m| m.guid == guid)
-    }
-
-    /// `GetNumGuildMembers()`: the whole roster with show-offline on, else the online tally
-    /// (`0x4d1190`, against `0xb73118`/`0xb7311c`). A loop bound, not the addressable range: with
-    /// show-offline off the offline rows sort last ([`sort`]).
-    pub fn num_members(&self) -> usize {
-        if self.show_offline {
-            self.members.len()
-        } else {
-            self.members.iter().filter(|m| m.is_online()).count()
-        }
     }
 
     /// Our rank's rights word, which every `Can*` predicate tests; `0` (none) before a roster.
