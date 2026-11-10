@@ -135,7 +135,6 @@ fn watched_item_objective_quests_number_their_poi_icons() {
     s.set_quest_log(QuestLogState {
         entries: vec![header, skull, spirit, done],
         num_quests: 3,
-        ..Default::default()
     });
     let poi = |quest_id: u32, objectives: &[i32]| WrathQuestPoi {
         quest_id,

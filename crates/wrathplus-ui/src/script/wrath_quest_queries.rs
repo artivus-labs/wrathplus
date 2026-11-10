@@ -348,7 +348,6 @@ mod tests {
                 },
             ],
             num_quests: 1,
-            ..Default::default()
         });
         s.run(
             "GetQuestGreenRange = function() return 5 end GetItemCount = function() return 0 end",
@@ -446,7 +445,6 @@ mod tests {
                 ..Default::default()
             }],
             num_quests: 1,
-            ..Default::default()
         };
         s.set_quest_log(log(Some(spell(Some("Fireball")))));
         assert!(
