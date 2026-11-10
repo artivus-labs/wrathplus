@@ -12,8 +12,8 @@ use crate::app_core::schedule::UiInput;
 use crate::app_core::session::ObjectStore;
 use crate::app_core::session::SelfPlayer;
 use crate::names::NameCache;
-use crate::net::{ClientCommand, Guid, NetCommands};
-use crate::ui_quest::{row_is_active, row_is_one_click};
+use crate::net::{Guid, NetCommands};
+use crate::ui_quest::row_is_active;
 use crate::ui_session::{close_npc_session_out_of_range, npc_switched, NpcSession};
 
 pub(crate) use crate::app_core::interaction::GossipState;
@@ -26,6 +26,7 @@ fn greeting_roll() -> f32 {
 
 mod net;
 pub(crate) use net::gossip_complete as end_interaction;
+mod select;
 
 /// The gossip window's handlers, feed and drain.
 pub struct UiGossipPlugin;
@@ -39,7 +40,7 @@ impl Plugin for UiGossipPlugin {
                 // Range-close first so the clear fires `GOSSIP_CLOSED` the same frame.
                 close_npc_session_out_of_range::<GossipState>.before(feed_gossip),
                 feed_gossip.in_set(UiFeed),
-                drain_gossip.after(UiInput),
+                select::drain_gossip.after(UiInput),
             ),
         );
     }
@@ -120,6 +121,9 @@ fn snapshot(state: &GossipState) -> Option<GossipMenu> {
             .map(|o| GossipOptionView {
                 label: o.message.clone(),
                 icon_type: gossip_icon_type(o.icon).into(),
+                box_text: o.box_text.clone(),
+                box_money: o.box_money,
+                coded: o.coded,
             })
             .collect(),
     })
@@ -219,80 +223,6 @@ fn feed_gossip(
     *last_npc = state.npc;
 }
 
-/// Drain the Lua intents: an option sends `CMSG_GOSSIP_SELECT_OPTION` with its wire `index`, a
-/// quest row its questgiver query, and `CloseGossip` clears locally, as there is no close packet.
-/// A coded option is not sent: the reference's code prompt (`GOSSIP_ENTER_CODE`, `0x4e237e`) is
-/// not built.
-fn drain_gossip(
-    script: Option<NonSendMut<UiScript>>,
-    mut state: ResMut<GossipState>,
-    commands: Res<NetCommands>,
-) {
-    let Some(mut script) = script else {
-        return;
-    };
-    for pos in script.take_gossip_selects() {
-        let Some(npc) = state.npc else { continue };
-        // Refused while the text query is out, as the reference's `SelectGossipOption`
-        // (`0x4e2320`) refuses under the latch `0xbbb670`.
-        if state.text_pending() {
-            debug!(
-                "ui_gossip: SelectGossipOption({pos}) while the text query is in flight — refused"
-            );
-            continue;
-        }
-        // Lua position is 1-based; resolve it to the option's wire `index`.
-        match pos
-            .checked_sub(1)
-            .and_then(|i| state.options.get(i as usize))
-        {
-            Some(opt) if !opt.coded => {
-                debug!("ui_gossip: select option {} (index {})", pos, opt.index);
-                let _ = commands.0.send(ClientCommand::GossipSelectOption {
-                    guid: npc,
-                    option: opt.index,
-                });
-            }
-            Some(_) => debug!("ui_gossip: ignoring coded option {pos} (coded options are greyed)"),
-            None => debug!("ui_gossip: SelectGossipOption({pos}) out of range — ignored"),
-        }
-    }
-    // Quest-row clicks: the 1-based row picks the quest.
-    for pos in script.take_gossip_quest_selects() {
-        let Some(npc) = state.npc else { continue };
-        // Refused while pending too; the reference's latch is traced for option selects only.
-        if state.text_pending() {
-            debug!(
-                "ui_gossip: SelectGossipQuest({pos}) while the text query is in flight — refused"
-            );
-            continue;
-        }
-        match pos
-            .checked_sub(1)
-            .and_then(|i| state.quests.get(i as usize))
-        {
-            Some((quest_id, icon, _level, _title)) => {
-                let (quest, icon) = (*quest_id, *icon);
-                let active = row_is_active(icon);
-                // As on the quest greeting panel: an active row is a turn-in, and so is an
-                // available one with its one-click flag.
-                let cmd = if active || row_is_one_click(icon) {
-                    ClientCommand::QuestgiverComplete { npc, quest }
-                } else {
-                    ClientCommand::QuestgiverQuery { npc, quest }
-                };
-                debug!("ui_gossip: quest row {pos} (quest {quest}, icon {icon}, active {active})");
-                let _ = commands.0.send(cmd);
-            }
-            None => debug!("ui_gossip: SelectGossipQuest({pos}) out of range — ignored"),
-        }
-    }
-    if script.take_gossip_close() {
-        debug!("ui_gossip: client-side close (no packet)");
-        state.clear();
-    }
-}
-
 /// `GossipState`'s methods that need this module (the type lives in `app_core` for the crate split).
 pub(crate) trait GossipGreeting {
     /// `None` when the record has not arrived or has no line in the NPC's gender column.
@@ -376,6 +306,7 @@ impl GossipGreeting for GossipState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::net::ClientCommand;
 
     /// The one type in [`GOSSIP_ICON_TYPES`] with no art in the 1.12 install.
     const GOSSIP_ICON_TYPE_UNSHIPPED: &str = "auctioneer";
@@ -417,13 +348,21 @@ mod tests {
         state.options = vec![GossipOption {
             index: 3,
             icon: 1,
-            coded: false,
+            coded: true,
             message: "Browse".into(),
+            box_money: 500,
+            box_text: "Pay 5 silver?".into(),
         }];
         let menu = snapshot(&state).expect("open");
         assert_eq!(menu.greeting, "Hello");
         assert_eq!(menu.options.len(), 1);
-        assert_eq!(menu.options[0].icon_type, "vendor");
+        let o = &menu.options[0];
+        assert_eq!(o.icon_type, "vendor");
+        // The select's confirm and code prompts read these (`0x58af10`).
+        assert_eq!(
+            (o.box_text.as_str(), o.box_money, o.coded),
+            ("Pay 5 silver?", 500, true)
+        );
     }
 
     /// A first visit keeps the menu closed until its text answers, then opens it complete: the
@@ -437,6 +376,7 @@ mod tests {
             icon: 9,
             coded: false,
             message: "I wish to join the battle!".into(),
+            ..Default::default()
         }];
         let wants_query = state.open_menu(0x42, 50, options, Vec::new(), 0);
         assert!(wants_query, "first visit asks for the text");
@@ -481,7 +421,7 @@ mod tests {
             .init_resource::<GossipState>()
             .init_resource::<NameCache>()
             .init_resource::<crate::app_core::state::WorldStates>()
-            .add_systems(Update, (feed_gossip, drain_gossip).chain());
+            .add_systems(Update, (feed_gossip, select::drain_gossip).chain());
         let mut script = UiScript::new().unwrap();
         prepare(&mut script);
         app.insert_non_send_resource(script);
@@ -517,6 +457,7 @@ mod tests {
             icon: 0,
             coded: false,
             message: label.into(),
+            ..Default::default()
         }]
     }
 
@@ -589,6 +530,16 @@ mod tests {
             .unwrap();
         let _ = tick(&mut app);
         assert_eq!(selects_sent(&rx), 1);
+        // A coded option goes out with the code the binding took (`0x58b023`-`0x58b030`).
+        state(&mut app).options[0].coded = true;
+        let _ = tick(&mut app);
+        app.world_mut()
+            .non_send_resource_mut::<UiScript>()
+            .run("SelectGossipOption(1, '1234')")
+            .unwrap();
+        let _ = tick(&mut app);
+        assert!(rx.try_iter().any(|c| matches!(c,
+            ClientCommand::GossipSelectOption { code: Some(code), .. } if code == "1234")));
 
         // Controls: a real end still closes, and a first visit from a closed frame stays shut
         // until its text answers.

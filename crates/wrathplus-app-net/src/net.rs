@@ -1300,11 +1300,11 @@ pub enum ClientCommand {
     GossipHello {
         guid: u64,
     },
-    /// `CMSG_GOSSIP_SELECT_OPTION` with the line's `index`. No code is ever sent: coded options
-    /// are not selectable.
+    /// `CMSG_GOSSIP_SELECT_OPTION` with the line's `index`, and the code a coded option asks.
     GossipSelectOption {
         guid: u64,
         option: u32,
+        code: Option<String>,
     },
     /// `CMSG_NPC_TEXT_QUERY`, asked once per `text_id` on menu receipt.
     NpcTextQuery {
@@ -2170,6 +2170,17 @@ pub enum ClientCommand {
         guid: u64,
         nodes: Vec<u32>,
     },
+}
+
+impl ClientCommand {
+    /// An option select with no code, what every uncoded option sends.
+    pub fn gossip_select(guid: u64, option: u32) -> Self {
+        Self::GossipSelectOption {
+            guid,
+            option,
+            code: None,
+        }
+    }
 }
 
 /// The realm list (`CMD_REALM_LIST`); the IO thread waits for [`crate::realm_select`] to pick.

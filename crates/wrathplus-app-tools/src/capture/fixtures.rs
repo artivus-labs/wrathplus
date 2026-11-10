@@ -208,6 +208,7 @@ pub(super) fn seed_ui_fixture(
                 icon: 1,
                 coded: false,
                 message: "Let me browse your goods.".into(),
+                ..Default::default()
             }];
             gossip
                 .options
@@ -217,6 +218,7 @@ pub(super) fn seed_ui_fixture(
                         icon: 0,
                         coded: false,
                         message: (*message).into(),
+                        ..Default::default()
                     }
                 }));
         }

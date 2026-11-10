@@ -1284,13 +1284,7 @@ fn every_wrath_writer_route_is_admitted() {
                 guid: Default::default(),
             },
         ),
-        (
-            "GossipSelectOption",
-            ClientCommand::GossipSelectOption {
-                guid: Default::default(),
-                option: Default::default(),
-            },
-        ),
+        ("GossipSelectOption", ClientCommand::gossip_select(0, 0)),
         (
             "NpcTextQuery",
             ClientCommand::NpcTextQuery {

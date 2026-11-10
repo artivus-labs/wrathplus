@@ -647,7 +647,7 @@ pub(crate) struct Model {
 
     /// The open gossip menu, the `SelectGossipOption` calls and whether `CloseGossip` ran.
     pub(crate) gossip: Option<gossip::GossipMenu>,
-    pub(crate) gossip_selects: Vec<u32>,
+    pub(crate) gossip_selects: Vec<(u32, Option<String>)>,
     pub(crate) gossip_close: bool,
     /// `SelectGossipQuest` 1-based rows, each sent as `CMSG_QUESTGIVER_QUERY_QUEST` for its quest.
     pub(crate) gossip_quest_selects: Vec<u32>,

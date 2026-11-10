@@ -509,10 +509,9 @@ fn assert_icon_and_select(
         probe.phase = Phase::Done;
         return;
     }
-    let _ = net.0.send(ClientCommand::GossipSelectOption {
-        guid: innkeeper,
-        option: opt.index,
-    });
+    let _ = net
+        .0
+        .send(ClientCommand::gossip_select(innkeeper, opt.index));
     info!(
         "PROBE_BINDER: (4 select) GossipSelectOption({innkeeper:#x}, wire index {}) sent for {:?}",
         opt.index, opt.message
