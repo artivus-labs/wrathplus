@@ -41,6 +41,23 @@ constexpr std::uint32_t kFlagBanker = 0x00020000;
 constexpr std::uint32_t kServiceFlags = kFlagQuestGiver | kFlagTrainer | kFlagVendors | kFlagRepair |
     kFlagFlightMaster | kFlagInnkeeper | kFlagBanker;
 
+// A spawn a player can use: one that cannot be selected (UNIT_FLAG_NOT_SELECTABLE) or is an
+// invisible trigger (CREATURE_FLAG_EXTRA_TRIGGER) offers nothing, whatever its NPC flags say. The
+// beta's world has 752 "[DND]" spawns with service flags (holiday bunnies, the TAR pedestals in
+// Goldshire), all unselectable, plus 67 more unselectable or trigger services; before this they
+// filled the answer's 20 places ahead of the real vendors. (Core values; mod_agent_nav.cpp
+// asserts them.)
+constexpr std::uint32_t kUnitFlagNotSelectable = 0x02000000;
+constexpr std::uint32_t kFlagExtraTrigger = 0x00000080;
+constexpr bool Usable(std::uint32_t unitFlags, std::uint32_t flagsExtra)
+{
+    return !(unitFlags & kUnitFlagNotSelectable) && !(flagsExtra & kFlagExtraTrigger);
+}
+// Goldshire's real vendor (unit_flags 512, flags_extra 2), a TAR pedestal (unit_flags
+// 0x82040000 with not-selectable), a holiday bunny (trigger).
+static_assert(Usable(512, 2) && !Usable(0x82040000u | kUnitFlagNotSelectable, 0) && !Usable(0, 128),
+    "usable spawns");
+
 // A quest hub: at least this many quest givers within this many yards of one of them.
 constexpr std::size_t kHubMembers = 3;
 constexpr float kHubRadius = 40.0f;
