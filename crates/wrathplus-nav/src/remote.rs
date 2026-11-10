@@ -5,6 +5,9 @@
 
 use crate::Route;
 
+#[path = "remote_services.rs"]
+pub mod services;
+
 /// The addon-message prefix.
 pub const PREFIX: &str = "WPNAV";
 pub const VERSION: u32 = 1;
@@ -23,6 +26,9 @@ pub struct Limits {
     pub max_avoid: u32,
     pub per_second: u32,
     pub per_minute: u32,
+    /// Services: the farthest a place may be (yards), and the most places in one answer.
+    pub service_radius: u32,
+    pub max_services: u32,
 }
 
 /// One route request.
@@ -157,6 +163,8 @@ pub struct Part {
 pub enum Reply {
     Hello(Limits),
     Part(Part),
+    /// A line of a services answer.
+    Service(services::Line),
     Refused {
         id: u16,
         refusal: Refusal,
@@ -179,9 +187,12 @@ pub fn decode(payload: &str) -> Result<Reply, String> {
     };
     let id = |i: usize| int(i).and_then(|v| u16::try_from(v).map_err(|_| bad()));
     match fields[0] {
-        "H" | "A" | "P" => Ok(Reply::Echo),
+        "H" | "A" | "P" | "S" => Ok(Reply::Echo),
+        "s" => services::decode(payload)
+            .map(Reply::Service)
+            .ok_or_else(bad),
         "h" => {
-            if fields.len() < 7 || int(1)? == 0 {
+            if fields.len() < 9 || int(1)? == 0 {
                 return Err(bad());
             }
             Ok(Reply::Hello(Limits {
@@ -190,6 +201,8 @@ pub fn decode(payload: &str) -> Result<Reply, String> {
                 max_avoid: int(4)?,
                 per_second: int(5)?,
                 per_minute: int(6)?,
+                service_radius: int(7)?,
+                max_services: int(8)?,
             }))
         }
         "e" => {

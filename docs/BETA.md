@@ -237,6 +237,13 @@ realm's `mod-agent-nav`; no extra port, no extra credentials).
   keeps within them by itself; a refusal names the limit.
 - `GET /status` says which source is in use: `nav.source` is `realm`, `local` or `none`, and
   `nav.detail` puts it in a sentence.
+- `AgentServices([kinds [, radius]])` asks the realm where services are on your map, nearest
+  first: `vendor`, `repair`, `trainer` (your class trainer), `flightmaster`, `innkeeper`,
+  `banker`, `questgiver-hub`, `trainer_cooking`, `trainer_first_aid`, `trainer_profession`. Like
+  `AgentPath` it returns `{pending = true}` first; `AGENT_SERVICES_READY` fires when the answer
+  is in, and the next call returns `{ { kind, name, x, y, z, map, zone, members, profession }, ... }`.
+  The built-in `Services` module asks on arrival and in each new zone, and hands the places to the
+  goal runner.
 
 If you have made `mmaps` from your own game files (the Manager's **Server** page: **Prepare server
 data**, then **Make navigation meshes**; it needs Docker and takes hours), point `WOW_NAV_MMAPS`

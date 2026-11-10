@@ -185,7 +185,7 @@ fn the_module_refuses_what_it_cannot_read() {
 #[test]
 fn the_probe_answer_carries_the_realm_limits() {
     let line = text(|out, len| unsafe { realm_hello_reply(out, len) });
-    assert_eq!(line, "h 1 1500 256 64 5 240");
+    assert_eq!(line, "h 1 1500 256 64 5 240 2000 20");
     assert_eq!(
         decode(&line),
         Ok(Reply::Hello(Limits {
@@ -194,8 +194,11 @@ fn the_probe_answer_carries_the_realm_limits() {
             max_avoid: 64,
             per_second: 5,
             per_minute: 240,
+            service_radius: 2000,
+            max_services: 20,
         }))
     );
+    assert!(decode("h 1 1500 256 64 5 240").is_err());
     // A realm without the module delivers our own whisper back.
     assert_eq!(decode(&hello()), Ok(Reply::Echo));
     assert_eq!(decode(&encode(&request())[0]), Ok(Reply::Echo));

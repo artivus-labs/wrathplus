@@ -9,7 +9,7 @@
 //! of the same kind replaces one still waiting (a chase asks again as its target moves), so a
 //! client never sends more than four a second.
 
-use wrathplus_nav::remote::{self, Assembler, Limits, Reply, Request};
+use wrathplus_nav::remote::{self, services, Assembler, Limits, Reply, Request};
 use wrathplus_nav::Route;
 
 /// How long the realm has to answer the probe sent on entering the world, and how often it is
@@ -20,6 +20,9 @@ pub(crate) const PROBES: u8 = 3;
 pub(crate) const REPLY_TIMEOUT: f64 = 8.0;
 /// The least time between two requests.
 pub(crate) const SPACING: f64 = 0.25;
+/// Why services cannot be asked of this realm.
+pub(crate) const NO_SERVICES: &str =
+    "this realm does not say where services are (it has no mod-agent-nav)";
 /// A goal past the realm's distance limit is walked in legs this fraction of the limit long.
 const LEG: f32 = 0.9;
 
@@ -58,8 +61,12 @@ pub(crate) fn choose(local: bool, realm: &Realm) -> Source {
 /// `AgentPath`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Purpose {
-    Walk { ticket: u32 },
+    Walk {
+        ticket: u32,
+    },
     Path,
+    /// `AgentServices`: not a route, where services are (`kinds`, `radius`).
+    Services,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -70,6 +77,9 @@ pub(crate) struct Ask {
     pub avoid: Vec<[f32; 3]>,
     /// `to`'s height is a guess (see `nav::heights`).
     pub any_height: bool,
+    /// For [`Purpose::Services`]: the kinds asked for (empty: all) and the radius (none: the realm's).
+    pub kinds: Vec<String>,
+    pub radius: Option<u32>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -84,6 +94,10 @@ pub(crate) enum Outcome {
         ask: Ask,
         note: String,
     },
+    Services {
+        ask: Ask,
+        places: Vec<services::Place>,
+    },
 }
 
 struct Flight {
@@ -92,6 +106,7 @@ struct Flight {
     ask: Ask,
     leg: bool,
     assembler: Assembler,
+    collect: services::Collect,
 }
 
 pub(crate) struct Remote {
@@ -194,6 +209,29 @@ impl Remote {
         } else {
             self.next_id + 1
         };
+        let leg = match ask.purpose {
+            // Kinds were checked when asked (`services::ask`), so the line is always made.
+            Purpose::Services => {
+                let line = services::request(self.next_id, &ask.kinds, ask.radius);
+                self.outbox.extend(line);
+                false
+            }
+            _ => self.send_route(&ask, limits),
+        };
+        self.last_sent = now;
+        self.flight = Some(Flight {
+            id: self.next_id,
+            sent: now,
+            ask,
+            leg,
+            assembler: Assembler::default(),
+            collect: services::Collect::default(),
+        });
+    }
+
+    /// A route request for `ask` into the outbox; true when it asks for a leg toward a goal past the
+    /// realm's distance limit.
+    fn send_route(&mut self, ask: &Ask, limits: Limits) -> bool {
         let span = level(ask.from, ask.to);
         let leg = limits.max_distance > 0.0 && span > limits.max_distance;
         let (to, to_z) = if leg {
@@ -224,14 +262,7 @@ impl Remote {
             any_height: ask.any_height && !leg,
             avoid,
         }));
-        self.last_sent = now;
-        self.flight = Some(Flight {
-            id: self.next_id,
-            sent: now,
-            ask,
-            leg,
-            assembler: Assembler::default(),
-        });
+        leg
     }
 
     fn fail_waiting(&mut self) -> Vec<Outcome> {
@@ -239,8 +270,11 @@ impl Remote {
         std::mem::take(&mut self.waiting)
             .into_iter()
             .map(|ask| Outcome::Failed {
+                note: match ask.purpose {
+                    Purpose::Services => NO_SERVICES.to_string(),
+                    _ => note.clone(),
+                },
                 ask,
-                note: note.clone(),
             })
             .collect()
     }
@@ -269,6 +303,21 @@ impl Remote {
                                 leg: flight.leg,
                             });
                         }
+                        Err(note) => out.push(Outcome::Failed {
+                            ask: flight.ask,
+                            note,
+                        }),
+                    }
+                }
+            }
+            Ok(Reply::Service(line)) => {
+                if let Some(mut flight) = self.flight.take_if(|f| f.id == line.id) {
+                    match flight.collect.push(line) {
+                        Ok(None) => self.flight = Some(flight),
+                        Ok(Some(places)) => out.push(Outcome::Services {
+                            ask: flight.ask,
+                            places,
+                        }),
                         Err(note) => out.push(Outcome::Failed {
                             ask: flight.ask,
                             note,

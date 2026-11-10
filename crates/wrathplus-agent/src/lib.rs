@@ -13,8 +13,9 @@
 //!
 //! In Lua, besides the stock API: `AgentNearby([yards])`, `AgentFindNpc(service [, yards])`,
 //! `AgentPosition()`, `AgentTarget(guid)`, `AgentInteract(guid)` (`world`), `AgentQuestPOI(quest)`
-//! (`quest_poi`), `AgentZones()` (`zones`), `AgentPath`, `AgentMoveTo`, `AgentStop`, `AgentWalk` (`nav`,
-//! over local mmaps from `WOW_NAV_MMAPS`, else routes asked of the realm), and the module functions (`env`).
+//! (`quest_poi`), `AgentZones()` (`zones`), `AgentPath`, `AgentMoveTo`, `AgentStop`, `AgentWalk`,
+//! `AgentServices` (`nav`, over local mmaps from `WOW_NAV_MMAPS`, else routes asked of the realm;
+//! services always from the realm), and the module functions (`env`).
 //!
 //! With the port open, the UI's movement verbs run from any Lua (stock gates them on a key
 //! binding), so an agent's scripts can walk. Everything else an agent does goes through the same
@@ -181,6 +182,9 @@ fn pump_events(
         }
         if let Err(e) = nav::install(script.lua(), &link.nav, &link.world) {
             error!("agent port: navigation functions: {e}");
+        }
+        if let Err(e) = nav::install_services(script.lua(), &link.nav, &link.world, &link.zones) {
+            error!("agent port: AgentServices: {e}");
         }
         if let Err(e) = install_signal(script.lua(), link.events.clone(), link.started) {
             error!("agent port: AgentSignal: {e}");

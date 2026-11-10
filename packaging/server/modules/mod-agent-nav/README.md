@@ -39,7 +39,7 @@ Realm to client:
 
 | Line | Meaning |
 | --- | --- |
-| `h <version> <max distance> <max corners> <max circles> <per second> <per minute>` | The probe's answer: the limits below. |
+| `h <version> <max distance> <max corners> <max circles> <per second> <per minute> <service radius> <max services>` | The probe's answer: the limits below. |
 | `r <id> <part> <parts> <flags> <dx,dy,dz>...` | The route's corners in tenths of a yard: the first of part 1 is absolute, every later one the step from the corner before (running on across parts). Flags: `-`, or letters from `c` (complete: it reaches the end), `s` (it crosses steep ground), `t` (cut at the corner limit). |
 | `e <id> <code> [detail]` | Refused: `rate`, `far`, `start`, `nomesh`, `noroute`, `bad`, `busy`. |
 
@@ -50,7 +50,7 @@ An exchange:
 
 ```
 > H 1
-< h 1 1500 256 64 5 240
+< h 1 1500 256 64 5 240 2000 20
 > A 7 -9380.0 100.0 23.0
 > P 7 - -9460.0 64.0 56.0 -9300.0 140.0 64.0
 < r 7 1 1 c -94600,640,560 <dx,dy,dz> <dx,dy,dz> ...
@@ -65,6 +65,46 @@ none does), and a route that cannot reach the end stops at the closest point, ma
 request marked `h` may search up to 21 heights (two searches each, gentle then steep), all on the
 module's thread.
 The client's tests compile this module's source and compare the two corner for corner.
+
+## Where services are
+
+The module also tells a character where services are on its map, as a player knows a town (and as
+Playerbots knows the world). Cheating a little: it reads the world database, not what the client
+has seen.
+
+| Line | Meaning |
+| --- | --- |
+| `S <id> <kinds> [radius]` | Kinds, a comma list: `vendor`, `repair`, `trainer` (the asker's own class trainer), `flightmaster`, `innkeeper`, `banker`, `questgiver-hub`, `trainer_cooking`, `trainer_first_aid`, `trainer_profession` (any profession trainer). Radius in yards; none (and at most) `AgentNav.ServiceRadius`. |
+| `s <id> <i> <n> <kind> <entry> <x> <y> <z> <members> <profession> <name>` | The `i`-th of `n` places, nearest first. `members`: the quest givers in a hub (1 otherwise). `profession`: the skill a profession trainer teaches, spaces as underscores (`First_Aid`), `-` otherwise. The name is the rest of the line. |
+| `s <id> 0 0` | Nothing of those kinds within the radius. |
+
+How places are chosen (`src/AgentNavServices.h`, tested against a fixture by the client's tests):
+
+- Spawns on the asker's map and phase, within the radius, whose faction template is not hostile
+  to the asker's either way (`FactionTemplateEntry::IsHostileTo`, templates only: reputation and
+  at-war states are not looked at).
+- The NPC flags are the spawn's own, else its template's (`ObjectMgr::ChooseCreatureFlags`):
+  vendor (any vendor flag), repair, flight master, innkeeper, banker.
+- `trainer`: a trainer whose default trainer (`creature_default_trainer`) is of type Class for the
+  asker's class.
+- Profession trainers: AzerothCore's `trainer` rows of type Tradeskill carry no requirement and
+  serve weapon masters too, so the profession is read off the trainer's spells: the skill line
+  they require (`trainer_spell.ReqSkillLine`, set on every rank and recipe past the first) and the
+  skill lines they step (the "Apprentice X" spells' `SPELL_EFFECT_SKILL_STEP`, one learned spell
+  down), the most common that is a profession or secondary skill (SkillLine.dbc categories 11 and
+  9). Cooking is 185, First Aid 129.
+- A quest hub: a quest giver with at least 3 quest givers (itself included) within 40 yards, given
+  once, at its nearest member.
+- A spawn offering several services is one place per kind. Nearest first, at most
+  `AgentNav.MaxServices`.
+
+The spawn table is read once at startup, on the world thread, from what ObjectMgr has already
+loaded (no database query, then or per request), and handed to the module's thread, which answers
+from it. Spawns added later (`.npc add`) are not in it until a restart. Requests count toward the
+same per-character rate as routes.
+
+The zone of each place is not sent: the realm only knows it by loading terrain, and the client
+names it from its own world map (`AgentServices`' `zone`).
 
 ## Threads
 
@@ -92,6 +132,7 @@ They protect a shared realm; all are in `conf/mod_agent_nav.conf.dist`.
 | `AgentNav.SearchNodes` | 65535 | Detour's node budget for one search, the client's own figure. |
 | `AgentNav.LegSnap` | 40 | For a leg (`n`), how far its end may move to reach walkable ground. |
 | `AgentNav.SlowQueryMs` | 50 | Log a warning for a search this slow. |
+| `AgentNav.ServiceRadius`, `AgentNav.MaxServices` | 2000, 20 | Where services are: the farthest place (yards) and the most places in one answer. |
 
 `AgentNav.Enable = 0` turns the module off: whispers pass through untouched, so clients see no
 route service.
@@ -103,7 +144,7 @@ needs the realm's `mmaps` in the data folder; a map without them is answered `no
 database changes. At startup the log says
 
 ```
->> mod-agent-nav: answering route requests from /path/to/data/mmaps (5 a second and 240 a minute per character, 1500 yd, 256 corners)
+>> mod-agent-nav: answering route requests from /path/to/data/mmaps (5 a second and 240 a minute per character, 1500 yd, 256 corners); 4321 service spawns
 ```
 
 In the WrathPlus Manager it is a standard module: on **Server modules**, press **Add** on "Agent

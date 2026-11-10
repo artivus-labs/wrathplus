@@ -26,9 +26,13 @@
 
 mod api;
 mod realm;
+mod services;
 mod walker;
 
-pub(crate) use api::{exchange, install};
+#[cfg(test)]
+use api::pump;
+pub(crate) use api::{exchange, install, status, take_lines};
+pub(crate) use services::install as install_services;
 pub(crate) use walker::walk;
 use walker::{PUSH_END, SETTLE};
 
@@ -95,6 +99,8 @@ pub(crate) struct Mesh {
     avoid: Vec<[f32; 3]>,
     remote: Remote,
     path: Option<PathAnswer>,
+    /// `AgentServices`: the question out and the last answer.
+    services: services::State,
 }
 
 /// Everything the Lua functions, the walker and the realm pump share.
@@ -132,6 +138,7 @@ pub(crate) fn link(
             avoid: Vec::new(),
             remote: Remote::new(),
             path: None,
+            services: services::State::default(),
         })),
         tickets: Arc::new(AtomicU32::new(0)),
         ahead: Arc::new(AtomicU32::new(0)),
@@ -280,6 +287,8 @@ fn route_in(
             to,
             avoid,
             any_height,
+            kinds: Vec::new(),
+            radius: None,
         },
         now,
     );
@@ -377,6 +386,10 @@ fn routing_to(nav: &Handles, goal: [f32; 3], then_interact: Option<u64>) -> bool
 /// Put the realm's answer where it was wanted: the waiting walk, or `AgentPath`'s next call.
 fn apply(nav: &Handles, outcome: Outcome) {
     let (ask, result, leg) = match outcome {
+        Outcome::Services { ask, places } => return services::answered(nav, ask, Ok(places)),
+        Outcome::Failed { ask, note } if ask.purpose == Purpose::Services => {
+            return services::answered(nav, ask, Err(note));
+        }
         Outcome::Route { ask, route, leg } => (ask, Ok(route), leg),
         Outcome::Failed { ask, note } => (ask, Err(note), false),
     };
@@ -431,66 +444,12 @@ fn apply(nav: &Handles, outcome: Outcome) {
     }
 }
 
-/// The realm's lines among this frame's events (`CHAT_MSG_ADDON` with our prefix), taken out of
-/// the stream: the message and who sent it.
-pub(crate) fn take_lines(
-    events: &mut Vec<(String, Vec<wrathplus_ui::script::ScriptValue>)>,
-) -> Vec<(String, String)> {
-    use wrathplus_ui::script::ScriptValue::Str;
-    let mut lines = Vec::new();
-    events.retain(|(event, args)| match (event.as_str(), args.as_slice()) {
-        ("CHAT_MSG_ADDON", [Str(prefix), Str(message), _, Str(sender), ..])
-            if prefix == wrathplus_nav::remote::PREFIX =>
-        {
-            lines.push((message.clone(), sender.clone()));
-            false
-        }
-        _ => true,
-    });
-    lines
-}
-
-/// Once a frame: follow the client into the world (the probe), hand the realm's lines to the
-/// route source, apply what came of them, and say what waits to be sent. `me` is the player's
-/// name once known: lines are ours only when we whispered them, and nothing is sent before.
-pub(crate) fn pump(nav: &Handles, lines: Vec<(String, String)>, me: Option<&str>) -> Vec<String> {
-    let now = nav.now();
-    let Ok(mut mesh) = nav.mesh.lock() else {
-        return Vec::new();
-    };
-    let remote = &mut mesh.remote;
-    let mut outcomes = remote.world(me.is_some(), now);
-    for (line, sender) in lines {
-        if me.is_some_and(|me| me.eq_ignore_ascii_case(&sender)) {
-            outcomes.extend(remote.receive(&line, now));
-        }
-    }
-    outcomes.extend(remote.tick(now));
-    let outbox = std::mem::take(&mut remote.outbox);
-    drop(mesh);
-    for outcome in outcomes {
-        apply(nav, outcome);
-    }
-    outbox
-}
-
-/// Which navmesh routes come from, for `/status`.
-pub(crate) fn status(nav: &Handles) -> serde_json::Value {
-    let Ok(mesh) = nav.mesh.lock() else {
-        return serde_json::Value::Null;
-    };
-    let local = mesh.dir.as_ref().filter(|dir| dir.is_dir());
-    let (source, detail) = match (realm::choose(local.is_some(), &mesh.remote.realm), local) {
-        (Source::Local, Some(dir)) => (
-            "local",
-            format!("routes come from local mmaps ({})", dir.display()),
-        ),
-        (Source::Realm, _) => ("realm", mesh.remote.describe()),
-        _ => ("none", mesh.remote.describe()),
-    };
-    serde_json::json!({"source": source, "detail": detail})
-}
-
+#[cfg(test)]
+#[path = "nav_rig_tests.rs"]
+mod rig;
+#[cfg(test)]
+#[path = "nav_services_tests.rs"]
+mod services_tests;
 #[cfg(test)]
 #[path = "nav_tests.rs"]
 mod tests;

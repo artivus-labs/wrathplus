@@ -3,17 +3,10 @@
 //!
 //! The UI VM is sandboxed (no `require`, `io`, `os`), as addons expect. This adds back exactly one
 //! door: `require(name)` reads `<scripts>/<name with dots as slashes>.lua`, or a built-in module,
-//! and nothing else. Built-ins preloaded as globals: `wp.agent` as `Agent`, the intents and
-//! decisions the fast tier chooses among; `wp.revive` as `Revive`, getting a dead character back
-//! up; `wp.upkeep` as `Upkeep`, which wears upgrades, sells junk, buys food and trains;
-//! `wp.survive` as `Survive`, which judges pulls and fights (safe targets, potions, when to run);
-//! `wp.rotation` as `Rotation`, a fight's priority list; `wp.combat` as `Combat`, fighting a target
-//! kept in range; `wp.move` as `Move`, going to a unit, following one and holding a spot;
-//! `wp.quest` as `Quests`, quest givers' dialogs and the party's quests; `wp.avoid` as `Avoid`,
-//! walks kept clear of hostiles; `wp.goals` as `Goals`, the goals, a GOAP planner over facts and
-//! actions toward the top one, and the runner that keeps the agent busy with them (`wp.engine` and
-//! `wp.values` load on `require`). `AgentReload(name)` loads a module again; `AgentModules()` lists
-//! the agent's files; an `autoexec.lua` runs in every new in-game VM (after `ReloadUI()`, a restart).
+//! and nothing else. Built-ins preloaded as globals (each described where it loads): `Agent`,
+//! `Revive`, `Upkeep`, `Survive`, `Rotation`, `Combat`, `Move`, `Quests`, `Avoid`, `Goals`,
+//! `Services`; `wp.engine` and `wp.values` load on `require`. `AgentReload(name)` loads a module
+//! again; `AgentModules()` lists the agent's files; an `autoexec.lua` runs in every new in-game VM.
 
 use mlua::{Lua, Value};
 use std::path::{Path, PathBuf};
@@ -33,6 +26,7 @@ const BUILT_IN: &[(&str, &str)] = &[
     ("wp.quest", include_str!("../lua/wp/quest.lua")),
     ("wp.avoid", include_str!("../lua/wp/avoid.lua")),
     ("wp.goals", include_str!("../lua/wp/goals.lua")),
+    ("wp.services", include_str!("../lua/wp/services.lua")),
 ];
 
 /// Where the agent's modules live: `WOW_AGENT_SCRIPTS`, else `<client home>/Agent/scripts`.
@@ -146,6 +140,9 @@ pub(crate) fn install(script: &UiScript, dir: PathBuf) -> mlua::Result<bool> {
     // Goals, the plan toward the top one, and the runner that keeps the agent busy (`Goals.on`).
     let goals = load_module(lua, &dir, "wp.goals")?;
     lua.globals().set("Goals", goals)?;
+    // Where services are, from the realm, handed to the goal runner as known places.
+    let services = load_module(lua, &dir, "wp.services")?;
+    lua.globals().set("Services", services)?;
     Ok(module_path(&dir, "autoexec").is_file())
 }
 
@@ -233,6 +230,9 @@ mod goals_safety_tests;
 #[cfg(test)]
 #[path = "survive_tests.rs"]
 mod survive_tests;
+#[cfg(test)]
+#[path = "services_tests.rs"]
+mod services_tests;
 
 #[cfg(test)]
 mod tests {

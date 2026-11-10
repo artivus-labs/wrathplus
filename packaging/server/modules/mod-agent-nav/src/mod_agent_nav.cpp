@@ -14,9 +14,22 @@
 // safe. Finished routes are handed back through a queue and sent from WorldScript::OnUpdate on
 // the world thread. So a query can never stall the world, however long it searches; the limits
 // below bound the queue, the memory and each search (the node budget).
+//
+// It also tells a character where services are on its map (AgentNavServices.h): the spawn table
+// is read from what ObjectMgr loaded, once, on the world thread at startup, and handed to the
+// search thread, which answers from it; no database query per request. The faction check uses
+// the faction templates alone (reputation is not looked at).
 
 #include "AgentNavProtocol.h"
 #include "AgentNavRoute.h"
+#include "AgentNavServices.h"
+#include "CreatureData.h"
+#include "DBCStores.h"
+#include "ObjectMgr.h"
+#include "SpellInfo.h"
+#include "SpellMgr.h"
+#include "Trainer.h"
+#include "UnitDefines.h"
 #include "Chat.h"
 #include "Config.h"
 #include "Log.h"
@@ -34,6 +47,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <deque>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -44,6 +58,12 @@
 static_assert(AgentNav::kMmapMagic == MMAP_MAGIC, "mmtile magic");
 static_assert(AgentNav::kMmapVersion == MMAP_VERSION, "mmtile version: the route search reads this core's tiles");
 static_assert(AgentNav::kMmapHeaderSize == sizeof(MmapTileHeader), "mmtile header");
+static_assert(AgentNav::kFlagQuestGiver == UNIT_NPC_FLAG_QUESTGIVER && AgentNav::kFlagTrainer == UNIT_NPC_FLAG_TRAINER &&
+    AgentNav::kFlagRepair == UNIT_NPC_FLAG_REPAIR && AgentNav::kFlagFlightMaster == UNIT_NPC_FLAG_FLIGHTMASTER &&
+    AgentNav::kFlagInnkeeper == UNIT_NPC_FLAG_INNKEEPER && AgentNav::kFlagBanker == UNIT_NPC_FLAG_BANKER &&
+    AgentNav::kFlagVendors == (uint32(UNIT_NPC_FLAG_VENDOR_MASK) | uint32(UNIT_NPC_FLAG_VENDOR_FOOD)), "npc flags");
+static_assert(AgentNav::kSkillCooking == SKILL_COOKING && AgentNav::kSkillFirstAid == SKILL_FIRST_AID, "skill lines");
+static_assert(std::tuple_size_v<decltype(AgentNav::Faction::enemies)> == MAX_FACTION_RELATIONS, "faction relations");
 static_assert(AgentNav::kGround == NAV_GROUND && AgentNav::kMagma == NAV_MAGMA && AgentNav::kSlime == NAV_SLIME &&
     AgentNav::kWater == NAV_WATER && AgentNav::kSteep == NAV_GROUND_STEEP, "terrain flags");
 
@@ -68,6 +88,8 @@ struct Job
     AgentNav::Message request;
     std::vector<AgentNav::Circle> avoid;
     AgentNav::RouteOptions options;
+    // A services request (Verb::Services): who asks, from where; answered from the spawn table.
+    AgentNav::ServiceQuery services;
 };
 
 struct Done
@@ -95,13 +117,15 @@ uint64 NowMs()
 class Service
 {
 public:
-    void Start(std::string const& mmaps, Settings const& settings)
+    // `spawns`: the service spawn table, read once on the world thread; the search thread owns it.
+    void Start(std::string const& mmaps, Settings const& settings, std::vector<AgentNav::Spawn> spawns)
     {
         Stop();
         _stop = false;
-        _thread = std::thread([this, mmaps, nodes = int(settings.searchNodes), tiles = std::size_t(settings.maxLoadedTiles)]
+        _thread = std::thread([this, mmaps, nodes = int(settings.searchNodes), tiles = std::size_t(settings.maxLoadedTiles),
+                                  spawns = std::move(spawns)]
         {
-            Run(mmaps, nodes, tiles);
+            Run(mmaps, nodes, tiles, spawns);
         });
     }
 
@@ -143,7 +167,7 @@ public:
     }
 
 private:
-    void Run(std::string const& mmaps, int nodes, std::size_t tiles)
+    void Run(std::string const& mmaps, int nodes, std::size_t tiles, std::vector<AgentNav::Spawn> const& spawns)
     {
         AgentNav::MeshCache cache(mmaps, nodes, tiles);
         while (true)
@@ -158,10 +182,19 @@ private:
                 _jobs.pop_front();
             }
             uint64 const began = NowMs();
-            AgentNav::RouteResult const route = cache.Route(job.map, job.request.from, job.request.to, job.avoid, job.options);
             Done done;
             done.guid = job.guid;
             done.map = job.map;
+            if (job.request.verb == AgentNav::Verb::Services)
+            {
+                done.lines = AgentNav::ServiceReply(job.request.id, AgentNav::SelectServices(spawns, job.services),
+                    AgentNav::kMaxPayload);
+                done.ms = uint32(NowMs() - began);
+                std::lock_guard<std::mutex> guard(_lock);
+                _done.push_back(std::move(done));
+                continue;
+            }
+            AgentNav::RouteResult const route = cache.Route(job.map, job.request.from, job.request.to, job.avoid, job.options);
             if (!route.error.empty())
                 done.lines.push_back(AgentNav::ErrorReply(job.request.id, route.error,
                     route.error == "nomesh" ? "this realm has no navmesh for this map" : "start or end is not on walkable ground"));
@@ -200,6 +233,124 @@ void Send(Player* player, std::string const& payload)
     WorldPacket data;
     ChatHandler::BuildChatPacket(data, CHAT_MSG_WHISPER, LANG_ADDON, player, nullptr, wire);
     player->SendDirectMessage(&data);
+}
+
+// A faction template's reaction fields, as AgentNavServices.h compares them.
+AgentNav::Faction FactionOf(FactionTemplateEntry const* entry)
+{
+    AgentNav::Faction out;
+    if (!entry)
+        return out;
+    out.faction = entry->faction;
+    out.ourMask = entry->ourMask;
+    out.friendlyMask = entry->friendlyMask;
+    out.hostileMask = entry->hostileMask;
+    for (std::size_t i = 0; i < out.enemies.size(); ++i)
+    {
+        out.enemies[i] = entry->enemyFaction[i];
+        out.friends[i] = entry->friendFaction[i];
+    }
+    return out;
+}
+
+// A services request as the search thread answers it: who asks, where, and what.
+AgentNav::ServiceQuery Asking(Player* player, AgentNav::Message const& message, AgentNav::Limits const& limits)
+{
+    AgentNav::ServiceQuery q;
+    q.kinds = message.kinds;
+    q.map = player->GetMapId();
+    q.phaseMask = player->GetPhaseMask();
+    q.x = player->GetPositionX();
+    q.y = player->GetPositionY();
+    q.radius = message.radius > 0.0f ? std::min(message.radius, limits.serviceRadius) : limits.serviceRadius;
+    q.playerClass = player->getClass();
+    q.faction = FactionOf(player->GetFactionTemplateEntry());
+    q.cap = limits.maxServices;
+    return q;
+}
+
+// The skill lines a spell steps or sets (SPELL_EFFECT_SKILL_STEP, SPELL_EFFECT_SKILL), and those of
+// the spells it teaches (SPELL_EFFECT_LEARN_SPELL), one level down.
+void SkillsOf(uint32 spellId, std::map<uint32, uint32>& votes, bool teach)
+{
+    SpellInfo const* info = sSpellMgr->GetSpellInfo(spellId);
+    if (!info)
+        return;
+    for (SpellEffectInfo const& effect : info->GetEffects())
+    {
+        if ((effect.Effect == SPELL_EFFECT_SKILL_STEP || effect.Effect == SPELL_EFFECT_SKILL) && effect.MiscValue > 0)
+            ++votes[uint32(effect.MiscValue)];
+        else if (teach && effect.Effect == SPELL_EFFECT_LEARN_SPELL && effect.TriggerSpell)
+            SkillsOf(effect.TriggerSpell, votes, false);
+    }
+}
+
+// The profession a tradeskill trainer teaches, and its name. AzerothCore's `trainer` rows of type
+// Tradeskill carry no requirement (0) and serve weapon masters too, so it is read off the trainer's
+// spells: the skill line they require (ReqSkillLine, set on every rank and recipe past the first)
+// and the skill lines they step (the "Apprentice X" spells), the most common one that is a
+// profession or secondary skill (SkillLine.dbc categories 11 and 9). 0 for none.
+uint32 ProfessionOf(Trainer::Trainer const& trainer, std::string& name)
+{
+    std::map<uint32, uint32> votes;
+    for (Trainer::Spell const& spell : trainer.GetSpells())
+    {
+        if (spell.ReqSkillLine)
+            ++votes[spell.ReqSkillLine];
+        SkillsOf(spell.SpellId, votes, true);
+    }
+    uint32 best = 0, most = 0;
+    for (auto const& [skill, count] : votes)
+    {
+        SkillLineEntry const* line = sSkillLineStore.LookupEntry(skill);
+        if (!line || (line->categoryId != SKILL_CATEGORY_PROFESSION && line->categoryId != SKILL_CATEGORY_SECONDARY))
+            continue;
+        if (count > most)
+        {
+            best = skill;
+            most = count;
+        }
+    }
+    if (SkillLineEntry const* line = best ? sSkillLineStore.LookupEntry(best) : nullptr)
+        name = line->name[LOCALE_enUS] ? line->name[LOCALE_enUS] : "";
+    return best;
+}
+
+// The creature spawns that offer a service, from the world database ObjectMgr has loaded: the
+// spawn's own NPC flags or its template's (ObjectMgr::ChooseCreatureFlags), the template's faction
+// and name, and the class its default trainer teaches. Read once, on the world thread at startup.
+std::vector<AgentNav::Spawn> ServiceSpawns()
+{
+    std::vector<AgentNav::Spawn> out;
+    for (auto const& [spawnId, data] : sObjectMgr->GetAllCreatureData())
+    {
+        CreatureTemplate const* info = sObjectMgr->GetCreatureTemplate(data.id);
+        if (!info)
+            continue;
+        uint32 npcflag = 0, unitFlags = 0, dynamicFlags = 0;
+        ObjectMgr::ChooseCreatureFlags(info, npcflag, unitFlags, dynamicFlags, &data);
+        if (!(npcflag & AgentNav::kServiceFlags))
+            continue;
+        AgentNav::Spawn s;
+        s.entry = data.id;
+        s.map = data.mapid;
+        s.phaseMask = data.phaseMask;
+        s.x = data.posX;
+        s.y = data.posY;
+        s.z = data.posZ;
+        s.npcFlags = npcflag;
+        if (Trainer::Trainer const* trainer = sObjectMgr->GetTrainer(data.id))
+        {
+            if (trainer->GetTrainerType() == Trainer::Type::Class)
+                s.trainerClass = uint8(trainer->GetTrainerRequirement());
+            else if (trainer->GetTrainerType() == Trainer::Type::Tradeskill)
+                s.profession = ProfessionOf(*trainer, s.professionName);
+        }
+        s.faction = FactionOf(sFactionTemplateStore.LookupEntry(info->faction));
+        s.name = info->Name;
+        out.push_back(std::move(s));
+    }
+    return out;
 }
 
 // One client line. Every line gets an answer, a refusal included.
@@ -242,7 +393,7 @@ void Handle(Player* player, std::string_view payload)
                     break;
                 case AgentNav::RateLimiter::Verdict::Ok:
                     if (character.queued >= settings.maxQueuedPerCharacter)
-                        refusal = AgentNav::ErrorReply(message.id, "busy", "wait for the routes already asked for");
+                        refusal = AgentNav::ErrorReply(message.id, "busy", "wait for the answers already asked for");
                     break;
             }
         }
@@ -254,7 +405,8 @@ void Handle(Player* player, std::string_view payload)
             Send(player, refusal);
         return;
     }
-    if (refusal.empty())
+    bool const services = message.verb == AgentNav::Verb::Services;
+    if (refusal.empty() && !services)
         refusal = AgentNav::CheckPath(message, settings.limits,
             {player->GetPositionX(), player->GetPositionY(), player->GetPositionZ()});
     if (refusal.empty() && !gService.Running())
@@ -272,6 +424,8 @@ void Handle(Player* player, std::string_view payload)
     job.options.maxPoints = int(settings.limits.maxWaypoints);
     job.options.endSnap = message.near ? settings.legSnap : 0.0f;
     job.options.anyHeight = message.anyHeight;
+    if (services)
+        job.services = Asking(player, message, settings.limits);
     {
         std::lock_guard<std::mutex> guard(gLock);
         ++gCharacters[player->GetGUID()].queued;
@@ -282,7 +436,7 @@ void Handle(Player* player, std::string_view payload)
         std::lock_guard<std::mutex> guard(gLock);
         --gCharacters[player->GetGUID()].queued;
     }
-    Send(player, AgentNav::ErrorReply(message.id, "busy", "the realm's route queue is full"));
+    Send(player, AgentNav::ErrorReply(message.id, "busy", "the realm's request queue is full"));
 }
 
 class AgentNavWorld : public WorldScript
@@ -312,6 +466,8 @@ public:
         s.searchNodes = sConfigMgr->GetOption<uint32>("AgentNav.SearchNodes", 65535);
         s.legSnap = sConfigMgr->GetOption<float>("AgentNav.LegSnap", 40.0f);
         s.slowMs = sConfigMgr->GetOption<uint32>("AgentNav.SlowQueryMs", 50);
+        s.limits.serviceRadius = sConfigMgr->GetOption<float>("AgentNav.ServiceRadius", 2000.0f);
+        s.limits.maxServices = std::clamp<uint32>(sConfigMgr->GetOption<uint32>("AgentNav.MaxServices", 20), 1, 100);
         std::lock_guard<std::mutex> guard(gLock);
         gSettings = s;
     }
@@ -325,11 +481,13 @@ public:
             return;
         }
         std::string const mmaps = sWorld->GetDataPath() + "mmaps";
-        gService.Start(mmaps, settings);
+        std::vector<AgentNav::Spawn> spawns = ServiceSpawns();
+        std::size_t const places = spawns.size();
+        gService.Start(mmaps, settings, std::move(spawns));
         LOG_INFO("server.loading",
-            ">> mod-agent-nav: answering route requests from {} ({} a second and {} a minute per character, {} yd, {} corners)",
+            ">> mod-agent-nav: answering route requests from {} ({} a second and {} a minute per character, {} yd, {} corners); {} service spawns",
             mmaps, settings.limits.perSecond, settings.limits.perMinute, uint32(settings.limits.maxDistance),
-            settings.limits.maxWaypoints);
+            settings.limits.maxWaypoints, places);
     }
 
     void OnShutdown() override { gService.Stop(); }

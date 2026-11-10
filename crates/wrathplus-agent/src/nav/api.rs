@@ -1,8 +1,8 @@
 //! The Lua side of `nav`: `AgentPath`, `AgentMoveTo`, `AgentInteract` (the far case), `AgentAvoid`,
 //! `AgentStop`, `AgentWalk`.
 
-use super::realm::Purpose;
-use super::{begin_routing, route_to, routing_to, start, Handles, Plan};
+use super::realm::{self, Purpose, Source};
+use super::{apply, begin_routing, route_to, routing_to, start, Handles, Plan};
 use crate::world;
 use mlua::{Lua, MultiValue, Table, Value};
 use wrathplus_nav::Route;
@@ -249,7 +249,7 @@ pub(crate) fn exchange(lua: &Lua, nav: &Handles, lines: Vec<(String, String)>, i
         .then(|| g.get::<mlua::Function>("UnitName").ok())
         .flatten()
         .and_then(|name| name.call::<Option<String>>("player").ok().flatten());
-    let outbox = super::pump(nav, lines, me.as_deref());
+    let outbox = pump(nav, lines, me.as_deref());
     let (false, Some(me), Ok(send)) = (
         outbox.is_empty(),
         me,
@@ -260,4 +260,64 @@ pub(crate) fn exchange(lua: &Lua, nav: &Handles, lines: Vec<(String, String)>, i
     for line in outbox {
         let _ = send.call::<()>((wrathplus_nav::remote::PREFIX, line, "WHISPER", me.as_str()));
     }
+}
+
+/// The realm's lines among this frame's events (`CHAT_MSG_ADDON` with our prefix), taken out of
+/// the stream: the message and who sent it.
+pub(crate) fn take_lines(
+    events: &mut Vec<(String, Vec<wrathplus_ui::script::ScriptValue>)>,
+) -> Vec<(String, String)> {
+    use wrathplus_ui::script::ScriptValue::Str;
+    let mut lines = Vec::new();
+    events.retain(|(event, args)| match (event.as_str(), args.as_slice()) {
+        ("CHAT_MSG_ADDON", [Str(prefix), Str(message), _, Str(sender), ..])
+            if prefix == wrathplus_nav::remote::PREFIX =>
+        {
+            lines.push((message.clone(), sender.clone()));
+            false
+        }
+        _ => true,
+    });
+    lines
+}
+
+/// Once a frame: follow the client into the world (the probe), hand the realm's lines to the
+/// route source, apply what came of them, and say what waits to be sent. `me` is the player's
+/// name once known: lines are ours only when we whispered them, and nothing is sent before.
+pub(crate) fn pump(nav: &Handles, lines: Vec<(String, String)>, me: Option<&str>) -> Vec<String> {
+    let now = nav.now();
+    let Ok(mut mesh) = nav.mesh.lock() else {
+        return Vec::new();
+    };
+    let remote = &mut mesh.remote;
+    let mut outcomes = remote.world(me.is_some(), now);
+    for (line, sender) in lines {
+        if me.is_some_and(|me| me.eq_ignore_ascii_case(&sender)) {
+            outcomes.extend(remote.receive(&line, now));
+        }
+    }
+    outcomes.extend(remote.tick(now));
+    let outbox = std::mem::take(&mut remote.outbox);
+    drop(mesh);
+    for outcome in outcomes {
+        apply(nav, outcome);
+    }
+    outbox
+}
+
+/// Which navmesh routes come from, for `/status`.
+pub(crate) fn status(nav: &Handles) -> serde_json::Value {
+    let Ok(mesh) = nav.mesh.lock() else {
+        return serde_json::Value::Null;
+    };
+    let local = mesh.dir.as_ref().filter(|dir| dir.is_dir());
+    let (source, detail) = match (realm::choose(local.is_some(), &mesh.remote.realm), local) {
+        (Source::Local, Some(dir)) => (
+            "local",
+            format!("routes come from local mmaps ({})", dir.display()),
+        ),
+        (Source::Realm, _) => ("realm", mesh.remote.describe()),
+        _ => ("none", mesh.remote.describe()),
+    };
+    serde_json::json!({"source": source, "detail": detail})
 }

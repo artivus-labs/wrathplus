@@ -3,7 +3,7 @@
 
 use super::*;
 
-const HELLO: &str = "h 1 1500 256 64 5 240";
+const HELLO: &str = "h 1 1500 256 64 5 240 2000 20";
 
 fn ask(purpose: Purpose, to: [f32; 3]) -> Ask {
     Ask {
@@ -11,6 +11,9 @@ fn ask(purpose: Purpose, to: [f32; 3]) -> Ask {
         from: [100.0, 200.0, 30.0],
         to,
         avoid: Vec::new(),
+        any_height: false,
+        kinds: Vec::new(),
+        radius: None,
     }
 }
 
@@ -206,7 +209,7 @@ fn a_goal_past_the_realm_limit_is_asked_for_a_leg_at_a_time() {
 fn only_the_nearest_circles_are_sent_when_the_realm_takes_fewer() {
     let mut remote = Remote::new();
     remote.world(true, 0.0);
-    remote.receive("h 1 1500 256 2 5 240", 0.1);
+    remote.receive("h 1 1500 256 2 5 240 2000 20", 0.1);
     remote.outbox.clear();
     let mut asked = ask(walk(1), [150.0, 200.0, 30.0]);
     asked.avoid = vec![
@@ -229,4 +232,48 @@ fn leaving_the_world_ends_what_was_asked() {
         .iter()
         .all(|o| matches!(o, Outcome::Failed { note, .. } if note.contains("left the world"))));
     assert!(remote.outbox.is_empty());
+}
+
+#[test]
+fn a_services_question_goes_out_and_its_places_come_back_in_order() {
+    let mut remote = available();
+    let mut asked = ask(Purpose::Services, [100.0, 200.0, 30.0]);
+    asked.kinds = vec!["repair".into(), "vendor".into()];
+    asked.radius = Some(500);
+    // A walk asked meanwhile goes first; the question waits its turn.
+    remote.ask(ask(walk(1), [110.0, 200.0, 30.0]), 1.0);
+    remote.ask(asked.clone(), 1.0);
+    assert_eq!(remote.outbox.len(), 1);
+    remote.receive("e 1 noroute x", 1.1);
+    remote.tick(1.0 + SPACING);
+    assert_eq!(remote.outbox[1], "S 2 repair,vendor 500");
+    assert!(remote
+        .receive("s 2 1 2 vendor 1 10.0 0.0 0.0 1 - Brother Danil", 1.3)
+        .is_empty());
+    let out = remote.receive("s 2 2 2 repair 2 20.0 0.0 0.0 1 - Godric", 1.4);
+    let [Outcome::Services { ask, places }] = &out[..] else {
+        panic!("{out:?}");
+    };
+    assert_eq!(ask, &asked);
+    let named: Vec<(&str, &str)> = places
+        .iter()
+        .map(|p| (p.kind.as_str(), p.name.as_str()))
+        .collect();
+    assert_eq!(named, [("vendor", "Brother Danil"), ("repair", "Godric")]);
+    // None near: one line saying so.
+    remote.ask(asked.clone(), 2.0);
+    let out = remote.receive("s 3 0 0", 2.1);
+    assert!(matches!(&out[..], [Outcome::Services { places, .. }] if places.is_empty()));
+}
+
+#[test]
+fn a_realm_without_the_module_fails_a_waiting_services_question_with_its_own_note() {
+    let mut remote = Remote::new();
+    remote.world(true, 0.0);
+    remote.ask(ask(Purpose::Services, [0.0; 3]), 0.5);
+    let out = remote.receive("H 1", 0.6);
+    let [Outcome::Failed { note, .. }] = &out[..] else {
+        panic!("{out:?}");
+    };
+    assert_eq!(note, NO_SERVICES);
 }

@@ -24,6 +24,7 @@
 // Realm to client (lower-case verbs, so a realm without the module, which simply delivers the
 // whisper back, can never be mistaken for an answer):
 //   h <version> <max distance> <max points> <max circles> <per second> <per minute>
+//     <service radius> <max services>
 //   r <id> <part> <parts> <flags> <dx,dy,dz>...
 //                                            the corners, in tenths of a yard: the first of part 1
 //                                            is absolute, every later one the step from the corner
@@ -31,6 +32,8 @@
 //                                            letters from c (complete: it reaches the end), s (it
 //                                            crosses steep ground), t (cut at the corner limit)
 //   e <id> <code> [detail]                   rate | far | start | nomesh | noroute | bad | busy
+//
+// And where services are: `S` and `s` lines (AgentNavServices.h).
 #ifndef MOD_AGENT_NAV_PROTOCOL_H
 #define MOD_AGENT_NAV_PROTOCOL_H
 
@@ -42,6 +45,8 @@
 #include <string>
 #include <string_view>
 #include <vector>
+
+#include "AgentNavServices.h"
 
 namespace AgentNav
 {
@@ -70,13 +75,17 @@ struct Limits
     float maxStartDistance = 100.0f;
     std::uint32_t maxWaypoints = 256;
     std::uint32_t maxAvoid = 64;
+    // Services (AgentNavServices.h): the farthest a place may be, and how many one answer holds.
+    float serviceRadius = 2000.0f;
+    std::uint32_t maxServices = 20;
 };
 
 enum class Verb
 {
     Hello,
     Avoid,
-    Path
+    Path,
+    Services
 };
 
 struct Message
@@ -91,6 +100,9 @@ struct Message
     std::array<float, 3> from{};
     std::array<float, 3> to{};
     bool hasToZ = false;
+    // Services: the kinds asked for (AgentNavServices.h `Kind`) and the radius (0: the realm's).
+    std::uint16_t kinds = 0;
+    float radius = 0.0f;
 };
 
 inline std::vector<std::string_view> Fields(std::string_view text)
@@ -173,12 +185,24 @@ inline std::string Parse(std::string_view payload, Message& out)
             return "hello";
         return "";
     }
-    if (f[0] != "A" && f[0] != "P")
+    if (f[0] != "A" && f[0] != "P" && f[0] != "S")
         return "verb";
     std::uint32_t id = 0;
     if (f.size() < 2 || !ParseCount(f[1], 65535, id) || id == 0)
         return "id";
     out.id = static_cast<std::uint16_t>(id);
+    if (f[0] == "S")
+    {
+        out.verb = Verb::Services;
+        if (f.size() < 3 || f.size() > 4)
+            return "fields";
+        out.kinds = ParseKinds(f[2]);
+        if (out.kinds == 0)
+            return "kinds";
+        if (f.size() == 4 && (!ParseNumber(f[3], kMaxCoordinate, out.radius) || out.radius <= 0.0f))
+            return "radius";
+        return "";
+    }
     if (f[0] == "A")
     {
         out.verb = Verb::Avoid;
@@ -292,7 +316,8 @@ inline std::string HelloReply(Limits const& limits)
 {
     return "h " + std::to_string(kVersion) + " " + std::to_string(static_cast<int>(limits.maxDistance)) + " " +
         std::to_string(limits.maxWaypoints) + " " + std::to_string(limits.maxAvoid) + " " +
-        std::to_string(limits.perSecond) + " " + std::to_string(limits.perMinute);
+        std::to_string(limits.perSecond) + " " + std::to_string(limits.perMinute) + " " +
+        std::to_string(static_cast<int>(limits.serviceRadius)) + " " + std::to_string(limits.maxServices);
 }
 
 struct RouteFlags

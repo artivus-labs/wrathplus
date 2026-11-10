@@ -101,3 +101,16 @@ AgentNav.LegSnap = 40
 #        Default:     50
 #
 AgentNav.SlowQueryMs = 50
+
+#
+#    AgentNav.ServiceRadius
+#    AgentNav.MaxServices
+#        Description: Where services are (`S` requests): the farthest a place may be, in yards
+#                     (also the default when a request names no radius), and the most places in
+#                     one answer (1 to 100). The places come from the creature spawns loaded at
+#                     startup; a request is a search over that table on the module's thread, and
+#                     counts toward the same per-character rate as a route.
+#        Default:     2000 and 20
+#
+AgentNav.ServiceRadius = 2000
+AgentNav.MaxServices = 20

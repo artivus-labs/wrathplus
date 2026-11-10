@@ -5,8 +5,10 @@
 // the linker leaves it out of the game.
 #include "AgentNavProtocol.h"
 #include "AgentNavRoute.h"
+#include "AgentNavServices.h"
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 
@@ -42,6 +44,8 @@ std::string Dump(AgentNav::Message const& m)
                 out += " " + Num(c.x) + " " + Num(c.y) + " " + Num(c.r);
             return out;
         }
+        case AgentNav::Verb::Services:
+            return "services " + std::to_string(m.id) + " " + std::to_string(m.kinds) + " " + Num(m.radius);
         case AgentNav::Verb::Path:
             break;
     }
@@ -163,6 +167,101 @@ int realm_cache_route(void* cache, unsigned map, const float* from, const float*
         std::memcpy(points + i * 3, route.points[i].data(), sizeof(float) * 3);
     *flags = (route.flags.complete ? 1 : 0) | (route.flags.steep ? 2 : 0) | (route.flags.truncated ? 4 : 0);
     return static_cast<int>(route.points.size());
+}
+
+} // extern "C"
+
+namespace
+{
+std::vector<std::string_view> Words(std::string_view line)
+{
+    return AgentNav::Fields(line);
+}
+
+std::uint32_t U(std::string_view s)
+{
+    return static_cast<std::uint32_t>(std::strtoul(std::string(s).c_str(), nullptr, 0));
+}
+
+float F(std::string_view s)
+{
+    return std::strtof(std::string(s).c_str(), nullptr);
+}
+
+// "faction ourMask friendlyMask hostileMask [enemy...]" as a Faction (masks in any C base).
+AgentNav::Faction FactionFrom(std::vector<std::string_view> const& w, std::size_t at)
+{
+    AgentNav::Faction f;
+    f.faction = U(w[at]);
+    f.ourMask = U(w[at + 1]);
+    f.friendlyMask = U(w[at + 2]);
+    f.hostileMask = U(w[at + 3]);
+    for (std::size_t i = 0; i < 4 && at + 4 + i < w.size(); ++i)
+        f.enemies[i] = U(w[at + 4 + i]);
+    return f;
+}
+}
+
+extern "C" {
+
+// The module's answer for a fixture spawn table and a query, as reply lines (newline-separated).
+// spawns: one per line, "entry map phase x y z flags trainerClass profession faction our friendly
+// hostile [enemy...] name"
+// (the name is one word, underscores for spaces); query: "kinds map phase x y radius class cap
+// faction our friendly hostile [enemy...]", kinds a comma list as on the wire.
+int realm_services(const char* spawns, const char* query, char* out, int out_len)
+{
+    std::vector<AgentNav::Spawn> table;
+    std::string_view rest(spawns);
+    while (!rest.empty())
+    {
+        std::size_t const end = rest.find('\n');
+        std::string_view const line = rest.substr(0, end);
+        rest = end == std::string_view::npos ? std::string_view() : rest.substr(end + 1);
+        if (line.empty())
+            continue;
+        std::vector<std::string_view> const w = Words(line);
+        AgentNav::Spawn s;
+        s.entry = U(w[0]);
+        s.map = U(w[1]);
+        s.phaseMask = U(w[2]);
+        s.x = F(w[3]);
+        s.y = F(w[4]);
+        s.z = F(w[5]);
+        s.npcFlags = U(w[6]);
+        s.trainerClass = static_cast<std::uint8_t>(U(w[7]));
+        // "skill:Name" for a profession trainer (underscores for spaces), else 0.
+        std::string_view const profession = w[8];
+        std::size_t const colon = profession.find(':');
+        s.profession = U(profession.substr(0, colon));
+        if (colon != std::string_view::npos)
+            s.professionName = std::string(profession.substr(colon + 1));
+        for (char& c : s.professionName)
+            if (c == '_')
+                c = ' ';
+        // The faction, its enemies if any, then the name last.
+        s.faction = FactionFrom({w.begin() + 9, w.end() - 1}, 0);
+        s.name = std::string(w.back());
+        for (char& c : s.name)
+            if (c == '_')
+                c = ' ';
+        table.push_back(s);
+    }
+    std::vector<std::string_view> const w = Words(query);
+    AgentNav::ServiceQuery q;
+    q.kinds = AgentNav::ParseKinds(w[0]);
+    q.map = U(w[1]);
+    q.phaseMask = U(w[2]);
+    q.x = F(w[3]);
+    q.y = F(w[4]);
+    q.radius = F(w[5]);
+    q.playerClass = static_cast<std::uint8_t>(U(w[6]));
+    q.cap = U(w[7]);
+    q.faction = FactionFrom(w, 8);
+    std::string joined;
+    for (std::string const& line : AgentNav::ServiceReply(9, AgentNav::SelectServices(table, q), AgentNav::kMaxPayload))
+        joined += (joined.empty() ? "" : "\n") + line;
+    return Put(joined, out, out_len);
 }
 
 } // extern "C"
