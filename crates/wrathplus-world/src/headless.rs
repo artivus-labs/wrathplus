@@ -12,6 +12,7 @@
 //! | `WOW_HEADLESS=1` | headless mode |
 //! | `WOW_WIN=WxH` | frame size in pixels (default 1280×720) |
 //! | `WOW_HEADLESS_FPS=N` | frames a second (default 30, 1–240) |
+//! | `WOW_PIPE_WARM=1\|0` | force the start-up pipeline warm pass on or off; headless skips it by default and compiles pipelines as first drawn (`wrathplus-app-world` `pipe_warm/gate.rs`) |
 
 use bevy::app::ScheduleRunnerPlugin;
 use bevy::camera::{CameraUpdateSystems, RenderTarget};
