@@ -1,0 +1,13 @@
+[worldserver]
+
+########################################
+# mod-party-quest-share
+########################################
+#
+#    PartyQuestShare.Enable
+#        Description: Playerbots in a party accept a quest any party member shares, when the
+#                     core would offer it to a player in their place. 0 leaves shared quests
+#                     to mod-playerbots (only a bot's master can share with it).
+#        Default:     1
+#
+PartyQuestShare.Enable = 1

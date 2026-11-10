@@ -62,6 +62,12 @@ pub(crate) const STANDARD: &[Standard] = &[
         origin: Origin::Bundled("packaging/server/modules/mod-quest-minimap-points"),
         about: "Fills in the quest locations AzerothCore lacks, so the minimap shows a quest's marker and the arrow pointing to it, as on retail servers.",
     },
+    Standard {
+        name: "mod-party-quest-share",
+        title: "Party bots take shared quests",
+        origin: Origin::Bundled("packaging/server/modules/mod-party-quest-share"),
+        about: "Share a quest and every bot in your party that can take it accepts, whoever leads the party. Without it only bots you added yourself do. Needs Playerbots.",
+    },
 ];
 
 pub(crate) fn is_standard(name: &str) -> bool {
