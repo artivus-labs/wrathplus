@@ -54,6 +54,32 @@ fn the_roster_reaches_the_shared_owner_and_keeps_its_bank_words_and_the_log_is_r
         (50_000, (7, 10), (3, 5))
     );
     assert!(native.rank(1).is_none());
+    // `MSG_GUILD_PERMISSIONS` overwrites its rank's row of the same table (`0x5cba2a`-`0x5cbab7`).
+    use wrathplus_protocol::wrath_guild_bank::{Permissions, TabPermission};
+    let tab = |rights, remaining_items| TabPermission {
+        rights,
+        remaining_items,
+    };
+    let mut native = NativeGuild::default();
+    native.apply_permissions(&Permissions {
+        rank: 1,
+        flags: 0x40000,
+        money_limit: 0,
+        purchased_tabs: 2,
+        tabs: [
+            tab(3, 4),
+            tab(1, 0),
+            tab(0, 0),
+            tab(0, 0),
+            tab(0, 0),
+            tab(0, 0),
+        ],
+    });
+    assert_eq!(native.ranks().len(), 2);
+    assert_eq!(
+        native.rank(1).map(|r| (r.flags, r.tabs[0])),
+        Some((0x40000, (3, 4)))
+    );
 
     // An invite and a promote, newest first, as AC writes them.
     let mut log = vec![2u8];

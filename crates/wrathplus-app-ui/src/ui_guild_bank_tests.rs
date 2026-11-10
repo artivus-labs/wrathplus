@@ -215,6 +215,8 @@ fn gestures_name_the_vault_and_zero_based_coordinates() {
         dbg(None)
     );
     assert!(open.banker().is_none() && !bank.open);
+    // Closing clears the bank guid only (`0x5a4270`): money and the tab count stay readable.
+    assert_eq!(bank.tab_purchase(), (false, 1, 5_000));
     assert!(
         crate::ui_items::guild_bank_deposit(open.banker, 2, 0, 1).is_none(),
         "the vault closed"
@@ -227,6 +229,7 @@ fn the_frame_events_follow_the_view() {
         events.into_iter().map(|(e, _)| e).collect::<Vec<_>>()
     };
     let open = WrathGuildBankView {
+        open: true,
         money: 10,
         tabs: vec![WrathGuildBankTab::default()],
         slots: vec![Vec::new()],
@@ -257,6 +260,12 @@ fn the_frame_events_follow_the_view() {
         ["GUILDBANKFRAME_CLOSED"]
     );
     assert!(events(None, &WrathGuildBankView::default()).is_empty());
+    // A closed vault's published state (rank rights from the roster, kept money) opens nothing.
+    let closed = WrathGuildBankView {
+        open: false,
+        ..richer
+    };
+    assert!(events(None, &closed).is_empty());
 }
 
 #[test]
@@ -367,4 +376,30 @@ fn a_bank_text_change_event_queues_its_tab() {
             .unwrap();
     }
     assert_eq!(world.resource::<GuildBank>().text_changed, [2]);
+}
+
+/// The rank rights and the tab count are published with the vault shut: 12340's merchant and
+/// guild-control panes read its globals (`CanGuildBankRepair` `0x5cc200`, `GetNumGuildBankTabs`
+/// `0x5a44d0`).
+#[test]
+fn a_shut_vault_still_publishes_rank_rights_and_the_tab_count() {
+    use wrathplus_protocol::wrath_guild_bank::{Permissions, TabPermission};
+    let permissions = Permissions {
+        rank: 0,
+        flags: 0x40000,
+        money_limit: 0,
+        purchased_tabs: 2,
+        tabs: std::array::from_fn(|_| TabPermission {
+            rights: 1,
+            remaining_items: 5,
+        }),
+    };
+    let mut native = crate::ui_guild::NativeGuild::default();
+    native.apply_permissions(&permissions);
+    let mut bank = GuildBank::default();
+    apply(&mut bank, Packet::Permissions(permissions), false);
+    let view = view(&bank, &native, &|_, _| (None, None), &|_| None);
+    assert!(!view.open);
+    assert_eq!((view.tabs.len(), view.rank_rights.len()), (2, 1));
+    assert_eq!(view.rank_rights[0].tabs[0], (1, 5));
 }

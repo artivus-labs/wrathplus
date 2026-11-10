@@ -46,7 +46,7 @@ fn a_built_client_registers_exactly_the_shipped_cvar_rows() {
         built, shipped,
         "the client registers the shipped table, no more, no less"
     );
-    assert_eq!(shipped.len(), 156, "the shipped row count moved");
+    assert_eq!(shipped.len(), 157, "the shipped row count moved");
 
     let latched: Vec<&str> = cvars
         .rows()
