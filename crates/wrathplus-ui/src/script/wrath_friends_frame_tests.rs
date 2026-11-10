@@ -87,7 +87,7 @@ fn guild_bank_tabs_money_and_staged_rank_rights() {
          SetGuildBankTabWithdraw(1, 999999) SetGuildBankWithdrawLimit(5000000000)",
     )
     .unwrap();
-    let staged = s.wrath_guild_bank_staged_rights(1).unwrap();
+    let staged = s.wrath_guild_bank_staged_rights(0).unwrap();
     assert_eq!(staged.tabs[0], (2 | 4, 100_000));
     assert_eq!(staged.money_per_day, 1_000_000_000);
 }

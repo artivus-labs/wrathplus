@@ -398,9 +398,9 @@ pub(super) fn drain_guild(
     }
 }
 
-/// The bank rights a 3.3.5 rank save carries: the guild-control pane's staged edit
-/// (`wrath_guild_bank_staged_rights`), else the rank's words from the last roster, so a rank
-/// saved without touching the bank keeps them.
+/// The bank rights a 3.3.5 rank save carries for 0-based `rank`: the guild-control pane's staged
+/// edit of that rank (`wrath_guild_bank_staged_rights`, the row the setters wrote, as
+/// `0x5cb25f`-`0x5cb2e5` reads `[0xad07a8]`), else the rank's words from the last roster.
 fn rank_bank(
     script: &UiScript,
     native: &super::wrath::NativeGuild,

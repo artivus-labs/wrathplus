@@ -81,3 +81,30 @@ fn an_over_long_rank_name_is_refused() {
         None
     );
 }
+
+/// `GuildControlSaveRank` sends the bank words of the rank it saves, the row the setters wrote
+/// (`0x5cb25f`-`0x5cb2e5` and `0x5cb7cb`-`0x5cb7e1`, both `[0xad07a8]`): an officer's save must not
+/// carry the guild master's row.
+#[test]
+fn a_rank_save_carries_the_saved_ranks_staged_bank_words() {
+    use wrathplus_ui::script::WrathGuildBankView;
+    let mut script = UiScript::new().unwrap();
+    script.set_wrath_guild_bank(WrathGuildBankView {
+        rank_rights: vec![
+            WrathGuildBankRankRights {
+                money_per_day: u32::MAX,
+                tabs: [(0xff, u32::MAX); 6],
+            },
+            WrathGuildBankRankRights {
+                money_per_day: 50_000,
+                tabs: [(1, 10); 6],
+            },
+        ],
+        ..Default::default()
+    });
+    script
+        .run("GuildControlSetRank(2) SetGuildBankTabWithdraw(1, 7)")
+        .unwrap();
+    let bank = rank_bank(&script, &crate::ui_guild::NativeGuild::default(), 1);
+    assert_eq!(bank.tabs[0], (1, 7), "rank index 1's staged edit");
+}

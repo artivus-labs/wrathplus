@@ -148,12 +148,12 @@ impl super::UiScript {
         self.model_mut().wrath_friends.events = events;
     }
 
-    /// The staged bank rights of 1-based `rank`, for App's rank save (`GuildControlSaveRank`).
+    /// The staged bank rights of 0-based `rank`, the wire's rank id, for App's rank save
+    /// (`GuildControlSaveRank`).
     pub fn wrath_guild_bank_staged_rights(&self, rank: u32) -> Option<WrathGuildBankRankRights> {
         let model = self.model_ref();
-        usize::try_from(rank.checked_sub(1)?)
-            .ok()
-            .and_then(|i| model.wrath_friends.staged.get(i).cloned())
+        let rank = usize::try_from(rank).ok()?;
+        model.wrath_friends.staged.get(rank).cloned()
     }
 
     /// Drain the guild-bank intents in call order.
