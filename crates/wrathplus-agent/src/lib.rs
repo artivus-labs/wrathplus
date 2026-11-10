@@ -4,7 +4,7 @@
 //!
 //! | Route | What it does |
 //! |---|---|
-//! | `GET /status` | client state (login, character select, in world) and, in world, the player |
+//! | `GET /status` | client state (login, character select, in world), in world the player, and where routes come from (`nav`) |
 //! | `POST /lua[?budget=N]` | run the body in the UI's Lua; values, `print` output or the error |
 //! | `GET /screenshot[?scale=0.5][&format=jpeg[&quality=85]]` | the next rendered frame, PNG or JPEG |
 //! | `GET /events?since=N[&wait_ms=M][&limit=K]` | every UI event since cursor `N`, long-polling |
@@ -13,8 +13,9 @@
 //!
 //! In Lua, besides the stock API: `AgentNearby([yards])`, `AgentFindNpc(service [, yards])`,
 //! `AgentPosition()`, `AgentTarget(guid)`, `AgentInteract(guid)` (`world`), `AgentQuestPOI(quest)`
-//! (`quest_poi`), `AgentZones()` (`zones`), `AgentPath`, `AgentMoveTo`, `AgentStop`, `AgentWalk` (`nav`,
-//! over the realm's mmaps from `WOW_NAV_MMAPS`), and the module functions (`env`).
+//! (`quest_poi`), `AgentZones()` (`zones`), `AgentPath`, `AgentMoveTo`, `AgentStop`, `AgentWalk`,
+//! `AgentServices` (`nav`, over local mmaps from `WOW_NAV_MMAPS`, else routes asked of the realm;
+//! services always from the realm), and the module functions (`env`).
 //!
 //! With the port open, the UI's movement verbs run from any Lua (stock gates them on a key
 //! binding), so an agent's scripts can walk. Everything else an agent does goes through the same
@@ -182,11 +183,15 @@ fn pump_events(
         if let Err(e) = nav::install(script.lua(), &link.nav, &link.world) {
             error!("agent port: navigation functions: {e}");
         }
+        if let Err(e) = nav::install_services(script.lua(), &link.nav, &link.world, &link.zones) {
+            error!("agent port: AgentServices: {e}");
+        }
         if let Err(e) = install_signal(script.lua(), link.events.clone(), link.started) {
             error!("agent port: AgentSignal: {e}");
         }
     }
-    if link.autoexec_due && state.is_some_and(|s| *s.get() == ClientState::InWorld) {
+    let in_world = state.is_some_and(|s| *s.get() == ClientState::InWorld);
+    if link.autoexec_due && in_world {
         link.autoexec_due = false;
         let reply = lua::run(&script, "return require(\"autoexec\")", DEFAULT_BUDGET);
         link.events.push([json!({
@@ -195,7 +200,10 @@ fn pump_events(
             "args": ["require(\"autoexec\")", reply["ok"], reply.get("error")],
         })]);
     }
-    let taken = script.take_tapped_events();
+    let mut taken = script.take_tapped_events();
+    // The realm's route replies are the nav source's, not the agent's to read.
+    let lines = nav::take_lines(&mut taken.events);
+    nav::exchange(script.lua(), &link.nav, lines, in_world);
     let time = link.started.elapsed().as_secs_f64();
     let dropped = (taken.dropped > 0)
         .then(|| json!({"time": time, "event": "AGENT_EVENTS_DROPPED", "args": [taken.dropped]}));
@@ -289,6 +297,7 @@ fn serve_jobs(
                     "ui_ready": ui_ready,
                     "time": link.started.elapsed().as_secs_f64(),
                     "player": player,
+                    "nav": nav::status(&link.nav),
                 }));
             }
             Job::Screenshot {

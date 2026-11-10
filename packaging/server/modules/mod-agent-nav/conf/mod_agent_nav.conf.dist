@@ -1,0 +1,116 @@
+[worldserver]
+
+########################################
+# mod-agent-nav
+########################################
+#
+#    AgentNav.Enable
+#        Description: Answer agent clients' route requests from the realm's navmesh (mmaps).
+#                     Off, clients are told nothing and fall back to their own mmaps, if any.
+#        Default:     1
+#
+AgentNav.Enable = 1
+
+#
+#    AgentNav.QueriesPerSecond
+#    AgentNav.QueriesPerMinute
+#        Description: Route requests one character may make in any second and in any minute
+#                     (0: no limit). A well-behaved client sends at most four a second, and only
+#                     while it is chasing or following something that moves. Past either, the
+#                     request is refused ("rate") and not counted.
+#        Default:     5 and 240
+#
+AgentNav.QueriesPerSecond = 5
+AgentNav.QueriesPerMinute = 240
+
+#
+#    AgentNav.MaxDistance
+#        Description: Longest route, in yards from start to end in a straight line (0: no
+#                     limit). Each request loads the navmesh tiles (533 yards a side) covering
+#                     both ends and one more all round, so this bounds what one request can
+#                     load: 36 tiles at 1500. Clients walk longer ways one leg at a time.
+#        Default:     1500
+#
+AgentNav.MaxDistance = 1500
+
+#
+#    AgentNav.MaxStartDistance
+#        Description: A route must start within this many yards of the character asking
+#                     (0: anywhere on its map). Routes are for walking, not for mapping.
+#        Default:     100
+#
+AgentNav.MaxStartDistance = 100
+
+#
+#    AgentNav.MaxWaypoints
+#        Description: Most corners in one answer (2 to 512); a longer route is cut there and
+#                     marked. About twenty corners fit one chat packet.
+#        Default:     256
+#
+AgentNav.MaxWaypoints = 256
+
+#
+#    AgentNav.MaxAvoidCircles
+#        Description: Most circles (hostile mobs to walk round) one request may carry, at most
+#                     64. About eleven fit one chat packet.
+#        Default:     64
+#
+AgentNav.MaxAvoidCircles = 64
+
+#
+#    AgentNav.MaxQueued
+#    AgentNav.MaxQueuedPerCharacter
+#        Description: Requests waiting for the search thread, in all and for one character.
+#                     Past either the request is refused ("busy").
+#        Default:     64 and 2
+#
+AgentNav.MaxQueued = 64
+AgentNav.MaxQueuedPerCharacter = 2
+
+#
+#    AgentNav.MaxLoadedTiles
+#        Description: Navmesh tiles the module keeps in memory (its own copies, apart from the
+#                     maps'); the least recently used are dropped past it. A tile is 1.5 MB on
+#                     average and up to 7 MB. Read at startup.
+#        Default:     128
+#
+AgentNav.MaxLoadedTiles = 128
+
+#
+#    AgentNav.SearchNodes
+#        Description: Detour's node budget for one search (256 to 65535). 65535 is what the
+#                     WrathPlus client uses on its own mmaps, so routes match; a search that
+#                     runs out returns the route as far as it got. Read at startup.
+#        Default:     65535
+#
+AgentNav.SearchNodes = 65535
+
+#
+#    AgentNav.LegSnap
+#        Description: For one leg of a longer walk, how far (yards) the leg's end may be moved
+#                     to reach walkable ground.
+#        Default:     40
+#
+AgentNav.LegSnap = 40
+
+#
+#    AgentNav.SlowQueryMs
+#        Description: Log a warning for a search that took this long (0: never). Searches run
+#                     on the module's own thread, so a slow one delays other route requests,
+#                     not the world.
+#        Default:     50
+#
+AgentNav.SlowQueryMs = 50
+
+#
+#    AgentNav.ServiceRadius
+#    AgentNav.MaxServices
+#        Description: Where services are (`S` requests): the farthest a place may be, in yards
+#                     (also the default when a request names no radius), and the most places in
+#                     one answer (1 to 100). The places come from the creature spawns loaded at
+#                     startup; a request is a search over that table on the module's thread, and
+#                     counts toward the same per-character rate as a route.
+#        Default:     2000 and 20
+#
+AgentNav.ServiceRadius = 2000
+AgentNav.MaxServices = 20

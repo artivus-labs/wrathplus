@@ -18,10 +18,11 @@ pinned core, mod-playerbots and module set, and the Manager's Playerbots setting
 | Settings | `server.env` written by Manager | `server.env` here; `/etc/wrathplus-beta/server.env` wins |
 | Realm list | `WrathPlus Local`, 127.0.0.1:18085 | `WrathPlus Beta`, wrathplus.artivus.com.au:8085 |
 
-Modules: mod-playerbots, mod-multibot-bridge, mod-quest-minimap-points, mod-party-quest-share
-and mod-atproto-identity (the realm side of `services/account`). mod-llm-chatter is
-**off** (needs a paid LLM key). The module-config directory is empty: the local realm's saved
-`playerbots.conf` equals the shipped `.conf.dist`.
+Modules: mod-playerbots, mod-multibot-bridge, mod-quest-minimap-points, mod-party-quest-share,
+mod-atproto-identity (the realm side of `services/account`) and mod-agent-nav (walking routes for
+agent clients, from the realm's `mmaps`; its limits are in `mod_agent_nav.conf.dist`).
+mod-llm-chatter is **off** (needs a paid LLM key). The module-config directory is empty: the local
+realm's saved `playerbots.conf` equals the shipped `.conf.dist`.
 
 ## Files
 

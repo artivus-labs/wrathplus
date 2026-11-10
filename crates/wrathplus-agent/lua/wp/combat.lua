@@ -362,7 +362,9 @@ local function tick(now)
     C.state = string.format("closing on %s (%d yd)%s", u.name or "the target", u.distance, cast and (": " .. cast) or "")
     return
   end
-  if AgentWalk().status == "walking" then AgentStop() end
+  -- In reach: stop the chase, a route still coming from the realm included.
+  local chase = AgentWalk().status
+  if chase == "walking" or chase == "routing" then AgentStop() end
   aimed = nil
   if C.ranged then
     -- From range: turn to it (a cast needs facing), without the attack's walk into melee.
@@ -447,7 +449,7 @@ frame:SetScript("OnUpdate", function(_, dt)
     if foe then
       local walk = AgentWalk()
       begin(foe)
-      resume = walk and walk.status == "walking" and walk.goal or nil
+      resume = walk and (walk.status == "walking" or walk.status == "routing") and walk.goal or nil
     end
   end
 end)

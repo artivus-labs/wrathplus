@@ -31,6 +31,28 @@ pub(crate) struct Zone {
     pub max: i32,
     pub x: f32,
     pub y: f32,
+    /// The world rect its map covers, world x from `bottom` to `top` and y from `right` to `left`.
+    pub rect: (f32, f32, f32, f32),
+}
+
+/// The zone a point lies in, by the client's world map: the smallest zone map on `map` whose
+/// rect holds it. Zone maps overlap their neighbours at the edges, so near a border this is a
+/// good guess rather than the terrain's own answer.
+pub(crate) fn zone_at(zones: &[Zone], map: u32, x: f32, y: f32) -> Option<&Zone> {
+    zones
+        .iter()
+        .filter(|z| {
+            let (left, right, top, bottom) = z.rect;
+            z.map == map
+                && (bottom.min(top)..=bottom.max(top)).contains(&x)
+                && (right.min(left)..=right.max(left)).contains(&y)
+        })
+        .min_by(|a, b| area(a).total_cmp(&area(b)))
+}
+
+fn area(z: &Zone) -> f32 {
+    let (left, right, top, bottom) = z.rect;
+    ((left - right) * (top - bottom)).abs()
 }
 
 type Known = Arc<Mutex<Vec<Zone>>>;
@@ -45,6 +67,14 @@ pub(crate) struct Handles {
 pub(crate) struct ZoneLink {
     known: Known,
     loaded: bool,
+}
+
+impl Handles {
+    /// The name of the zone a point lies in ([`zone_at`]), once the zones are read.
+    pub(crate) fn name_at(&self, map: u32, x: f32, y: f32) -> Option<String> {
+        let known = self.known.lock().ok()?;
+        zone_at(&known, map, x, y).map(|z| z.name.clone())
+    }
 }
 
 pub(crate) fn link() -> (Handles, ZoneLink) {
@@ -102,6 +132,7 @@ pub(crate) fn build(
             max: at(90),
             x: (top + bottom) / 2.0,
             y: (left + right) / 2.0,
+            rect: (left, right, top, bottom),
         });
     }
     out.sort_by_key(|z| z.id);
@@ -224,5 +255,18 @@ mod tests {
         assert_eq!((dusk.x, dusk.y), (-10616.0, -516.5));
         let city = &zones[1];
         assert_eq!((city.faction, city.city, city.min), ("Alliance", true, 10));
+        // A point is in the smallest zone map that holds it: Stormwind's inside Elwynn-sized
+        // rects, Duskwood's south of it; nothing off the maps or on another map.
+        let name = |map, x, y| zone_at(&zones, map, x, y).map(|z| z.name.as_str());
+        assert_eq!(name(0, -8900.0, 600.0), Some("Stormwind City"));
+        assert_eq!(name(0, -10500.0, -1000.0), Some("Duskwood"));
+        assert_eq!(name(0, -5000.0, 0.0), None);
+        assert_eq!(name(1, -10500.0, -1000.0), None);
+        let mut wide = zones.clone();
+        wide[0].rect = (2000.0, -2000.0, -7000.0, -12000.0);
+        assert_eq!(
+            zone_at(&wide, 0, -8900.0, 600.0).map(|z| z.name.as_str()),
+            Some("Stormwind City")
+        );
     }
 }

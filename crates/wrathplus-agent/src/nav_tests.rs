@@ -1,7 +1,10 @@
 //! `nav`'s unit tests: targets, the no-navmesh answers and the straight-approach fallback.
 
+use super::api::{height_given, target};
+use super::realm::Purpose;
 use super::walker::*;
 use super::*;
+use mlua::{Lua, MultiValue};
 
 #[test]
 fn targets_come_from_coordinates_or_a_nearby_guid() {
@@ -41,9 +44,21 @@ fn without_mmaps_a_route_says_how_to_get_one() {
         facing: 0.0,
         map: 0,
     };
-    assert!(route_to(&handles, me, [1.0, 1.0, 0.0], false)
-        .unwrap_err()
-        .contains("WOW_NAV_MMAPS"));
+    // Out of the world the realm has not been asked; in it, a realm that does not answer.
+    let why = route_to(&handles, me, [1.0, 1.0, 0.0], false, Purpose::Path).unwrap_err();
+    assert!(
+        why.contains("WOW_NAV_MMAPS") && why.contains("once in the world"),
+        "{why}"
+    );
+    assert_eq!(pump(&handles, Vec::new(), Some("Me")), ["H 1"]);
+    pump(&handles, vec![("H 1".into(), "Me".into())], Some("Me"));
+    let why = route_to(&handles, me, [1.0, 1.0, 0.0], false, Purpose::Path).unwrap_err();
+    assert!(
+        why.contains("WOW_NAV_MMAPS") && why.contains("mod-agent-nav"),
+        "{why}"
+    );
+    assert_eq!(status(&handles)["source"], "none");
+    assert_eq!(status(&handles)["detail"], why.as_str());
 }
 
 #[test]
@@ -82,6 +97,23 @@ fn a_far_interaction_without_a_navmesh_falls_back_to_the_straight_approach() {
         Ok(world::Order::Interact(0x10))
     ));
     assert_eq!(handles.walk.lock().unwrap().then_interact, None);
+}
+
+impl Plan {
+    /// The route of a plan made from local mmaps.
+    fn ready(self) -> Route {
+        match self {
+            Plan::Ready(route) => route,
+            Plan::Asked => panic!("asked the realm, with local mmaps set"),
+        }
+    }
+}
+
+/// A local route, as the walker asks for one.
+fn local(handles: &Handles, me: world::Me, to: [f32; 3], bumps: &[[f32; 3]]) -> Route {
+    route_in(&handles.mesh, me, to, bumps, false, Purpose::Path, 0.0)
+        .unwrap()
+        .ready()
 }
 
 /// A bump is marked a step ahead toward the corner the walk fell short of, or on the corner
@@ -152,13 +184,23 @@ fn a_walk_stuck_on_the_inn_corner_routes_round_it() {
             facing: 0.0,
             map: 0,
         };
-        let plain = route_in(&handles.mesh, me, goal, &[]).unwrap();
+        let plain = local(&handles, me, goal, &[]);
         assert!(
             plain.complete && near(&plain, [corner[0], corner[1]]),
             "the plain route takes the corner: {plain:?}"
         );
         let mut bumps = Vec::new();
-        let round = route_round(&handles.mesh, &mut bumps, me, corner, goal).unwrap();
+        let round = route_round(
+            &handles.mesh,
+            &mut bumps,
+            me,
+            corner,
+            goal,
+            Purpose::Path,
+            0.0,
+        )
+        .unwrap()
+        .ready();
         assert_eq!(bumps, [bump(at, corner)]);
         assert!(round.complete, "{round:?}");
         assert!(
@@ -166,7 +208,7 @@ fn a_walk_stuck_on_the_inn_corner_routes_round_it() {
             "the fresh route leaves the corner out: {round:?}"
         );
         // The walk's bumps are its own: the next plain route is the first again.
-        assert_eq!(route_in(&handles.mesh, me, goal, &[]).unwrap(), plain);
+        assert_eq!(local(&handles, me, goal, &[]), plain);
     }
     assert_eq!(handles.mesh.lock().unwrap().avoid, [[0.0, 0.0, 1.0]]);
 }
@@ -232,9 +274,13 @@ fn a_quest_hand_in_in_stormwind_is_reached_from_goldshire_without_its_height() {
         map: 0,
     };
     let flat = [-8387.0, 685.0, 58.0];
-    let at_my_height = route_to(&handles, me, flat, false).unwrap();
+    let at_my_height = route_to(&handles, me, flat, false, Purpose::Path)
+        .unwrap()
+        .ready();
     assert!(!at_my_height.complete, "{:?}", at_my_height.points.last());
-    let found = route_to(&handles, me, flat, true).unwrap();
+    let found = route_to(&handles, me, flat, true, Purpose::Path)
+        .unwrap()
+        .ready();
     assert!(found.complete, "{:?}", found.points.last());
     let end = found.points.last().unwrap();
     assert!(
