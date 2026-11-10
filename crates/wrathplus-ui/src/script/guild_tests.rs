@@ -151,6 +151,30 @@ fn adding_a_rank_runs_the_same_name_rule() {
     assert_eq!(s.take_guild_requests().len(), 1);
 }
 
+/// `0x5caf40`: an index past the roster clears the selection rather than taking the last row.
+#[test]
+fn a_selection_past_the_roster_clears_it() {
+    let mut s = crate::script::UiScript::new().unwrap();
+    s.set_guild(GuildState {
+        roster: vec![GuildMemberInfo::default(), GuildMemberInfo::default()],
+        ..Default::default()
+    });
+    s.run("SetGuildRosterSelection(2)").unwrap();
+    assert_eq!(
+        s.eval::<i64>("return GetGuildRosterSelection()").unwrap(),
+        2
+    );
+    s.run("SetGuildRosterSelection(3)").unwrap();
+    assert_eq!(
+        s.eval::<i64>("return GetGuildRosterSelection()").unwrap(),
+        0
+    );
+    assert_eq!(
+        s.take_guild_requests(),
+        [GuildRequest::Select(2), GuildRequest::Select(0)]
+    );
+}
+
 /// `GuildStatus_Update` passes 0 before it tests the selection.
 #[test]
 fn member_lookup_is_one_based_and_tolerates_zero() {

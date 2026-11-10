@@ -444,9 +444,10 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // GetGuildRosterSelection() (`0x4d1890`) / SetGuildRosterSelection(index) (`0x4d1820`):
-    // 1-based, 0 for none. The setter writes the snapshot and queues the intent: the same Lua pass
-    // reads it back, and the app's state must follow so the next push agrees.
+    // GetGuildRosterSelection() (`0x5cafd0`) / SetGuildRosterSelection(index) (`0x5caf40`):
+    // 1-based, 0 for none; an index outside the roster clears the selection (`0x5cafbf`). The
+    // setter writes the snapshot and queues the intent: the same Lua pass reads it back, and the
+    // app's state must follow so the next push agrees.
     g.set(
         "GetGuildRosterSelection",
         lua.create_function(|lua, ()| {
@@ -458,8 +459,11 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         "SetGuildRosterSelection",
         lua.create_function(|lua, index: i64| {
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-            let len = model.guild.roster.len();
-            let index = u32::try_from(index.clamp(0, len as i64)).unwrap_or(0);
+            let len = model.guild.roster.len() as i64;
+            let index = u32::try_from(index)
+                .ok()
+                .filter(|i| i64::from(*i) <= len)
+                .unwrap_or(0);
             model.guild.selection = index;
             model.guild_requests.push(GuildRequest::Select(index));
             Ok(())
