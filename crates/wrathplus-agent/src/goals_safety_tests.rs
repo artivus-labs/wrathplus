@@ -147,7 +147,7 @@ fn hurt_the_runner_rests_before_a_walk_and_food_is_bought_where_it_is_sold() {
     assert_eq!(
         text(
             &script,
-            "local f = Goals.facts() return tostring(f.needs_food) .. ' ' .. tostring(f.food_vendor_known) .. ' ' .. Goals.places.food.name"
+            "local f = Goals.facts() return tostring(f.needs_food) .. ' ' .. tostring(f.food_vendor_known) .. ' ' .. Goals.places.food[1].name"
         ),
         "true true Innkeeper Farley"
     );

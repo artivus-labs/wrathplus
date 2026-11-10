@@ -8,7 +8,11 @@
 --                               following ends that way too, "offline", when they log off.
 --   Move.to(x, y [, z])         the same for a place (or a table { x =, y = [, z =] }): the navmesh
 --                               route, ending as AGENT_MOVE_DONE too. A name not in sight fails at
---                               once (false, why): the client only knows what it can see.
+--                               once (false, why): the client only knows what it can see. A walk
+--                               someone stops short (AgentStop) ends "interrupted"; one that gains
+--                               no ground (`stall_yards` in `stall_after` seconds, out of a fight and
+--                               not eating) is sent again once, then ends "stalled", which is also
+--                               put out as AGENT_WALK_DONE("stalled", target).
 --   Move.follow(unit)           follow mode: keep within `follow_distance` of them (moving only
 --                               once they are `slack` yards further, as players do), go to where
 --                               they were last seen if they leave sight, and fight beside them:
@@ -39,9 +43,13 @@ local M = {
   -- Whom the group's follow intent follows (a name); nil: the leader, or the first other member.
   companion = nil,
   face_speakers = true,
+  -- A walk that has not gained `stall_yards` in `stall_after` seconds has stalled.
+  stall_yards = 2, stall_after = 20,
 }
 
 local who, guid, anchor, aimed, seen, seen_at, started, point
+-- Where the walk last gained ground and when, and whether it was sent again after stalling.
+local progress, resent
 
 local function far(a, b)
   return math.sqrt((a.x - b.x) ^ 2 + (a.y - b.y) ^ 2)
@@ -120,6 +128,7 @@ end
 local function set(mode, unit)
   if Combat and Combat.active then Combat.stop() end
   who, guid, aimed, seen, seen_at, started = unit, resolve(unit), nil, nil, GetTime(), GetTime()
+  progress, resent = nil, false
   M.mode, M.last = mode, nil
 end
 
@@ -193,6 +202,39 @@ function M.reached()
   return true, M.last ~= nil and M.last.outcome == "arrived", M.last and M.last.outcome
 end
 
+-- Eating or drinking: a walk that stands still meanwhile has not stalled.
+function M.resting()
+  return UnitBuff ~= nil and (UnitBuff("player", "Food") or UnitBuff("player", "Drink")) ~= nil
+end
+
+-- Whether the walk has stalled for good: no ground gained for `stall_after` seconds, out of a fight
+-- and not resting. The first stall sends the walk again; the second is the end.
+local function stalled(now)
+  local me = AgentPosition()
+  if not me then return false end
+  local paused = UnitAffectingCombat("player") or (Combat and Combat.active) or M.resting()
+  if paused or not progress or far(me, progress) > M.stall_yards then
+    progress = { x = me.x, y = me.y, at = now }
+    return false
+  end
+  if now - progress.at < M.stall_after then return false end
+  progress.at = now
+  if resent then return true end
+  resent = true
+  if point then
+    AgentMoveTo(point.x, point.y, point.z)
+  else
+    aimed = nil
+  end
+  return false
+end
+
+local function stall_end()
+  local name = who
+  finish("stalled")
+  signal("WALK_DONE", "stalled", name)
+end
+
 -- Who to fight: something attacking us, else (assisting) the leader's target in their fight.
 local function foe(leader)
   local me = UnitGUID("player")
@@ -242,6 +284,9 @@ local function tick(now)
     if me and far(me, point) <= M.to_within then return finish("arrived") end
     if walk.status == "arrived" then return finish("arrived") end
     if walk.status == "stuck" or walk.status == "failed" then return finish("failed") end
+    -- Stopped short by someone else (AgentStop): over, but no failure of the walk's.
+    if walk.status == "stopped" or walk.status == "idle" then return finish("interrupted") end
+    if stalled(now) then return stall_end() end
     M.state = string.format("going to %s (%d yd)", who, me and far(me, point) or 0)
     return
   end
@@ -250,6 +295,7 @@ local function tick(now)
   if u then seen, seen_at = { x = u.x, y = u.y, z = u.z }, now end
   if M.mode == "to" then
     if u and u.distance <= M.to_within then return finish("arrived") end
+    if stalled(now) then return stall_end() end
     if u then
       close_in(u, M.to_within)
       M.state = string.format("going to %s (%d yd)", u.name or who, u.distance)

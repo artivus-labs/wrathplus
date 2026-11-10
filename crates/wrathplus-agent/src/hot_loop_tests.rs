@@ -83,3 +83,7 @@ fn choosing_the_running_action_again_carries_on_with_it() {
     assert_eq!(text(&script, "return heard('INTENT_DONE')"), "");
     assert!(!text(&script, "return table.concat(Goals.log, ' | ')").contains("interrupted"));
 }
+
+/// Errands that looped or hung live: the sale that cannot empty the bags, the planner's walks.
+#[path = "errand_tests.rs"]
+mod errand_tests;

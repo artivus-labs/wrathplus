@@ -24,7 +24,10 @@ const PICKUP_FILTER: &str =
     "Quests.pick_up = function() return 'skipped: only Smith Argus offers' end\nreturn {}\n";
 
 fn argus() -> (UiScript, std::path::PathBuf) {
-    let dir = std::env::temp_dir().join(format!("wp-agent-quest-skip-{}", std::process::id()));
+    // A folder per call: two tests run at once, and one's cleanup must not take the other's module.
+    static CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let n = CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("wp-agent-quest-skip-{}-{n}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("pickup_filter.lua"), PICKUP_FILTER).unwrap();
