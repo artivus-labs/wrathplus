@@ -95,6 +95,9 @@ fn module_route(
     })
 }
 
+/// A route request: from, to, and the circles to go round.
+type Case<'a> = ([f32; 3], [f32; 3], &'a [[f32; 3]]);
+
 /// Needs real mmaps: `WRATHPLUS_MMAPS=<server data>/mmaps cargo test -p wrathplus-nav -- --ignored`.
 /// The realm's module and the client's own search give the same route, corner for corner: into
 /// the abbey, out of Northshire (the steep valley wall), round an avoided circle, and to a place
@@ -109,7 +112,7 @@ fn the_module_routes_as_the_client_does() {
     // Nine tiles is one short route's worth: every longer one makes it drop some.
     let tight = unsafe { realm_cache_new(path.as_ptr(), 65_535, 9) };
     let circle = [[-9380.0f32, 100.0, 15.0]];
-    let cases: [([f32; 3], [f32; 3], &[[f32; 3]]); 6] = [
+    let cases: [Case; 6] = [
         ([-8907.2, -113.6, 81.9], [-8902.6, -162.6, 82.0], &[]),
         ([-9045.7, -129.3, 96.0], [-9464.0, 64.0, 56.0], &[]),
         ([-9460.0, 64.0, 56.0], [-9300.0, 140.0, 64.0], &[]),
