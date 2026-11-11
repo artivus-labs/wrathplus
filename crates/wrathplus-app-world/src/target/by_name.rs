@@ -100,6 +100,15 @@ fn common_prefix_len(query: &str, name: &str) -> usize {
         .count()
 }
 
+/// A follow miss (`0x522590`-`0x5225c7`): `0xc7` for none or `target` (`0x76e780`), else `0x13a`.
+fn follow_miss_key(text: &str) -> &'static str {
+    if text.is_empty() || text.eq_ignore_ascii_case("target") {
+        "ERR_GENERIC_NO_TARGET"
+    } else {
+        "ERR_UNIT_NOT_FOUND"
+    }
+}
+
 /// The follow start gate (`0x60fed0`'s mode-3 chain) as a pure function, its order pinned by test:
 ///
 /// | check | site | failure |
@@ -501,7 +510,12 @@ pub(super) fn follow_requests(
             }
             None => {
                 // No subject by name or token: a follow in progress is left alone.
-                info!("follow: nothing to follow");
+                let key = follow_miss_key(match request {
+                    crate::player::FollowRequest::Unit(text)
+                    | crate::player::FollowRequest::Name { name: text, .. } => text,
+                });
+                info!("follow: nothing to follow — {key}");
+                errors.0.push(crate::app_core::errors::UiError::key(key));
             }
         }
     }
@@ -722,6 +736,8 @@ mod tests {
             follow_refusal_key(true, true, true, true, true),
             Some("ERR_PLAYER_DEAD")
         );
+        assert_eq!(follow_miss_key("Target"), "ERR_GENERIC_NO_TARGET");
+        assert_eq!(follow_miss_key("Nobody"), "ERR_UNIT_NOT_FOUND");
     }
 
     #[test]
