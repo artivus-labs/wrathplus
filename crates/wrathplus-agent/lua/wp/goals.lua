@@ -378,7 +378,9 @@ function G.learn_places(list)
   assert(type(list) == "table", "learn_places takes a list of places")
   local n = 0
   for _, p in ipairs(list) do
-    assert(type(p) == "table" and valid_name(p.kind) and type(p.name) == "string" and tonumber(p.x) and tonumber(p.y),
+    -- mod-agent-nav names its quest hub "questgiver-hub"; goal/action/fact names stay snake_case.
+    assert(type(p) == "table" and (valid_name(p.kind) or p.kind == "questgiver-hub")
+      and type(p.name) == "string" and tonumber(p.x) and tonumber(p.y),
       "a place is { kind, name, x, y [, z, map, zone, guid] }")
     local place = { guid = p.guid, name = p.name, x = tonumber(p.x), y = tonumber(p.y), z = tonumber(p.z),
       map = p.map, zone = p.zone, at = now() }

@@ -8,6 +8,9 @@ asks, learned = 0, {}
 zone = "Northshire Valley"
 answers = {}
 AgentPosition = function() return { x = 0, y = 0, z = 0 } end
+AgentNearby = function() return {} end
+AgentWalk = function() return { status = "idle" } end
+AgentAvoid = function() return {} end
 GetRealZoneText = function() return zone end
 AgentServices = function(kinds)
   asks = asks + 1
@@ -16,17 +19,23 @@ AgentServices = function(kinds)
   if a == "absent" then return nil, "this realm does not say where services are (it has no mod-agent-nav)" end
   return a
 end
-Goals = Goals or {}
-Goals.learn_places = function(places) learned[#learned + 1] = places end
 "#;
 
-fn services() -> UiScript {
+fn services_with_real_goals() -> UiScript {
     let dir = std::env::temp_dir().join(format!("wp-agent-services-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let script = UiScript::new().unwrap();
     super::install(&script, dir).unwrap();
     script.run(GAME).unwrap();
+    script
+}
+
+fn services() -> UiScript {
+    let script = services_with_real_goals();
+    script
+        .run("Goals.learn_places = function(places) learned[#learned + 1] = places end")
+        .unwrap();
     script
 }
 
@@ -87,4 +96,65 @@ fn a_realm_without_the_module_is_asked_again_only_in_the_next_zone() {
     script.tick(1.1);
     assert_eq!(int(&script, "return asks"), 2);
     assert_eq!(int(&script, "return #learned"), 0);
+}
+
+#[test]
+fn services_learn_all_protocol_kinds_with_real_goals_while_goals_are_off() {
+    let mut script = services_with_real_goals();
+    script
+        .run(
+            r#"
+            Goals.on = false
+            kinds = { "vendor", "questgiver-hub", "trainer_first_aid", "repair", "trainer",
+              "flightmaster", "innkeeper", "banker", "trainer_cooking", "trainer_profession" }
+            queued = {}
+            for i, kind in ipairs(kinds) do
+              queued[i] = { kind = kind, name = "Service " .. i, x = i, y = 2, z = 3,
+                map = 0, zone = zone }
+            end
+            "#,
+        )
+        .unwrap();
+    // Exercise the actual frame poll: pending first, then a mixed answer whose hub used to
+    // abort learning after vendor and before first aid (and leave Services.learned at zero).
+    script.tick(1.1);
+    assert_eq!(int(&script, "return asks"), 1);
+    assert_eq!(int(&script, "return Services.learned"), 0);
+    script.run("answers = { queued }").unwrap();
+    script.tick(1.1);
+    assert_eq!(int(&script, "return asks"), 2);
+    assert_eq!(int(&script, "return Services.learned"), 1);
+    assert_eq!(int(&script, "return #Services.places"), 10);
+    script
+        .run(
+            r#"
+            assert(Goals.on == false)
+            assert(Services.why == nil)
+            assert(#Services.kinds == #kinds)
+            for _, kind in ipairs(Services.kinds) do
+              assert(Goals.places[kind] and #Goals.places[kind] >= 1, kind)
+            end
+            for i, kind in ipairs(kinds) do
+              local found = false
+              for _, p in ipairs(Goals.places[kind]) do
+                if p.name == queued[i].name then
+                  assert(p.x == i and p.y == 2 and p.z == 3 and p.map == 0 and p.zone == zone)
+                  found = true
+                end
+              end
+              assert(found, kind)
+            end
+            -- Only this exact hyphenated kind is accepted; shared name validation stays strict.
+            for _, kind in ipairs({ "questgiver-hubs", "questgiver--hub", "Questgiver-hub" }) do
+              assert(not pcall(Goals.learn_places, {{ kind = kind, name = "Bad", x = 1, y = 2 }}))
+            end
+            assert(not pcall(Goals.fact, "questgiver-hub", function() return true end))
+            "#,
+        )
+        .unwrap();
+    script.tick(1.1);
+    assert_eq!(int(&script, "return asks"), 2);
+    assert!(!script.eval::<bool>("return Goals.on").unwrap());
+    let errors = script.take_errors();
+    assert!(errors.is_empty(), "{errors:?}");
 }
