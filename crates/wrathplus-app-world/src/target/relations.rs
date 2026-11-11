@@ -51,12 +51,11 @@ pub fn can_interact(
 /// and one of `CanAttack`'s.
 const UNIT_FLAG_NOT_SELECTABLE: u32 = 1 << 25;
 
-/// `IsSelectable`, CGUnit_C's and CGPlayer_C's vtable `+0xa8` (`0x6e6ec0`, a jump to `+0xa4`,
-/// `0x71a390`): `UNIT_FLAG_NOT_SELECTABLE` clear, or the unit is both created by the active player
-/// (`UNIT_FIELD_CREATEDBY` against `0x4d3790`) and slot 0 of PetInfo's pet list (`0x5d3390(0)`),
-/// the `SMSG_PET_SPELLS` guid `0x5d6900` stores, here `pet_guid` (0: no pet). Unverified for
-/// 12340: that the other vtables' slot is a `xor eax,eax` stub (1.12 `0x469fe0`), so a GameObject,
-/// item or corpse never becomes the selection.
+/// `IsSelectable`, CGUnit_C's and CGPlayer_C's vtable `+0xa8` (`0x6e6ec0` → `0x71a390`):
+/// `UNIT_FLAG_NOT_SELECTABLE` clear, or created by us (`UNIT_FIELD_CREATEDBY`, `0x4d3790`) and
+/// PetInfo's pet slot 0 (`0x5d3390(0)`, the `SMSG_PET_SPELLS` guid `0x5d6900` stores). Unverified
+/// for 12340: the other vtables' `xor eax,eax` stub (1.12 `0x469fe0`), so no GameObject, item or
+/// corpse selects.
 ///
 /// `None` passes: `SetSelection` makes the call (`0x524cfa`) only on an object the manager
 /// resolved (`0x524cd7`), which keeps an out-of-range party member selectable. A store whose
