@@ -339,8 +339,9 @@ impl Plugin for UiTradePlugin {
                     feed_trade
                         .after(crate::app_core::schedule::UnitFeed)
                         .in_set(UiFeed),
-                    // Ahead of the feed, so an accepted partner shows the frame the window opens.
-                    answer_trade_request.before(feed_trade),
+                    // After this frame's packets and before the feed, so a request is answered
+                    // before the trade window and the VM's OnUpdate observe it.
+                    answer_trade_request.in_set(UiFeed).before(feed_trade),
                     // The coinage-change reflex's trade half, after the world's fields land.
                     trim_offer_to_purse
                         .after(crate::app_core::schedule::UnitFeed)
@@ -351,9 +352,8 @@ impl Plugin for UiTradePlugin {
     }
 }
 
-/// 1.12's `BlockTrades` CVar (`0x842fbc`), the Block Trades checkbox (`UIOptionsFrame.lua:11`).
-/// A resource, not a [`TradeSession`] field, because a disconnect clears the session; read only
-/// by [`answer_trade_request`]'s leg 8.
+/// The `BlockTrades` CVar (`0xa12a64`), read only by [`answer_trade_request`]'s leg 8; a resource,
+/// not a [`TradeSession`] field, because a disconnect clears the session.
 #[derive(Resource, Default)]
 pub struct BlockTrades(pub bool);
 
@@ -371,10 +371,9 @@ fn streamed_player<'a>(
 }
 
 /// Answer an incoming trade request with the reference's eight-leg ladder (`0x4bf736`, case 1 of
-/// `0x4bf720`, over `[0x4bf736, 0x4bf7f8)`); only leg 8 prints, so the order is behaviour. A
-/// system, not a packet handler, because leg 8 may wait on a name query. There is no consent
-/// step: 1.12 registers `TRADE_REQUEST` (event `0x11d`, slot `0xbe160c`) and never signals it,
-/// so the stock `TRADE` popup never shows and a request that passes opens the window unasked.
+/// `0x4bf720`, over `[0x4bf736, 0x4bf7f8)`); only leg 8 prints, so the order is behaviour. There
+/// is no consent step: 1.12 registers `TRADE_REQUEST` (event `0x11d`, slot `0xbe160c`) and never
+/// signals it, so the stock `TRADE` popup never shows and a request that passes opens the window.
 fn answer_trade_request(
     mut trade: ResMut<TradeSession>,
     commands: Res<NetCommands>,
@@ -387,6 +386,7 @@ fn answer_trade_request(
     block_trades: Res<BlockTrades>,
     index: Res<GuidIndex>,
     stores: Query<&ObjectStore>,
+    script: Option<NonSend<UiScript>>,
 ) {
     let Some(initiator) = trade.pending_request() else {
         return;
@@ -397,13 +397,7 @@ fn answer_trade_request(
     // first (`0x4bf759` precedes `0x4bf779`); the two differ for an ignored, unstreamed initiator.
     let initiator_store = streamed_player(&index, &stores, initiator);
     if trade.initiated || initiator_store.is_none() {
-        info!(
-            target: "trade",
-            "BEGIN_TRADE from {initiator:#x} dropped without a reply (own initiate in flight: {}, \
-             initiator resolved: {})",
-            trade.initiated,
-            initiator_store.is_some(),
-        );
+        info!(target: "trade", "BEGIN_TRADE from {initiator:#x} dropped without a reply (own initiate in flight: {})", trade.initiated);
         trade.refuse_request();
         return;
     }
@@ -433,17 +427,21 @@ fn answer_trade_request(
         return;
     }
 
-    // Leg 8, Block Trades, the one leg that names the initiator. The reference reads the live
-    // `CGUnit` (`0x609210`); this may wait on a name query, with no timer, since vmangos cancels
-    // the trade to us when the initiator leaves (`Player.cpp:11747`), which clears the request.
+    // Leg 8, Block Trades (`0x587485`), the one leg that names the initiator: the held unit's
+    // `GetUnitName` (`0x72a000`), `UNKNOWNOBJECT` while the name is uncached, never a wait.
     if block_trades.0 {
-        let Some(name) = names.resolve(initiator, &commands).map(str::to_string) else {
-            return;
-        };
+        let name = names.resolve(initiator, &commands).map_or_else(
+            || {
+                let lua = script.as_deref().map(UiScript::lua);
+                let unknown = lua.and_then(|l| wrathplus_ui::script::unknownobject(l).ok());
+                unknown.map_or_else(|| "Unknown Being".into(), |s| s.to_string_lossy())
+            },
+            str::to_string,
+        );
         info!(target: "trade", "BEGIN_TRADE from {name} refused by BlockTrades; sending CMSG_BUSY_TRADE");
         let _ = commands.0.send(ClientCommand::BusyTrade);
         trade.refuse_request();
-        // `0x496720(0xbb, name)`: one `DisplayError`; catalog row `0xbb` makes it a chat line.
+        // `0x5216f0(0xca, name)` (`0x58749c`): one `DisplayError`, a chat line by its catalog row.
         errors.0.push(crate::app_core::errors::UiError::s(
             "ERR_TRADE_BLOCKED_S",
             name,
@@ -829,6 +827,7 @@ fn resolve_trade_target(token: &str, selection: &Selection, group: &GroupState) 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app_core::errors::{UiError, UiErrorKeys};
     use wrathplus_protocol::types::Field;
     use wrathplus_protocol::types::{TradeStatus, TradeStatusExtended};
 
@@ -1256,20 +1255,21 @@ mod tests {
     #[test]
     fn block_trades_refuses_and_says_so() {
         let (mut app, rx) = request_app(true, false, true);
-        app.world_mut().resource_mut::<TradeSession>().request(0x7);
-        app.update();
-
-        assert!(matches!(rx.try_recv(), Ok(ClientCommand::BusyTrade)));
-        assert_eq!(
-            app.world()
-                .resource::<crate::app_core::errors::UiErrorKeys>()
-                .0,
-            vec![crate::app_core::errors::UiError::s(
-                "ERR_TRADE_BLOCKED_S",
-                "Grubbis".to_string()
-            )],
-            "the refusal raises the reference's own `0x496720(0xbb, name)`"
-        );
+        // A held initiator with no cached name is named at once (`0x72a24d`), here with no VM.
+        app.world_mut()
+            .resource_mut::<NameCache>()
+            .invalidate_player(0x8);
+        for (guid, name) in [(0x7, "Grubbis"), (0x8, "Unknown Being")] {
+            app.world_mut().resource_mut::<TradeSession>().request(guid);
+            app.update();
+            assert!(rx.try_iter().any(|c| matches!(c, ClientCommand::BusyTrade)));
+            let errors = &mut app.world_mut().resource_mut::<UiErrorKeys>().0;
+            assert_eq!(
+                std::mem::take(errors),
+                vec![UiError::s("ERR_TRADE_BLOCKED_S", name)],
+                "the refusal raises the reference's own `0x5216f0(0xca, name)`"
+            );
+        }
         assert_eq!(
             wrathplus_ui::messages::kind_of("ERR_TRADE_BLOCKED_S"),
             wrathplus_ui::messages::MsgKind::Chat,
@@ -1408,7 +1408,7 @@ mod tests {
         let (tx, rx) = crossbeam_channel::unbounded();
         let mut app = App::new();
         let mut names = NameCache::default();
-        // Named, so leg 8 reaches its line rather than parking on a name query.
+        // Named, so leg 8's line carries the name.
         names.insert_player(0x7, "Grubbis".to_string(), None);
         names.insert_player(0x8, "Skarrid".to_string(), None);
         app.init_resource::<TradeSession>()

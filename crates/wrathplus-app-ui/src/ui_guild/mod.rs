@@ -123,7 +123,7 @@ mod tests {
     }
 
     #[test]
-    fn the_signon_condition_is_all_four_conjuncts() {
+    fn the_signon_condition_is_all_three_conjuncts() {
         let mut social = SocialState::default();
         crate::ui_social::net::friend_list(
             &mut social,
@@ -135,24 +135,37 @@ mod tests {
         crate::ui_social::net::ignore_list(&mut social, vec![9]);
         let on = GuildMemberNotify(true);
         let off = GuildMemberNotify(false);
-        let me = Some(1);
+        let me = Some("Me");
+        let signon = |name: &str, guid| event(guild_event::SIGNED_ON, &[name], guid);
 
-        // 2: the CVar, off by default.
+        // 1: the CVar, off by default.
         assert!(
-            !net::announce_signon(&social, &off, me, Some(5)),
+            !net::announce_signon(&social, &off, me, &signon("Ann", Some(5))),
             "guildMemberNotify off silences the whole family"
         );
-        assert!(net::announce_signon(&social, &on, me, Some(5)));
+        assert!(net::announce_signon(
+            &social,
+            &on,
+            me,
+            &signon("Ann", Some(5))
+        ));
 
-        // 3: not us; vmangos sends the sign-on to the signer too (`Guild.cpp:651-656`).
+        // 2: not us, by name and case-sensitively (`0x76e760`); AzerothCore sends the sign-on to
+        // the signer too (`Guild.cpp:1917`).
         assert!(
-            !net::announce_signon(&social, &on, me, Some(1)),
+            !net::announce_signon(&social, &on, me, &signon("Me", Some(1))),
             "your own sign-on is not announced to you"
         );
+        assert!(net::announce_signon(
+            &social,
+            &on,
+            me,
+            &signon("ME", Some(5))
+        ));
 
-        // 4: not a friend, whose `SMSG_FRIEND_STATUS` prints the same line.
+        // 3: not a friend, whose `SMSG_FRIEND_STATUS` prints the same line.
         assert!(
-            !net::announce_signon(&social, &on, me, Some(7)),
+            !net::announce_signon(&social, &on, me, &signon("Fay", Some(7))),
             "a guildmate who is also a friend is announced by the friend path, not twice"
         );
 
@@ -162,13 +175,29 @@ mod tests {
             "the fixture's ignore really is an ignore"
         );
         assert!(
-            net::announce_signon(&social, &on, me, Some(9)),
-            "the reference announces an ignored guildmate — 0x5ae810 is not the ignore check"
+            net::announce_signon(&social, &on, me, &signon("Ig", Some(9))),
+            "the reference announces an ignored guildmate — 0x6b3920 is not the ignore check"
         );
 
-        // 1: a local player, and the pair's guid; either missing is the silent exit.
-        assert!(!net::announce_signon(&social, &on, None, Some(5)));
-        assert!(!net::announce_signon(&social, &on, me, None));
+        // No own name, no subject name or no guid on the wire: the silent exit.
+        assert!(!net::announce_signon(
+            &social,
+            &on,
+            None,
+            &signon("Ann", Some(5))
+        ));
+        assert!(!net::announce_signon(
+            &social,
+            &on,
+            me,
+            &event(guild_event::SIGNED_ON, &[], Some(5))
+        ));
+        assert!(!net::announce_signon(
+            &social,
+            &on,
+            me,
+            &signon("Ann", None)
+        ));
     }
 
     #[test]
