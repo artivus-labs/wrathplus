@@ -227,12 +227,6 @@ impl super::UiScript {
     pub fn take_guild_requests(&mut self) -> Vec<GuildRequest> {
         std::mem::take(&mut self.model_mut().guild_requests)
     }
-
-    /// Queue an intent from a slash command (`/ginvite`, `/gquit`, `/gpromote`, ...). The
-    /// reference's slash commands are Lua calling the same bindings; WrathPlus parses them in Rust.
-    pub fn queue_guild_request(&mut self, request: GuildRequest) {
-        self.model_mut().guild_requests.push(request);
-    }
 }
 
 /// A roster row by 1-based index.

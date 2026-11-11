@@ -49,22 +49,6 @@ pub fn read_u32_le(r: &mut impl Read) -> io::Result<u32> {
     Ok(u32::from_le_bytes(b))
 }
 
-pub fn read_u32_be(r: &mut impl Read) -> io::Result<u32> {
-    let mut b = [0u8; 4];
-    r.read_exact(&mut b)?;
-    Ok(u32::from_be_bytes(b))
-}
-
-pub fn read_i32_le(r: &mut impl Read) -> io::Result<i32> {
-    Ok(read_u32_le(r)? as i32)
-}
-
-pub fn read_u64_le(r: &mut impl Read) -> io::Result<u64> {
-    let mut b = [0u8; 8];
-    r.read_exact(&mut b)?;
-    Ok(u64::from_le_bytes(b))
-}
-
 pub fn read_f32_le(r: &mut impl Read) -> io::Result<f32> {
     Ok(f32::from_bits(read_u32_le(r)?))
 }

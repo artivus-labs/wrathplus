@@ -19,18 +19,10 @@ use num_bigint::BigInt;
 use rand::{thread_rng, RngCore};
 use sha1::{Digest, Sha1};
 
-pub mod vanilla_header;
 pub mod wrath_header;
-
-pub use vanilla_header::{DecrypterHalf, EncrypterHalf, HeaderCrypto, ProofSeed};
 
 /// Session-key length in bytes: two interleaved SHA-1 digests.
 pub const SESSION_KEY_LENGTH: usize = 40;
-/// Proof (`M1`, `M2`) length in bytes: one SHA-1 digest.
-pub const PROOF_LENGTH: usize = 20;
-/// Public-key (`A`/`B`) length in bytes.
-pub const PUBLIC_KEY_LENGTH: usize = 32;
-pub const SALT_LENGTH: usize = 32;
 /// The generator `g`.
 pub const GENERATOR: u8 = 7;
 /// The safe prime `N`, little endian, as `CMD_AUTH_LOGON_CHALLENGE_Server` sends it.
@@ -40,6 +32,11 @@ pub const LARGE_SAFE_PRIME_LITTLE_ENDIAN: [u8; 32] = [
 ];
 /// The SRP multiplier `k`, fixed at 3 (SRP6, not 6a).
 const K_VALUE: u8 = 3;
+
+/// A fresh `LocalChallenge` for `CMSG_AUTH_SESSION`, which the world proof hashes.
+pub fn world_client_seed() -> u32 {
+    thread_rng().next_u32()
+}
 
 // --- bigint helpers (little-endian, unsigned magnitude) ------------------------------------------
 
@@ -729,31 +726,6 @@ mod tests {
         assert_eq!(
             v.to_vec(),
             hx("28b837075a12b82553921d9095fa3fdcb0151c4bfc860ab97a69d0fa86a3d213")
-        );
-    }
-
-    #[test]
-    fn header_cipher_golden() {
-        let sk: [u8; 40] = std::array::from_fn(|i| (i as u8).wrapping_mul(7).wrapping_add(3));
-        let (_p, crypto) = ProofSeed::new().into_client_header_crypto(
-            &NormalizedString::new("alice").unwrap(),
-            sk,
-            0xDEAD_BEEF,
-        );
-        let (mut enc, mut dec) = crypto.split();
-        assert_eq!(
-            enc.encrypt_client_header(12, 0x37F).to_vec(),
-            hx("03097792b1d7")
-        );
-        assert_eq!(
-            enc.encrypt_client_header(0x1FF, 0xC7).to_vec(),
-            hx("03ceca0c55a5")
-        );
-        let mut buf: Vec<u8> = (0..32u16).map(|i| (i as u8).wrapping_mul(13)).collect();
-        dec.decrypt(&mut buf);
-        assert_eq!(
-            buf,
-            hx("03071c15122b2039364f445d5a5368617e778c85829b90a9a6bfb4cdcac3d8d1")
         );
     }
 }

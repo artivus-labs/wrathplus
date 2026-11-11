@@ -290,8 +290,7 @@ impl WrathWorldSession {
     ) -> Result<Self> {
         let username = NormalizedString::new(username)
             .map_err(|e| anyhow!("invalid username for Wrath world login: {e}"))?;
-        // Reuse the SRP crate's OS-backed random u32 source; Wrath uses this as LocalChallenge.
-        let client_seed = wrathplus_srp::vanilla_header::ProofSeed::new().seed();
+        let client_seed = wrathplus_srp::world_client_seed();
         Self::connect_with_seed(addr, &username, session_key, realm_id, client_seed)
     }
 
