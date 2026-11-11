@@ -100,9 +100,7 @@ fn common_prefix_len(query: &str, name: &str) -> usize {
         .count()
 }
 
-/// A follow that resolves nobody (`0x522590`-`0x5225c7`): an empty token, or `target`
-/// (`_strnicmp`, `0x76e780`), is `0xc7` `ERR_GENERIC_NO_TARGET`; anything else `0x13a`
-/// `ERR_UNIT_NOT_FOUND`.
+/// A follow miss (`0x522590`-`0x5225c7`): `0xc7` for none or `target` (`0x76e780`), else `0x13a`.
 fn follow_miss_key(text: &str) -> &'static str {
     if text.is_empty() || text.eq_ignore_ascii_case("target") {
         "ERR_GENERIC_NO_TARGET"
@@ -649,23 +647,12 @@ impl SelectCommit<'_, '_> {
 }
 
 #[cfg(test)]
+#[path = "by_name_rank_tests.rs"]
+mod rank_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
-
-    fn exact(dist2: f32) -> Rank {
-        Rank {
-            exact: true,
-            prefix: 3,
-            dist2,
-        }
-    }
-    fn prefix(prefix: usize, dist2: f32) -> Rank {
-        Rank {
-            exact: false,
-            prefix,
-            dist2,
-        }
-    }
 
     #[test]
     fn prefix_length_folds_case_and_stops_at_the_shorter_string() {
@@ -700,7 +687,7 @@ mod tests {
     }
 
     /// A dead player following a creature sees `ERR_INVALID_FOLLOW_TARGET`, not `ERR_PLAYER_DEAD`:
-    /// the two followee checks come first and share message `0x128`. A miss names its own line.
+    /// the two followee checks come first and share message `0x128`.
     #[test]
     fn the_follow_gate_refuses_in_the_references_own_order() {
         // The clean case.
@@ -738,7 +725,6 @@ mod tests {
             follow_refusal_key(true, true, true, true, true),
             Some("ERR_PLAYER_DEAD")
         );
-        // A miss: no target, then any other unresolved text.
         assert_eq!(follow_miss_key("Target"), "ERR_GENERIC_NO_TARGET");
         assert_eq!(follow_miss_key("Nobody"), "ERR_UNIT_NOT_FOUND");
     }
@@ -751,32 +737,5 @@ mod tests {
                 .expect("whole-string still matches")
                 .exact
         );
-    }
-
-    #[test]
-    fn exact_beats_any_prefix_and_nearest_breaks_the_tie() {
-        // The deviation: exact ranks first, whatever the reference's walk order.
-        assert!(exact(100.0).beats(prefix(3, 1.0)));
-        assert!(!prefix(3, 1.0).beats(exact(100.0)));
-        // Among same-named exact matches, the nearest wins.
-        assert!(exact(4.0).beats(exact(9.0)));
-        assert!(!exact(9.0).beats(exact(4.0)));
-    }
-
-    #[test]
-    fn longer_prefix_beats_nearer_shorter_one() {
-        // The reference's `jg` accept: a longer prefix wins at any distance.
-        assert!(prefix(5, 900.0).beats(prefix(3, 1.0)));
-        assert!(!prefix(3, 1.0).beats(prefix(5, 900.0)));
-        // Equal prefix length falls through to strictly-nearest.
-        assert!(prefix(3, 4.0).beats(prefix(3, 9.0)));
-    }
-
-    #[test]
-    fn ties_keep_the_incumbent_and_nan_never_displaces() {
-        // The reference's `jp` reject edge makes the accept a strict `<`.
-        assert!(!prefix(3, 4.0).beats(prefix(3, 4.0)));
-        assert!(!exact(4.0).beats(exact(4.0)));
-        assert!(!prefix(3, f32::NAN).beats(prefix(3, 4.0)));
     }
 }

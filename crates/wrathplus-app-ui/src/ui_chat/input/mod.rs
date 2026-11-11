@@ -646,9 +646,8 @@ pub(super) fn drain_chat_input(
             ParsedChat::Assist { name } => {
                 chat_out.assist.write(crate::target::AssistRequest { name });
             }
-            // A probe's `/follow`; the stock handler is `FollowUnit(msg)` (`ChatFrame.lua:1506`).
-            // Bare is the target, as `FollowUnit("")` is; named is a name with no exact flag, so
-            // prefix matching.
+            // The stock `/follow` is `FollowUnit(msg)` (`ChatFrame.lua:1506`): bare is the target,
+            // a name has no exact flag, so it prefix-matches.
             ParsedChat::Follow { name } => {
                 chat_out.follow.write(match name {
                     Some(name) => crate::player::FollowRequest::Name { name, exact: false },
