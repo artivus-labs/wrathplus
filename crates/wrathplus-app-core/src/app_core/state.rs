@@ -775,18 +775,13 @@ impl EmoteSounds {
     }
 }
 
-/// A unit's collision height in yards, the reference's `CMovement+0xb4`: the `h` whose fractions
-/// are the depth lines (swim `0.75·h`, splash `0.4·h`, foam gate `max(2·h, 1.0)`; `0x6030c0`,
-/// `0x5fa760`). It is `CreatureModelData.collisionHeight`, the MD20 collision box's Z extent in
-/// model units, times `k = max(SCALE_X, CreatureDisplayInfo.creatureModelScale)`: `0x60b270`
-/// passes the larger (`0x60b312`) to `0x6174b0`, which stores the product (`0x617501`), and the
-/// unit model build `0x5fb9dd` runs it for every unit.
-///
-/// That `max` is 1.12's, whose server folds the DBC scales into `SCALE_X` (vmangos
-/// `Unit.cpp:9579`); AzerothCore's does not, and 12340 stores `collisionHeight × k(native display)
-/// × max(SCALE_X, 1.0)` at `CMovement+0xcc` (`0x725f50` → `0x6e9570`), `k` the unit model scale.
-/// The display is the native one (`UNIT_FIELD_NATIVEDISPLAYID`, index 132 at `0x60b270`), so a
-/// transform keeps the unit's own depth lines. Not the movement capsule,
+/// A unit's collision height in yards, 12340's `CMovement+0xcc` (`[unit+0x854]`): the `h` whose
+/// fractions are the depth lines (swim `0.75·h`, `0x730d90`; splash `0.4·h`, `0x730ded`; foam gate
+/// `max(2·h, 1)`, `0x71cc28`). `0x725f50` gives a player, or a creature whose record has
+/// `type_flags & 0x20000`, `CreatureModelData.collisionHeight × k × max(SCALE_X, 1)`, `k` the unit
+/// model scale of the native display, so a transform keeps the unit's own lines; any other
+/// creature keeps the ctor default, unscaled. A player-driven body takes the server's
+/// (`SMSG`/`MSG_MOVE_SET_COLLISION_HGT`) after create. Not the movement capsule,
 /// [`crate::player::CAPSULE_HEIGHT`].
 #[derive(Component, Clone, Copy, Debug, PartialEq)]
 pub struct CollisionHeight(pub f32);

@@ -86,7 +86,7 @@ pub struct RelationInputs<'w, 's> {
     stores: Query<'w, 's, &'static ObjectStore>,
     world: WorldInputs<'w>,
     /// The faction tables and standings the reaction reads beside the context.
-    factions: Option<Res<'w, super::Factions>>,
+    pub(super) factions: Option<Res<'w, super::Factions>>,
     reputations: Option<Res<'w, crate::net::Reputations>>,
 }
 
@@ -121,7 +121,7 @@ impl RelationInputs<'_, '_> {
         super::ring::can_interact_from_player(factions, reps, target, me, self.context())
     }
 
-    fn reputations(&self) -> &crate::net::Reputations {
+    pub(super) fn reputations(&self) -> &crate::net::Reputations {
         static NONE: crate::net::Reputations = crate::net::Reputations(Vec::new());
         self.reputations.as_deref().unwrap_or(&NONE)
     }

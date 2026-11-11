@@ -61,7 +61,7 @@ pub(crate) use live_display::{DisplaySwapped, ModelScale};
 mod conform;
 
 /// The per-unit collision height, the `h` the swim, wade, splash and foam depths are fractions of.
-mod collision_height;
+pub(crate) mod collision_height;
 use collision_height::stamp_collision_heights;
 
 /// Spell missiles: the projectile a cast with a `Spell.dbc` Speed above 0 flies at each target.
@@ -611,14 +611,23 @@ impl Plugin for EntitiesPlugin {
                 .before(EntityVisualsSet)
                 .after(WorldStage::Net),
         )
-        // After the net stage, whose Commands create the entity; until then its readers take the
-        // constructor default.
-        .add_systems(Update, stamp_collision_heights.after(WorldStage::Net))
-        // Before attach, so a unit's first build takes its model scale.
+        // After wire creation and cache eviction; publish the height before the world-unit
+        // reconciler and Input's mover mirror read the swim/wade depth lines.
+        .add_systems(
+            Update,
+            stamp_collision_heights
+                .after(WorldStage::Net)
+                .after(evict_display_caches)
+                .before(publish_world_units)
+                .before(WorldStage::Input),
+        )
+        // After cache eviction, before the camera pivot and first attach read the model scale.
         .add_systems(
             Update,
             live_display::stamp_unit_model_scales
                 .after(WorldStage::Net)
+                .after(evict_display_caches)
+                .before(WorldStage::Input)
                 .before(EntityVisualsSet),
         )
         // Display models resolve and build before attach, all after `WorldStage::Net` spawns the

@@ -312,6 +312,11 @@ fn collision_height_and_near_teleport() {
     )
     .unwrap();
     assert!(matches!(order, MoverOrder::CollisionHeight { height, .. } if height == 2.5));
+    let echo = order_body(0, &2.5f32.to_le_bytes());
+    assert_eq!(
+        collision_height_echo(MSG_MOVE_SET_COLLISION_HGT, &echo),
+        Some((GUID, 2.5))
+    );
 
     let movement = OutboundMovement {
         mover_guid: GUID,

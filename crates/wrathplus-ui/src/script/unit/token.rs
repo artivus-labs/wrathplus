@@ -43,9 +43,15 @@ pub(crate) fn names_unit(guid: u64) -> bool {
 /// `SStrCmpI` (`0x76ea40`) as an equality: the text up to a NUL, character by character as
 /// [`sstr_fold_next`] reads it.
 pub(crate) fn sstr_eq_i(a: &[u8], b: &[u8]) -> bool {
+    sstr_eq_i_n(a, b, usize::MAX)
+}
+
+/// [`sstr_eq_i`] over at most `n` characters, `0x76ea40`'s count argument.
+pub fn sstr_eq_i_n(a: &[u8], b: &[u8], mut n: usize) -> bool {
     let cut = |s: &[u8]| s.iter().position(|&c| c == 0).unwrap_or(s.len());
     let (mut a, mut b) = (&a[..cut(a)], &b[..cut(b)]);
-    while !a.is_empty() || !b.is_empty() {
+    while (!a.is_empty() || !b.is_empty()) && n > 0 {
+        n -= 1;
         let ((ca, ra), (cb, rb)) = (sstr_fold_next(a), sstr_fold_next(b));
         if ca != cb {
             return false;

@@ -190,10 +190,8 @@ impl CreatureCatalog {
             .map(|r| f32::from(r.model_alpha.min(255) as u8) / 255.0)
     }
 
-    /// `CreatureModelData.collisionHeight`, the `h` of every depth line (swim `0.75·h`, splash
-    /// `0.4·h`, foam gate `2·h`, read against `CMovement+0xb4`). It is the M2's collision-box Z
-    /// extent, pre-scale: the prism is this × `max(OBJECT_FIELD_SCALE_X, creatureModelScale)`
-    /// (`0x60b312` → `0x617501`). A miss takes the constructor default, `2.0277777` (`0x616fd8`).
+    /// `CreatureModelData.collisionHeight`, the M2's collision-box Z extent before scale: a
+    /// model-law unit's `h` is this × its unit model scale × `max(SCALE_X, 1)` (`0x6cf350`).
     pub fn collision_height(&self, display_id: u32) -> Option<f32> {
         let row = self.display.get(&display_id)?;
         Some(self.models.get(&row.model_id)?.collision_height)
