@@ -6,8 +6,8 @@
 //! which clips foam at banks. Growth is texgen only: each frame the stencil maps `centre ± size(t)`
 //! to UV [0, 1] at the heading, clamped to its transparent border.
 //!
-//! The driver (`0x5fa760`) emits a wake when translating, a ring when turning or standing, and a
-//! full ring on crossing the wade depth (`0x6030c0`).
+//! The driver (`0x71cba0`) emits a wake when translating, a ring when turning or standing, and a
+//! full ring on crossing the wade depth (`0x730d10`).
 //!
 //! The patch is the liquid mesh's own triangles through the same `clip_from_world`, so the depth
 //! test settles its tie with the water; a lift would overshoot onto dry sand on a beach. The
@@ -48,12 +48,12 @@ const POOL_SIZE: usize = 128;
 const SELF_SLOTS: usize = 32;
 
 /// The step-in and step-out one-shot depth as a fraction of the unit's own collision height
-/// (`0x6030c0`, CMovement+0xb4), latched either way: about 0.81 yd for a human.
+/// (`0x730ded`, `[unit+0x854]`), latched either way: about 0.81 yd for a human.
 const ONESHOT_DEPTH_FRAC: f32 = 0.4;
 
 /// The emission depth gate, `max(2 × collision height, 1.0)`: about 4.06 yd for a human, so a
-/// surface swimmer at its 1.52-yd rest depth still foams. The field, `[unit+0x297]`, is
-/// CMovement+0xb4, the collision height, not `UNIT_FIELD_BOUNDINGRADIUS`.
+/// surface swimmer at its 1.52-yd rest depth still foams. The field is the collision height
+/// `[unit+0x854]` (`0x71cc28`), not `UNIT_FIELD_BOUNDINGRADIUS`.
 const GATE_DEPTH_FRAC: f32 = 2.0;
 
 /// Speed (yd/s) past which a streamed unit counts as translating: its `MOVEMENTFLAGS & 0xf` proxy.
@@ -272,8 +272,8 @@ fn drive_unit(
     };
     let depth = surface - wow[2];
 
-    // The one-shot fires on crossing the wade depth either way (`0x6030c0`, latch `[+0x269]`);
-    // the driver's mode-0xC9 call also clears the cooldown.
+    // The one-shot fires on crossing the wade depth either way (`0x730ded`, last depth
+    // `[unit+0x784]`); the driver's mode-0xC9 call also clears the cooldown.
     let wading_now = depth > ONESHOT_DEPTH_FRAC * h;
     let oneshot = wading_now != foam_state.wading;
     foam_state.wading = wading_now;

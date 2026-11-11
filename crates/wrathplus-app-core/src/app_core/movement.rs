@@ -133,7 +133,7 @@ pub struct KitPush {
 }
 
 /// Capsule radius (yd), the `CMovement` ctor's placeholder 1/3. The reference overwrites it per
-/// model from `CreatureModelData` (`0x6174b0`: human male 0.30555, female 0.20835); not built here.
+/// model from `CreatureModelData` (`0x6e9570`: human male 0.30555, female 0.20835); not built here.
 pub const CAPSULE_RADIUS: f32 = 1.0 / 3.0;
 
 /// Capsule total height (yd), one for every body: the swept shape and the head and feet offsets.
@@ -141,8 +141,8 @@ pub const CAPSULE_RADIUS: f32 = 1.0 / 3.0;
 /// [`crate::entities::CollisionHeight`] instead.
 pub const CAPSULE_HEIGHT: f32 = 2.027_777_7;
 
-/// The `CMovement` ctor's collision height (`0x616fd8`), before `0x6174b0` sets the model's: the
-/// depth lines' fallback for a unit whose display id has no `CreatureModelData` row.
+/// The `CMovement` ctor's collision height (`0x6ebd75` in `0x6ebd30`), before `0x6e9570` sets the
+/// model's: the depth lines' height for a creature without the model-collision flag or model row.
 pub const DEFAULT_COLLISION_HEIGHT: f32 = 2.027_777_7;
 
 /// Terminal fall speed under feather fall (yd/s), the whole of Slow Fall: `0x7c5d20` and
@@ -191,7 +191,7 @@ pub fn may_swim(unit_flags: u32) -> bool {
 }
 
 /// The depth over the feet (yd) past which a unit swims: 0.75 × its own collision height
-/// ([`crate::entities::CollisionHeight`]), about 1.52 yd for a human male and 0.86 for a gnome
+/// ([`crate::entities::CollisionHeight`]), about 1.52 yd for a human male and 0.91 for a gnome
 /// female. Also the wade ceiling: wading is being in liquid without swimming.
 pub fn swim_enter_depth(h: f32) -> f32 {
     SWIM_DEPTH_FRAC * h

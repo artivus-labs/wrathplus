@@ -66,7 +66,18 @@ pub(super) fn register(app: &mut App) {
         .net_handler(K::GameObjectCustomAnim, on_gameobject_anim)
         .net_handler(K::GameObjectDespawnAnim, on_gameobject_anim)
         .net_handler(K::ForceSpeedChange, on_speed)
-        .net_handler(K::SpeedChanged, on_speed);
+        .net_handler(K::SpeedChanged, on_speed)
+        .net_handler(K::CollisionHeight, on_collision_height);
+}
+
+/// The server's collision height, written as sent (`0x6e9600`); a driven body keeps it.
+fn on_collision_height(In(ev): In<SessionEvent>, mut sc: Scene) {
+    if let SessionEvent::CollisionHeight { guid, height } = ev {
+        if let Some(&e) = sc.index.0.get(&guid) {
+            let h = crate::app_core::state::CollisionHeight(height);
+            sc.commands.entity(e).insert(h);
+        }
+    }
 }
 
 /// The streamed world as one parameter: the components, caches, lifecycle hooks and edges the

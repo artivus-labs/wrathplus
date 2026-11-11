@@ -61,7 +61,7 @@ pub(crate) use live_display::{DisplaySwapped, ModelScale};
 mod conform;
 
 /// The per-unit collision height, the `h` the swim, wade, splash and foam depths are fractions of.
-mod collision_height;
+pub(crate) mod collision_height;
 use collision_height::stamp_collision_heights;
 
 /// Spell missiles: the projectile a cast with a `Spell.dbc` Speed above 0 flies at each target.

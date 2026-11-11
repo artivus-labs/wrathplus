@@ -36,7 +36,7 @@ const MSG_MOVE_FEATHER_FALL: u16 = 0x02b0;
 const MSG_MOVE_WATER_WALK: u16 = 0x02b1;
 const MSG_MOVE_UPDATE_CAN_FLY: u16 = 0x03ad;
 const MSG_MOVE_GRAVITY_CHNG: u16 = 0x04d2;
-const MSG_MOVE_SET_COLLISION_HGT: u16 = 0x0518;
+use crate::wrath_authority::MSG_MOVE_SET_COLLISION_HGT;
 /// Flight's vertical keys.
 const MSG_MOVE_START_ASCEND: u16 = 0x0359;
 const MSG_MOVE_STOP_ASCEND: u16 = 0x035a;
