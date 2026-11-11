@@ -28,7 +28,12 @@ Move = { companion_now = function() return "Pallytest" end }
 "#;
 
 pub(super) fn quests() -> UiScript {
-    let dir = std::env::temp_dir().join(format!("wp-agent-quest-{}", std::process::id()));
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let dir = std::env::temp_dir().join(format!(
+        "wp-agent-quest-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let script = UiScript::new().unwrap();
@@ -133,6 +138,31 @@ fn a_visit_hands_in_then_takes_what_is_on_offer() {
         calls(&script),
         "interact 0xR | turn in 3 | complete | reward 1 | interact 0xR | select 1 | accept | PARTY: Handed in: Quest 1. Picked up: Quest 2."
     );
+    // One signal, for the hand-in asked for, with both counts (the beta reported "pick_up", the
+    // phase it ended in).
+    let signals: String = script.eval("return table.concat(signals, ' | ')").unwrap();
+    assert_eq!(signals, "QUESTS_DONE hand_in 1 1");
+}
+
+/// Every call ends in its own AGENT_QUESTS_DONE: a second call while a visit runs ends that one
+/// first, with what it did so far, then starts afresh.
+#[test]
+fn a_call_while_a_visit_runs_ends_it_with_its_own_signal() {
+    let mut script = quests();
+    assert!(script.eval::<bool>("return Quests.pick_up()").unwrap());
+    script.tick(0.6);
+    script.fire_event("GOSSIP_SHOW", vec![]);
+    script.fire_event("QUEST_DETAIL", vec![]);
+    assert!(script.eval::<bool>("return Quests.pick_up()").unwrap());
+    let signals: String = script.eval("return table.concat(signals, ' | ')").unwrap();
+    assert_eq!(signals, "QUESTS_DONE pick_up 1 0");
+    script.tick(0.6);
+    script.fire_event("GOSSIP_SHOW", vec![]);
+    script.fire_event("QUEST_DETAIL", vec![]);
+    script.tick(0.6);
+    assert!(!script.eval::<bool>("return Quests.busy()").unwrap());
+    let signals: String = script.eval("return table.concat(signals, ' | ')").unwrap();
+    assert_eq!(signals, "QUESTS_DONE pick_up 1 0 | QUESTS_DONE pick_up 1 0");
 }
 
 #[test]

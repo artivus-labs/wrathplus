@@ -83,11 +83,6 @@ impl super::UiScript {
     pub fn set_wrath_unit_popup_state(&mut self, state: WrathUnitPopupState) {
         self.model_mut().wrath_unit_popup.state = state;
     }
-
-    /// The server's opt-out-of-loot flag, as the player's descriptor reports it.
-    pub fn set_wrath_opt_out_of_loot(&mut self, on: bool) {
-        self.model_mut().wrath_unit_popup.opt_out_of_loot = on;
-    }
 }
 
 fn push(lua: &Lua, r: WrathUnitPopupRequest) {

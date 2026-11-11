@@ -7,9 +7,17 @@
 //! [`services::KINDS`], none for all; radius in yards, none for the realm's) → `{pending = true}`
 //! while the realm is asked; `AGENT_SERVICES_READY` (`true, count` or `false, why`) fires when it
 //! answers, and the next call for the same kinds returns the places,
-//! `{ { kind, entry, name, x, y, z, map, zone, members, profession }, ... }`: `zone` from the
-//! client's own world map (`zones::Handles::name_at`), `members` the quest givers in a hub,
-//! `profession` the skill a profession trainer teaches. `nil, why` when it cannot be asked.
+//! `{ { kind, entry, name, x, y, z, map, zone, distance, members, profession }, ... }`, nearest
+//! first: `distance` in yards on the ground (as the realm measures) from where the character
+//! stands at that call, `zone` from the client's own world map (`zones::Handles::name_at`),
+//! `members` the quest givers in a hub, `profession` the skill a profession trainer teaches.
+//! `nil, why` when it cannot be asked.
+//!
+//! The realm's defaults: every place within 2000 yards, at most 20 (its `AgentNav.ServiceRadius`
+//! and `AgentNav.MaxServices`; a smaller radius may be asked for). An answer is given back,
+//! without asking again, for [`FRESH`] seconds while the character stays within [`NEAR`] yards
+//! of where it asked and on the same map; the order is kept nearest first from where it stands
+//! at each call.
 
 use super::realm::{Ask, Purpose, Realm, NO_SERVICES};
 use super::{level, Handles};
@@ -134,7 +142,25 @@ pub(super) fn answered(nav: &Handles, ask: Ask, result: Result<Vec<Place>, Strin
     nav.announce("AGENT_SERVICES_READY", said);
 }
 
-fn place_table(lua: &Lua, p: &Place, map: u32, zones: &zones::Handles) -> mlua::Result<Table> {
+/// Yards on the ground from `me` to the place, as the realm measures them.
+fn ground(me: [f32; 3], p: &Place) -> f32 {
+    (p.pos[0] - me[0]).hypot(p.pos[1] - me[1])
+}
+
+/// The places nearest first from `me` (the realm sorted them from where it was asked, which an
+/// answer kept for [`FRESH`] seconds may no longer be), each with its distance.
+fn nearest_first(places: &[Place], me: [f32; 3]) -> Vec<(&Place, f32)> {
+    let mut out: Vec<(&Place, f32)> = places.iter().map(|p| (p, ground(me, p))).collect();
+    out.sort_by(|a, b| a.1.total_cmp(&b.1));
+    out
+}
+
+fn place_table(
+    lua: &Lua,
+    (p, distance): (&Place, f32),
+    map: u32,
+    zones: &zones::Handles,
+) -> mlua::Result<Table> {
     let t = lua.create_table()?;
     t.set("kind", p.kind.as_str())?;
     t.set("entry", p.entry)?;
@@ -144,6 +170,8 @@ fn place_table(lua: &Lua, p: &Place, map: u32, zones: &zones::Handles) -> mlua::
     t.set("z", p.pos[2])?;
     t.set("map", map)?;
     t.set("zone", zones.name_at(map, p.pos[0], p.pos[1]))?;
+    // Rounded in f64, so 14.1 reads 14.1 and not 14.100000381.
+    t.set("distance", (f64::from(distance) * 10.0).round() / 10.0)?;
     t.set("members", p.members)?;
     t.set("profession", p.profession.clone())?;
     Ok(t)
@@ -164,13 +192,13 @@ pub(crate) fn install(
                 .ok_or_else(|| "not in the world yet".to_string())
                 .and_then(|me| {
                     let radius = radius.filter(|r| *r > 0.0).map(|r| r.round() as u32);
-                    ask(&n, me, kinds(list)?, radius).map(|places| (places, me.map))
+                    ask(&n, me, kinds(list)?, radius).map(|places| (places, me))
                 });
             match asked {
-                Ok((Some(places), map)) => {
+                Ok((Some(places), me)) => {
                     let out = lua.create_table()?;
-                    for p in &places {
-                        out.push(place_table(lua, p, map, &z)?)?;
+                    for place in nearest_first(&places, me.pos) {
+                        out.push(place_table(lua, place, me.map, &z)?)?;
                     }
                     Ok((Value::Table(out), None))
                 }

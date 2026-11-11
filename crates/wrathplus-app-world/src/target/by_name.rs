@@ -1,11 +1,10 @@
-//! Selection by name: the reference's one resolver (`0x493aa0`) behind `/target`, `/assist` and
-//! `/follow`, parameterised per binding.
+//! Selection by name: 1.12's resolver (`0x493aa0`) behind `/target` and `/assist`, parameterised
+//! per binding; `/follow` is 12340's, in [`follow`].
 //!
 //! | binding | typemask | filter mode | exact-only |
 //! |---|---|---|---|
 //! | `TargetByName 0x489d60` | 8, creatures and players | 0 | Lua arg 2 |
 //! | `AssistByName 0x489c40` | 0x10, players only | 0 | 0 |
-//! | `FollowByName 0x489ec0` | 0x10, players only | 2, `CanAssist` and alive | Lua arg 2 |
 //!
 //! Filter mode 0 underflows `0x493e40`'s jump table into accept-all: no range, facing, reaction,
 //! liveness, visibility or self test. A name matches whole-string first (`0x64a4c0` → CRT
@@ -37,7 +36,7 @@ use super::{scan, Selection};
 pub(crate) enum NameSearch {
     /// Typemask 8, creatures and players (a player carries the UNIT bit): `/target`.
     AnyUnit,
-    /// Typemask 0x10, players only: `/assist <name>` and `/follow <name>`.
+    /// Typemask 0x10, players only: `/assist <name>`.
     PlayerOnly,
 }
 
@@ -100,50 +99,6 @@ fn common_prefix_len(query: &str, name: &str) -> usize {
         .count()
 }
 
-/// A follow miss (`0x522590`-`0x5225c7`): `0xc7` for none or `target` (`0x76e780`), else `0x13a`.
-fn follow_miss_key(text: &str) -> &'static str {
-    if text.is_empty() || text.eq_ignore_ascii_case("target") {
-        "ERR_GENERIC_NO_TARGET"
-    } else {
-        "ERR_UNIT_NOT_FOUND"
-    }
-}
-
-/// The follow start gate (`0x60fed0`'s mode-3 chain) as a pure function, its order pinned by test:
-///
-/// | check | site | failure |
-/// |---|---|---|
-/// | followee is a player (typemask `0x10`) | `0x60ff5f` | `0x128` `ERR_INVALID_FOLLOW_TARGET` |
-/// | `CanCooperate` with the followee (`0x606ba0`) | `0x60ff6a` | `0x128`, the same line |
-/// | we are alive | `0x60ff7c` | `0x7e` `ERR_PLAYER_DEAD` |
-/// | we are not stunned (`UNIT_FIELD_FLAGS & 0x40000`) | `0x60ff95` | `0x191` `ERR_GENERIC_STUNNED` |
-/// | we are not casting | `0x60ffb9` | `0x134` `ERR_TOOBUSYTOFOLLOW` |
-///
-/// There is no followee-alive check (the per-tick death test ends a follow) and no distance check:
-/// follow's row in `0x860a58` has a `0.0` threshold, so `ERR_AUTOFOLLOW_TOO_FAR` (`0x6110a0`)
-/// never fires (`0x6110c8`).
-fn follow_refusal_key(
-    followee_is_player: bool,
-    can_assist_followee: bool,
-    we_are_dead: bool,
-    we_are_stunned: bool,
-    we_are_casting: bool,
-) -> Option<&'static str> {
-    if !followee_is_player || !can_assist_followee {
-        return Some("ERR_INVALID_FOLLOW_TARGET");
-    }
-    if we_are_dead {
-        return Some("ERR_PLAYER_DEAD");
-    }
-    if we_are_stunned {
-        return Some("ERR_GENERIC_STUNNED");
-    }
-    if we_are_casting {
-        return Some("ERR_TOOBUSYTOFOLLOW");
-    }
-    None
-}
-
 /// Whether the prefix tier is live, the resolver's exact-only argument. The unit popup's Target and
 /// Follow pass 1 (`UnitPopup.lua:557`, `UnitPopup.lua:623`), so a menu naming its unit never lands
 /// on a bystander sharing a first letter; the slash commands pass nothing.
@@ -196,17 +151,8 @@ pub(crate) struct ByNameScan<'w, 's> {
     /// Read-only: a sweep fires no name query, so an uncached name does not match, as in the
     /// reference.
     names: Res<'w, NameCache>,
-    /// The reaction inputs behind `CanAssist`, for [`Filter::AssistableAlive`] and the follow gate.
+    /// The reaction inputs behind [`follow`]'s gate.
     relations: super::RelationInputs<'w, 's>,
-}
-
-/// The per-candidate filter, the mode argument the reference hands `0x493e40`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Filter {
-    /// Mode 0, which underflows the jump table's bound into accept-all: `/target`, `/assist`.
-    AcceptAll,
-    /// Mode 2, `CanAssist` and `UNIT_FIELD_HEALTH > 0`: `/follow`.
-    AssistableAlive,
 }
 
 impl ByNameScan<'_, '_> {
@@ -219,51 +165,22 @@ impl ByNameScan<'_, '_> {
             .map(|(_, _, tf, _)| tf.translation)
     }
 
-    /// The mode-2 arm (`0x493eca`): alive, and `CanAssist 0x6066f0` as a friendly reaction (4+).
-    fn assistable_alive(&self, store: Option<&ObjectStore>) -> bool {
-        if store.is_some_and(|s| s.0.unit_is_dead()) {
-            return false;
-        }
-        let self_store = self.self_q.single().ok().and_then(|(_, _, _, s)| s);
-        self.relations.ring_reaction(store, self_store) >= 4
-    }
-
-    /// The follow start gate ([`follow_refusal_key`], entered at `0x60ff59`): the key of the first
-    /// refusal, for `CGGameUI::DisplayError`. `FollowUnit` skips the resolver but not this gate.
-    fn follow_refusal(
-        &self,
-        followee: u64,
-        followee_store: Option<&ObjectStore>,
-        casting: bool,
-    ) -> Option<&'static str> {
-        let self_store = self.self_q.single().ok().and_then(|(_, _, _, s)| s);
-        follow_refusal_key(
-            guid::is_player(followee),
-            self.relations.ring_reaction(followee_store, self_store) >= 4,
-            self_store.is_some_and(|s| s.0.unit_is_dead()),
-            self_store.is_some_and(|s| s.0.unit_flags() & crate::player::UNIT_FLAG_STUNNED != 0),
-            casting,
-        )
-    }
-
-    /// Resolve a name to a unit through [`scan_units`], the mode argument deciding the filter.
+    /// Resolve a name to a unit through [`scan_units`].
     fn resolve(
         &self,
         query: &str,
         search: NameSearch,
-        filter: Filter,
         mode: Match,
     ) -> Option<(Entity, u64, String)> {
         scan_units(
             self.units
                 .iter()
-                .map(|(e, g, tf, store)| (e, g.0, tf.translation, store)),
+                .map(|(e, g, tf, _)| (e, g.0, tf.translation)),
             self.origin(),
             &self.names,
             query,
             search,
             mode,
-            |store| filter != Filter::AssistableAlive || self.assistable_alive(store),
         )
     }
 }
@@ -281,17 +198,15 @@ type UnitQuery<'w, 's> = Query<
 >;
 
 /// The resolver's walk (`0x493aa0`): a name to a unit, logging one `by-name:` line per call,
-/// ungated since it runs per command: the candidates counted, the winner and on what. `keep` is
-/// the per-candidate filter mode; `origin` is the active player's position, without which the
-/// reference resolves nothing (`0x493ae0`).
-fn scan_units<'a>(
-    units: impl Iterator<Item = (Entity, u64, Vec3, Option<&'a ObjectStore>)>,
+/// ungated since it runs per command: the candidates counted, the winner and on what. `origin` is
+/// the active player's position, without which the reference resolves nothing (`0x493ae0`).
+fn scan_units(
+    units: impl Iterator<Item = (Entity, u64, Vec3)>,
     origin: Option<Vec3>,
     names: &NameCache,
     query: &str,
     search: NameSearch,
     mode: Match,
-    keep: impl Fn(Option<&ObjectStore>) -> bool,
 ) -> Option<(Entity, u64, String)> {
     let query = query.trim();
     if query.is_empty() {
@@ -304,8 +219,8 @@ fn scan_units<'a>(
     let mut considered = 0usize;
     let mut nameless = 0usize;
     let mut best: Option<(Entity, u64, Rank, String)> = None;
-    for (entity, guid, pos, store) in units {
-        if !search.accepts(guid) || !keep(store) {
+    for (entity, guid, pos) in units {
+        if !search.accepts(guid) {
             continue;
         }
         let Some(name) = names.peek(guid) else {
@@ -355,13 +270,12 @@ impl PlayerLookup<'_, '_> {
         scan_units(
             self.units
                 .iter()
-                .map(|(e, g, tf)| (e, g.0, tf.translation(), None)),
+                .map(|(e, g, tf)| (e, g.0, tf.translation())),
             origin,
             names,
             name,
             NameSearch::PlayerOnly,
             Match::PrefixOk,
-            |_| true,
         )
         .map(|(e, g, _)| (e, g))
     }
@@ -382,7 +296,6 @@ pub(super) fn target_named(
     let Some((entity, guid, _)) = scan_params.resolve(
         name,
         NameSearch::AnyUnit,
-        Filter::AcceptAll,
         if exact {
             Match::ExactOnly
         } else {
@@ -405,12 +318,7 @@ pub(super) fn assist_named(
 ) {
     let basis = match name {
         Some(name) => scan_params
-            .resolve(
-                name,
-                NameSearch::PlayerOnly,
-                Filter::AcceptAll,
-                Match::PrefixOk,
-            )
+            .resolve(name, NameSearch::PlayerOnly, Match::PrefixOk)
             .map(|(e, _, _)| e),
         None => commit.selection.target,
     };
@@ -446,78 +354,6 @@ pub(super) fn assist_requests(
             request.name.as_deref(),
             "/assist",
         );
-    }
-}
-
-/// Drain `/follow [name]` into [`crate::player`]; follow sends nothing on the wire. The followee's
-/// name is latched here for `AUTOFOLLOW_BEGIN` ([`crate::ui_follow`]).
-pub(super) fn follow_requests(
-    mut requests: MessageReader<crate::player::FollowRequest>,
-    scan_params: ByNameScan,
-    selection: Res<Selection>,
-    group: Res<crate::app_core::group::GroupState>,
-    index: Res<GuidIndex>,
-    stores: Query<&ObjectStore>,
-    cast: Res<crate::spell::PendingCast>,
-    mut errors: ResMut<crate::app_core::errors::UiErrorKeys>,
-    mut follow: ResMut<crate::player::FollowState>,
-    mut approach: ResMut<crate::player::Approach>,
-) {
-    for request in requests.read() {
-        let resolved = match request {
-            crate::player::FollowRequest::Name { name, exact } => scan_params
-                .resolve(
-                    name,
-                    NameSearch::PlayerOnly,
-                    Filter::AssistableAlive,
-                    if *exact {
-                        Match::ExactOnly
-                    } else {
-                        Match::PrefixOk
-                    },
-                )
-                .map(|(_, guid, name)| (guid, name)),
-            // `"target"` skips `player_token_guid`, whose players-only filter would make a
-            // creature a silent miss: the start gate must refuse it with its error line.
-            crate::player::FollowRequest::Unit(token) => match token.as_str() {
-                "target" => selection.guid,
-                tok => crate::target::unit_tokens::player_token_guid(tok, &selection, &group),
-            }
-            .map(|guid| {
-                let name = scan_params.names.peek(guid).unwrap_or_default().to_string();
-                (guid, name)
-            }),
-        };
-        // The start gate, whichever way the subject was found.
-        if let Some((guid, _)) = &resolved {
-            let followee = index.0.get(guid).and_then(|e| stores.get(*e).ok());
-            if let Some(key) = scan_params.follow_refusal(
-                *guid,
-                followee,
-                cast.in_flight(std::time::Instant::now()),
-            ) {
-                info!("follow: refused — {key}");
-                errors.0.push(crate::app_core::errors::UiError::key(key));
-                continue;
-            }
-        }
-        match resolved {
-            Some((guid, name)) => {
-                info!("follow: now following \"{name}\" guid {guid:#x}");
-                // The arm `0x611130` cancels what runs first: one auto-move cell.
-                approach.stop();
-                follow.start(guid, name);
-            }
-            None => {
-                // No subject by name or token: a follow in progress is left alone.
-                let key = follow_miss_key(match request {
-                    crate::player::FollowRequest::Unit(text)
-                    | crate::player::FollowRequest::Name { name: text, .. } => text,
-                });
-                info!("follow: nothing to follow — {key}");
-                errors.0.push(crate::app_core::errors::UiError::key(key));
-            }
-        }
     }
 }
 
@@ -657,6 +493,10 @@ impl SelectCommit<'_, '_> {
     }
 }
 
+#[path = "by_name_follow.rs"]
+mod follow;
+pub(super) use follow::follow_requests;
+
 #[cfg(test)]
 #[path = "by_name_rank_tests.rs"]
 mod rank_tests;
@@ -695,49 +535,6 @@ mod tests {
     fn whole_string_match_is_case_insensitive_and_ranks_exact() {
         let r = rank("kobold vermin", "Kobold Vermin", 9.0, Match::PrefixOk).expect("matches");
         assert!(r.exact, "tier 1 is case-insensitive whole-string");
-    }
-
-    /// A dead player following a creature sees `ERR_INVALID_FOLLOW_TARGET`, not `ERR_PLAYER_DEAD`:
-    /// the two followee checks come first and share message `0x128`.
-    #[test]
-    fn the_follow_gate_refuses_in_the_references_own_order() {
-        // The clean case.
-        assert_eq!(follow_refusal_key(true, true, false, false, false), None);
-        // A creature refuses, however it was found.
-        assert_eq!(
-            follow_refusal_key(false, true, false, false, false),
-            Some("ERR_INVALID_FOLLOW_TARGET")
-        );
-        // An enemy player fails CanAssist, and shares the creature's line.
-        assert_eq!(
-            follow_refusal_key(true, false, false, false, false),
-            Some("ERR_INVALID_FOLLOW_TARGET")
-        );
-        // Our own three, each shadowed by the followee checks above it.
-        assert_eq!(
-            follow_refusal_key(true, true, true, false, false),
-            Some("ERR_PLAYER_DEAD")
-        );
-        assert_eq!(
-            follow_refusal_key(true, true, false, true, false),
-            Some("ERR_GENERIC_STUNNED")
-        );
-        assert_eq!(
-            follow_refusal_key(true, true, false, false, true),
-            Some("ERR_TOOBUSYTOFOLLOW")
-        );
-        // Everything wrong at once: the followee's line wins.
-        assert_eq!(
-            follow_refusal_key(false, false, true, true, true),
-            Some("ERR_INVALID_FOLLOW_TARGET")
-        );
-        // Dead and stunned: dead is checked first.
-        assert_eq!(
-            follow_refusal_key(true, true, true, true, true),
-            Some("ERR_PLAYER_DEAD")
-        );
-        assert_eq!(follow_miss_key("Target"), "ERR_GENERIC_NO_TARGET");
-        assert_eq!(follow_miss_key("Nobody"), "ERR_UNIT_NOT_FOUND");
     }
 
     #[test]

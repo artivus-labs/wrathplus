@@ -73,13 +73,12 @@ impl FollowState {
     }
 }
 
-/// A start-following request: the chat input's `/follow`, or the UI's `FollowUnit`/`FollowByName`.
-/// A name finds players only; the start gate refuses a creature either way.
+/// A start-following request, as `FollowUnit`'s token pass (`0x60abf0`) left it.
 #[derive(bevy::ecs::message::Message, Clone, Debug)]
 pub enum FollowRequest {
-    /// `FollowUnit(unit)`; a bare `/follow`'s empty token arrives as `"target"`.
-    Unit(String),
-    /// `FollowByName(name, exactMatch)`: the unit popup passes `1`, `/follow <name>` nothing.
+    /// The guid a unit token named, 0 for none; `text` picks the miss's key.
+    Unit { text: String, guid: u64 },
+    /// A name: the unit popup passes `exact`, `/follow <name>` does not.
     Name { name: String, exact: bool },
 }
 

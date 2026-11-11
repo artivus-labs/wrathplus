@@ -258,7 +258,7 @@ pub(super) fn stream_self_movement(
         send_move!(MoveKind::StopPitch);
     }
     // `START_SWIM` (0xca) and `STOP_SWIM` (0xcb) go out the frame `SWIMMING` flips, enqueued by
-    // the swim decision `0x6030c0`; airborne and swimming never overlap, so the arc cannot race.
+    // the swim decision `0x730d10`; airborne and swimming never overlap, so the arc cannot race.
     if added & move_flags::SWIMMING != 0 {
         send_move!(MoveKind::StartSwim);
     } else if removed & move_flags::SWIMMING != 0 {

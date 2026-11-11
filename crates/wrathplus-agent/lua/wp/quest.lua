@@ -9,6 +9,10 @@
 --                      the one that sells for most.
 --                      Both return at once and run in the background; the visit ends as
 --                      AGENT_QUESTS_DONE (kind, picked up, handed in), so wait on that, not the log.
+--                      `kind` is what was asked ("pick_up" or "hand_in"), and the two counts are
+--                      the whole visit's: a hand-in that also takes the follow-ups on offer ends
+--                      "hand_in", 1, 1. Every call ends in exactly one: a call while a visit runs
+--                      ends that one first (its own AGENT_QUESTS_DONE), then starts afresh.
 --   Quests.state       what it is doing; Quests.busy() for an intent's `until`.
 --   Quests.list()      the quest log: { { id, title, level, complete, objectives = { { text,
 --                      kind, done }, ... } }, ... } (kind: "monster", "item", "object", "event"
@@ -130,7 +134,9 @@ local function stop(why)
   if job then
     did(why)
     if Agent and Agent.signal then
-      Agent.signal("QUESTS_DONE", job == "available" and "pick_up" or "hand_in", #visit.accepted, #visit.handed)
+      -- The kind asked for, not the phase it ended in (a hand-in moves on to the follow-ups).
+      local kind = (visit.asked or job) == "available" and "pick_up" or "hand_in"
+      Agent.signal("QUESTS_DONE", kind, #visit.accepted, #visit.handed)
     end
     announce()
   end
@@ -139,7 +145,10 @@ local function stop(why)
 end
 
 local function start(kind)
+  -- One AGENT_QUESTS_DONE per call: a visit still running ends here, with its own.
+  if job then stop("another visit was asked for") end
   job, npc, since, asked = kind, nil, GetTime(), nil
+  visit.asked = kind
   return true
 end
 

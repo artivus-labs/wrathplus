@@ -339,11 +339,15 @@ impl Plugin for PlayerPlugin {
                 .before(control)
                 .before(mirror_mover_collision_height),
         )
-        // Before `control`, which evaluates the swim depth lines.
+        // Before steering and camera control read the driven body's depth lines.
         .add_systems(
             Update,
             mirror_mover_collision_height
                 .in_set(WorldStage::Input)
+                .after(land::land_here)
+                .after(server_ride::drive_self_ride)
+                .after(wire_in::release_on_session_end)
+                .before(follow::steer_follow)
                 .before(control),
         )
         // The shake adds its offset after `control` seats the camera, so its distance falloff

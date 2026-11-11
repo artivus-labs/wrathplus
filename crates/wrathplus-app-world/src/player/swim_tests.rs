@@ -1,9 +1,9 @@
 use super::*;
 
-/// `CreatureModelData.collisionHeight × displayScale` for three shipped bodies, as
-/// `wrathplus_formats`' `collision_height_is_the_m2_collision_box` pins them.
+/// Three shipped bodies' collision heights, as `wrathplus_formats`'
+/// `collision_heights_are_the_column_times_the_unit_model_scale` pins them.
 const HUMAN_MALE: f32 = 2.031;
-const GNOME_FEMALE: f32 = 1.150; // 1.000 column × 1.15 display scale
+const GNOME_FEMALE: f32 = 1.214;
 const NIGHT_ELF_MALE: f32 = 2.438;
 
 fn player_at(y: f32) -> Player {

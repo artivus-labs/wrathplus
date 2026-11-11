@@ -383,7 +383,9 @@ impl Remote {
                 l.max_distance, l.per_second, l.per_minute
             ),
             Realm::Probing { .. } => "asking the realm whether it answers route requests".into(),
-            Realm::Unknown | Realm::Absent => self.no_navmesh(None),
+            // Before the world, nothing is wrong yet: say what happens on entering it.
+            Realm::Unknown => "not in the world yet: on entering it the client asks the realm whether it routes walks (or set WOW_NAV_MMAPS=<server data>/mmaps for local routes)".into(),
+            Realm::Absent => self.no_navmesh(None),
         }
     }
 }

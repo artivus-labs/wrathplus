@@ -8,15 +8,15 @@ import { AgentError, type AgentClient } from "./client.ts";
 /** The agent helpers an outside agent needs, and which of them finish in the background. Every
  *  claim here is checked against crates/wrathplus-agent (src/world.rs, src/nav.rs, lua/wp/*.lua);
  *  keep it under 1500 characters. */
-export const HELPERS = `Helpers (guids: "0x..." strings). What walks or fights returns at once and ends as an AGENT_* event (events names=["AGENT_"]).
-- AgentNearby([yards]), nearest first: {guid, name, kind, distance, x, y, z, level, health, dead, reaction, creature_type, quest, npc, lootable}. AgentPosition(): {x, y, z, facing, map}. AgentTarget(guid).
-- AgentMoveTo(x, y[, z] | guid): walks a navmesh route; returns the route, {pending = true} while the realm routes it, or nil, why. AgentWalk(): {status = idle|routing|walking|arrived|stopped|failed|stuck, note}, ending as AGENT_WALK_DONE(status). AgentStop(). A later AgentMoveTo, AgentInteract or Combat.engage replaces it.
-- AgentInteract(guid): talk to, loot, use or attack it; walks there itself.
+export const HELPERS = `Helpers (guids: "0x..." strings). What walks or fights returns at once, ending as an AGENT_* event (events names=["AGENT_"]).
+- AgentNearby([yards]), nearest first: {guid, name, kind, distance, x, y, z, level, health, dead, reaction, creature_type, quest, npc, lootable}. AgentPosition(): {x, y, z, map}. AgentTarget(guid).
+- AgentMoveTo(x, y[, z] | guid): walks a navmesh route; returns the route, {pending = true} while the realm routes it, or nil, why. AgentWalk(): {status = idle|routing|walking|arrived|stopped|failed|stuck, note, cinematic}, ending as AGENT_WALK_DONE(status). AgentStop(). A later walk or fight replaces it.
+- AgentInteract(guid): talk to, loot, use or attack it; walks there itself. At a vendor the window opens a moment later; Upkeep may sell junk.
 - Combat.engage(guid): true if in sight; chases, fights, loots: AGENT_COMBAT_DONE(guid, killed|lost|stopped|died). Combat.engaged(guid): over, won, outcome. Combat.stop().
-- Quests.pick_up(), Quests.hand_in(): visit givers within 30 yd: AGENT_QUESTS_DONE(kind, picked, handed). Quests.list(): {id, title, complete, objectives}.
+- Quests.pick_up(), Quests.hand_in(): visit givers within 30 yd: AGENT_QUESTS_DONE(kind asked, picked, handed), one per call. Quests.list().
 - Move.to(unit | x, y[, z]): AGENT_MOVE_DONE(target, arrived|lost|failed). Move.follow(unit), Move.free().
 - Goals.on = true levels by itself. Goals.list(), Goals.facts(), Goals.state; Goals.push{name, why, priority, want}; Goals.hold{reason, seconds} pauses it. Agent.activity(): {name, seconds}, nil between actions.
-- StopCinematic() skips a cinematic (status.cinematic); a new character starts in one, with nothing near or walkable.`;
+- StopCinematic() skips a cinematic (status.cinematic); a new character starts in one.`;
 
 const LUA_DESCRIPTION = `Run Lua in the WrathPlus game client's UI VM (the WoW 3.3.5a addon API) to read game state and act.
 It is the stock World of Warcraft 3.3.5a (build 12340) API as an addon sees it: read (UnitName("player"), UnitHealth("target"), GetQuestLogTitle(i), GetContainerItemInfo(bag, slot), ...) and act (CastSpellByName, UseContainerItem, SendChatMessage, ...). Movement verbs work from here (MoveForwardStart/MoveForwardStop, TurnLeftStart/TurnLeftStop, JumpOrAscendStart, ...): start one, stop it in a later call.
@@ -24,7 +24,7 @@ A bare expression (\`UnitLevel("player")\`) returns its values; otherwise use \`
 A chunk runs to completion inside one game frame: never loop waiting for the world to change. Return, then call again or wait on the events tool.
 ${HELPERS}
 For code that runs by itself every frame, save a module (save_module) and require("name") it (AgentReload("name") after a change; one named autoexec runs on entering the world). Frames work as in addons: CreateFrame("Frame"):SetScript("OnUpdate", fn) ticks, :RegisterEvent(...) reacts.
-Also: AgentFindNpc(service[, yards]) (the nearest "repair", "vendor", "classtrainer", "innkeeper"... in sight), AgentServices([kinds[, radius]]) (where services are on your map, from the realm: {pending = true} first, then the list after AGENT_SERVICES_READY), AgentPath (a route preview; {pending = true} first when the realm routes, then the route after AGENT_PATH_READY), Rotation.list (what Combat casts), Agent.intent(name, {when, run}) and Agent.decide(name, {question, options, on}) for a fast decision loop when one runs, require("wp.engine") (a Playerbots-style decision engine) and require("wp.values") (health, power, auras, cooldowns, range, threat, bags).`;
+Also: AgentFindNpc(service[, yards]) (the nearest "repair", "vendor", "classtrainer", "innkeeper"... in sight), AgentServices([kinds[, radius]]) (where services are on your map, from the realm: {pending = true} first, then after AGENT_SERVICES_READY the places with their distance, nearest first; 2000 yd and 20 places by default; the answer is reused for 120 s within 100 yd), AgentPath (a route preview; {pending = true} first when the realm routes, then the route after AGENT_PATH_READY), Rotation.list (what Combat casts), Agent.intent(name, {when, run}) and Agent.decide(name, {question, options, on}) for a fast decision loop when one runs, require("wp.engine") (a Playerbots-style decision engine) and require("wp.values") (health, power, auras, cooldowns, range, threat, bags).`;
 
 const MODULES_DESCRIPTION = `List your saved Lua modules, or read one when \`name\` is given (dotted names like grind.loop). Modules persist across reloads and restarts of the client.`;
 

@@ -1,5 +1,5 @@
-//! The water splash. The reference's per-frame water decision `0x6030c0` compares
-//! `surface − feet` against `0.4·collisionHeight` (`0x60314a`) and plays a positioned unit sound
+//! The water splash. The reference's per-frame water decision `0x730d10` compares
+//! `surface − feet` against `0.4·collisionHeight` (`0x730ded`) and plays a positioned unit sound
 //! on a crossing in either direction, waist-deep and before swimming starts at `0.75·h`.
 //! Wading below the line makes only the footstep splashes.
 //!

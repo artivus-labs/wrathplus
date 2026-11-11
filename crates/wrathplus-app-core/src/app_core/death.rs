@@ -52,10 +52,6 @@ pub struct DeathNet {
     pub spirit_healer: Option<u64>,
     /// Bumped per ask: a Cancel clears nothing, so only a fresh ask re-shows the dialog.
     pub confirm_generation: u32,
-    /// Water-walking is granted on our mover; mirrored, not applied: walking on the water surface
-    /// is not built.
-    #[allow(dead_code)]
-    pub water_walk: bool,
 }
 
 impl DeathNet {

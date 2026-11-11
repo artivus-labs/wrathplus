@@ -2142,13 +2142,11 @@ pub enum ClientCommand {
         name: String,
     },
     /// `MSG_PETITION_DECLINE`: we send the item guid; the owner receives ours.
-    #[allow(dead_code)]
     PetitionDecline {
         item: u64,
     },
     // ── Taxi ──
-    /// `CMSG_TAXINODE_STATUS_QUERY` with the flight master's guid. Not sent yet.
-    #[allow(dead_code)]
+    /// `CMSG_TAXINODE_STATUS_QUERY` with the flight master's guid.
     TaxiNodeStatusQuery {
         guid: u64,
     },

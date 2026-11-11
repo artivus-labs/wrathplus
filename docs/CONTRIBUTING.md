@@ -108,8 +108,8 @@ out of scope is closed with the reason.
     (`WOW_RIG="gear:?"` lists them). It was built on vmangos's `.character premade` commands and
     is not ported to AzerothCore. `WOW_PROBE_CHAT="<command>"` sends one GM
     command and logs the reply as `net: server says`. An account named `probe` and digits is
-    shielded: every world entry sends `.cheat god on`, `.die` clears it for a death test, and
-    `WOW_GOD=off` leaves it off.
+    shielded: every world entry sends `.cheat god on`, `.die` kills through it for a death test,
+    and `WOW_GOD=off` leaves it off.
   - A trace is `WOW_MOVE_TRACE=<file>`, filtered with `WOW_MOVE_TRACE_TAGS` (`"move,snd,in"`) and
     ended by `WOW_PROBE_EXIT_AT=<seconds>`; grep it for the `rly` and `snd` lines.
     Add `hit` for movement obstruction diagnostics: when a frame retains less than half its

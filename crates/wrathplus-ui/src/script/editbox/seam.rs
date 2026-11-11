@@ -132,20 +132,6 @@ impl UiScript {
     pub fn editbox_cut(&mut self) -> Option<String> {
         super::cut_selection(self.lua())
     }
-
-    /// Push a sent line, as its canonical slash line, into the named box's history where the
-    /// reference calls `ChatEdit_AddHistory`. By name: the router runs after the box has cleared
-    /// and lost focus. `false` when `box_name` is no live EditBox.
-    pub fn editbox_add_history(&mut self, box_name: &str, line: &str) -> bool {
-        let lua = self.lua();
-        let Ok(t) = lua.globals().get::<mlua::Table>(box_name) else {
-            return false;
-        };
-        let Ok(h) = crate::script::object::frame_handle_of(lua, &t) else {
-            return false;
-        };
-        super::with_eb(lua, h, |eb| eb.add_history_line(line)).is_some()
-    }
 }
 
 /// Box `h`'s advance-table request, `None` when its table is current for the display string,

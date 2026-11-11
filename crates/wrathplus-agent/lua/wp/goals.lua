@@ -378,7 +378,9 @@ function G.learn_places(list)
   assert(type(list) == "table", "learn_places takes a list of places")
   local n = 0
   for _, p in ipairs(list) do
-    assert(type(p) == "table" and valid_name(p.kind) and type(p.name) == "string" and tonumber(p.x) and tonumber(p.y),
+    -- mod-agent-nav names its quest hub "questgiver-hub"; goal/action/fact names stay snake_case.
+    assert(type(p) == "table" and (valid_name(p.kind) or p.kind == "questgiver-hub")
+      and type(p.name) == "string" and tonumber(p.x) and tonumber(p.y),
       "a place is { kind, name, x, y [, z, map, zone, guid] }")
     local place = { guid = p.guid, name = p.name, x = tonumber(p.x), y = tonumber(p.y), z = tonumber(p.z),
       map = p.map, zone = p.zone, at = now() }
@@ -1253,7 +1255,22 @@ G.action({
     return pass.hand_in
   end,
   effects = { quest_ready = false, hand_in_near = false, progressed = true },
-  cost = function(f) return f.hand_in_near and 1 or 4 end,
+  -- In sight, the cheapest step there is. Else by the walk, as the NPC errands are but one less
+  -- (2 + yards / 200, at most 6, against their 3 + ...), so a hand-in comes before training or
+  -- selling at a like distance, as `progress` says (quests first): a flat 4 put any trainer
+  -- within 200 yards first.
+  cost = function(f)
+    if f.hand_in_near then return 1 end
+    local pos = me()
+    -- Execution visits the first eligible quest in log order; price that same destination.
+    for _, q in ipairs(quests()) do
+      local h = hand_in_of(q)
+      if h and not G.cooling("hand_in_quests:" .. q.title) then
+        return 2 + (pos and math.min(far(pos, h) / 200, 4) or 2)
+      end
+    end
+    return 4
+  end,
   run = function(args)
     quest_visit = { talking = false, since = now() }
     G.last_visit = nil
