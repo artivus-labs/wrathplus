@@ -85,14 +85,26 @@ fn unit_model_scale(
 }
 
 /// [`ModelScale`], recomputed on a display or family-record change (`0x72cbb0`, `0x72ce4b`).
+#[allow(clippy::type_complexity)]
 pub(super) fn stamp_unit_model_scales(
     mut commands: Commands,
     creatures: Option<Res<Creatures>>,
     families: Option<Res<crate::app_core::catalogs::PetFamilyTables>>,
     names: Option<Res<crate::names::NameCache>>,
-    units: Query<(Entity, &NetEntity, &ObjectStore, Option<&ModelScale>)>,
+    units: Query<(
+        Entity,
+        Ref<NetEntity>,
+        Ref<ObjectStore>,
+        Option<&ModelScale>,
+    )>,
 ) {
+    let tables_changed = creatures.as_ref().is_some_and(|r| r.is_changed())
+        || families.as_ref().is_some_and(|r| r.is_changed())
+        || names.as_ref().is_some_and(|r| r.is_changed());
     for (entity, net, store, current) in &units {
+        if current.is_some() && !tables_changed && !net.is_changed() && !store.is_changed() {
+            continue;
+        }
         if !matches!(
             net.kind,
             EntityKind::Unit | EntityKind::Player | EntityKind::Corpse
@@ -104,7 +116,7 @@ pub(super) fn stamp_unit_model_scales(
             families.as_deref(),
             names.as_deref(),
             net.kind,
-            store,
+            &store,
             net.display_id,
         );
         if current.map(|c| c.0) == Some(k) {
