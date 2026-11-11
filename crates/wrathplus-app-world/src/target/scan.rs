@@ -457,11 +457,12 @@ pub(super) fn commit(
     target_store: Option<&ObjectStore>,
     engaged: bool,
     self_guid: Option<u64>,
+    pet_guid: u64,
     new_attackable: bool,
 ) -> CommitOutcome {
-    // `IsSelectable`, before the dedup (`0x4935ec`–`0x4935f3`): a non-selectable unit is a complete
+    // `IsSelectable`, before the dedup (`0x524cf8`–`0x524d06`): a non-selectable unit is a complete
     // no-op that keeps the current target, for every selection writer.
-    if !super::relations::is_selectable(target_store, self_guid) {
+    if !super::relations::is_selectable(target_store, self_guid, pet_guid) {
         return CommitOutcome::default();
     }
     if selection.guid == Some(guid) {
@@ -503,6 +504,7 @@ pub(super) fn cycle(
     selection: &mut Selection,
     seam: &mut crate::creature_anim::AttackSeam,
     engaged: bool,
+    pet_guid: u64,
 ) {
     history.enter(side);
     history.prune(now);
@@ -562,8 +564,9 @@ pub(super) fn cycle(
         guid,
         scan.store_at(entity),
         engaged,
-        // `IsSelectable`'s `CREATEDBY` clause reads it.
+        // `IsSelectable`'s own-pet clause reads both.
         scan.self_guid(),
+        pet_guid,
         // `Attack 0x5ecb70`'s validation, which a mode-2 pick fails (reaction >= 4 against
         // `CanAttack`'s < 4). A duelling friendly passes `CanAttack`'s duel arm, which reads no
         // reaction, so the reference's `Attack` would re-swing at it; here it gets none.
@@ -637,6 +640,8 @@ impl AttackPick<'_, '_> {
                 selection,
                 seam,
                 engaged,
+                // No pet slot: the enemy pool is `CanAttack`'s, which refuses `NOT_SELECTABLE`.
+                0,
             );
         }
         let Some(guid) = selection.guid else {
@@ -811,11 +816,15 @@ pub(super) fn auto_acquire_attacker(
     mut swings: MessageReader<SwingMessage>,
     self_player: Query<(Entity, &Guid), With<SelfPlayer>>,
     guids: Query<&Guid>,
-    // For `IsSelectable`: a `NOT_SELECTABLE` attacker is not acquired.
+    // For `IsSelectable`: a `NOT_SELECTABLE` attacker is not acquired, bar our own pet.
     stores: Query<&ObjectStore>,
+    pet: Option<Res<crate::app_core::state::PetBar>>,
     mut selection: ResMut<Selection>,
     mut seam: crate::creature_anim::AttackSeam,
 ) {
+    let pet_guid = pet
+        .as_deref()
+        .map_or(0, crate::app_core::state::PetBar::guid);
     for s in swings.read() {
         if selection.target.is_some() {
             continue;
@@ -842,6 +851,7 @@ pub(super) fn auto_acquire_attacker(
             stores.get(s.attacker).ok(),
             false,
             Some(my_guid.0),
+            pet_guid,
             false,
         );
     }
@@ -850,6 +860,7 @@ pub(super) fn auto_acquire_attacker(
 #[cfg(test)]
 mod tests {
     mod repeat;
+    mod selectable;
     use super::*;
     use crate::net::NetCommands;
     use wrathplus_protocol::types::Field;
@@ -864,8 +875,10 @@ mod tests {
         go_with(world, guid, None, engaged, self_guid, attackable)
     }
 
+    const PET: u64 = 0xC;
+
     /// `go` with the new target's descriptor; `None` is an unresolved object, which skips
-    /// `IsSelectable` (`0x4935c8`).
+    /// `IsSelectable` (`0x524cd7`).
     fn go_with(
         world: &mut World,
         guid: u64,
@@ -887,6 +900,7 @@ mod tests {
                         store.as_ref(),
                         engaged,
                         self_guid,
+                        PET,
                         attackable,
                     )
                 },
@@ -1131,61 +1145,6 @@ mod tests {
             None,
             "and the re-swing killed Auto Shot"
         );
-    }
-
-    /// `IsSelectable` refuses the whole commit before the dedup (`0x4935ee`/`0x4935f3`): nothing is
-    /// sent and the held target survives. vmangos flags the pre-event Baron Rivendare this way
-    /// (`instance_stratholme.cpp:224`).
-    #[test]
-    fn not_selectable_refuses_the_commit_and_keeps_the_old_target() {
-        use wrathplus_protocol::ObjectFields;
-        const FLAGS: u16 = Field::UnitFlags.index();
-        const CREATEDBY: u16 = Field::UnitCreatedby.index();
-        const OBJECT_TYPE: u16 = Field::ObjectType.index();
-        const NOT_SELECTABLE: u32 = 1 << 25;
-        // `OBJECT_FIELD_TYPE` bit 3, a unit: the only kind whose `+0x58` slot is not the base stub.
-        let unit = |pairs: &[(u16, u32)]| {
-            let mut all = vec![(OBJECT_TYPE, 0x8u32)];
-            all.extend_from_slice(pairs);
-            ObjectStore(ObjectFields::from_pairs(&all))
-        };
-
-        let (mut world, rx) = commit_world();
-        let sent = |rx: &crossbeam_channel::Receiver<ClientCommand>| rx.try_iter().count();
-
-        let plain = unit(&[]);
-        assert!(go_with(&mut world, 0xA, Some(plain), false, Some(1), true).changed);
-        assert_eq!(sent(&rx), 1);
-
-        // The Baron: flagged, created by nobody, refused; 0xA is still the target.
-        let baron = unit(&[(FLAGS, NOT_SELECTABLE | 0x2)]);
-        let out = go_with(&mut world, 0xB, Some(baron), true, Some(1), true);
-        assert!(!out.changed && !out.swung, "the commit is a complete no-op");
-        assert_eq!(sent(&rx), 0, "nothing goes out — not even the stop");
-        assert_eq!(
-            world.resource::<Selection>().guid,
-            Some(0xA),
-            "the target already in hand survives the refused click"
-        );
-
-        // The `CREATEDBY` clause: the same flag on a unit I created still selects (my totem).
-        let mine = unit(&[(FLAGS, NOT_SELECTABLE), (CREATEDBY, 1), (CREATEDBY + 1, 0)]);
-        assert!(go_with(&mut world, 0xC, Some(mine), false, Some(1), true).changed);
-        assert_eq!(sent(&rx), 1);
-
-        // Somebody else's flagged creation is not mine to click.
-        let theirs = unit(&[(FLAGS, NOT_SELECTABLE), (CREATEDBY, 9), (CREATEDBY + 1, 0)]);
-        assert!(!go_with(&mut world, 0xD, Some(theirs), false, Some(1), true).changed);
-        assert_eq!(sent(&rx), 0);
-
-        // A non-unit object answers the base stub: a GameObject is never the selection.
-        let go_obj = ObjectStore(ObjectFields::from_pairs(&[(OBJECT_TYPE, 0x20)]));
-        assert!(!go_with(&mut world, 0xE, Some(go_obj), false, Some(1), true).changed);
-        assert_eq!(sent(&rx), 0);
-
-        // An unresolved object (an out-of-range party member) skips the check.
-        assert!(go_with(&mut world, 0xF, None, false, Some(1), true).changed);
-        assert_eq!(sent(&rx), 1);
     }
 
     fn cand(guid: u64, score: f32, on_screen: bool) -> Candidate {

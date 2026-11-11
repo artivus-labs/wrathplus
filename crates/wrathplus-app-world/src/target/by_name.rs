@@ -533,6 +533,8 @@ pub struct SelectCommit<'w, 's> {
     names: Option<Res<'w, NameCache>>,
     /// `assistAttack`, the assist tail's second leg.
     assist_attack: Res<'w, super::AssistAttack>,
+    /// `IsSelectable`'s pet slot; `Option` for harnesses without the pet bar.
+    pet: Option<Res<'w, crate::app_core::state::PetBar>>,
 }
 
 impl super::StoreLookup for SelectCommit<'_, '_> {
@@ -542,6 +544,13 @@ impl super::StoreLookup for SelectCommit<'_, '_> {
 }
 
 impl SelectCommit<'_, '_> {
+    /// PetInfo's pet slot 0 (`0x5d3390(0)`), the `SMSG_PET_SPELLS` guid; 0 with no pet.
+    pub(super) fn pet_guid(&self) -> u64 {
+        self.pet
+            .as_deref()
+            .map_or(0, crate::app_core::state::PetBar::guid)
+    }
+
     /// The shared assist tail (`0x489bb2`-`0x489c07`, byte-identical in `AssistByName` at
     /// `0x489cae`-`0x489d07`): select the basis unit's `UNIT_FIELD_TARGET` if it is streamed.
     /// Every miss is silent and deselects nothing: no basis, a basis targeting nothing, or an
@@ -619,6 +628,7 @@ impl SelectCommit<'_, '_> {
             me.and_then(|(_, store, _)| store),
             super::RelationContext::new(self.names.as_deref(), self),
         );
+        let pet_guid = self.pet_guid();
         scan::commit(
             &mut self.selection,
             &mut self.seam,
@@ -627,29 +637,19 @@ impl SelectCommit<'_, '_> {
             self.stores.get(entity).ok(),
             me.is_some_and(|(_, _, engaged)| engaged),
             me.map(|(g, _, _)| g.0),
+            pet_guid,
             attackable,
         );
     }
 }
 
 #[cfg(test)]
+#[path = "by_name_rank_tests.rs"]
+mod rank_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
-
-    fn exact(dist2: f32) -> Rank {
-        Rank {
-            exact: true,
-            prefix: 3,
-            dist2,
-        }
-    }
-    fn prefix(prefix: usize, dist2: f32) -> Rank {
-        Rank {
-            exact: false,
-            prefix,
-            dist2,
-        }
-    }
 
     #[test]
     fn prefix_length_folds_case_and_stops_at_the_shorter_string() {
@@ -732,32 +732,5 @@ mod tests {
                 .expect("whole-string still matches")
                 .exact
         );
-    }
-
-    #[test]
-    fn exact_beats_any_prefix_and_nearest_breaks_the_tie() {
-        // The deviation: exact ranks first, whatever the reference's walk order.
-        assert!(exact(100.0).beats(prefix(3, 1.0)));
-        assert!(!prefix(3, 1.0).beats(exact(100.0)));
-        // Among same-named exact matches, the nearest wins.
-        assert!(exact(4.0).beats(exact(9.0)));
-        assert!(!exact(9.0).beats(exact(4.0)));
-    }
-
-    #[test]
-    fn longer_prefix_beats_nearer_shorter_one() {
-        // The reference's `jg` accept: a longer prefix wins at any distance.
-        assert!(prefix(5, 900.0).beats(prefix(3, 1.0)));
-        assert!(!prefix(3, 1.0).beats(prefix(5, 900.0)));
-        // Equal prefix length falls through to strictly-nearest.
-        assert!(prefix(3, 4.0).beats(prefix(3, 9.0)));
-    }
-
-    #[test]
-    fn ties_keep_the_incumbent_and_nan_never_displaces() {
-        // The reference's `jp` reject edge makes the accept a strict `<`.
-        assert!(!prefix(3, 4.0).beats(prefix(3, 4.0)));
-        assert!(!exact(4.0).beats(exact(4.0)));
-        assert!(!prefix(3, f32::NAN).beats(prefix(3, 4.0)));
     }
 }
