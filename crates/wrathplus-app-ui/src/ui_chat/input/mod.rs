@@ -95,7 +95,6 @@ pub(super) struct ChatOut<'w, 's> {
     anim: MessageWriter<'w, crate::creature_anim::EmoteAnim>,
     target: MessageWriter<'w, crate::target::TargetByNameRequest>,
     assist: MessageWriter<'w, crate::target::AssistRequest>,
-    follow: MessageWriter<'w, crate::player::FollowRequest>,
     /// `/wave <name>`'s player search, which selects nothing.
     players: crate::target::PlayerLookup<'w, 's>,
     /// Native explicit-leave visibility is separate from Vanilla's combined slot state.
@@ -646,13 +645,9 @@ pub(super) fn drain_chat_input(
             ParsedChat::Assist { name } => {
                 chat_out.assist.write(crate::target::AssistRequest { name });
             }
-            // The stock `/follow` is `FollowUnit(msg)` (`ChatFrame.lua:1506`): bare is the target,
-            // a name has no exact flag, so it prefix-matches.
+            // The stock `/follow` is `FollowUnit(msg)` (`ChatFrame.lua:1506`).
             ParsedChat::Follow { name } => {
-                chat_out.follow.write(match name {
-                    Some(name) => crate::player::FollowRequest::Name { name, exact: false },
-                    None => crate::player::FollowRequest::Unit("target".into()),
-                });
+                script.queue_follow(name.as_deref().unwrap_or(""), false)
             }
             // `SlashCmdList["PVP"]` is `TogglePVP()`, the popup row's intent queue.
             ParsedChat::Pvp => script.queue_pvp_toggle(),
