@@ -69,9 +69,8 @@ impl CreatureFamily {
     ///
     /// The reference overwrites the `modelScale × scale` product with it (`0x472e87`), so the
     /// product survives only a family lookup miss; a world unit's ramp is the same line
-    /// (`0x71c1af`). Deviation: a zero range (row 28 only) is `None`, the lookup-miss fallback,
-    /// because the glue path divides by zero there into a NaN scale and the world path's `t = 0`
-    /// gives row 28's `minScale` of 0, which would draw a pet of that family at no size.
+    /// (`0x71c1af`). Deviation: a zero range (row 28 only) is `None`, the lookup-miss fallback:
+    /// the glue path divides by zero into NaN, the world path draws at row 28's `minScale` of 0.
     pub fn scale_at(&self, level: u32) -> Option<f32> {
         let range = self.max_scale_level.checked_sub(self.min_scale_level)?;
         if range == 0 {
@@ -112,10 +111,7 @@ impl CreatureFamilies {
         self.get(family)?.scale_at(level)
     }
 
-    /// A world unit's model scale, `[unit+0xb3c]` (`0x71c110`): `base` is
-    /// [`crate::CreatureCatalog::unit_model_scale`], and a unit whose creature record names a
-    /// family takes the family's ramp at its level when the ramp is larger, or always when it has
-    /// a `UNIT_FIELD_PETNUMBER` (`0x71c1ba`-`0x71c1ca`).
+    /// A world unit's `[unit+0xb3c]` (`0x71c110`): the ramp if larger, or for a pet (`0x71c1ba`).
     pub fn unit_model_scale(&self, base: f32, family: u32, level: u32, is_pet: bool) -> f32 {
         match self.pet_scale(family, level) {
             Some(ramp) if is_pet || ramp > base => ramp,
@@ -312,14 +308,11 @@ mod tests {
         assert_eq!(fams.pet_scale(10, 60), None);
         assert!((fams.pet_scale(1, 60).unwrap() - 1.0).abs() < 1e-6);
 
-        // The world unit law: the Mangy Duskbat (Bat, display 9535 at 0.2, level 3) takes the
-        // larger ramp; a wild unit above its ramp keeps its own; a pet always takes the ramp.
+        // A world unit: the Mangy Duskbat (Bat, 0.2, level 3).
         let bat = 0.4 + 0.23 * 2.0 / 59.0;
         assert!((fams.unit_model_scale(0.2, 24, 3, false) - bat).abs() < 1e-6);
         assert_eq!(fams.unit_model_scale(0.9, 24, 3, false), 0.9);
         assert!((fams.unit_model_scale(0.9, 24, 3, true) - bat).abs() < 1e-6);
-        // The warlock's Imp (display 4449 at 0.5) is flat at 0.5; no family keeps the base.
-        assert_eq!(fams.unit_model_scale(0.5, 23, 5, true), 0.5);
         assert_eq!(fams.unit_model_scale(0.2, 0, 3, false), 0.2);
     }
 

@@ -723,8 +723,7 @@ pub(super) fn attach_entity_visuals(
                     .entity(entity)
                     .remove::<wrathplus_world::model_fade::UnitAppearFade>();
             }
-            // A unit renders at its model scale × `OBJECT_FIELD_SCALE_X` (`0x71c0e0`); any other
-            // object at the field alone (`0x4d5f90`).
+            // Unit: model scale × `OBJECT_FIELD_SCALE_X` (`0x71c0e0`); else the field (`0x4d5f90`).
             let placement = if let Ok(mut t) = transforms.get_mut(entity) {
                 t.scale = Vec3::splat(net.scale * model_scale.map_or(1.0, |k| k.0));
                 *t

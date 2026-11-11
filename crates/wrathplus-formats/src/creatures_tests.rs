@@ -94,8 +94,7 @@ fn stormwind_guard_equipment_columns_decode_in_bodyslot_order() {
     );
 }
 
-/// A unit display's model scale (`0x71c110`): the Imp and Mangy Duskbat below 1, the tauren and
-/// gnome bodies above it through `creatureModelScale`, `modelScale` and the race display.
+/// `0x71c110` over both scale columns and, for an NPC, its race display's.
 #[test]
 fn unit_model_scales_compose_the_race_display_and_both_columns() {
     let data = crate::wow_data_or_skip!();

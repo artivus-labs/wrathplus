@@ -128,8 +128,7 @@ pub(super) fn seat_or_spawn_mount(
     fade_skip: bool,
     arrival: Option<super::Arrival>,
 ) -> Seat {
-    // The mount's `creatureModelScale` alone, without its `modelScale`, under the rider's render
-    // scale (`0x71c0fb`, `[unit+0x990]` from `0x73d660`).
+    // `creatureModelScale` alone, not `modelScale` (`0x71c0fb`, `[unit+0x990]` from `0x73d660`).
     let mount_scale = creatures
         .and_then(|c| c.catalog.display_scale(mount_display))
         .unwrap_or(1.0);

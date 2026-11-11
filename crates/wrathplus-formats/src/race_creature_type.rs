@@ -13,8 +13,7 @@ use crate::dbc::{parse, u32_at};
 
 const CHR_RACES: &str = "DBFilesClient\\ChrRaces.dbc";
 
-/// `ChrRaces.dbc` under its 1.12-shaped schema, which [`crate::wrath_layouts`] maps onto build
-/// 12340's columns.
+/// `ChrRaces.dbc` under its 1.12 schema, which [`crate::wrath_layouts`] maps onto 12340's.
 pub(crate) fn read_chr_races(chain: &mut Chain) -> Result<RecordSet> {
     let bytes = chain
         .read_file(CHR_RACES)

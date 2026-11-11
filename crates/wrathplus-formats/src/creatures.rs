@@ -14,6 +14,8 @@ const CREATURE_MODEL_DATA: &str = "DBFilesClient\\CreatureModelData.dbc";
 const CREATURE_DISPLAY_INFO: &str = "DBFilesClient\\CreatureDisplayInfo.dbc";
 const CREATURE_DISPLAY_INFO_EXTRA: &str = "DBFilesClient\\CreatureDisplayInfoExtra.dbc";
 
+mod scale;
+
 /// A resolved creature display: model, scale, skins and, for a humanoid NPC, its appearance.
 #[derive(Debug, Clone)]
 pub struct CreatureModel {
@@ -120,30 +122,6 @@ pub struct CreatureCatalog {
 }
 
 impl CreatureCatalog {
-    /// A display's own `creatureModelScale`, the mount's factor in a mounted unit's render scale
-    /// (`0x71c0fb` multiplies the `[unit+0x990]` that `0x73d660` stores from it).
-    pub fn display_scale(&self, display_id: u32) -> Option<f32> {
-        self.display.get(&display_id).map(|r| r.scale)
-    }
-
-    /// A unit display's model scale before its family ramp (`0x722ae0` → `0x71c110`): the race
-    /// display's `creatureModelScale` (`0x71c050`, 1.0 without an extra row) × `creatureModelScale`
-    /// × `modelScale`, and 1.0 when that is not positive. The unit renders at this × its eased
-    /// `OBJECT_FIELD_SCALE_X` (`0x71c0e0`); `None` for a display or model miss, which renders at
-    /// 1.0 with no family ramp (`0x722b07`, `0x722b32`).
-    pub fn unit_model_scale(&self, display_id: u32) -> Option<f32> {
-        let row = self.display.get(&display_id)?;
-        let model = self.models.get(&row.model_id)?;
-        let race = (row.extended_id != 0)
-            .then(|| self.extra.get(&row.extended_id))
-            .flatten()
-            .and_then(|e| self.race_displays.get(&(e.race, e.sex)))
-            .and_then(|d| self.display.get(d))
-            .map_or(1.0, |r| r.scale);
-        let k = race * row.scale * model.scale;
-        Some(if k > 0.0 { k } else { 1.0 })
-    }
-
     /// A display's footstep camera shake, a `CameraShakes.dbc` id (`FootstepShakeSize`).
     pub fn footstep_shake(&self, display_id: u32) -> Option<u32> {
         let row = self.display.get(&display_id)?;
@@ -195,15 +173,6 @@ impl CreatureCatalog {
     /// Every display as `(display id, model id)`.
     pub fn display_models(&self) -> impl Iterator<Item = (u32, u32)> + '_ {
         self.display.iter().map(|(id, r)| (*id, r.model_id))
-    }
-
-    /// `modelScale × creatureModelScale`, which the reference sizes the serverless character-select
-    /// pet (`0x472dc6`) and a corpse (`0x705ac0`) by; a world unit takes
-    /// [`Self::unit_model_scale`].
-    pub fn model_scale(&self, display_id: u32) -> Option<f32> {
-        let row = self.display.get(&display_id)?;
-        let model = self.models.get(&row.model_id)?;
-        Some(model.scale * row.scale)
     }
 
     /// The display's model's `[WorldEffectScale, AttachedEffectScale]`: the size factor a spell
@@ -478,18 +447,7 @@ pub fn load_creature_catalog(chain: &mut Chain) -> Result<CreatureCatalog> {
     // Best-effort: without it only humanoid NPCs lose their skins; the caller logs `extra_len()`.
     let extra = load_creature_display_info_extra(chain).unwrap_or_default();
     // Best-effort: without it a humanoid NPC's race scale reads 1.0.
-    let race_displays = crate::race_creature_type::read_chr_races(chain)
-        .map(|rs| {
-            rs.records()
-                .iter()
-                .filter_map(|r| {
-                    let race = u8::try_from(u32_at(r, 0)?).ok()?;
-                    Some([(0, u32_at(r, 4)?), (1, u32_at(r, 5)?)].map(|(sex, d)| ((race, sex), d)))
-                })
-                .flatten()
-                .collect()
-        })
-        .unwrap_or_default();
+    let race_displays = scale::race_displays(chain);
 
     Ok(CreatureCatalog {
         display,

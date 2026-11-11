@@ -67,8 +67,7 @@ pub(super) fn drive(
 }
 
 /// The camera pivot's target height: the model-local [`CameraPivot`] times the body's raw
-/// `OBJECT_FIELD_SCALE_X` × its model scale (the un-eased `0x71c0e0`), not the eased render scale,
-/// clamped. `swimming` picks the preset as
+/// `OBJECT_FIELD_SCALE_X` × model scale, un-eased, clamped. `swimming` picks the preset as
 /// `0x50f880` does (`0x50f89e`, `cam+0x124`), lower by [`CameraPivot::swim_drop_local`];
 /// [`super::camera::PivotGlide`] glides between presets. `None` until the model attaches: the
 /// reference skips the camera update while the model is unresolved (`0x50e907`), so a display

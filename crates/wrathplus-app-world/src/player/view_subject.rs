@@ -49,8 +49,7 @@ pub(super) fn publish_view_subject(
     mut subject: ResMut<ViewSubject>,
     self_store: Query<&ObjectStore, With<SelfPlayer>>,
     index: Res<GuidIndex>,
-    // The pivot height takes the raw `OBJECT_FIELD_SCALE_X` × model scale, not the eased render
-    // scale.
+    // The pivot height takes the raw `OBJECT_FIELD_SCALE_X` × model scale, not the eased scale.
     poses: Query<(
         &Transform,
         Option<&CameraPivot>,

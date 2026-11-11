@@ -43,18 +43,11 @@ pub(super) struct ScaleEase {
     elapsed: f32,
 }
 
-/// A unit's or corpse's model scale, which it renders at × its eased `OBJECT_FIELD_SCALE_X`: a
-/// unit's `[unit+0xb3c]` (`0x71c110`, applied at `0x71c0e0`), a corpse's display columns
-/// (`0x705ac0`, applied at `0x706570`). Absent on any other object, which renders at the field
-/// alone (`0x4d5f90`).
+/// A unit's (`[unit+0xb3c]`, `0x71c110`) or corpse's (`0x705ac0`, `0x706570`) model scale.
 #[derive(Component, Clone, Copy, Debug, PartialEq)]
 pub(crate) struct ModelScale(pub(crate) f32);
 
-/// [`ModelScale`] for a unit showing `display`: the display's scale
-/// ([`wrathplus_formats::CreatureCatalog::unit_model_scale`]), then the family ramp its creature
-/// record names (`[unit+0x964]+0x14`) at `UNIT_FIELD_LEVEL`, by `UNIT_FIELD_PETNUMBER`
-/// ([`wrathplus_formats::CreatureFamilies::unit_model_scale`]). A corpse takes its display's
-/// `modelScale × creatureModelScale`, 1.0 on a miss, with no race or family factor (`0x705ac0`).
+/// [`ModelScale`]: the display's, then its creature record's family ramp (`[unit+0x964]+0x14`).
 fn unit_model_scale(
     creatures: Option<&Creatures>,
     families: Option<&crate::app_core::catalogs::PetFamilyTables>,
@@ -73,7 +66,7 @@ fn unit_model_scale(
         .zip(display)
         .and_then(|(c, d)| c.catalog.unit_model_scale(d))
     else {
-        return 1.0;
+        return 1.0; // a display or model miss: no family ramp (`0x722b07`, `0x722b32`)
     };
     let family = (kind == EntityKind::Unit)
         .then(|| store.0.object_entry())
@@ -91,10 +84,7 @@ fn unit_model_scale(
     }
 }
 
-/// Stamp each unit's and corpse's [`ModelScale`] and restamp it when its display, level, pet
-/// number or creature record moves it, as the reference recomputes on a display change and on a record
-/// naming a family (`0x72cbb0`, `0x72ce4b`). An unbuilt unit takes it at attach; a built one
-/// eases to it in [`refresh_live_display`].
+/// [`ModelScale`], recomputed on a display or family-record change (`0x72cbb0`, `0x72ce4b`).
 pub(super) fn stamp_unit_model_scales(
     mut commands: Commands,
     creatures: Option<Res<Creatures>>,
@@ -245,8 +235,7 @@ pub(super) fn refresh_live_display(
                 });
             }
         }
-        // A restamped model scale eases a built unit to its new size over the same window, as
-        // `0x72cbb0`'s argument 0 does; the stamp a unit was built with is already in place.
+        // `0x72cbb0`'s argument 0 eases a restamp; the build already took the first stamp.
         if let Some(k) = model_scale.filter(|k| k.is_changed() && !k.is_added()) {
             commands.entity(entity).insert(ScaleEase {
                 from: tf.scale.x,
