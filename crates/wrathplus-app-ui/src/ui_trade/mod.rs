@@ -339,8 +339,9 @@ impl Plugin for UiTradePlugin {
                     feed_trade
                         .after(crate::app_core::schedule::UnitFeed)
                         .in_set(UiFeed),
-                    // Ahead of the feed, so an accepted partner shows the frame the window opens.
-                    answer_trade_request.before(feed_trade),
+                    // After this frame's packets and before the feed, so a request is answered
+                    // before the trade window and the VM's OnUpdate observe it.
+                    answer_trade_request.in_set(UiFeed).before(feed_trade),
                     // The coinage-change reflex's trade half, after the world's fields land.
                     trim_offer_to_purse
                         .after(crate::app_core::schedule::UnitFeed)
