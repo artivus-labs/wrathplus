@@ -1,7 +1,7 @@
 use super::*;
 use wrathplus_protocol::wrath_events::{WrathDispatch, WrathEventAdapter};
-fn body(gm: bool, text: &[u8]) -> Vec<u8> {
-    let mut b = vec![1];
+fn body(gm: bool, kind: u8, text: &[u8]) -> Vec<u8> {
+    let mut b = vec![kind];
     b.extend(u32::MAX.to_le_bytes());
     b.extend(42u64.to_le_bytes());
     b.extend(0x12345678u32.to_le_bytes());
@@ -21,13 +21,18 @@ fn adapter_fifo_preserves_raw_gm_order_duplicates_and_clears_on_disconnect() {
     app.add_plugins(UiNativeChatPlugin);
     let mut adapter = WrathEventAdapter::new();
     let mut expected = Vec::new();
-    for (gm, text) in [
-        (false, b"\xff".as_slice()),
-        (true, b"".as_slice()),
-        (false, b"\xff".as_slice()),
+    for (gm, kind, text) in [
+        (false, 1, b"\xff".as_slice()),
+        (true, 1, b"".as_slice()),
+        (false, 1, b"\xff".as_slice()),
+        (
+            false,
+            0,
+            b"Godmode is ON. You won't take damage.".as_slice(),
+        ),
     ] {
         let opcode = if gm { 0x3b3 } else { 0x96 };
-        let bytes = body(gm, text);
+        let bytes = body(gm, kind, text);
         expected.push(wrathplus_protocol::wrath_chat::decode(opcode, &bytes).unwrap());
         let WrathDispatch::Handled { session_events, .. } =
             adapter.dispatch(opcode, &bytes, 0).unwrap()
@@ -61,6 +66,12 @@ fn adapter_fifo_preserves_raw_gm_order_duplicates_and_clears_on_disconnect() {
             .collect::<Vec<_>>(),
         expected
     );
+    let said = app.world().resource::<Messages<ServerSaidMessage>>();
+    let said: Vec<_> = said
+        .iter_current_update_messages()
+        .map(|m| m.text.as_str())
+        .collect();
+    assert_eq!(said, ["Godmode is ON. You won't take damage."]);
     crate::net::handlers::dispatch(
         app.world_mut(),
         vec![SessionEvent::Disconnected {
