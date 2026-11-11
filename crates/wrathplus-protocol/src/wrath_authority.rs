@@ -470,6 +470,8 @@ pub const SMSG_MOVE_GRAVITY_ENABLE: u16 = 0x04d0;
 pub const CMSG_MOVE_GRAVITY_ENABLE_ACK: u32 = 0x04d1;
 pub const SMSG_MOVE_SET_COLLISION_HGT: u16 = 0x0516;
 pub const CMSG_MOVE_SET_COLLISION_HGT_ACK: u32 = 0x0517;
+/// AzerothCore's echo of a mover's height ACK to its observers (`MovementHandler.cpp:716`).
+pub const MSG_MOVE_SET_COLLISION_HGT: u16 = 0x0518;
 
 pub const MOVEMENT_FLAG_DISABLE_GRAVITY: u32 = 0x0000_0400;
 pub const MOVEMENT_FLAG_FALLING: u32 = wrath_ground::MOVE_FALLING;
@@ -644,6 +646,17 @@ impl MoverOrder {
             | Self::TeleportNear { counter, .. } => counter,
         }
     }
+}
+
+/// [`MSG_MOVE_SET_COLLISION_HGT`]'s mover and its trailing height, after the `MovementInfo`.
+pub fn collision_height_echo(opcode: u16, body: &[u8]) -> Option<(u64, f32)> {
+    let tail = body
+        .len()
+        .checked_sub(4)
+        .filter(|_| opcode == MSG_MOVE_SET_COLLISION_HGT)?;
+    let height = f32::from_le_bytes(body[tail..].try_into().ok()?);
+    let guid = read_packed_guid(&mut &body[..tail]).ok()?;
+    height.is_finite().then_some((guid, height))
 }
 
 /// Whether `opcode` is a [`MoverOrder`]. `SMSG_MOVE_UNSET_CAN_FLY` keeps its own codec above.

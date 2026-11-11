@@ -642,6 +642,12 @@ fn dispatch_packet(
 ) -> Result<()> {
     let now = clock.now_ms();
     if wrathplus_protocol::wrath_relay::handles(packet.opcode) {
+        // Ahead of the pose, which a swimming or flying observer's relay may not decode.
+        if let Some((guid, height)) =
+            wrath_authority::collision_height_echo(packet.opcode, &packet.body)
+        {
+            send(events, SessionEvent::CollisionHeight { guid, height })?;
+        }
         let event = match wrathplus_protocol::wrath_relay::decode(packet.opcode, &packet.body) {
             Ok(event) => event,
             // Another unit swimming, flying or riding is outside the on-foot relay subset: drop
@@ -5407,21 +5413,22 @@ mod mover_order_tests {
                 ..
             })
         ));
-        for order in [
-            MoverOrder::Mode {
-                kind: ModeOrderKind::DisableGravity,
-                apply: true,
-                mover_guid: 1,
-                counter: 2,
-            },
-            MoverOrder::CollisionHeight {
-                mover_guid: 1,
-                counter: 2,
-                height: 2.0,
-            },
-        ] {
-            assert!(mover_order_event(&order).is_none(), "{order:?}");
-        }
+        let gravity = MoverOrder::Mode {
+            kind: ModeOrderKind::DisableGravity,
+            apply: true,
+            mover_guid: 1,
+            counter: 2,
+        };
+        assert!(mover_order_event(&gravity).is_none());
+        let height = MoverOrder::CollisionHeight {
+            mover_guid: 1,
+            counter: 2,
+            height: 2.0,
+        };
+        assert!(matches!(
+            mover_order_event(&height),
+            Some(SessionEvent::CollisionHeight { guid: 1, height }) if height == 2.0
+        ));
     }
 
     #[test]

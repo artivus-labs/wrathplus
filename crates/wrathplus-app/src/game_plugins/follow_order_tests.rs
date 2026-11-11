@@ -31,9 +31,3 @@ fn follow_requests_are_drained_before_the_target_chain_consumes_them() {
     }
     assert!(seen.contains(&one("::by_name::follow::follow_requests")));
 }
-
-#[test]
-fn the_client_builds_headless() {
-    let app = headless_client();
-    assert!(app.world().contains_resource::<Schedules>());
-}

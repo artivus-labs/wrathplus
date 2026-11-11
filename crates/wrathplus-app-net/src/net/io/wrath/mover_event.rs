@@ -2,8 +2,8 @@ use wrathplus_protocol::wrath_authority::{self, MoverOrder};
 use wrathplus_protocol::SessionEvent;
 
 /// The shared event the controller applies for a mover order, where it models the state: every
-/// speed, water walk, feather fall, hover, can-fly, knockback and the near-teleport snap. Gravity
-/// and collision height are acknowledged without one.
+/// speed, water walk, feather fall, hover, can-fly, knockback, collision height and the
+/// near-teleport snap. Gravity is acknowledged without one.
 pub(crate) fn mover_order_event(order: &MoverOrder) -> Option<SessionEvent> {
     use wrath_authority::{ModeOrderKind, SpeedOrderKind};
     use wrathplus_protocol::types::{JumpInfo, MoveMode, SpeedKind};
@@ -84,6 +84,11 @@ pub(crate) fn mover_order_event(order: &MoverOrder) -> Option<SessionEvent> {
                 orientation: t.orientation,
             }),
         },
-        MoverOrder::CollisionHeight { .. } => return None,
+        MoverOrder::CollisionHeight {
+            mover_guid, height, ..
+        } => SessionEvent::CollisionHeight {
+            guid: mover_guid,
+            height,
+        },
     })
 }

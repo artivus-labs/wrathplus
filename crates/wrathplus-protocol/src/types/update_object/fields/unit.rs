@@ -295,8 +295,8 @@ impl ObjectFields {
     pub fn unit_combat_reach(&self) -> f32 {
         self.get_float(Field::UnitCombatreach, 0).unwrap_or(1.5)
     }
-    /// `UNIT_FIELD_BOUNDINGRADIUS`: horizontal radius in yards; the water-foam depth gate takes
-    /// `max(2 * radius, 1.0)` (`0x5fa760`), so absent reads 0.
+    /// `UNIT_FIELD_BOUNDINGRADIUS`: horizontal radius in yards, 0 when absent. The water-foam gate
+    /// reads the collision height, not this (`0x71cc28`).
     pub fn unit_bounding_radius(&self) -> f32 {
         self.get_float(Field::UnitBoundingradius, 0).unwrap_or(0.0)
     }

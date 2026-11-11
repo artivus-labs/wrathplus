@@ -16,7 +16,6 @@ use wrathplus_protocol::EntityKind;
 use crate::app_core::session::ObjectStore;
 use crate::net::{Guid, NetEntity};
 
-use super::collision_height::{collision_height_for, CollisionHeight};
 use super::{Creatures, VisualAttached};
 
 /// The reference's scale-ease window: 2 s, cosine smoothstep (`0x614bbf`).
@@ -48,7 +47,7 @@ pub(super) struct ScaleEase {
 pub(crate) struct ModelScale(pub(crate) f32);
 
 /// [`ModelScale`]: the display's, then its creature record's family ramp (`[unit+0x964]+0x14`).
-fn unit_model_scale(
+pub(super) fn unit_model_scale(
     creatures: Option<&Creatures>,
     families: Option<&crate::app_core::catalogs::PetFamilyTables>,
     names: Option<&crate::names::NameCache>,
@@ -155,13 +154,11 @@ fn live_display_id(kind: EntityKind, store: &ObjectStore) -> Option<u32> {
 }
 
 /// Diff each attached entity's live appearance against what its visual was built with: a display
-/// move swaps the model, a scale move arms the 2 s ease, and a change of the native display or
-/// `SCALE_X` restamps [`CollisionHeight`]. Mount children carry no [`ObjectStore`]: their display
-/// is the host's field, diffed by `mount::reseat_mounts`.
+/// move swaps the model and a scale move arms the 2 s ease. Mount children carry no
+/// [`ObjectStore`]: their display is the host's field, diffed by `mount::reseat_mounts`.
 #[allow(clippy::type_complexity)]
 pub(super) fn refresh_live_display(
     mut commands: Commands,
-    creatures: Option<Res<Creatures>>,
     mut entities: Query<
         (
             Entity,
@@ -169,7 +166,6 @@ pub(super) fn refresh_live_display(
             &mut NetEntity,
             &ObjectStore,
             &AppliedDisplay,
-            Option<&CollisionHeight>,
             &Transform,
             Has<crate::app_core::session::SelfPlayer>,
             Option<Ref<ModelScale>>,
@@ -185,7 +181,7 @@ pub(super) fn refresh_live_display(
     prediction: Option<Res<crate::spell::form_cancel::FormCancelPrediction>>,
 ) {
     let predicted = prediction.as_deref().and_then(|p| p.display());
-    for (entity, guid, mut net, store, applied, height, tf, is_self, model_scale) in &mut entities {
+    for (entity, guid, mut net, store, applied, tf, is_self, model_scale) in &mut entities {
         // ── The display-id swap ──────────────────────────────────────────────────────────────
         let live = predicted
             .filter(|_| is_self)
@@ -254,26 +250,6 @@ pub(super) fn refresh_live_display(
                 to: net.scale * k.0,
                 elapsed: 0.0,
             });
-        }
-
-        // ── The collision prism ──────────────────────────────────────────────────────────────
-        // From the native display (`[unit+0x110]+0x1f8`) and `SCALE_X`, not the rendered swap
-        // above; recomputed and diffed each frame, as no change gate covers both. It snaps to the
-        // target scale: easing it would drag the depth lines through two seconds of depths.
-        let prism = super::collision_height::prism_display_id(Some(store), net.display_id);
-        let h = collision_height_for(creatures.as_deref(), prism, net.scale);
-        if height != Some(&h) {
-            debug!(
-                "collision height restamp: guid {:016x} {:?} -> {:.3} (native display {:?}, \
-                 rendered {:?}, scale {:.3})",
-                guid.0,
-                height.map(|c| c.0),
-                h.0,
-                prism,
-                net.display_id,
-                net.scale
-            );
-            commands.entity(entity).insert(h);
         }
     }
 }

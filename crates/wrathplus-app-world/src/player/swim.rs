@@ -68,14 +68,14 @@ pub(super) fn at_surface(player: &Player, surface_y: Option<f32>) -> bool {
         .is_some_and(|surface| surface - player.pos.y <= rest_cap(player.collision_height.0) + BAND)
 }
 
-/// Latches [`Player::swimming`] as `0x6030c0` does and returns it: enter on a strict
+/// Latches [`Player::swimming`] as `0x730d10` does and returns it: enter on a strict
 /// `depth > 0.75·h`, leave on `depth < 0.75·h - 1/36` or no liquid at all. Entry also waits out a
 /// rising launch until its upward speed halves (`0x7c5de0`, about 0.236 s for a swim jump), so the
 /// hop re-latches still rising and its residual velocity is dropped (`0x7c6e50` → `0x7c6290`).
 /// `now` is `Time::elapsed_secs`. Never touches [`Player::settling`], the terrain streamer's.
 pub(super) fn update_swimming(player: &mut Player, surface_y: Option<f32>, now: f32) -> bool {
-    // LEVITATING skips the whole decision (`0x6030d2` test ah,4, to `0x6031fa`): it is GM flight,
-    // whose SWIMMING the dry ground would otherwise clear the next frame.
+    // LEVITATING skips the decision (1.12 `0x6030d2`; 12340's exit `0x730d1f` tests `[+0x48] & 4`,
+    // unmapped): GM flight, whose SWIMMING the dry ground would otherwise clear the next frame.
     if player.modes.levitating {
         return player.swimming;
     }

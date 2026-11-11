@@ -298,6 +298,9 @@ mod schedule_source;
 #[cfg(test)]
 pub(crate) mod schedule_tests {
     mod ordering_tests {
+        include!("game_plugins/dimension_order_tests.rs");
+    }
+    mod follow_order_tests {
         include!("game_plugins/follow_order_tests.rs");
     }
     use std::any::TypeId;

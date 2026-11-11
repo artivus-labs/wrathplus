@@ -34,8 +34,8 @@ pub const FIELD_UNIT_BYTES_1: u16 = Field::UnitBytes1.index();
 pub const FIELD_UNIT_FLAGS: u16 = Field::UnitFlags.index();
 /// Aura-state bits, tested as `1 << (state - 1)` by the usable check (client `[unit+0x110]+0x1dc`).
 /// Horizontal bounding radius, in yards.
-/// The unshifted appearance, untouched by forms, morphs and polymorph (`UpdateFields_1_12_1.h:77`).
-/// The client sizes the mover collision box from it (`0x60b270`), so a shapeshift keeps the box.
+/// The unshifted appearance, untouched by forms, morphs and polymorph. The client sizes the
+/// collision height from it (`[unit+0xd0]+0xf8` in `0x725f50`), so a shapeshift keeps it.
 /// The ridden mount's `CreatureDisplayInfo` id, 0 when unmounted; this field, not the aura, is the
 /// mounted state (`Unit::IsMounted`; client `[unit+0x110]+0x1fc`).
 pub const FIELD_UNIT_MOUNTDISPLAYID: u16 = Field::UnitMountDisplayId.index();
