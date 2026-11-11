@@ -611,14 +611,23 @@ impl Plugin for EntitiesPlugin {
                 .before(EntityVisualsSet)
                 .after(WorldStage::Net),
         )
-        // After the net stage, whose Commands create the entity; until then its readers take the
-        // constructor default.
-        .add_systems(Update, stamp_collision_heights.after(WorldStage::Net))
-        // Before attach, so a unit's first build takes its model scale.
+        // After wire creation and cache eviction; publish the height before the world-unit
+        // reconciler and Input's mover mirror read the swim/wade depth lines.
+        .add_systems(
+            Update,
+            stamp_collision_heights
+                .after(WorldStage::Net)
+                .after(evict_display_caches)
+                .before(publish_world_units)
+                .before(WorldStage::Input),
+        )
+        // After cache eviction, before the camera pivot and first attach read the model scale.
         .add_systems(
             Update,
             live_display::stamp_unit_model_scales
                 .after(WorldStage::Net)
+                .after(evict_display_caches)
+                .before(WorldStage::Input)
                 .before(EntityVisualsSet),
         )
         // Display models resolve and build before attach, all after `WorldStage::Net` spawns the
