@@ -456,8 +456,8 @@ pub use types::{
 };
 pub(crate) use types::{FontExplicit, MeasuredText, RegionData};
 pub use unit::{
-    grey_band, level_reads_unknown, parse_unit_token, power_token, unit_is_grey, PlayerRecord,
-    SelectionRequest, UnitBase, UnitGuids, UnitPowerState, UnitState, UnitTokenParse,
+    grey_band, level_reads_unknown, parse_unit_token, power_token, unit_is_grey, unknownobject,
+    PlayerRecord, SelectionRequest, UnitBase, UnitGuids, UnitPowerState, UnitState, UnitTokenParse,
 };
 pub use weapon_enchant::WeaponEnchant;
 pub use who_sort::{WhoSortChain, WhoSortKey};

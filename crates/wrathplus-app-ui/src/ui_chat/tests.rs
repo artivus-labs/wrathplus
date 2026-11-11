@@ -251,13 +251,13 @@ fn a_received_text_emote_composes_its_sentence_and_names_the_performer() {
     for (l, expected) in [
         (them("Jane"), "Bob waves at Jane."),
         (them("Me"), "Bob waves at you."),
+        (them("ME"), "Bob waves at ME."), // case-sensitive: `SStrCmp` at `0x50375d`
         (them("-"), "Bob waves."),
     ] {
         let e = line(WAVE, l).expect("a sentence");
         assert_eq!(e.text, expected);
         assert_eq!(e.kind, Some(K::TextEmote));
-        // arg2 is the performer, not the target (`0x49b47c`).
-        assert_eq!(e.sender, "Bob");
+        assert_eq!(e.sender, "Bob"); // arg2 is the performer, not the target (`0x49b47c`)
     }
     for (l, expected) in [
         (mine("Jane"), "You wave at Jane."),

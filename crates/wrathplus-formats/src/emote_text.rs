@@ -41,13 +41,13 @@ pub struct EmoteLine<'a> {
     pub performer: &'a str,
     /// The performer guid is the active player's (`0x49b2c8`).
     pub performer_is_you: bool,
-    /// The performer is female, `NameCache` record `+0x13c == 1`: `+8` on the column (`0x49b31c`).
+    /// The performer is female, name-cache record `+0x144 == 1`: `+8` on the column (`0x50377a`).
     pub performer_female: bool,
     /// The target name as the wire carries it, never round-tripped through a name cache; empty is
     /// untargeted (`0x49b311`).
     pub target: &'a str,
-    /// Your own name (`GetOwnName`, `0x609210`), compared case-insensitively with `target` at
-    /// `0x49b2f3` (`0x64a480`).
+    /// Your own name, the local player's `GetUnitName` (`0x72a000`), compared case-sensitively
+    /// with `target` (`SStrCmp` `0x76e760` at `0x50375d`, a bounded `strncmp`).
     pub your_name: &'a str,
 }
 
@@ -64,7 +64,7 @@ impl EmoteTextCatalog {
         if line.performer_is_you {
             ctx = 2;
             performer_is_other = false;
-        } else if !line.target.is_empty() && line.target.eq_ignore_ascii_case(line.your_name) {
+        } else if !line.target.is_empty() && line.target == line.your_name {
             ctx = 1;
             target_is_other = false;
         }

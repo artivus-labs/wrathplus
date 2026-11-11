@@ -504,7 +504,7 @@ pub mod net {
         }
     }
 
-    /// Reads the friends list, the notify CVar and our guid for the sign-on condition ([`event`]).
+    /// Reads the friends list, the notify CVar and our name for the sign-on condition ([`event`]).
     fn on_event(
         In(ev): In<SessionEvent>,
         mut guild: ResMut<GuildState>,
@@ -512,16 +512,11 @@ pub mod net {
         social: Res<SocialState>,
         notify: Res<GuildMemberNotify>,
         self_guid: Res<crate::app_core::session::SelfGuid>,
+        names: Res<crate::names::NameCache>,
     ) {
         if let SessionEvent::GuildEvent(notice) = ev {
-            event(
-                &mut guild,
-                &mut errors,
-                &social,
-                &notify,
-                self_guid.0,
-                notice,
-            );
+            let own_name = self_guid.0.and_then(|g| names.peek(g));
+            event(&mut guild, &mut errors, &social, &notify, own_name, notice);
         }
     }
 
@@ -579,42 +574,37 @@ pub mod net {
         guild.apply_roster(roster);
     }
 
-    /// `SMSG_GUILD_EVENT`. The sign-on/sign-off pair's guid serves its line's condition, four
-    /// conjuncts in the reference's `0x0c`/`0x0d` arms, each failing to the silent exit `0x5e74c9`:
+    /// `SMSG_GUILD_EVENT`. The sign-on/sign-off line's condition, three conjuncts in arms 12/13 of
+    /// `0x6d92d0` (`0x6d95be`, `0x6d964c`), each failing to the silent exit `0x6d9901`:
     ///
-    /// 1. a local player exists (ours: we know our guid);
-    /// 2. `guildMemberNotify` is on (`0x5e733f`, `0x5e73e7`);
-    /// 3. the subject is not us: the reference compares names (`0x609210`), we compare guids, and
-    ///    vmangos sends the sign-on to the signer too (`Guild.cpp:651-656`);
-    /// 4. the subject is not a friend (`FriendList::FindFriendSlot 0x5ae810`, not the ignore
-    ///    check), since `SMSG_FRIEND_STATUS` prints the same line ungated (`0x5acde6`, `0x5ace08`).
+    /// 1. `guildMemberNotify` is on (`[0xbd0974]+0x30`);
+    /// 2. `params[0]` is not our name (`GetOwnName` `0x6b1060`), case-sensitively (`SStrCmp`
+    ///    `0x76e760`): AzerothCore sends the sign-on to the signer too (`Guild.cpp:1917,2162`);
+    /// 3. the guid is not a friend (`0x6b3920`, not the ignore check), whose
+    ///    `SMSG_FRIEND_STATUS` prints the same line ungated.
     pub(crate) fn event(
         guild: &mut GuildState,
         errors: &mut UiErrorKeys,
         social: &SocialState,
         notify: &GuildMemberNotify,
-        self_guid: Option<u64>,
+        own_name: Option<&str>,
         notice: GuildEventNotice,
     ) {
-        let announce = announce_signon(social, notify, self_guid, notice.guid);
+        let announce = announce_signon(social, notify, own_name, &notice);
         guild.apply_event(&notice);
         push_lines(errors, lines::event_line(&notice, announce));
     }
 
-    /// The sign-on/sign-off line's four conjuncts ([`event`]) as one predicate.
+    /// The sign-on/sign-off line's three conjuncts ([`event`]) as one predicate; no own name, no
+    /// subject name or no guid on the wire is the silent exit.
     pub fn announce_signon(
         social: &SocialState,
         notify: &GuildMemberNotify,
-        self_guid: Option<u64>,
-        subject: Option<u64>,
+        own_name: Option<&str>,
+        notice: &GuildEventNotice,
     ) -> bool {
-        if !notify.0 {
-            return false; // conjunct 2
-        }
-        match (self_guid, subject) {
-            // conjuncts 3 and 4.
-            (Some(me), Some(subject)) => subject != me && !social.is_friend(subject),
-            // No local player (conjunct 1) or no guid on the wire: the silent exit.
+        match (own_name, notice.params.first(), notice.guid) {
+            (Some(me), Some(name), Some(guid)) => notify.0 && name != me && !social.is_friend(guid),
             _ => false,
         }
     }

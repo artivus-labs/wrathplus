@@ -838,7 +838,7 @@ pub fn feed_chat(
                     &EmoteLine {
                         performer: &performer_name,
                         performer_is_you: self_guid.0 == Some(performer),
-                        // Sex 1 is female, where the reference reads it (`record+0x13c`).
+                        // Sex 1 is female, where the reference reads it (`record+0x144`).
                         performer_female: names
                             .player_traits(performer)
                             .is_some_and(|(_, _, sex)| sex == 1),
