@@ -29,6 +29,3 @@ wrathplus-blp = { path = "../wrathplus-blp" }
 image = { version = "0.25", default-features = false, features = ["png"] }
 wrathplus-wdt = { path = "../wrathplus-wdt" }
 wrathplus-wmo = { path = "../wrathplus-wmo" }
-
-[dev-dependencies]
-glam = "0.31"

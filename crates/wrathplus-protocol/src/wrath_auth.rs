@@ -115,10 +115,6 @@ impl Logon {
             }
         }
     }
-
-    pub fn auth_socket_live(&self) -> bool {
-        self.stream.is_some()
-    }
 }
 
 /// Write a 3.3.5a/build-12340 `CMD_AUTH_LOGON_CHALLENGE_Client` packet.

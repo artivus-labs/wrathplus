@@ -8978,7 +8978,6 @@ version = "0.2.0"
 dependencies = [
  "anyhow",
  "clap",
- "glam 0.31.1",
  "image",
  "tracing",
  "wrathplus-adt",

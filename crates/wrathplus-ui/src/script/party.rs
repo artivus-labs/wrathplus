@@ -187,34 +187,6 @@ impl super::UiScript {
         }
     }
 
-    /// One member's answer, relayed to the leader (handler `0x4ba360`, guid matched in full at
-    /// `0x4ba3f9`/`0x4ba405`). Any answer clears the member's pending flag, as the handler stores a
-    /// constant 0 whatever the status byte (`0x4ba40e`); a `0` also prints `RAID_MEMBER_NOT_READY`
-    /// for them (`0x4ba414`). Once no member is both pending and online the check closes at once
-    /// (`0x4ba4ce`), so an offline member never holds it open but is still listed as AFK.
-    pub fn ready_check_answered(&mut self, guid: u64, ready: bool) {
-        let lua = self.lua();
-        let mut model = self.model_mut();
-        let Some(member) = model.party.raid.iter().find(|m| m.guid == guid) else {
-            return; // an unmatched guid writes nothing (`0x4ba491`)
-        };
-        let name = member.name.clone();
-        model.ready_check.unanswered.retain(|g| *g != guid);
-        if !ready {
-            let template: String = lua
-                .globals()
-                .get::<String>("RAID_MEMBER_NOT_READY")
-                .unwrap_or_default();
-            model
-                .ready_check
-                .lines
-                .push(template.replacen("%s", &name, 1));
-        }
-        if model.ready_check.deadline.is_some() && !ready_check_pending_online(&model) {
-            ready_check_force_close(lua, &mut model);
-        }
-    }
-
     /// Drain the ready-check lines composed since the last call; the reference prints each as a
     /// `CHAT_MSG_SYSTEM` line (`0x49a870(text, 10)`).
     pub fn take_ready_check_lines(&mut self) -> Vec<String> {
