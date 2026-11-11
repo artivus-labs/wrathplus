@@ -75,7 +75,13 @@ impl Plugin for UiFollowPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<FollowFeed>().add_systems(
             Update,
-            (feed_follow.in_set(UiFeed), drain_follow.after(UiInput)),
+            (
+                feed_follow.in_set(UiFeed),
+                // Deliver this tick's requests before the target chain consumes them.
+                drain_follow
+                    .after(UiInput)
+                    .before(crate::target::TargetUpdate),
+            ),
         );
     }
 }
