@@ -86,7 +86,7 @@ impl DisconnectedMessage {
 pub struct SelfGuid(pub Option<u64>);
 
 /// One `CHAT_MSG_SYSTEM` line, such as a GM command's answer: the only evidence of server state
-/// with no field, like vmangos god mode (`Unit::m_invincibilityHpThreshold`).
+/// with no field, like AzerothCore god mode (`Player::_activeCheats`).
 #[derive(Message, Clone)]
 pub struct ServerSaidMessage {
     pub text: String,

@@ -66,8 +66,8 @@ impl Plugin for DevToolsPlugin {
                 // A banner per world entry naming the body, warning on states that invalidate a
                 // reading (dead, GM mode, server-blocked movement); never env-gated.
                 .add_plugins(crate::preflight::PreflightPlugin)
-                // A probe account's body gets vmangos `.cheat god` (damage stops at 1 hp) and GM
-                // mode off on every world entry; inert on any other account.
+                // A probe account's body gets `.cheat god on` (no damage taken) and its GM mode
+                // as asked on every world entry; inert on any other account.
                 .add_plugins(crate::probe_shield::ProbeShieldPlugin);
         }
     }

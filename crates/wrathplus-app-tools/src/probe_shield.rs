@@ -1,20 +1,17 @@
 //! The probe shield: a probe body cannot die, and does not need GM mode to stay alive.
 //!
-//! GM mode (`Player::SetGameMaster`) re-templates the player to faction 35 ("Friendly", enemy
-//! mask 0) and freezes the mirror timers, so nothing hostility-, damage- or breath-related can be
-//! measured with it on. `.cheat god` (`Player::SetCheatGod` → `SetInvincibilityHpThreshold(1)`)
-//! instead makes `Unit::DealDamage` stop at 1 hp, environmental damage included, and changes
-//! nothing a client can see. The shield is always armed; GM mode also stays on by default, since
-//! the shield does not stop aggro, and `WOW_GM=off` drops it safely when a run needs faithful
-//! factions. A shielded body with GM off in a hostile camp survives pinned at 1 hp.
+//! GM mode (`Player::SetGameMaster`) re-templates the player to faction 35 (`FACTION_FRIENDLY`),
+//! so nothing hostility-related can be measured with it on. AzerothCore's `.cheat god on` instead
+//! sets `CHEAT_GOD` on the session's own player whatever is selected (`cs_cheat.cpp:53-71`), and
+//! `Unit::DealDamage` then deals nothing (`Unit.cpp:1013`), falls and environment included; the
+//! combat log still shows each hit, as absorbed (`Unit.cpp:6718`). The shield is always armed; GM
+//! mode also stays on by default, since the shield does not stop aggro, and `WOW_GM=off` drops it
+//! safely when a run needs faithful factions.
 //!
-//! - Not persisted: the threshold is a runtime `Unit` member, so it is re-sent on every world
-//!   entry, and a body parked somewhere hostile is unshielded for the few hundred ms before the
-//!   first line goes out. GM mode on by default keeps it from being whittled down there.
-//! - Target-sensitive: `.cheat god on` acts on the current selection and answers "Player not
-//!   found!" for a creature, so the command always names the character.
-//! - `.die` clears it silently (`HandleDieHelper` calls `SetCheatGod(false)`), so a death re-arms
-//!   it.
+//! - Not persisted: `Player::_activeCheats` starts empty with every `Player` (`Player.cpp:395`),
+//!   so it is re-sent on every world entry, and a body parked somewhere hostile is unshielded for
+//!   the few hundred ms before the line goes out.
+//! - `.die` kills through it: the default `Die.Command.Mode = 1` calls `Unit::Kill`.
 //!
 //! Only a probe account (`probe<N>`) is ever sent anything. `WOW_GM=off` (or `gm:off` in
 //! `WOW_RIG`) drops GM mode; `WOW_GOD=off` runs unshielded, reported on the preflight banner.
@@ -23,22 +20,19 @@ use bevy::prelude::*;
 
 use crate::app_core::session::EnteredWorldMessage;
 use crate::app_core::session::ObjectStore;
-use crate::app_core::session::SelfGuid;
 use crate::app_core::session::SelfPlayer;
 use crate::app_core::session::ServerSaidMessage;
 use crate::app_core::ui_flags::LoginIntent;
-use crate::names::NameCache;
 
 /// `PLAYER_FLAGS_GM`: the body carries the faction-35 re-template.
 const PLAYER_FLAGS_GM: u32 = 0x0000_0008;
 
-/// Spacing between the shield's lines: two server-side flips inside one net drain merge to a
-/// no-op, and `.gm off` must land after the shield is up.
+/// Spacing between the shield's lines: `.gm off` must land after the shield is up.
 const STEP_SECS: f32 = 0.8;
 
-/// How long to wait for our own name, which makes the command selection-proof, before arming
-/// without it.
-const NAME_WAIT_SECS: f32 = 3.0;
+/// Explicit `on`: the bare form toggles (`cs_cheat.cpp:55`), and a trailing argument such as a
+/// name fails the whole command (`ChatCommand.h:107`).
+const GOD_LINE: &str = ".cheat god on";
 
 /// How long the server gets to confirm before the body is reported unshielded; the round trip is
 /// ~100-150 ms.
@@ -81,7 +75,7 @@ pub(crate) struct ProbeShield {
     /// `Time::elapsed_secs` after which an unanswered `.cheat god on` is called unconfirmed.
     confirm_by: f32,
     /// Set at world entry, cleared once the batch is built.
-    arm_wanted: Option<f32>,
+    arm_wanted: bool,
     /// Our own death state last frame, so a death edge differs from arriving dead; `None` until
     /// the first descriptor read of this world entry.
     was_dead: Option<bool>,
@@ -94,7 +88,7 @@ impl Default for ProbeShield {
             steps: Vec::new(),
             next_at: 0.0,
             confirm_by: 0.0,
-            arm_wanted: None,
+            arm_wanted: false,
             was_dead: None,
         }
     }
@@ -145,18 +139,13 @@ fn disabled_by_env() -> bool {
     *OFF
 }
 
-/// Classify one `CHAT_MSG_SYSTEM` line as an answer about god mode. The chat strings are
-/// `mangos_string` 368/369 (`LANG_YOU_SET_GOD`, `LANG_YOUR_GOD_SET`); `LANG_CHEAT_GOD_ON/OFF`
-/// (349/350) arrive as `SMSG_NOTIFICATION` and never reach here.
+/// Classify one `CHAT_MSG_SYSTEM` line as the answer to `.cheat god`, which AzerothCore hardcodes
+/// as "Godmode is ON. …" / "Godmode is OFF. …" (`cs_cheat.cpp:62,67`).
 fn god_verdict(text: &str) -> Option<bool> {
     let lower = text.to_ascii_lowercase();
-    if !lower.contains("god mode") {
-        return None;
-    }
-    // "You set god mode to on for X." / "Your god mode has been turned off by X."
-    if lower.contains(" to on") || lower.contains("turned on") {
+    if lower.contains("godmode is on") {
         Some(true)
-    } else if lower.contains(" to off") || lower.contains("turned off") {
+    } else if lower.contains("godmode is off") {
         Some(false)
     } else {
         None
@@ -171,8 +160,6 @@ fn drive_shield(
     mut said: MessageReader<ServerSaidMessage>,
     time: Res<Time>,
     intent: Res<LoginIntent>,
-    names: Res<NameCache>,
-    self_guid: Res<SelfGuid>,
     self_q: Query<&ObjectStore, With<SelfPlayer>>,
     script: Option<NonSendMut<wrathplus_ui::script::UiScript>>,
 ) {
@@ -196,7 +183,7 @@ fn drive_shield(
     }
 
     if entered_world {
-        shield.arm_wanted = Some(time.elapsed_secs());
+        shield.arm_wanted = true;
         shield.was_dead = None;
         shield.report = ShieldReport::Arming;
     }
@@ -207,10 +194,10 @@ fn drive_shield(
             Some(true) => {
                 if shield.report != ShieldReport::Armed {
                     info!(
-                        "probe-shield: ARMED — this character cannot die (vmangos `.cheat god`: \
-                         damage clamps at 1 hp instead of killing). Hostility, factions, aggro and \
-                         environmental damage all stay faithful, unlike GM mode. It is NOT \
-                         persisted, so it is re-armed on every world entry."
+                        "probe-shield: ARMED — this character takes no damage (AzerothCore \
+                         `.cheat god`; the combat log shows each hit as absorbed). Hostility, \
+                         factions and aggro stay faithful, unlike GM mode. It is NOT persisted, so \
+                         it is re-armed on every world entry."
                     );
                 }
                 shield.report = ShieldReport::Armed;
@@ -221,13 +208,13 @@ fn drive_shield(
                      run unshielded, use WOW_GOD=off (which also stops this re-arm) rather than \
                      `.cheat god off`."
                 );
-                rearm(&mut shield, &time, &names, &self_guid);
+                rearm(&mut shield, &time);
             }
             None => {}
         }
     }
 
-    // A death proves the shield was down; `.die` clears it silently before killing.
+    // A death is a `.die` (`Unit::Kill` ignores the shield) or a shield that never landed.
     if let Ok(store) = self_q.single() {
         let dead = store.0.unit_is_dead() || store.0.player_is_ghost();
         match shield.was_dead {
@@ -235,33 +222,21 @@ fn drive_shield(
             Some(false) if dead => {
                 shield.was_dead = Some(true);
                 warn!(
-                    "probe-shield: THE CHARACTER DIED — so the shield was down. `.die` clears it \
-                     silently by design; anything else means it never landed. Re-arming now (it \
-                     does not revive: send `.revive`)."
+                    "probe-shield: THE CHARACTER DIED — `.die` kills through the shield; any \
+                     other death means it never landed. Re-sending it now (it does not revive: \
+                     send `.revive`)."
                 );
-                rearm(&mut shield, &time, &names, &self_guid);
+                rearm(&mut shield, &time);
             }
             Some(_) => shield.was_dead = Some(dead),
         }
     }
 
-    // Build the batch once the body, and ideally our own name, is there to address.
-    if let Some(wanted_at) = shield.arm_wanted {
+    // Build the batch once the body is there, since the GM step reads its flags.
+    if shield.arm_wanted {
         let Ok(store) = self_q.single() else { return };
-        let name = self_guid.0.and_then(|g| names.peek(g));
-        let waited = time.elapsed_secs() - wanted_at;
-        if name.is_none() && waited < NAME_WAIT_SECS {
-            return;
-        }
-        if name.is_none() {
-            warn!(
-                "probe-shield: our own name has not resolved after {NAME_WAIT_SECS:.0}s — arming \
-                 without it. `.cheat god` re-targets to the current selection, so this can be \
-                 refused with \"Player not found!\" if anything is targeted."
-            );
-        }
-        shield.arm_wanted = None;
-        shield.steps.push(god_line(name));
+        shield.arm_wanted = false;
+        shield.steps.push(GOD_LINE.into());
         shield.confirm_by = time.elapsed_secs() + CONFIRM_SECS;
         let gm_is_on = store.0.player_flags() & PLAYER_FLAGS_GM != 0;
         match (gm_is_on, wants_gm_off()) {
@@ -304,25 +279,16 @@ fn drive_shield(
         shield.report = ShieldReport::Unconfirmed;
         warn!(
             "probe-shield: NOT CONFIRMED — `.cheat god on` went out and the server never answered \
-             it. Treat this character as mortal. Check the account's GM level (`.cheat` needs \
-             SEC_GAMEMASTER 3; probe accounts are 6): \
-             SELECT gmlevel FROM realmd.account_access WHERE id = <account>."
+             it. Treat this character as mortal. Check the account's GM level (`.cheat god` is \
+             RBAC 295, granted from gmlevel 2): \
+             SELECT gmlevel FROM account_access WHERE id = <account>."
         );
     }
 }
 
-/// The command, naming the character when known: the bare form acts on the current selection.
-fn god_line(name: Option<&str>) -> String {
-    match name {
-        Some(n) => format!(".cheat god on {n}"),
-        None => ".cheat god on".into(),
-    }
-}
-
 /// Queue another `.cheat god on` and re-open the confirmation window.
-fn rearm(shield: &mut ProbeShield, time: &Time, names: &NameCache, self_guid: &SelfGuid) {
-    let name = self_guid.0.and_then(|g| names.peek(g));
-    shield.steps.push(god_line(name));
+fn rearm(shield: &mut ProbeShield, time: &Time) {
+    shield.steps.push(GOD_LINE.into());
     shield.next_at = time.elapsed_secs();
     shield.confirm_by = time.elapsed_secs() + CONFIRM_SECS;
     shield.report = ShieldReport::Arming;
@@ -344,22 +310,21 @@ mod tests {
 
     #[test]
     fn the_servers_own_words_are_what_confirm_it() {
-        // vmangos 368, the answer to `.cheat god on <name>`.
+        assert_eq!(GOD_LINE, ".cheat god on");
         assert_eq!(
-            god_verdict("You set god mode to on for |cffffffff|Hplayer:Probetwo|h[Probetwo]|h|r."),
+            god_verdict("Godmode is ON. You won't take damage."),
             Some(true)
         );
         assert_eq!(
-            god_verdict("You set god mode to off for [Probetwo]."),
-            Some(false)
-        );
-        // vmangos 369, when another GM does it to us.
-        assert_eq!(
-            god_verdict("Your god mode has been turned off by [Someone]."),
+            god_verdict("Godmode is OFF. You can take damage."),
             Some(false)
         );
         for other in [
+            // The vmangos answer, and `.cheat status` (`acore_string` 358): neither answers ours.
+            "You set god mode to on for [Probetwo].",
+            "Godmode: ON.",
             "Player not found!",
+            "GM mode is ON",
             "GM mode is OFF",
             "There is no such command",
             "Welcome to World of Warcraft!",
@@ -380,11 +345,5 @@ mod tests {
         ] {
             assert!(!rig_asks_for_gm_off(spec), "{spec:?}");
         }
-    }
-
-    #[test]
-    fn the_command_always_names_its_target() {
-        assert_eq!(god_line(Some("Probetwo")), ".cheat god on Probetwo");
-        assert_eq!(god_line(None), ".cheat god on");
     }
 }
