@@ -185,7 +185,7 @@ lua() { port /lua --data-binary "$1"; }
 
 lua 'return GetNumCharacters()'                      # {"ok":true,"output":[],"values":[0]}
 
-# Create one (race and class are the stock ids: 1 = Human, 1 = Warrior):
+# Create one (1-based catalog indices: 1 = Human, 1 = Warrior, not race/class IDs):
 lua 'SetGlueScreen("charcreate") return true'
 lua 'SetSelectedRace(1) SetSelectedClass(1) CreateCharacter("Mybot") return true'
 
