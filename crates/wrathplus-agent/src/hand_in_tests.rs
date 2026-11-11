@@ -99,3 +99,55 @@ fn a_hand_in_may_be_an_object_and_one_on_another_continent_is_not_walked_to() {
         1
     );
 }
+
+/// Seen on the beta: with a quest ready, the runner trained first. A hand-in out of sight cost a
+/// flat 4 while training costs 3 + yards / 200, so any trainer within 200 yards came first,
+/// against `progress`'s order (quests first). At a like distance the hand-in comes first now; a
+/// trainer much nearer than the hand-in still does, by the walk.
+#[test]
+fn a_finished_quest_is_handed_in_before_training_at_a_like_distance() {
+    let script = goals();
+    script.run(ELMORE).unwrap();
+    script
+        .run(
+            "Goals.on = false Upkeep.trained_level = 1 \
+             Goals.places.trainer = { { name = 'Llane Beshere', x = 50, y = 0, z = 0, map = 0 } } \
+             AgentQuestPOI = function(id) if id == 1097 then return { { objective = -1, map = 0, x = hx, y = 0 } } end end \
+             hx = 100",
+        )
+        .unwrap();
+    // The hand-in 100 yards off, the trainer 50: the hand-in first (it used to be the trainer).
+    assert_eq!(
+        text(&script, "local f = Goals.facts() return tostring(f.can_train) .. ' ' .. tostring(f.trainer_known)"),
+        "true true"
+    );
+    assert_eq!(
+        text(&script, "return plan_of('progress')"),
+        "hand_in_quests"
+    );
+    // The hand-in 700 yards off and the trainer 50: train on the way, by the walk.
+    script.run("hx = 700").unwrap();
+    assert_eq!(text(&script, "return plan_of('progress')"), "train");
+}
+
+#[test]
+fn hand_in_cost_prices_the_first_eligible_quest_that_execution_visits() {
+    let script = goals();
+    script.run(ELMORE).unwrap();
+    script
+        .run(
+            "Goals.on = false Upkeep.trained_level = 1 \
+             LOG[2] = { id = 42, title = 'Nearby quest', complete = true, objectives = {} } \
+             Goals.places.trainer = { { name = 'Trainer', x = 50, y = 0, z = 0, map = 0 } } \
+             AgentQuestPOI = function(id) return { { objective = -1, map = 0, \
+               x = id == 1097 and 700 or 100, y = 0 } } end",
+        )
+        .unwrap();
+    // Execution takes Elmore first, so the nearby second quest must not make that walk cheap.
+    assert_eq!(text(&script, "return plan_of('progress')"), "train");
+    script.run("LOG[1], LOG[2] = LOG[2], LOG[1]").unwrap();
+    assert_eq!(
+        text(&script, "return plan_of('progress')"),
+        "hand_in_quests"
+    );
+}

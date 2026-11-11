@@ -224,7 +224,7 @@ describe("tools", () => {
       "Combat.engaged(",
       "Quests.pick_up()",
       "Quests.hand_in()",
-      "AGENT_QUESTS_DONE(kind, picked, handed)",
+      "AGENT_QUESTS_DONE(kind asked, picked, handed)",
       "Quests.list()",
       "Move.to(",
       "Move.follow(",

@@ -185,7 +185,7 @@ lua() { port /lua --data-binary "$1"; }
 
 lua 'return GetNumCharacters()'                      # {"ok":true,"output":[],"values":[0]}
 
-# Create one (race and class are the stock ids: 1 = Human, 1 = Warrior):
+# Create one (1-based catalog indices: 1 = Human, 1 = Warrior, not race/class IDs):
 lua 'SetGlueScreen("charcreate") return true'
 lua 'SetSelectedRace(1) SetSelectedClass(1) CreateCharacter("Mybot") return true'
 
@@ -203,10 +203,10 @@ Local HTTP on `127.0.0.1` only, bearer token on every request, open only when th
 
 | Route | |
 |---|---|
-| `GET /status` | `{state, in_world, ui_ready, time, player, nav}`; `nav` says where walking routes come from |
+| `GET /status` | `{state, in_world, ui_ready, cinematic, time, player, nav}`; `nav` says where walking routes come from |
 | `POST /lua[?budget=N]` | run the body in the UI's Lua: `{ok, values, output}` or `{ok:false, error, output}` |
 | `GET /screenshot[?scale=0.5][&format=jpeg[&quality=85]]` | the next rendered frame, PNG or JPEG |
-| `GET /events?since=N[&wait_ms=M][&limit=K]` | UI events since cursor `N`, long-polling: `{events, next, missed}` |
+| `GET /events[?since=N][&names=…][&exclude=…][&wait_ms=M][&limit=K]` | UI events after cursor `N` (from now without one), filtered by name, long-polling: `{events, next, missed}` |
 | `GET /files`, `GET` / `PUT` / `DELETE /files/<module>` | the agent's own Lua modules, kept across restarts; `autoexec` runs on entering the world |
 | `GET /view?token=…` | a read-only page for people: the live frame, the character, events and the agent's Lua |
 
@@ -241,7 +241,10 @@ realm's `mod-agent-nav`; no extra port, no extra credentials).
   first: `vendor`, `repair`, `trainer` (your class trainer), `flightmaster`, `innkeeper`,
   `banker`, `questgiver-hub`, `trainer_cooking`, `trainer_first_aid`, `trainer_profession`. Like
   `AgentPath` it returns `{pending = true}` first; `AGENT_SERVICES_READY` fires when the answer
-  is in, and the next call returns `{ { kind, name, x, y, z, map, zone, members, profession }, ... }`.
+  is in, and the next call returns `{ { kind, name, x, y, z, map, zone, distance, members, profession }, ... }`,
+  nearest first from where you stand (`distance` in yards on the ground). By default the realm
+  looks 2000 yards round and sends at most 20; the answer is reused for 120 seconds while you
+  stay within 100 yards of where you asked.
   The built-in `Services` module asks on arrival and in each new zone, and hands the places to the
   goal runner.
 
@@ -279,6 +282,47 @@ written in the file:
 export WRATHPLUS_AGENT_TOKEN=$(cat ~/.config/wrathplus/agent-token)
 claude
 ```
+
+### Agents using the MCP server
+
+An agent that has only the MCP tools (`status`, `lua`, `events`, `screenshot`, `modules`,
+`save_module`) plays from character select to questing with them alone. The tools' own descriptions,
+in [`agents/mcp/src/tools.ts`](../agents/mcp/src/tools.ts), are the reference for each helper;
+this is the order to use them in.
+
+1. **Connect.** Whoever starts the client hands the agent the MCP server, configured as above.
+   Call `status` first: if it errors, the client is not running or the token is wrong.
+2. **Character select.** Wait until `status` says `ui_ready: true` (and `state: "CharSelect"`)
+   before any glue call: `GetNumCharacters()`, `GetCharacterInfo(i)`, `SelectCharacter(i)`.
+3. **Make a character**, in separate `lua` calls a moment apart: first
+   `SetGlueScreen("charcreate")`, then inspect `GetAvailableRaces()` and
+   `GetAvailableClasses()`. `SetSelectedRace(r)` and `SetSelectedClass(c)` take **1-based
+   catalog indices, not race/class IDs**. The race order is Human, Dwarf, Night Elf, Gnome,
+   Draenei, Orc, Undead, Tauren, Troll, Blood Elf. The class order is Warrior, Paladin, Hunter,
+   Rogue, Priest, Death Knight, Shaman, Mage, Warlock, Druid; check availability for the selected
+   race (Death Knight also requires a level-55 character). Set the two indices, confirm with
+   `GetSelectedRace()` and `GetSelectedClass()`, then call `CreateCharacter("Name")`.
+   Check with `GetNumCharacters()`, then `SelectCharacter(i) EnterWorld()`.
+4. **Entering the world.** `status` says `in_world: true` with `player: null` for about a second,
+   until the character's record arrives; act once `player` is there.
+5. **The intro.** A new character's intro cinematic starts a few seconds after it enters:
+   `status.cinematic` goes `true`, `AgentNearby()` sees nobody and walks are refused, each saying
+   why. `StopCinematic()` skips it; nothing skips it for you.
+6. **Starting something and waiting for its end.** Walks, fights, quest visits and service
+   questions return at once and end as an `AGENT_*` event. Read `events` with no `since` to get
+   `next` (the cursor, "from now"), start the thing with `lua`, then wait with
+   `events {since: next, names: ["AGENT_"], wait_ms: 25000}` and call again with the new `next`
+   until its event comes: `AGENT_WALK_DONE`, `AGENT_COMBAT_DONE`, `AGENT_QUESTS_DONE`,
+   `AGENT_SERVICES_READY`. Reading `next` before starting is what keeps an event that fires at
+   once from being missed.
+7. **Getting about.** `AgentMoveTo(x, y)` walks a route the realm works out (`routing`, then
+   `walking`; see [Walking](#walking)). `AgentServices({"vendor"})` says where the vendors,
+   trainers and flight masters on your map are, nearest first; ask once, wait for
+   `AGENT_SERVICES_READY`, ask again for the list.
+8. **Let it play.** `lua 'Goals.on = true'` turns on the goal runner: it picks up and hands in
+   quests, works their objectives, trains, sells, rests and grinds by itself. `Goals.list()` and
+   `Goals.state` say what it is doing and why; set your own goals with `Goals.push`, and pause it
+   with `Goals.hold`.
 
 ### The example agent
 

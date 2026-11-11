@@ -1253,7 +1253,22 @@ G.action({
     return pass.hand_in
   end,
   effects = { quest_ready = false, hand_in_near = false, progressed = true },
-  cost = function(f) return f.hand_in_near and 1 or 4 end,
+  -- In sight, the cheapest step there is. Else by the walk, as the NPC errands are but one less
+  -- (2 + yards / 200, at most 6, against their 3 + ...), so a hand-in comes before training or
+  -- selling at a like distance, as `progress` says (quests first): a flat 4 put any trainer
+  -- within 200 yards first.
+  cost = function(f)
+    if f.hand_in_near then return 1 end
+    local pos = me()
+    -- Execution visits the first eligible quest in log order; price that same destination.
+    for _, q in ipairs(quests()) do
+      local h = hand_in_of(q)
+      if h and not G.cooling("hand_in_quests:" .. q.title) then
+        return 2 + (pos and math.min(far(pos, h) / 200, 4) or 2)
+      end
+    end
+    return 4
+  end,
   run = function(args)
     quest_visit = { talking = false, since = now() }
     G.last_visit = nil
