@@ -1,10 +1,10 @@
 //! `FollowUnit` and `FollowByName`; each call queues a [`FollowRequest`] the app drains.
-//! `FollowUnit("target")` is a bare `/follow` and the `FOLLOWTARGET` binding. 12340's `FollowUnit`
-//! (`0x5224c0`) also takes a player's name with an exact-only flag, which the stock menu passes
-//! (`UnitPopup.lua:1324-1325`, `FollowUnit(fullname, 1)`), so it never prefix-matches someone
-//! else, while `/follow rag` may. Labelled: `FollowByName` keeps 1.12's reading (`0x489ec0`); its
-//! 12340 binding is untraced. WrathPlus parses `/follow` in Rust, so these globals serve the stock
-//! UI and addons.
+//! The stock `/follow` is `FollowUnit(msg)` (`ChatFrame.lua:1506-1507`); a bare one follows the
+//! target, like the `FOLLOWTARGET` binding's `FollowUnit("target")`.
+//! 12340's `FollowUnit` (`0x5224c0`) also takes a player's name with an exact-only flag, which the
+//! stock menu passes (`UnitPopup.lua:1324-1325`, `FollowUnit(fullname, 1)`), so it never
+//! prefix-matches someone else, while `/follow rag` may. Labelled: `FollowByName` keeps 1.12's
+//! reading (`0x489ec0`); its 12340 binding is untraced.
 
 use mlua::Lua;
 
@@ -33,10 +33,14 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
 
     // FollowUnit(unitOrName [, exactMatch]) (12340 `0x5224c0`): the resolver `0x520190` takes a
     // unit token or a player's name (typemask `0x10`, then `0x8`) with the exact flag, so the stock
-    // popup's `FollowUnit(fullname, 1)` (UnitPopup.lua:1324-1325) follows by name.
+    // popup's `FollowUnit(fullname, 1)` (UnitPopup.lua:1324-1325) follows by name. Flag 1
+    // (`0x5201d8`) makes a missing or empty token the target (`0x60ac15`, `0x60b029`).
     g.set(
         "FollowUnit",
-        lua.create_function(|lua, (who, exact): (String, Option<mlua::Value>)| {
+        lua.create_function(|lua, (who, exact): (mlua::Value, Option<mlua::Value>)| {
+            let who = super::unit::token::token_text(lua, &who)
+                .filter(|w| !w.is_empty())
+                .unwrap_or_else(|| "target".into());
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
             let request = if super::unit::token_recognised(&who, true) {
                 FollowRequest::ByUnit(who)
@@ -83,12 +87,13 @@ mod tests {
     use crate::script::UiScript;
 
     /// A unit token follows the unit; stock `UnitPopup.lua`'s `FollowUnit(name, 1)` follows the
-    /// name exactly.
+    /// name exactly; an empty or missing token follows the target.
     #[test]
     fn follow_unit_takes_a_token_or_a_name() {
         let mut s = UiScript::new().unwrap();
         s.run(r#"FollowUnit("target"); FollowUnit("Ally", 1); FollowUnit("Bob")"#)
             .unwrap();
+        s.run(r#"FollowUnit(""); FollowUnit()"#).unwrap();
         assert_eq!(
             s.take_follow_requests(),
             [
@@ -101,6 +106,8 @@ mod tests {
                     name: "Bob".into(),
                     exact: false,
                 },
+                FollowRequest::ByUnit("target".into()),
+                FollowRequest::ByUnit("target".into()),
             ]
         );
     }

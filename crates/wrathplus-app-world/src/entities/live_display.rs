@@ -34,13 +34,102 @@ pub(crate) struct DisplaySwapped {
     pub(crate) entity: Entity,
 }
 
-/// A render-scale ease toward [`NetEntity::scale`], written absolutely each tick so a mid-ease
-/// rebuild's snap is overwritten.
+/// A render-scale ease toward [`NetEntity::scale`] × [`ModelScale`], written absolutely each
+/// tick so a mid-ease rebuild's snap is overwritten.
 #[derive(Component)]
 pub(super) struct ScaleEase {
     from: f32,
     to: f32,
     elapsed: f32,
+}
+
+/// A unit's (`[unit+0xb3c]`, `0x71c110`) or corpse's (`0x705ac0`, `0x706570`) model scale.
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
+pub(crate) struct ModelScale(pub(crate) f32);
+
+/// [`ModelScale`]: the display's, then its creature record's family ramp (`[unit+0x964]+0x14`).
+fn unit_model_scale(
+    creatures: Option<&Creatures>,
+    families: Option<&crate::app_core::catalogs::PetFamilyTables>,
+    names: Option<&crate::names::NameCache>,
+    kind: EntityKind,
+    store: &ObjectStore,
+    display: Option<u32>,
+) -> f32 {
+    if kind == EntityKind::Corpse {
+        return creatures
+            .zip(display)
+            .and_then(|(c, d)| c.model_scale(d))
+            .unwrap_or(1.0);
+    }
+    let Some(base) = creatures
+        .zip(display)
+        .and_then(|(c, d)| c.catalog.unit_model_scale(d))
+    else {
+        return 1.0; // a display or model miss: no family ramp (`0x722b07`, `0x722b32`)
+    };
+    let family = (kind == EntityKind::Unit)
+        .then(|| store.0.object_entry())
+        .flatten()
+        .and_then(|entry| names?.creature_record(entry))
+        .map_or(0, |r| r.pet_family);
+    match families {
+        Some(f) if family != 0 => f.families.unit_model_scale(
+            base,
+            family,
+            store.0.unit_level().unwrap_or(0),
+            store.0.unit_pet_number() != 0,
+        ),
+        _ => base,
+    }
+}
+
+/// [`ModelScale`], recomputed on a display or family-record change (`0x72cbb0`, `0x72ce4b`).
+#[allow(clippy::type_complexity)]
+pub(super) fn stamp_unit_model_scales(
+    mut commands: Commands,
+    creatures: Option<Res<Creatures>>,
+    families: Option<Res<crate::app_core::catalogs::PetFamilyTables>>,
+    names: Option<Res<crate::names::NameCache>>,
+    units: Query<(
+        Entity,
+        Ref<NetEntity>,
+        Ref<ObjectStore>,
+        Option<&ModelScale>,
+    )>,
+) {
+    let tables_changed = creatures.as_ref().is_some_and(|r| r.is_changed())
+        || families.as_ref().is_some_and(|r| r.is_changed())
+        || names.as_ref().is_some_and(|r| r.is_changed());
+    for (entity, net, store, current) in &units {
+        if current.is_some() && !tables_changed && !net.is_changed() && !store.is_changed() {
+            continue;
+        }
+        if !matches!(
+            net.kind,
+            EntityKind::Unit | EntityKind::Player | EntityKind::Corpse
+        ) {
+            continue;
+        }
+        let k = unit_model_scale(
+            creatures.as_deref(),
+            families.as_deref(),
+            names.as_deref(),
+            net.kind,
+            &store,
+            net.display_id,
+        );
+        if current.map(|c| c.0) == Some(k) {
+            continue;
+        }
+        debug!(
+            "unit model scale: display {:?} {:?} -> {k:.3} (SCALE_X {:.3})",
+            net.display_id,
+            current.map(|c| c.0),
+            net.scale
+        );
+        commands.entity(entity).insert(ModelScale(k));
+    }
 }
 
 /// The live display id, read per kind as `wrathplus_protocol` reads it at create: `0` is absent, so
@@ -83,6 +172,7 @@ pub(super) fn refresh_live_display(
             Option<&CollisionHeight>,
             &Transform,
             Has<crate::app_core::session::SelfPlayer>,
+            Option<Ref<ModelScale>>,
         ),
         // A torn-down unit is freed, not rebuilt (`0x464920`).
         (
@@ -95,7 +185,7 @@ pub(super) fn refresh_live_display(
     prediction: Option<Res<crate::spell::form_cancel::FormCancelPrediction>>,
 ) {
     let predicted = prediction.as_deref().and_then(|p| p.display());
-    for (entity, guid, mut net, store, applied, height, tf, is_self) in &mut entities {
+    for (entity, guid, mut net, store, applied, height, tf, is_self, model_scale) in &mut entities {
         // ── The display-id swap ──────────────────────────────────────────────────────────────
         let live = predicted
             .filter(|_| is_self)
@@ -152,10 +242,18 @@ pub(super) fn refresh_live_display(
                 net.scale = live;
                 commands.entity(entity).insert(ScaleEase {
                     from: tf.scale.x,
-                    to: live,
+                    to: live * model_scale.as_ref().map_or(1.0, |k| k.0),
                     elapsed: 0.0,
                 });
             }
+        }
+        // `0x72cbb0`'s argument 0 eases a restamp; the build already took the first stamp.
+        if let Some(k) = model_scale.filter(|k| k.is_changed() && !k.is_added()) {
+            commands.entity(entity).insert(ScaleEase {
+                from: tf.scale.x,
+                to: net.scale * k.0,
+                elapsed: 0.0,
+            });
         }
 
         // ── The collision prism ──────────────────────────────────────────────────────────────

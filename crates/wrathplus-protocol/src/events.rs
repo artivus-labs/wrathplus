@@ -113,7 +113,7 @@ pub enum SessionEvent {
         /// its tilt included; `None` without the flag or for a zero word (AzerothCore's identity,
         /// an object spawned with no rotation), which faces `orientation`.
         rotation: Option<[f32; 4]>,
-        /// `OBJECT_FIELD_SCALE_X`, the complete render scale; `1.0` when absent.
+        /// `OBJECT_FIELD_SCALE_X`, without the model scale (`0x71c0e0`); `1.0` when absent.
         scale: f32,
         /// From the `LIVING` block, so not in `fields`; `None` for a GameObject.
         speeds: Option<MoveSpeeds>,

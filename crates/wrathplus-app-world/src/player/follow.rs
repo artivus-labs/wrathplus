@@ -77,7 +77,7 @@ impl FollowState {
 /// A name finds players only; the start gate refuses a creature either way.
 #[derive(bevy::ecs::message::Message, Clone, Debug)]
 pub enum FollowRequest {
-    /// `FollowUnit(unit)`; a bare `/follow` is `FollowUnit("target")`.
+    /// `FollowUnit(unit)`; a bare `/follow`'s empty token arrives as `"target"`.
     Unit(String),
     /// `FollowByName(name, exactMatch)`: the unit popup passes `1`, `/follow <name>` nothing.
     Name { name: String, exact: bool },

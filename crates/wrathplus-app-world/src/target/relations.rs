@@ -11,7 +11,7 @@
 //!
 //! A corpse has its own reaction gate, `0x6067d0` ([`corpse_friendly`]).
 
-use wrathplus_protocol::types::{ObjectType, OwnerFallback};
+use wrathplus_protocol::types::{Field, ObjectType, OwnerFallback};
 
 use crate::app_core::session::ObjectStore;
 use crate::net::Reputations;
@@ -51,19 +51,24 @@ pub fn can_interact(
 /// and one of `CanAttack`'s.
 const UNIT_FLAG_NOT_SELECTABLE: u32 = 1 << 25;
 
-/// `IsSelectable`, CGUnit_C's vtable slot 21 (`0x60be60`): `UNIT_FLAG_NOT_SELECTABLE` clear, or the
-/// unit's `UNIT_FIELD_CREATEDBY` is the active player, so your own flagged totems and traps stay
-/// selectable. Every vtable but CGUnit_C's and CGPlayer_C's has the `xor eax,eax` stub
-/// (`0x469fe0`) there, so a GameObject, item or corpse never becomes the selection.
+/// `IsSelectable`, CGUnit_C's and CGPlayer_C's vtable `+0xa8` (`0x6e6ec0` → `0x71a390`):
+/// `UNIT_FLAG_NOT_SELECTABLE` clear, or created by us (`UNIT_FIELD_CREATEDBY`, `0x4d3790`) and
+/// PetInfo's pet slot 0 (`0x5d3390(0)`, the `SMSG_PET_SPELLS` guid `0x5d6900` stores). Unverified
+/// for 12340: the other vtables' `xor eax,eax` stub (1.12 `0x469fe0`), so no GameObject, item or
+/// corpse selects.
 ///
-/// `None` passes: `SetSelection 0x493540` makes the call (`0x4935ee`) only on an object the
-/// manager resolved (`0x4935c8`), which keeps an out-of-range party member selectable. A store
-/// whose `OBJECT_FIELD_TYPE` has not streamed passes the same way.
-pub(crate) fn is_selectable(store: Option<&ObjectStore>, self_guid: Option<u64>) -> bool {
+/// `None` passes: `SetSelection` makes the call (`0x524cfa`) only on an object the manager
+/// resolved (`0x524cd7`), which keeps an out-of-range party member selectable. A store whose
+/// `OBJECT_FIELD_TYPE` has not streamed passes the same way.
+pub(crate) fn is_selectable(
+    store: Option<&ObjectStore>,
+    self_guid: Option<u64>,
+    pet_guid: u64,
+) -> bool {
     let Some(store) = store else {
-        return true; // no resolved object: the reference skips the call (`0x4935c8`)
+        return true; // no resolved object: the reference skips the call (`0x524cd7`)
     };
-    // Only CGUnit_C and CGPlayer_C override slot 21.
+    // Only CGUnit_C and CGPlayer_C override the slot (the 1.12 reading above).
     if !matches!(
         store.0.object_type(),
         None | Some(ObjectType::Unit) | Some(ObjectType::Player)
@@ -71,7 +76,9 @@ pub(crate) fn is_selectable(store: Option<&ObjectStore>, self_guid: Option<u64>)
         return false;
     }
     store.0.unit_flags() & UNIT_FLAG_NOT_SELECTABLE == 0
-        || (self_guid.is_some() && store.0.unit_created_by() == self_guid)
+        || (self_guid.is_some()
+            && store.0.unit_created_by() == self_guid
+            && store.0.get_field_guid(Field::ObjectGuid, 0) == Some(pet_guid))
 }
 
 /// `UNIT_FLAG_POSSESSED`, `UNIT_FIELD_FLAGS` bit 24 (vmangos `UnitDefines.h:569`), which the

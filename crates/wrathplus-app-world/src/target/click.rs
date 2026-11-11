@@ -40,7 +40,12 @@ pub(super) fn select_on_plate_click(
     mut greeting: MessageWriter<crate::sound::NpcGreetingRequest>,
     mut right_clicks: MessageWriter<WorldRightClick>,
     units: Query<(&Guid, Option<&ObjectStore>)>,
+    // `IsSelectable`'s pet slot.
+    pet: Option<Res<crate::app_core::state::PetBar>>,
 ) {
+    let pet_guid = pet
+        .as_deref()
+        .map_or(0, crate::app_core::state::PetBar::guid);
     let (left, right) = (
         std::mem::take(&mut plate.left),
         std::mem::take(&mut plate.right),
@@ -68,6 +73,7 @@ pub(super) fn select_on_plate_click(
             store,
             engaged,
             self_guid,
+            pet_guid,
             attack,
         );
     }
@@ -92,6 +98,8 @@ pub(super) fn select_on_click(
     click_cfg: Res<ClickConfig>,
     // Read at the commit, where the reference resolves it for `0x493540`'s `IsSelectable` gate.
     stores: Query<&ObjectStore>,
+    // `IsSelectable`'s pet slot.
+    pet: Option<Res<crate::app_core::state::PetBar>>,
 ) {
     let (hovered, occlusion) = (press.hovered, press.occlusion);
     let clicked = clicks.read().last().is_some();
@@ -120,6 +128,8 @@ pub(super) fn select_on_click(
                 stores.get(entity).ok(),
                 engaged,
                 self_guid,
+                pet.as_deref()
+                    .map_or(0, crate::app_core::state::PetBar::guid),
                 press.attack(),
             );
         }
@@ -231,6 +241,8 @@ pub(crate) struct Dispatch<'w, 's> {
     service: ServiceArms<'w>,
     feedback: Feedback<'w>,
     auto: crate::player::AutoMove<'w, 's>,
+    /// `IsSelectable`'s pet slot; `Option` for harnesses without the pet bar.
+    pet: Option<Res<'w, crate::app_core::state::PetBar>>,
 }
 
 /// The Loot walk's stop radius: the arm (`0x611130`) takes the square root (`0x6111ab`) of what
@@ -902,6 +914,10 @@ fn interact(dispatch: &mut Dispatch, press: &PressPick, mut select: Select) {
         );
     }
     let me = dispatch.me();
+    let pet_guid = dispatch
+        .pet
+        .as_deref()
+        .map_or(0, crate::app_core::state::PetBar::guid);
     // A mid-combat click on a vendor or corpse switches and stops, never swings (`0x5ecb70`); the
     // sword, not the fork, as the re-swing also needs the player's own legs.
     // Deref'd only where it commits: a leg that does not select leaves the change tick alone.
@@ -915,6 +931,7 @@ fn interact(dispatch: &mut Dispatch, press: &PressPick, mut select: Select) {
             target,
             me.is_some_and(|(_, _, e)| e),
             me.map(|(_, g, _)| g),
+            pet_guid,
             press.attack(),
         )
     };

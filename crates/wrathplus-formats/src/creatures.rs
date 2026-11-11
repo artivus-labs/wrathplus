@@ -14,6 +14,8 @@ const CREATURE_MODEL_DATA: &str = "DBFilesClient\\CreatureModelData.dbc";
 const CREATURE_DISPLAY_INFO: &str = "DBFilesClient\\CreatureDisplayInfo.dbc";
 const CREATURE_DISPLAY_INFO_EXTRA: &str = "DBFilesClient\\CreatureDisplayInfoExtra.dbc";
 
+mod scale;
+
 /// A resolved creature display: model, scale, skins and, for a humanoid NPC, its appearance.
 #[derive(Debug, Clone)]
 pub struct CreatureModel {
@@ -115,15 +117,11 @@ pub struct CreatureCatalog {
     display: HashMap<u32, DisplayRow>,
     models: HashMap<u32, ModelRow>,
     extra: HashMap<u32, NpcAppearance>,
+    /// `ChrRaces` `(race, sex)` → the race's base display (`+0x10` male, `+0x14` female).
+    race_displays: HashMap<(u8, u8), u32>,
 }
 
 impl CreatureCatalog {
-    /// A display's own `creatureModelScale`, the mount scale law: a mount renders at
-    /// `OBJECT_FIELD_SCALE_X × creatureModelScale`, without `modelScale` (`0x613ef0`).
-    pub fn display_scale(&self, display_id: u32) -> Option<f32> {
-        self.display.get(&display_id).map(|r| r.scale)
-    }
-
     /// A display's footstep camera shake, a `CameraShakes.dbc` id (`FootstepShakeSize`).
     pub fn footstep_shake(&self, display_id: u32) -> Option<u32> {
         let row = self.display.get(&display_id)?;
@@ -175,15 +173,6 @@ impl CreatureCatalog {
     /// Every display as `(display id, model id)`.
     pub fn display_models(&self) -> impl Iterator<Item = (u32, u32)> + '_ {
         self.display.iter().map(|(id, r)| (*id, r.model_id))
-    }
-
-    /// `modelScale × creatureModelScale`. The server folds it into `OBJECT_FIELD_SCALE_X`, which
-    /// alone scales a unit (`0x613ef0`), so only the glue screens read this: the reference sizes
-    /// the serverless character-select pet by it (`0x472dc6`).
-    pub fn model_scale(&self, display_id: u32) -> Option<f32> {
-        let row = self.display.get(&display_id)?;
-        let model = self.models.get(&row.model_id)?;
-        Some(model.scale * row.scale)
     }
 
     /// The display's model's `[WorldEffectScale, AttachedEffectScale]`: the size factor a spell
@@ -457,11 +446,14 @@ pub fn load_creature_catalog(chain: &mut Chain) -> Result<CreatureCatalog> {
 
     // Best-effort: without it only humanoid NPCs lose their skins; the caller logs `extra_len()`.
     let extra = load_creature_display_info_extra(chain).unwrap_or_default();
+    // Best-effort: without it a humanoid NPC's race scale reads 1.0.
+    let race_displays = scale::race_displays(chain);
 
     Ok(CreatureCatalog {
         display,
         models,
         extra,
+        race_displays,
     })
 }
 

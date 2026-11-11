@@ -82,6 +82,7 @@ impl ScriptSelect<'_, '_> {
     /// `0x493f60(reverse, mode)`), one cycle of the cycler the TAB key runs.
     pub fn target_nearest(&mut self, mode: wrathplus_ui::script::NearestMode, reverse: bool) {
         let engaged = self.commit.engaged();
+        let pet_guid = self.commit.pet_guid();
         scan::cycle(
             scan::ScanSide::of(mode),
             reverse,
@@ -91,6 +92,7 @@ impl ScriptSelect<'_, '_> {
             &mut self.commit.selection,
             &mut self.commit.seam,
             engaged,
+            pet_guid,
         );
     }
 
