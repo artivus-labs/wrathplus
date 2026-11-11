@@ -7,14 +7,14 @@ use std::collections::HashMap;
 
 use crate::Chain;
 use anyhow::{Context, Result};
-use wrathplus_dbc::{FieldType, Schema, SchemaField};
+use wrathplus_dbc::{FieldType, RecordSet, Schema, SchemaField};
 
 use crate::dbc::{parse, u32_at};
 
 const CHR_RACES: &str = "DBFilesClient\\ChrRaces.dbc";
 
-/// Each `ChrRaces.dbc` row's creature type by race id; a race without a row is absent.
-pub fn load_race_creature_types(chain: &mut Chain) -> Result<HashMap<u8, u32>> {
+/// `ChrRaces.dbc` under its 1.12 schema, which [`crate::wrath_layouts`] maps onto 12340's.
+pub(crate) fn read_chr_races(chain: &mut Chain) -> Result<RecordSet> {
     let bytes = chain
         .read_file(CHR_RACES)
         .with_context(|| format!("reading {CHR_RACES}"))?;
@@ -26,7 +26,12 @@ pub fn load_race_creature_types(chain: &mut Chain) -> Result<HashMap<u8, u32>> {
         };
         schema.add_field(SchemaField::new(format!("f{i}"), ty));
     }
-    let rs = parse(&bytes, schema, "ChrRaces")?;
+    parse(&bytes, schema, "ChrRaces")
+}
+
+/// Each `ChrRaces.dbc` row's creature type by race id; a race without a row is absent.
+pub fn load_race_creature_types(chain: &mut Chain) -> Result<HashMap<u8, u32>> {
+    let rs = read_chr_races(chain)?;
     Ok(rs
         .records()
         .iter()

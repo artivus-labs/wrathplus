@@ -128,7 +128,7 @@ pub(super) fn seat_or_spawn_mount(
     fade_skip: bool,
     arrival: Option<super::Arrival>,
 ) -> Seat {
-    // `0x607a75`: `SCALE_X` × `creatureModelScale` alone, without `CreatureModelData.modelScale`.
+    // `creatureModelScale` alone, not `modelScale` (`0x71c0fb`, `[unit+0x990]` from `0x73d660`).
     let mount_scale = creatures
         .and_then(|c| c.catalog.display_scale(mount_display))
         .unwrap_or(1.0);

@@ -237,6 +237,7 @@ pub(super) fn attach_entity_visuals(
             Has<crate::app_core::movement::TransportAnchor>,
             Option<&super::Arrival>,
             Has<super::live_display::ShownRebuild>,
+            Option<&super::live_display::ModelScale>,
         ),
         // A torn-down unit gets no model: the reference frees it at once (`0x464920`).
         (
@@ -300,6 +301,7 @@ pub(super) fn attach_entity_visuals(
         anchored,
         arrival,
         shown_rebuild,
+        model_scale,
     ) in &pending
     {
         // The appear ramp's origin: the unit's arrival, however long its visual waited to build.
@@ -721,11 +723,9 @@ pub(super) fn attach_entity_visuals(
                     .entity(entity)
                     .remove::<wrathplus_world::model_fade::UnitAppearFade>();
             }
-            // Size is `OBJECT_FIELD_SCALE_X` alone: the server already folds the DBC scale into
-            // it (vmangos `Unit::GetScaleForDisplayId`, `Unit.cpp:9579`), and the reference
-            // renders at the field (`0x613ef0`).
+            // Unit: model scale × `OBJECT_FIELD_SCALE_X` (`0x71c0e0`); else the field (`0x4d5f90`).
             let placement = if let Ok(mut t) = transforms.get_mut(entity) {
-                t.scale = Vec3::splat(net.scale);
+                t.scale = Vec3::splat(net.scale * model_scale.map_or(1.0, |k| k.0));
                 *t
             } else {
                 Transform::default()

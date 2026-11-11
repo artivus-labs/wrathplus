@@ -44,15 +44,17 @@ impl RemoteView {
 
 /// Resolves our `PLAYER_FARSIGHT` into a pose, before the controller runs; a subject not yet
 /// streamed leaves the camera on the body.
+#[allow(clippy::type_complexity)]
 pub(super) fn publish_view_subject(
     mut subject: ResMut<ViewSubject>,
     self_store: Query<&ObjectStore, With<SelfPlayer>>,
     index: Res<GuidIndex>,
-    // The pivot height takes the raw `OBJECT_FIELD_SCALE_X`, not the eased render scale.
+    // The pivot height takes the raw `OBJECT_FIELD_SCALE_X` × model scale, not the eased scale.
     poses: Query<(
         &Transform,
         Option<&CameraPivot>,
         Option<&crate::net::NetEntity>,
+        Option<&crate::entities::ModelScale>,
     )>,
     net: Res<NetCommands>,
     mut engaged: Local<Option<u64>>,
@@ -64,10 +66,10 @@ pub(super) fn publish_view_subject(
     subject.remote = anchor
         .and_then(|guid| index.0.get(&guid).copied())
         .and_then(|entity| Some((entity, poses.get(entity).ok()?)))
-        .map(|(entity, (t, pivot, net))| RemoteView {
+        .map(|(entity, (t, pivot, net, k))| RemoteView {
             entity,
             feet: t.translation,
-            pivot_height: head_height(pivot, net.map_or(1.0, |n| n.scale)),
+            pivot_height: head_height(pivot, net.map_or(1.0, |n| n.scale) * k.map_or(1.0, |k| k.0)),
         });
 
     // `CMSG_FAR_SIGHT` on the field's edge: 1 as the view attaches and 0 as it releases, the
