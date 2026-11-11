@@ -3,30 +3,54 @@
 //!
 //! The UI VM is sandboxed (no `require`, `io`, `os`), as addons expect. This adds back exactly one
 //! door: `require(name)` reads `<scripts>/<name with dots as slashes>.lua`, or a built-in module,
-//! and nothing else. Built-ins preloaded as globals (each described where it loads): `Agent`,
+//! and nothing else. Built-ins preloaded as globals (each described in `BUILT_IN`): `Agent`,
 //! `Revive`, `Upkeep`, `Survive`, `Rotation`, `Combat`, `Move`, `Quests`, `Avoid`, `Goals`,
-//! `Services`; `wp.engine` and `wp.values` load on `require`. `AgentReload(name)` loads a module
-//! again; `AgentModules()` lists the agent's files; an `autoexec.lua` runs in every new in-game VM.
+//! `Services`, `Professions`; `wp.engine` and `wp.values` load on `require`. `AgentReload(name)`
+//! loads a module again; `AgentModules()` lists the agent's files; an `autoexec.lua` runs in every
+//! new in-game VM.
 
 use mlua::{Lua, Value};
 use std::path::{Path, PathBuf};
 use wrathplus_ui::script::UiScript;
 
-/// Modules every agent has.
-const BUILT_IN: &[(&str, &str)] = &[
-    ("wp.engine", include_str!("../lua/wp/engine.lua")),
-    ("wp.values", include_str!("../lua/wp/values.lua")),
-    ("wp.agent", include_str!("../lua/wp/agent.lua")),
-    ("wp.revive", include_str!("../lua/wp/revive.lua")),
-    ("wp.upkeep", include_str!("../lua/wp/upkeep.lua")),
-    ("wp.survive", include_str!("../lua/wp/survive.lua")),
-    ("wp.rotation", include_str!("../lua/wp/rotation.lua")),
-    ("wp.combat", include_str!("../lua/wp/combat.lua")),
-    ("wp.move", include_str!("../lua/wp/move.lua")),
-    ("wp.quest", include_str!("../lua/wp/quest.lua")),
-    ("wp.avoid", include_str!("../lua/wp/avoid.lua")),
-    ("wp.goals", include_str!("../lua/wp/goals.lua")),
-    ("wp.services", include_str!("../lua/wp/services.lua")),
+/// A built-in module `wp.<file>` from `lua/wp/<file>.lua`, and the global it is preloaded as.
+macro_rules! wp {
+    ($f:literal $(, $g:literal)?) => {
+        (concat!("wp.", $f), wp!(@g $($g)?), include_str!(concat!("../lua/wp/", $f, ".lua")))
+    };
+    (@g) => { None };
+    (@g $g:literal) => { Some($g) };
+}
+
+/// Modules every agent has, in load order, with the global each is preloaded as (a later one may
+/// use an earlier one's).
+const BUILT_IN: &[(&str, Option<&str>, &str)] = &[
+    wp!("engine"),
+    wp!("values"),
+    // The intent and decision registry the fast tier reads.
+    wp!("agent", "Agent"),
+    // Death handling every agent has: release, corpse run, reclaim (`Revive.on = false` to opt out).
+    wp!("revive", "Revive"),
+    // Chores: wear upgrades, sell junk and repair at merchants, train at class trainers.
+    wp!("upkeep", "Upkeep"),
+    // Staying alive: which pulls are safe, potions and emergency buttons, when to run.
+    wp!("survive", "Survive"),
+    // What to cast in a fight, as a priority list (`Rotation.list`), and fighting a target kept in
+    // range (`Combat.engage(guid)`), which runs it.
+    wp!("rotation", "Rotation"),
+    wp!("combat", "Combat"),
+    // Going to a unit, following one (with its fights), holding a spot.
+    wp!("move", "Move"),
+    // Quest givers' dialogs, and keeping in step with the party's quests.
+    wp!("quest", "Quests"),
+    // Walks kept clear of hostile mobs in sight, unless the fast tier says to fight through.
+    wp!("avoid", "Avoid"),
+    // Goals, the plan toward the top one, and the runner that keeps the agent busy (`Goals.on`).
+    wp!("goals", "Goals"),
+    // Where services are, from the realm, handed to the goal runner as known places.
+    wp!("services", "Services"),
+    // Cooking and First Aid learnt, made and used; it teaches `Goals` facts and actions.
+    wp!("professions", "Professions"),
 ];
 
 /// Where the agent's modules live: `WOW_AGENT_SCRIPTS`, else `<client home>/Agent/scripts`.
@@ -110,39 +134,12 @@ pub(crate) fn install(script: &UiScript, dir: PathBuf) -> mlua::Result<bool> {
     let list_dir = dir.clone();
     let modules = lua.create_function(move |_, ()| Ok(list(&list_dir)))?;
     lua.globals().set("AgentModules", modules)?;
-    // The intent and decision registry the fast tier reads, as the global `Agent`.
-    let agent = load_module(lua, &dir, "wp.agent")?;
-    lua.globals().set("Agent", agent)?;
-    // Death handling every agent has: release, corpse run, reclaim (`Revive.on = false` to opt out).
-    let revive = load_module(lua, &dir, "wp.revive")?;
-    lua.globals().set("Revive", revive)?;
-    // Chores: wear upgrades, sell junk and repair at merchants, train at class trainers.
-    let upkeep = load_module(lua, &dir, "wp.upkeep")?;
-    lua.globals().set("Upkeep", upkeep)?;
-    // Staying alive: which pulls are safe, potions and emergency buttons, when to run (`Survive`).
-    let survive = load_module(lua, &dir, "wp.survive")?;
-    lua.globals().set("Survive", survive)?;
-    // What to cast in a fight, as a priority list (`Rotation.list`), and fighting a target kept in
-    // range (`Combat.engage(guid)`), which runs it.
-    let rotation = load_module(lua, &dir, "wp.rotation")?;
-    lua.globals().set("Rotation", rotation)?;
-    let combat = load_module(lua, &dir, "wp.combat")?;
-    lua.globals().set("Combat", combat)?;
-    // Going to a unit, following one (with its fights), holding a spot.
-    let movement = load_module(lua, &dir, "wp.move")?;
-    lua.globals().set("Move", movement)?;
-    // Quest givers' dialogs, and keeping in step with the party's quests.
-    let quests = load_module(lua, &dir, "wp.quest")?;
-    lua.globals().set("Quests", quests)?;
-    // Walks kept clear of hostile mobs in sight, unless the fast tier says to fight through.
-    let avoid = load_module(lua, &dir, "wp.avoid")?;
-    lua.globals().set("Avoid", avoid)?;
-    // Goals, the plan toward the top one, and the runner that keeps the agent busy (`Goals.on`).
-    let goals = load_module(lua, &dir, "wp.goals")?;
-    lua.globals().set("Goals", goals)?;
-    // Where services are, from the realm, handed to the goal runner as known places.
-    let services = load_module(lua, &dir, "wp.services")?;
-    lua.globals().set("Services", services)?;
+    for (name, global, _) in BUILT_IN {
+        if let Some(global) = global {
+            let module = load_module(lua, &dir, name)?;
+            lua.globals().set(*global, module)?;
+        }
+    }
     Ok(module_path(&dir, "autoexec").is_file())
 }
 
@@ -157,8 +154,8 @@ fn load_module(lua: &Lua, dir: &Path, name: &str) -> mlua::Result<Value> {
     if !cached.is_nil() {
         return Ok(cached);
     }
-    let source = match BUILT_IN.iter().find(|(n, _)| *n == name) {
-        Some((_, source)) => source.to_string(),
+    let source = match BUILT_IN.iter().find(|(n, _, _)| *n == name) {
+        Some((_, _, source)) => source.to_string(),
         None => std::fs::read_to_string(module_path(dir, name))
             .map_err(|e| mlua::Error::runtime(format!("require: module {name} not found ({e})")))?,
     };
@@ -200,6 +197,9 @@ mod hot_loop_tests;
 #[cfg(test)]
 #[path = "move_tests.rs"]
 mod move_tests;
+#[cfg(test)]
+#[path = "professions_tests.rs"]
+mod professions_tests;
 #[cfg(test)]
 #[path = "quest_skip_tests.rs"]
 mod quest_skip_tests;

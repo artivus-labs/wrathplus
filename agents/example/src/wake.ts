@@ -27,6 +27,9 @@ if Agent and Agent.steps and Agent.steps.at > 0 then
   out[#out + 1] = string.format("steps: %d of %d, %s", Agent.steps.at, #Agent.steps.list, s and s.name or "?")
 end
 if Upkeep and #Upkeep.log > 0 then out[#out + 1] = "upkeep lately: " .. table.concat(Upkeep.log, "; ") end
+if Professions and Professions.summary then
+  out[#out + 1] = "professions: " .. Professions.summary() .. (#Professions.log > 0 and (" (lately: " .. Professions.log[#Professions.log] .. ")") or "")
+end
 local asks = {}
 for i = 1, 4 do
   local f = _G["StaticPopup" .. i]

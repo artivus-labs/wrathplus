@@ -20,9 +20,11 @@ export interface XpSample {
   level: number;
   xp: number;
   max: number;
+  /** Professions.digest(): secondary professions known, reagents held for them, food held. */
+  trade?: { professions: number; reagents: number; food: number };
 }
 
-export const XP_LUA = `return { level = UnitLevel("player") or 0, xp = UnitXP("player") or 0, max = UnitXPMax("player") or 0 }`;
+export const XP_LUA = `return { level = UnitLevel("player") or 0, xp = UnitXP("player") or 0, max = UnitXPMax("player") or 0, trade = Professions and Professions.digest and Professions.digest() or nil }`;
 
 /** The goal planner's facts now (`Reflection.observe`), or false without wp.goals. */
 export const FACTS_LUA = "return Goals and Goals.facts() or false";
@@ -97,6 +99,11 @@ interface Window {
   noops: Map<string, Noop>;
   quests: number;
   pickedUp: number;
+  /** Rests taken to the end (AGENT_RESTED), and food bought at merchants. */
+  rests: number;
+  foodBought: number;
+  /** The latest Professions.digest() sample, set as the review is built. */
+  trade?: XpSample["trade"];
   xp: number;
   time: TimeShares;
 }
@@ -154,6 +161,8 @@ export class Reflection {
       noops: new Map(),
       quests: 0,
       pickedUp: 0,
+      rests: 0,
+      foodBought: 0,
       xp: 0,
       time: zeroTime(),
     };
@@ -231,6 +240,12 @@ export class Reflection {
           break;
         case "AGENT_ACTION_FAILED":
           this.#failed(now, `${String(a[1])} (for ${String(a[0])})`, String(a[2] ?? ""));
+          break;
+        case "AGENT_FOOD_BOUGHT":
+          w.foodBought += Number(a[0]) || 0;
+          break;
+        case "AGENT_RESTED":
+          w.rests++;
           break;
         case "AGENT_INTENT_DONE":
           // Goal actions are counted by AGENT_ACTION_FAILED; a replaced activity did not fail.
@@ -351,6 +366,7 @@ export class Reflection {
     const now = this.#now();
     const reasons = this.#pending.size ? [...this.#pending] : ["asked for"];
     const score = this.score();
+    this.#window.trade = this.#xp?.trade;
     const text = digest(reasons, this.#window, score, this.options.fast?.(), this.options.versions?.changelog(undefined, 200) ?? [], {
       memory: this.options.memory?.() ?? "",
       ...(this.#facts ? { facts: this.#facts } : {}),
@@ -403,6 +419,8 @@ export function digest(
   );
   if (w.deaths.length) out.push(`Deaths:\n${w.deaths.map((d) => `- ${clock(d.at)} ${d.cause ?? "cause not reported (no fight review)"}`).join("\n")}`);
   if (w.levels.length) out.push(`Levels reached: ${w.levels.join(", ")}.`);
+  const trade = unusedTrade(w);
+  if (trade) out.push(trade);
   if (w.reviews.length) out.push(`Fight reviews:\n${w.reviews.slice(-3).map((r) => `- ${r}`).join("\n")}`);
   const goals: string[] = [];
   if (w.goalsDone.length) goals.push(`- Done: ${w.goalsDone.map((g) => `${g.name}${g.ok ? "" : " (failed)"}`).join(", ")}`);
@@ -527,3 +545,17 @@ export const GUIDANCE = `Work on your harness as a coding agent works on its own
 5. Deploy: save_module, AgentReload it, then note_change with why and what to watch on this scoreboard.
 6. At the next review, check that number. Worse: rollback_module. Better: keep it, and write the lesson in MEMORY.md.
 If nothing needs changing, say so in a line, and end your turn.`;
+
+/** Rests or food bought that a profession would have saved: this many in a window is "a lot". */
+export const UNFED_RESTS = 3;
+export const BOUGHT_FOOD = 10;
+
+/** The line a window gets when it rested or bought food a lot while carrying reagents and knowing
+ *  no secondary profession, else null. */
+export function unusedTrade(w: Pick<Window, "rests" | "foodBought" | "trade">): string | null {
+  const t = w.trade;
+  if (!t || t.professions > 0 || t.reagents === 0) return null;
+  if (w.rests < UNFED_RESTS && w.foodBought < BOUGHT_FOOD) return null;
+  const did = [w.rests ? `rested ${w.rests} times` : "", w.foodBought ? `bought ${w.foodBought} food` : ""].filter(Boolean).join(" and ");
+  return `Professions: you ${did} while carrying ${t.reagents} meat and cloth and knowing neither Cooking nor First Aid. Both are cheap to learn and turn those reagents into food and bandages: the runner's learn_professions does it once a trainer is known (Goals.places trainer_cooking / trainer_first_aid; a "Cooking Trainer" or "Cook", a "First Aid Trainer" or "Physician" in sight is remembered), so go where one is or teach it the place.`;
+}
