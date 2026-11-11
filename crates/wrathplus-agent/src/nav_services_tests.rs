@@ -92,3 +92,43 @@ fn agent_services_says_when_the_realm_cannot_answer() {
         .unwrap_err()
         .contains("too many requests"));
 }
+
+/// Each place carries its distance on the ground from where the character stands, and the list is
+/// nearest first from there: after a walk within the answer's lifetime the order follows the
+/// character, not the spot the realm was asked from.
+#[test]
+fn places_come_nearest_first_with_their_distance_from_where_you_stand() {
+    let rig = Rig::in_world();
+    let call = "AgentServices('vendor')";
+    assert_eq!(services(&rig, call), Ok(None));
+    rig.realm(&[]);
+    rig.realm(&[
+        "s 1 1 2 vendor 1 110.0 200.0 30.0 1 - Brother Danil",
+        "s 1 2 2 vendor 2 70.0 240.0 30.0 1 - Janos Hammerknuckle",
+    ]);
+    let read = |rig: &Rig| -> Vec<(String, f64)> {
+        let list: Table = rig.lua.load(format!("return {call}")).eval().unwrap();
+        list.sequence_values::<Table>()
+            .map(|p| {
+                let p = p.unwrap();
+                (p.get("name").unwrap(), p.get("distance").unwrap())
+            })
+            .collect()
+    };
+    assert_eq!(
+        read(&rig),
+        [
+            ("Brother Danil".to_string(), 10.0),
+            ("Janos Hammerknuckle".to_string(), 50.0)
+        ]
+    );
+    // Thirty yards on, the same answer, nearest first from here.
+    rig.world.snapshot.lock().unwrap().me.as_mut().unwrap().pos = [80.0, 230.0, 30.0];
+    assert_eq!(
+        read(&rig),
+        [
+            ("Janos Hammerknuckle".to_string(), 14.1),
+            ("Brother Danil".to_string(), 42.4)
+        ]
+    );
+}

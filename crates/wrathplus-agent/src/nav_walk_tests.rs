@@ -311,7 +311,11 @@ fn realm_lines_are_taken_out_of_the_event_stream() {
 #[test]
 fn status_names_the_source_in_use() {
     let rig = Rig::new();
-    assert_eq!(status(&rig.nav)["source"], "none");
+    // Before the world nothing is wrong yet, and the detail says what happens next.
+    let before = status(&rig.nav);
+    assert_eq!(before["source"], "none");
+    let detail = before["detail"].as_str().unwrap();
+    assert!(detail.starts_with("not in the world yet") && !detail.contains("no navmesh"));
     rig.realm(&[]);
     let probing = status(&rig.nav);
     assert_eq!(probing["source"], "realm");

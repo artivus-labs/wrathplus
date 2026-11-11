@@ -203,10 +203,10 @@ Local HTTP on `127.0.0.1` only, bearer token on every request, open only when th
 
 | Route | |
 |---|---|
-| `GET /status` | `{state, in_world, ui_ready, time, player, nav}`; `nav` says where walking routes come from |
+| `GET /status` | `{state, in_world, ui_ready, cinematic, time, player, nav}`; `nav` says where walking routes come from |
 | `POST /lua[?budget=N]` | run the body in the UI's Lua: `{ok, values, output}` or `{ok:false, error, output}` |
 | `GET /screenshot[?scale=0.5][&format=jpeg[&quality=85]]` | the next rendered frame, PNG or JPEG |
-| `GET /events?since=N[&wait_ms=M][&limit=K]` | UI events since cursor `N`, long-polling: `{events, next, missed}` |
+| `GET /events[?since=N][&names=…][&exclude=…][&wait_ms=M][&limit=K]` | UI events after cursor `N` (from now without one), filtered by name, long-polling: `{events, next, missed}` |
 | `GET /files`, `GET` / `PUT` / `DELETE /files/<module>` | the agent's own Lua modules, kept across restarts; `autoexec` runs on entering the world |
 | `GET /view?token=…` | a read-only page for people: the live frame, the character, events and the agent's Lua |
 
@@ -241,7 +241,10 @@ realm's `mod-agent-nav`; no extra port, no extra credentials).
   first: `vendor`, `repair`, `trainer` (your class trainer), `flightmaster`, `innkeeper`,
   `banker`, `questgiver-hub`, `trainer_cooking`, `trainer_first_aid`, `trainer_profession`. Like
   `AgentPath` it returns `{pending = true}` first; `AGENT_SERVICES_READY` fires when the answer
-  is in, and the next call returns `{ { kind, name, x, y, z, map, zone, members, profession }, ... }`.
+  is in, and the next call returns `{ { kind, name, x, y, z, map, zone, distance, members, profession }, ... }`,
+  nearest first from where you stand (`distance` in yards on the ground). By default the realm
+  looks 2000 yards round and sends at most 20; the answer is reused for 120 seconds while you
+  stay within 100 yards of where you asked.
   The built-in `Services` module asks on arrival and in each new zone, and hands the places to the
   goal runner.
 
@@ -279,6 +282,45 @@ written in the file:
 export WRATHPLUS_AGENT_TOKEN=$(cat ~/.config/wrathplus/agent-token)
 claude
 ```
+
+### Agents using the MCP server
+
+An agent that has only the MCP tools (`status`, `lua`, `events`, `screenshot`, `modules`,
+`save_module`) plays from character select to questing with them alone. The tools' own descriptions,
+in [`agents/mcp/src/tools.ts`](../agents/mcp/src/tools.ts), are the reference for each helper;
+this is the order to use them in.
+
+1. **Connect.** Whoever starts the client hands the agent the MCP server, configured as above.
+   Call `status` first: if it errors, the client is not running or the token is wrong.
+2. **Character select.** Wait until `status` says `ui_ready: true` (and `state: "CharSelect"`)
+   before any glue call: `GetNumCharacters()`, `GetCharacterInfo(i)`, `SelectCharacter(i)`.
+3. **Make a character** with the stock ids, in three `lua` calls a moment apart:
+   `SetGlueScreen("charcreate")`, then `SetSelectedRace(r) SetSelectedClass(c)`, then
+   `CreateCharacter("Name")`. Races: 1 Human, 2 Orc, 3 Dwarf, 4 Night Elf, 5 Undead, 6 Tauren,
+   7 Gnome, 8 Troll, 10 Blood Elf, 11 Draenei. Classes: 1 Warrior, 2 Paladin, 3 Hunter,
+   4 Rogue, 5 Priest, 7 Shaman, 8 Mage, 9 Warlock, 11 Druid (6, Death Knight, needs a level 55
+   character on the account). Check with `GetNumCharacters()`, then `SelectCharacter(i)
+   EnterWorld()`.
+4. **Entering the world.** `status` says `in_world: true` with `player: null` for about a second,
+   until the character's record arrives; act once `player` is there.
+5. **The intro.** A new character's intro cinematic starts a few seconds after it enters:
+   `status.cinematic` goes `true`, `AgentNearby()` sees nobody and walks are refused, each saying
+   why. `StopCinematic()` skips it; nothing skips it for you.
+6. **Starting something and waiting for its end.** Walks, fights, quest visits and service
+   questions return at once and end as an `AGENT_*` event. Read `events` with no `since` to get
+   `next` (the cursor, "from now"), start the thing with `lua`, then wait with
+   `events {since: next, names: ["AGENT_"], wait_ms: 25000}` and call again with the new `next`
+   until its event comes: `AGENT_WALK_DONE`, `AGENT_COMBAT_DONE`, `AGENT_QUESTS_DONE`,
+   `AGENT_SERVICES_READY`. Reading `next` before starting is what keeps an event that fires at
+   once from being missed.
+7. **Getting about.** `AgentMoveTo(x, y)` walks a route the realm works out (`routing`, then
+   `walking`; see [Walking](#walking)). `AgentServices({"vendor"})` says where the vendors,
+   trainers and flight masters on your map are, nearest first; ask once, wait for
+   `AGENT_SERVICES_READY`, ask again for the list.
+8. **Let it play.** `lua 'Goals.on = true'` turns on the goal runner: it picks up and hands in
+   quests, works their objectives, trains, sells, rests and grinds by itself. `Goals.list()` and
+   `Goals.state` say what it is doing and why; set your own goals with `Goals.push`, and pause it
+   with `Goals.hold`.
 
 ### The example agent
 
