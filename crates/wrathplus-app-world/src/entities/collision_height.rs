@@ -19,9 +19,10 @@ const USE_MODEL_COLLISION: u32 = 0x20000;
 /// AzerothCore's `DEFAULT_COLLISION_HEIGHT` (`ObjectDefines.h:49`), not the client's.
 const AC_DEFAULT_COLLISION_HEIGHT: f32 = 2.03128;
 
-/// What recomputes the height: `SCALE_X` (`0x72d070` → `0x72a560`), the mount (`0x740450` →
-/// `0x73d940`), the creature record's arrival (`0x72ce56`); not a display change (`0x716860`).
-/// `0x72a560` may read `SCALE_X` before the descriptor write; this takes the new value.
+/// What recomputes the height: `SCALE_X` (`0x72d070` → `0x72a560`), mount and dismount
+/// (`0x740450`, `0x741a40` → `0x73d940`), the creature record's arrival (`0x72ce56`); not a display
+/// change (`0x716860`). Whether `0x72a560` runs before the descriptor write is unread; this takes
+/// the new `SCALE_X`.
 #[derive(Component, Clone, Copy, PartialEq, Debug)]
 pub(super) struct HeightTriggers {
     scale_x: f32,
@@ -143,11 +144,12 @@ pub(super) fn stamp_collision_heights(
             if first && height.is_none() {
                 commands.entity(entity).insert(CollisionHeight::default());
             }
+            debug!("collision height: {entity} driven, kept {height:?} (first {first})");
             continue;
         }
-        let display = native_display_id(Some(&store), net.display_id);
+        let native = native_display_id(Some(&store), net.display_id);
         let column = takes_model_law(net.kind, record.map(|r| r.type_flags))
-            .then(|| display.and_then(|d| creatures.collision_height(d)))
+            .then(|| native.and_then(|d| creatures.collision_height(d)))
             .flatten();
         let k = super::live_display::unit_model_scale(
             Some(creatures),
@@ -155,10 +157,18 @@ pub(super) fn stamp_collision_heights(
             names.as_deref(),
             net.kind,
             &store,
-            display,
+            native,
         );
         let h = collision_height_for(column, k, now.scale_x);
         if height != Some(&h) {
+            debug!(
+                "collision height: {entity} {:?} {:?} -> {:.3} (first {first}, native {native:?}, \
+                 column {column:?}, k {k:.3}, SCALE_X {:.3})",
+                net.kind,
+                height.map(|c| c.0),
+                h.0,
+                now.scale_x
+            );
             commands.entity(entity).insert(h);
         }
     }

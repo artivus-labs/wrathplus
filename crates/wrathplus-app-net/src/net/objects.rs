@@ -74,6 +74,7 @@ pub(super) fn register(app: &mut App) {
 fn on_collision_height(In(ev): In<SessionEvent>, mut sc: Scene) {
     if let SessionEvent::CollisionHeight { guid, height } = ev {
         if let Some(&e) = sc.index.0.get(&guid) {
+            debug!("net: collision height {guid:#x} -> {height:.3} (server)");
             let h = crate::app_core::state::CollisionHeight(height);
             sc.commands.entity(e).insert(h);
         }
