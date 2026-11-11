@@ -10,6 +10,7 @@
 //! | `GET /events[?since=N][&wait_ms=M][&limit=K][&names=A,B_][&exclude=C*]` | UI events after cursor `N`, long-polling, filtered by name |
 //! | `GET /view?token=…` | a read-only page for people: the live frame, the character, events and the agent's Lua |
 //! | `GET /files`, `GET|PUT|DELETE /files/<module>` | the agent's own Lua modules (see `env`) |
+//! | `GET /lua/search?q=…[&kind=builtin,own,api][&limit=N]`, `GET /lua/doc?name=…` | what exists to call: built-ins, own modules, the VM's globals (`search`) |
 //!
 //! `/status` is `{state, in_world, ui_ready, cinematic, time, player, nav}`. `player` is `null` out of the
 //! world, and in it until the player's own record has arrived (about a second after entering,
@@ -47,6 +48,7 @@ mod lua;
 mod nav;
 mod npc;
 mod quest_poi;
+mod search;
 mod server;
 mod world;
 mod zones;
@@ -60,7 +62,7 @@ use server::{Format, Job, Port};
 use std::sync::Arc;
 use std::time::Instant;
 use wrathplus_app_core::app_core::state::ClientState;
-use wrathplus_ui::script::{ScriptValue, UiScript};
+use wrathplus_ui::script::UiScript;
 
 /// Instruction bound for one agent chunk unless the request names one: the same bound an addon
 /// load gets, about 50x the heaviest addon, so only a runaway loop meets it.
@@ -231,7 +233,7 @@ fn pump_events(
                 json!({
                     "time": time,
                     "event": event,
-                    "args": args.iter().map(script_value).collect::<Vec<_>>(),
+                    "args": args.iter().map(lua::script_value).collect::<Vec<_>>(),
                 })
             })
             .chain(dropped),
@@ -287,6 +289,14 @@ fn serve_jobs(
                     "args": [shown, answer["ok"], answer.get("error")],
                 })]);
                 let _ = reply.send(answer);
+            }
+            // `/lua/search` and `/lua/doc` (kind `api`): the VM's global function names, read
+            // without running the agent's Lua or stamping its input.
+            Job::Globals { reply } => {
+                let _ = reply.send(json!(script
+                    .as_ref()
+                    .map(|s| lua::globals(s))
+                    .unwrap_or_default()));
             }
             Job::Status { reply } => {
                 let state = state.as_ref().map(|s| *s.get());
@@ -401,18 +411,6 @@ fn encode(image: Image, scale: f32, format: Format) -> Result<Vec<u8>, String> {
         }
     }
     Ok(bytes)
-}
-
-fn script_value(value: &ScriptValue) -> Value {
-    match value {
-        ScriptValue::Nil => Value::Null,
-        ScriptValue::Bool(b) => json!(b),
-        ScriptValue::Int(i) => json!(i),
-        ScriptValue::Number(n) if n.is_finite() => json!(n),
-        ScriptValue::Number(n) => json!(n.to_string()),
-        ScriptValue::Str(s) => json!(s),
-        ScriptValue::Bytes(b) => json!(String::from_utf8_lossy(b)),
-    }
 }
 
 /// `AgentSignal(name, ...)`: put `AGENT_<NAME>` with the arguments on the event stream, so the

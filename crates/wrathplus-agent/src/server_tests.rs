@@ -64,6 +64,9 @@ fn port() -> (std::net::SocketAddr, Arc<EventLog>) {
                 Job::Status { reply } => {
                     let _ = reply.send(json!({"state": "Login"}));
                 }
+                Job::Globals { reply } => {
+                    let _ = reply.send(json!(["GetTime", "UnitName", "UnitNameUnmodified"]));
+                }
                 Job::Screenshot { reply, .. } => {
                     let _ = reply.send(Err("no window in tests".into()));
                 }
@@ -234,4 +237,54 @@ fn modules_are_saved_listed_read_and_deleted_inside_the_scripts_folder() {
     let delete = format!("DELETE /files/grind.loop HTTP/1.1\r\nHost: x\r\n{auth}\r\n");
     assert_eq!(call(address, &delete).0, 200);
     assert_eq!(get(address, "/files/grind.loop", TOKEN).0, 404);
+}
+
+fn json_get(address: std::net::SocketAddr, path: &str) -> (u16, Value) {
+    let (status, body) = get(address, path, TOKEN);
+    (status, serde_json::from_str(&body).unwrap())
+}
+
+#[test]
+fn lua_search_finds_builtins_first_and_the_vms_globals_by_name() {
+    let (address, _) = port();
+    let (status, found) = json_get(address, "/lua/search?q=pick_up&kind=builtin&limit=3");
+    assert_eq!(status, 200);
+    assert_eq!(found["results"][0]["name"], "Quests.pick_up");
+    assert!(found["results"][0]["at"]
+        .as_str()
+        .unwrap()
+        .starts_with("wp/quest.lua:"));
+    assert!(found["results"].as_array().unwrap().len() <= 3);
+    // The VM's globals come from the game loop; a comma list of kinds, encoded as clients do.
+    let (status, found) = json_get(address, "/lua/search?q=unitname&kind=api%2Cown");
+    assert_eq!(status, 200);
+    let names: Vec<&str> = found["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["UnitName", "UnitNameUnmodified"]);
+    assert_eq!(json_get(address, "/lua/search?q=x&kind=stock").0, 400);
+}
+
+#[test]
+fn lua_doc_reads_one_name_or_says_what_is_near() {
+    let (address, _) = port();
+    let (status, found) = json_get(address, "/lua/doc?name=Quests.pick_up");
+    assert_eq!(status, 200);
+    assert!(found["source"]
+        .as_str()
+        .unwrap()
+        .starts_with("function Q.pick_up("));
+    let (status, found) = json_get(address, "/lua/doc?name=GetTime");
+    assert_eq!((status, found["kind"].as_str()), (200, Some("api")));
+    let (status, found) = json_get(address, "/lua/doc?name=Quests.pick");
+    assert_eq!(status, 404);
+    assert!(found["suggestions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|s| s == "Quests.pick_up"));
+    assert_eq!(json_get(address, "/lua/doc").0, 400);
 }

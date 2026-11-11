@@ -10,6 +10,8 @@ tool is one HTTP call to the port.
 | `screenshot(scale?)` | `GET /screenshot?scale=S` | PNG image content, scale 0.5 by default |
 | `events(since?, names?, exclude?, wait_ms?, limit?)` | `GET /events` | `{events, next, missed}`; pass `next` as the next `since` |
 | `status()` | `GET /status` | `{state, in_world, ui_ready, cinematic, time, player, nav}` (`nav`: where walking routes come from) |
+| `lua_search(query, kinds?, limit?)` | `GET /lua/search?q=…&kind=…&limit=…` | what exists to call: built-in helpers (signature, doc, file:line), your modules' matching lines, the API's names |
+| `lua_doc(name)` | `GET /lua/doc?name=…` | one function's signature, doc and source, or a module's source |
 | `modules(name?)` | `GET /files[/<name>]` | the saved module list, or one module's source |
 | `save_module(name, source)` | `PUT /files/<name>` | `{saved, bytes}`; `require(name)` or `AgentReload(name)` in Lua loads it |
 

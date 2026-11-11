@@ -77,6 +77,8 @@ describe("tools", () => {
     expect(tools.map((t) => t.name).sort()).toEqual([
       "events",
       "lua",
+      "lua_doc",
+      "lua_search",
       "modules",
       "save_module",
       "screenshot",
@@ -198,7 +200,7 @@ describe("tools", () => {
 
   test("every description opens with a sentence that stands alone inside 100 characters", async () => {
     const { tools } = await (await connect()).listTools();
-    expect(tools).toHaveLength(6);
+    expect(tools).toHaveLength(8);
     for (const tool of tools) {
       const opening = (tool.description ?? "").split(/(?<=\.)\s/)[0] ?? "";
       expect(opening.length, `${tool.name}: ${opening}`).toBeGreaterThan(30);
@@ -332,5 +334,41 @@ describe("modules", () => {
     const result = await call("save_module", { name: "../etc", source: "x" });
     expect(result.isError).toBe(true);
     expect(seen).toEqual([]);
+  });
+});
+
+describe("lua search", () => {
+  test("lua_search sends the query, the kinds as a list and the limit", async () => {
+    const body = { query: "pick_up", total: 1, results: [{ kind: "builtin", name: "Quests.pick_up" }] };
+    reply = () => Response.json(body);
+    const result = await call("lua_search", { query: "pick_up", kinds: ["builtin", "own"], limit: 5 });
+    expect(seen[0]).toMatchObject({
+      method: "GET",
+      path: "/lua/search",
+      query: { q: "pick_up", kind: "builtin,own", limit: "5" },
+    });
+    expect(JSON.parse(textOf(result))).toEqual(body);
+    await call("lua_search", { query: "unitname" });
+    expect(seen[1]?.query).toEqual({ q: "unitname" });
+    expect((await call("lua_search", { query: "x", kinds: ["stock"] })).isError).toBe(true);
+  });
+
+  test("lua_doc reads one name, and a missing one is a tool error with the port's text", async () => {
+    reply = (req) =>
+      req.query.name === "Quests.pick_up"
+        ? Response.json({ kind: "builtin", name: "Quests.pick_up", source: "function Q.pick_up() ... end" })
+        : Response.json({ error: "nothing is named Nope", suggestions: [] }, { status: 404 });
+    const found = await call("lua_doc", { name: "Quests.pick_up" });
+    expect(seen[0]).toMatchObject({ path: "/lua/doc", query: { name: "Quests.pick_up" } });
+    expect(JSON.parse(textOf(found)).source).toContain("function Q.pick_up");
+    const missing = await call("lua_doc", { name: "Nope" });
+    expect(missing.isError).toBe(true);
+    expect(textOf(missing)).toContain("nothing is named Nope");
+  });
+
+  test("the lua tool says to search before writing a helper", async () => {
+    const lua = (await (await connect()).listTools()).tools.find((t) => t.name === "lua");
+    expect(lua?.description).toContain("lua_search");
+    expect(lua?.description).toContain("lua_doc");
   });
 });
