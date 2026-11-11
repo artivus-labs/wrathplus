@@ -3,6 +3,7 @@ use super::*;
 use crate::app_core::movement::swim_enter_depth;
 use crate::app_core::session::ObjectStore;
 use crate::app_core::state::CollisionHeight;
+use crate::entities::collision_height::ac_collision_height;
 
 /// A stamped unit re-enters [`mark_swimming_creatures`] only when its `Transform` or its
 /// descriptors or collision height change (`0x730d90` reads the live height); an unstamped one
@@ -78,6 +79,7 @@ pub(in crate::motion) fn mark_swimming_creatures(
     world: wrathplus_world::world_point::WorldPoint,
     epoch: Res<wrathplus_world::collision::ColliderEpoch>,
     mut last_epoch: Local<Option<u64>>,
+    creatures: Option<Res<crate::entities::Creatures>>,
 ) {
     // A collider epoch change (liquid streams with the colliders) drops every stamp.
     let now = epoch.get();
@@ -130,8 +132,10 @@ pub(in crate::motion) fn mark_swimming_creatures(
         let swimming = creature_swim_state(marked, depth, boundary, flags)
             || (crate::app_core::movement::may_swim(flags)
                 && world.room_settled(who)
-                && collision
-                    .is_some_and(|h| ac_surface_swimming(&support, t, spline, modes, h.0, depth)));
+                && store.is_some_and(|s| {
+                    let h = ac_collision_height(creatures.as_deref(), s, net.display_id);
+                    ac_surface_swimming(&support, t, spline, modes, h, depth)
+                }));
         if swimming != marked {
             if swimming {
                 commands.entity(e).insert(CreatureSwimming);
@@ -143,7 +147,7 @@ pub(in crate::motion) fn mark_swimming_creatures(
 }
 
 /// Deliberate AC interoperability deviation from 12340's feet-only 0.75*h law.
-/// AC `GetMinHeightInWater` seats at (1 - 4*1040/10202)*h without necessarily
+/// AC `GetMinHeightInWater` seats at (1 - 4*1040/10202)*h, h its own height, without necessarily
 /// broadcasting SWIMMING for playerbots. Admit ONLY that surface seat on a live ground
 /// spline above measured deep support; never infer depth from missing collision.
 /// See https://github.com/artivus-labs/wrathplus/wiki/WRATH-AC-SURFACE-SWIM for provenance, authority and numeric bounds.

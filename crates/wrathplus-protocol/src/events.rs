@@ -1193,6 +1193,12 @@ pub enum SessionEvent {
         counter: u32,
         launch: crate::types::JumpInfo,
     },
+    /// A unit's collision height from the server (`SMSG_`/`MSG_MOVE_SET_COLLISION_HGT`), written
+    /// to `CMovement+0xcc` as sent (`0x6e9600`).
+    CollisionHeight {
+        guid: u64,
+        height: f32,
+    },
     /// Someone invited us to their group (`SMSG_GROUP_INVITE`): the invite popup.
     GroupInvite {
         inviter: String,

@@ -114,55 +114,20 @@ fn unit_model_scales_compose_the_race_display_and_both_columns() {
     assert_eq!(cat.unit_model_scale(u32::MAX), None);
 }
 
-/// vmangos folds both scales into `SCALE_X`, so the prism's `max(SCALE_X, display scale)` floor
-/// bites only where `modelScale < 1`, and no shipped row is below 1.
+/// 12340's collision height at `SCALE_X` 1, `collisionHeight × k` (`0x6d78c0` → `0x6cf350`):
+/// the bodies `wrathplus-app-world`'s swim tests use.
 #[test]
-fn no_shipped_model_scales_below_one_so_the_prism_floor_is_inert_at_rest() {
+fn collision_heights_are_the_column_times_the_unit_model_scale() {
     let data = crate::wow_data_or_skip!();
     let mut chain = crate::open_chain(&data).expect("open chain");
     let cat = load_creature_catalog(&mut chain).expect("load creature catalog");
-
-    let under: Vec<_> = cat
-        .models
-        .iter()
-        .filter(|(_, m)| m.scale < 1.0)
-        .map(|(id, m)| (*id, m.scale))
-        .collect();
-    assert!(
-        under.is_empty(),
-        "a sub-1 modelScale would make the floor bite at rest: {under:?}"
-    );
-    // Not vacuous: the column is read, and varies.
-    assert!(
-        cat.models.values().any(|m| m.scale > 1.0),
-        "some row scales above 1.0, or this is asserting on a zeroed column"
-    );
-}
-
-/// The Shore Strider (display 4945, model 35): column 2.083 × display scale 1.75 = 3.645 yd
-/// with or without the floor, since its `modelScale` is 1.0.
-#[test]
-fn the_shore_strider_prism_is_the_same_under_both_readings() {
-    let data = crate::wow_data_or_skip!();
-    let mut chain = crate::open_chain(&data).expect("open chain");
-    let cat = load_creature_catalog(&mut chain).expect("load creature catalog");
-
-    let m = cat.model(4945).expect("display 4945 resolves");
-    assert_eq!(m.model_path, "Creature\\SeaGiant\\SeaGiant.mdx");
-    let column = cat.collision_height(4945).expect("collision height");
-    let display_scale = cat.display_scale(4945).expect("display scale");
-    assert!((column - 2.083).abs() < 5e-4, "column is {column}");
-    assert!(
-        (display_scale - 1.75).abs() < 5e-4,
-        "CreatureDisplayInfo.scale is {display_scale}"
-    );
-    // vmangos ships `creature_template.display_scale = 0` for entry 5359, so SCALE_X is the
-    // folded `modelScale × displayScale` = 1.0 × 1.75.
-    let scale_x = m.scale;
-    assert!((scale_x - 1.75).abs() < 5e-4, "folded SCALE_X is {scale_x}");
-    assert_eq!(
-        column * scale_x,
-        column * scale_x.max(display_scale),
-        "the floor is inert on this row — the height was not the bug"
-    );
+    for (display, want, what) in [
+        (49, 2.031, "human male, 2.031 × 1"),
+        (60, 2.639, "tauren female, 2.111 × modelScale 1.25"),
+        (1564, 1.214, "gnome female, 1.056 × creatureModelScale 1.15"),
+    ] {
+        let h = cat.collision_height(display).expect("column")
+            * cat.unit_model_scale(display).expect("k");
+        assert!((h - want).abs() < 5e-4, "{display} ({what}) is {h}");
+    }
 }

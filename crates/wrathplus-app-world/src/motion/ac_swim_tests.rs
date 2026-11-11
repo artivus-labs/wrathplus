@@ -241,7 +241,15 @@ fn ac_surface_swim_releases_on_shore_and_permit_mode_or_path_loss() {
             "path" => {
                 app.world_mut().entity_mut(e).remove::<Spline>();
             }
-            "height" => app.world_mut().get_mut::<CollisionHeight>(e).unwrap().0 = H * 2.0,
+            // AzerothCore's own height, which seats it: twice the body moves the seat.
+            "height" => {
+                app.world_mut()
+                    .entity_mut(e)
+                    .insert(ObjectStore(ObjectFields::from_pairs(&[
+                        (Field::UnitFlags.index(), 8),
+                        (Field::ObjectScaleX.index(), 2.0f32.to_bits()),
+                    ])));
+            }
             "shore" => {
                 // Replace only support; same wire feet and room water.
                 let mut q = app.world_mut().query_filtered::<Entity, With<RigidBody>>();

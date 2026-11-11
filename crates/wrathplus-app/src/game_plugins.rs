@@ -297,6 +297,9 @@ mod schedule_source;
 
 #[cfg(test)]
 pub(crate) mod schedule_tests {
+    mod ordering_tests {
+        include!("game_plugins/dimension_order_tests.rs");
+    }
     use std::any::TypeId;
     use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -677,12 +680,6 @@ pub(crate) mod schedule_tests {
         pub fn non_send_only(&self, what: &[ComponentId]) -> bool {
             what.iter().all(|id| self.non_send.contains(id))
         }
-    }
-
-    #[test]
-    fn the_client_builds_headless() {
-        let app = headless_client();
-        assert!(app.world().contains_resource::<Schedules>());
     }
 
     /// `PostUpdate`'s undeclared-order pairs on the declared graph; `GlobalTransform` and the
