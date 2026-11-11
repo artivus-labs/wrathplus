@@ -1259,15 +1259,15 @@ G.action({
   -- within 200 yards first.
   cost = function(f)
     if f.hand_in_near then return 1 end
-    local pos, best = me(), nil
+    local pos = me()
+    -- Execution visits the first eligible quest in log order; price that same destination.
     for _, q in ipairs(quests()) do
       local h = hand_in_of(q)
-      if h and pos and not G.cooling("hand_in_quests:" .. q.title) then
-        local d = far(pos, h)
-        if not best or d < best then best = d end
+      if h and not G.cooling("hand_in_quests:" .. q.title) then
+        return 2 + (pos and math.min(far(pos, h) / 200, 4) or 2)
       end
     end
-    return 2 + (best and math.min(best / 200, 4) or 2)
+    return 4
   end,
   run = function(args)
     quest_visit = { talking = false, since = now() }

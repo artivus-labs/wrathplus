@@ -129,3 +129,25 @@ fn a_finished_quest_is_handed_in_before_training_at_a_like_distance() {
     script.run("hx = 700").unwrap();
     assert_eq!(text(&script, "return plan_of('progress')"), "train");
 }
+
+#[test]
+fn hand_in_cost_prices_the_first_eligible_quest_that_execution_visits() {
+    let script = goals();
+    script.run(ELMORE).unwrap();
+    script
+        .run(
+            "Goals.on = false Upkeep.trained_level = 1 \
+             LOG[2] = { id = 42, title = 'Nearby quest', complete = true, objectives = {} } \
+             Goals.places.trainer = { { name = 'Trainer', x = 50, y = 0, z = 0, map = 0 } } \
+             AgentQuestPOI = function(id) return { { objective = -1, map = 0, \
+               x = id == 1097 and 700 or 100, y = 0 } } end",
+        )
+        .unwrap();
+    // Execution takes Elmore first, so the nearby second quest must not make that walk cheap.
+    assert_eq!(text(&script, "return plan_of('progress')"), "train");
+    script.run("LOG[1], LOG[2] = LOG[2], LOG[1]").unwrap();
+    assert_eq!(
+        text(&script, "return plan_of('progress')"),
+        "hand_in_quests"
+    );
+}

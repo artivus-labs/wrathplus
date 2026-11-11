@@ -294,13 +294,15 @@ this is the order to use them in.
    Call `status` first: if it errors, the client is not running or the token is wrong.
 2. **Character select.** Wait until `status` says `ui_ready: true` (and `state: "CharSelect"`)
    before any glue call: `GetNumCharacters()`, `GetCharacterInfo(i)`, `SelectCharacter(i)`.
-3. **Make a character** with the stock ids, in three `lua` calls a moment apart:
-   `SetGlueScreen("charcreate")`, then `SetSelectedRace(r) SetSelectedClass(c)`, then
-   `CreateCharacter("Name")`. Races: 1 Human, 2 Orc, 3 Dwarf, 4 Night Elf, 5 Undead, 6 Tauren,
-   7 Gnome, 8 Troll, 10 Blood Elf, 11 Draenei. Classes: 1 Warrior, 2 Paladin, 3 Hunter,
-   4 Rogue, 5 Priest, 7 Shaman, 8 Mage, 9 Warlock, 11 Druid (6, Death Knight, needs a level 55
-   character on the account). Check with `GetNumCharacters()`, then `SelectCharacter(i)
-   EnterWorld()`.
+3. **Make a character**, in separate `lua` calls a moment apart: first
+   `SetGlueScreen("charcreate")`, then inspect `GetAvailableRaces()` and
+   `GetAvailableClasses()`. `SetSelectedRace(r)` and `SetSelectedClass(c)` take **1-based
+   catalog indices, not race/class IDs**. The race order is Human, Dwarf, Night Elf, Gnome,
+   Draenei, Orc, Undead, Tauren, Troll, Blood Elf. The class order is Warrior, Paladin, Hunter,
+   Rogue, Priest, Death Knight, Shaman, Mage, Warlock, Druid; check availability for the selected
+   race (Death Knight also requires a level-55 character). Set the two indices, confirm with
+   `GetSelectedRace()` and `GetSelectedClass()`, then call `CreateCharacter("Name")`.
+   Check with `GetNumCharacters()`, then `SelectCharacter(i) EnterWorld()`.
 4. **Entering the world.** `status` says `in_world: true` with `player: null` for about a second,
    until the character's record arrives; act once `player` is there.
 5. **The intro.** A new character's intro cinematic starts a few seconds after it enters:
