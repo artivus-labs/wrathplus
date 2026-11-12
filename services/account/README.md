@@ -65,7 +65,22 @@ time for the same identity. Names starting with a reserved prefix (`RNDBOT`: mod
 `username LIKE 'RNDBOT%'` as its own; `AHBOT`, `WPMANAGER`, `ADMIN`, `SOAP`) get `AT` in front.
 The mapping is stored by DID and never changes, even when the handle does.
 
-## Records
+## Privacy and optional records
+
+New and existing accounts default to private. Website sign-in requests only identity scope
+(`atproto`) unless the unchecked public-record option is explicitly selected. Consent is
+kept privately and checked after OAuth restore and before every record write. Old stored grants
+are discarded on migration; DID/account/password continuity is preserved. Private callbacks
+end their temporary OAuth session and remove locally stored credentials.
+
+The account page can start opt-in authorization or stop future publication (CSRF-protected).
+Withdrawal removes local OAuth credentials and fences stale in-flight opt-in callbacks. Queued
+private events are acknowledged and dropped, not backfilled after later opt-in. A network write
+already dispatched before withdrawal cannot be recalled. Existing public records are not
+automatically deleted; public copies may persist after manual deletion. Private server data
+(DID/handle/account mapping, encrypted password and gameplay) remains necessary to operate
+the account. Other players still see ordinary in-game character activity.
+
 
 Lexicons (in `lexicons/`, authority `wrathplus.artivus.com.au`):
 
@@ -73,13 +88,15 @@ Lexicons (in `lexicons/`, authority `wrathplus.artivus.com.au`):
 - `au.com.artivus.wrathplus.milestone`: a level reached, an achievement earned, a quest turned in
   (quests only with `PUBLISH_QUESTS=1`), key `<realm>:<guid>:<kind>:<value>` (quests add the time).
 
-The OAuth scope is `atproto` plus `repo:<collection>?action=create&action=update` for these two
+For explicit opt-in only, the OAuth scope is `atproto` plus `repo:<collection>?action=create&action=update` for these two
 collections only. The service polls the realm module (`mod-atproto-identity`, `.atproto events`
 over SOAP), writes the records with the person's stored OAuth session, then acknowledges them.
 Record keys come from the event's content, so a repeat delivery overwrites instead of duplicating.
 
-**Agents** have no stored write credential (their session is deleted at sign-in), so the service
-publishes nothing for them in v1; their events are acknowledged and dropped. An agent that wants
+**Agent app-password sign-in** never enables publication or retains its proof session.
+Identities without explicit website consent publish nothing; their events are acknowledged and
+dropped. An existing website opt-in is unchanged by agent sign-in and can be disabled on the
+account page. An agent that wants
 records writes them itself with its own app-password session (`com.atproto.repo.putRecord`, same
 collections and keys).
 
@@ -123,6 +140,7 @@ minutes). Request bodies are capped at 16 KB.
 | `GET /` | Sign-in page, or the account page when signed in |
 | `POST /oauth/login` | Start OAuth (form field `handle`) |
 | `GET /oauth/callback` | OAuth return: makes the account if new, sets the session cookie |
+| `POST /account/privacy` | Stop publication and remove local OAuth session (CSRF) |
 | `POST /account/reset`, `POST /logout` | New game password; sign out (CSRF) |
 | `GET /client/login`, `POST /client/approve`, `POST /client/token` | Client sign-in ([CLIENT-LOGIN.md](CLIENT-LOGIN.md)) |
 | `GET /oauth/client-metadata.json`, `GET /oauth/jwks.json` | Client metadata and public keys |

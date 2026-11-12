@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Store } from "../src/db.ts";
 import { depsFor, fakeNet } from "./fakes.ts";
-import { clientMetadata, createOAuthClient, guardedFetch, loadOrCreateKeys, OAUTH_SCOPE } from "../src/oauth.ts";
+import { clientMetadata, createOAuthClient, guardedFetch, loadOrCreateKeys, IDENTITY_SCOPE, OAUTH_SCOPE } from "../src/oauth.ts";
 
 describe("OAuth client", () => {
   const dir = mkdtempSync(join(tmpdir(), "wp-oauth-"));
@@ -19,6 +19,7 @@ describe("OAuth client", () => {
   });
 
   test("scope is atproto plus our two collections only", () => {
+    expect(IDENTITY_SCOPE).toBe("atproto");
     expect(OAUTH_SCOPE.split(" ")).toEqual([
       "atproto",
       "repo:au.com.artivus.wrathplus.character?action=create&action=update",
@@ -40,6 +41,19 @@ describe("OAuth client", () => {
     expect(clientMetadata("https://a.example/").jwks_uri).toBe("https://a.example/oauth/jwks.json");
   });
 
+  test("SDK callback rejects stale saved state before replacing the current credential", async () => {
+    const store = new Store(":memory:");
+    const did = "did:plc:aaaaaaaaaaaaaaaaaaaaaaaa";
+    const client = createOAuthClient("https://wrathplus.artivus.com.au", await loadOrCreateKeys(keysPath), store, depsFor(fakeNet()));
+    store.setPublishing(did, true);
+    await store.sessionStore().set(did, { current: true });
+    await store.stateStore().set("old-state", { appState: JSON.stringify({ v: 1, did, version: 0, publish: true }) });
+    await expect(client.callback(new URLSearchParams({ state: "old-state", code: "old" }))).rejects.toThrow("superseded");
+    expect(await store.sessionStore().get(did)).toEqual({ current: true });
+    expect(await store.stateStore().get("old-state")).toBeUndefined();
+    store.close();
+  });
+
   test("state store expires entries; session store round-trips", async () => {
     let now = 0;
     const store = new Store(":memory:");
@@ -57,6 +71,22 @@ describe("OAuth client", () => {
 });
 
 describe("guardedFetch (the OAuth library's fetch)", () => {
+  test("withdrawal during DNS fences the actual record request", async () => {
+    const net = fakeNet();
+    net.hosts["pds.example.com"] = ["203.0.113.10"];
+    net.routes["POST https://pds.example.com/xrpc/com.atproto.repo.putRecord"] = () => Response.json({ ok: true });
+    const deps = depsFor(net);
+    let enabled = true;
+    const lookup = deps.lookup;
+    const f = guardedFetch({ ...deps, lookup: async (...args) => { const result = await lookup(...args); enabled = false; return result; } }, () => enabled);
+    const init = { method: "POST", body: JSON.stringify({ repo: "did:plc:alice", record: {} }) };
+    await expect(f("https://pds.example.com/xrpc/com.atproto.repo.putRecord", init)).rejects.toThrow("consent withdrawn");
+    expect(net.requests).toHaveLength(0);
+    const publicFetch = guardedFetch(deps, () => true);
+    expect((await publicFetch("https://pds.example.com/xrpc/com.atproto.repo.putRecord", init)).status).toBe(200);
+    expect(net.requests).toHaveLength(1);
+  });
+
   test("refuses loopback, private and plain-http targets before any request", async () => {
     const net = fakeNet();
     net.hosts["pds.example.com"] = ["203.0.113.10"];

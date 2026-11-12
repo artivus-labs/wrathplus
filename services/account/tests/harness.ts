@@ -1,6 +1,7 @@
 // The whole app over fakes: a realm, an ATProto network with Alice on it, an OAuth server that
 // signs in whoever the test says, and a clock the test moves.
 
+import { currentConsentState } from "../src/oauth.ts";
 import { Accounts } from "../src/accounts.ts";
 import { createApp, type OAuthPort } from "../src/app.ts";
 import { ClientCodes } from "../src/client.ts";
@@ -21,29 +22,33 @@ export function harness(opts: { perIp?: number; perDid?: number } = {}) {
   const clock = { now: 1_000_000 };
   const now = () => clock.now;
   const accounts = new Accounts({ store, soap: realm.run, cipher: new PasswordCipher(TEST_KEY), wait: async () => {}, log: () => {} });
-  const authorized: Array<{ handle: string; state?: string }> = [];
+  const authorized: Array<{ handle: string; scope: string; state?: string }> = [];
+  const oauthState = { scope: "atproto repo:au.com.artivus.wrathplus.character?action=create&action=update repo:au.com.artivus.wrathplus.milestone?action=create&action=update", signOuts: 0 };
   const oauth: OAuthPort = {
     clientMetadata: {},
     jwks: { keys: [] },
     authorize: async (handle, options) => {
-      authorized.push({ handle, ...(options.state ? { state: options.state } : {}) });
+      authorized.push({ handle, scope: options.scope, ...(options.state ? { state: options.state } : {}) });
       return new URL("https://auth.example.com/authorize");
     },
     // The fake authorization server returns ?did=…&state=… to the callback.
     callback: async (params) => {
       const did = params.get("did");
       if (!did) throw new Error("access_denied");
-      return { session: { did }, state: params.get("state") };
+      if (!currentConsentState(params.get("state"), store)) throw new Error("Sign-in superseded");
+      await store.sessionStore().set(did, { fake: true });
+      return { session: { did, getTokenInfo: async () => ({ scope: oauthState.scope }), signOut: async () => { oauthState.signOuts++; await store.sessionStore().del(did); } }, state: params.get("state") };
     },
   };
   const handle = createApp({
+    store,
     publicUrl: ORIGIN,
     accounts,
     identity: depsFor(net),
     oauth,
     sessions: new WebSessions(store, TEST_KEY, now),
     codes: new ClientCodes(store, now),
-    scope: "atproto",
+    scope: "atproto repo:au.com.artivus.wrathplus.character?action=create&action=update repo:au.com.artivus.wrathplus.milestone?action=create&action=update",
     realmAddress: "wrathplus.artivus.com.au:3724",
     loginsPerIp: new RateLimiter({ max: opts.perIp ?? 20, windowMs: 60_000 }, now),
     issuesPerDid: new RateLimiter({ max: opts.perDid ?? 10, windowMs: 60_000 }, now),
@@ -81,5 +86,5 @@ export function harness(opts: { perIp?: number; perDid?: number } = {}) {
   /** The CSRF token from a page's forms. */
   const csrfOf = async (res: Response) => /name="csrf" value="([^"]+)"/.exec(await res.text())?.[1] ?? "";
 
-  return { handle, net, realm, store, clock, authorized, get, post, postJson, signIn, csrfOf };
+  return { oauthState, handle, net, realm, store, clock, authorized, get, post, postJson, signIn, csrfOf };
 }

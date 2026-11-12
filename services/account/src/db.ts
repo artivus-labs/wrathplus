@@ -44,6 +44,11 @@ export class Store {
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS publication_consent (
+        did TEXT PRIMARY KEY,
+        enabled INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0, 1)),
+        version INTEGER NOT NULL DEFAULT 0
+      );
       CREATE TABLE IF NOT EXISTS oauth_state (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL,
@@ -73,6 +78,10 @@ export class Store {
     // v2: the game password, AES-256-GCM (see secrets.ts). Added to databases made by v1.
     const columns = this.db.query<{ name: string }, []>("PRAGMA table_info(account_link)").all();
     if (!columns.some((c) => c.name === "password_enc")) this.db.exec("ALTER TABLE account_link ADD COLUMN password_enc TEXT");
+    // Stored credentials are not consent. Legacy/private sessions must not survive a restart.
+    this.db.exec(`DELETE FROM oauth_session WHERE NOT EXISTS (
+      SELECT 1 FROM publication_consent WHERE did = oauth_session.key AND enabled = 1
+    )`);
   }
 
   linkByDid(did: string): AccountLink | undefined {
@@ -109,6 +118,33 @@ export class Store {
 
   setPassword(did: string, passwordEnc: string, now = Date.now()): void {
     this.db.query("UPDATE account_link SET password_enc = ?, updated_at = ? WHERE did = ?").run(passwordEnc, now, did);
+  }
+
+  /** Missing consent (including legacy accounts) is private. */
+  publishingEnabled(did: string): boolean {
+    return this.db.query<{ enabled: number }, [string]>("SELECT enabled FROM publication_consent WHERE did = ?").get(did)?.enabled === 1;
+  }
+
+  publishingVersion(did: string): number {
+    return this.db.query<{ version: number }, [string]>("SELECT version FROM publication_consent WHERE did = ?").get(did)?.version ?? 0;
+  }
+
+  /** Compare the version captured before OAuth; a disable invalidates every older callback. */
+  setPublishing(did: string, enabled: boolean, expectedVersion?: number): boolean {
+    return this.db.transaction(() => {
+      const version = this.publishingVersion(did);
+      if (expectedVersion !== undefined && version !== expectedVersion) return false;
+      this.db.query(`INSERT INTO publication_consent (did, enabled, version) VALUES (?, ?, ?)
+        ON CONFLICT(did) DO UPDATE SET enabled = excluded.enabled, version = excluded.version`)
+        .run(did, enabled ? 1 : 0, version + 1);
+      if (!enabled) this.forgetOAuthSession(did);
+      return true;
+    }).immediate();
+  }
+
+  /** Synchronous so disabling cannot return with retained write credentials. */
+  forgetOAuthSession(did: string): void {
+    this.db.query("DELETE FROM oauth_session WHERE key = ?").run(did);
   }
 
   // --- web sessions (ids and codes are stored hashed) ---------------------------------------------
@@ -164,7 +200,9 @@ export class Store {
     };
   }
 
-  /** The OAuth library's sessions, keyed by DID. */
+  /** The OAuth library's sessions, keyed by DID. Routes own callback/refresh cleanup:
+   * identity callbacks temporarily persist a session before consent can be checked.
+   */
   sessionStore<V>(): KeyValueStore<V> {
     return {
       get: async (key) => {

@@ -107,15 +107,16 @@ describe("the flow through the app", () => {
     const next = /name="next" value="([^"]+)"/.exec(text)![1]!.replace(/&amp;/g, "&");
     expect(next).toBe(`/client/login?${params()}`);
     await h.post("/oauth/login", { handle: "alice.bsky.social", next });
-    expect(h.authorized[0]).toEqual({ handle: "alice.bsky.social", state: next });
-    const { res } = await h.signIn(ALICE_DID, next);
+    expect(h.authorized[0]).toMatchObject({ handle: "alice.bsky.social", scope: "atproto" });
+    expect(JSON.parse(h.authorized[0]!.state!).next).toBe(next);
+    const { res } = await h.signIn(ALICE_DID, h.authorized[0]!.state);
     expect(res.headers.get("location")).toBe(next);
   });
 
   test("OAuth state cannot send people anywhere but the client sign-in page", async () => {
     const h = harness();
     await h.post("/oauth/login", { handle: "alice.bsky.social", next: "https://evil.com/" });
-    expect(h.authorized[0]!.state).toBeUndefined();
+    expect(JSON.parse(h.authorized[0]!.state!).next).toBeUndefined();
     const { res } = await h.signIn(ALICE_DID, "//evil.com/");
     expect(res.headers.get("location")).toBe("/");
   });

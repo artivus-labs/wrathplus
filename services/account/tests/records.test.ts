@@ -80,6 +80,66 @@ describe("EventPump", () => {
     expect(await new EventPump({ soap: realm.run, publish, realm: REALM, publishQuests: false }).tick()).toEqual({ handled: 1, acked: 1 });
   });
 
+  test("publisher fails closed by default and drops queued private events without restoring", async () => {
+    const realm = new FakeRealm();
+    realm.events = [ev(1, "login", 0), ev(2, "level", 12)];
+    let restores = 0;
+    const publish = oauthPublisher(async () => {
+      restores++;
+      throw new Error("must not restore private sessions");
+    }, () => true);
+    expect(await new EventPump({ soap: realm.run, publish, realm: REALM, publishQuests: false }).tick()).toEqual({ handled: 2, acked: 2 });
+    expect(restores).toBe(0);
+    expect(realm.events).toEqual([]);
+  });
+
+  test("revocation while restore is in flight prevents every write", async () => {
+    let enabled = true;
+    let writes = 0;
+    let finishRestore!: () => void;
+    const restored = new Promise<void>((resolve) => { finishRestore = resolve; });
+    const publish = oauthPublisher(async () => {
+      await restored;
+      return { fetchHandler: async () => { writes++; return new Response("{}"); } };
+    }, () => true, () => {}, () => enabled);
+    const pending = publish(ALICE_DID, recordsFor(parseEvents(ev(2, "level", 12))[0]!, { realm: REALM, publishQuests: false }));
+    enabled = false;
+    finishRestore();
+    expect(await pending).toBe("no_session");
+    expect(writes).toBe(0);
+  });
+
+  test("revocation between character and milestone writes prevents the second write", async () => {
+    let enabled = true;
+    let writes = 0;
+    const publish = oauthPublisher(async () => ({ fetchHandler: async () => {
+      writes++;
+      enabled = false;
+      return new Response("{}");
+    } }), () => true, () => {}, () => enabled);
+    expect(await publish(ALICE_DID, recordsFor(parseEvents(ev(2, "level", 12))[0]!, { realm: REALM, publishQuests: false }))).toBe("no_session");
+    expect(writes).toBe(1);
+  });
+
+  test("a transient event retried after revocation is acknowledged without restoring or writing", async () => {
+    const realm = new FakeRealm();
+    realm.events = [ev(1, "level", 12)];
+    let enabled = true;
+    let restores = 0;
+    let writes = 0;
+    const publish = oauthPublisher(async () => {
+      restores++;
+      return { fetchHandler: async () => { writes++; return new Response("{}", { status: 503 }); } };
+    }, () => true, () => {}, () => enabled);
+    const pump = new EventPump({ soap: realm.run, publish, realm: REALM, publishQuests: false });
+    expect(await pump.tick()).toEqual({ handled: 0, acked: undefined });
+    enabled = false;
+    expect(await pump.tick()).toEqual({ handled: 1, acked: 1 });
+    expect(restores).toBe(1);
+    expect(writes).toBe(1);
+    expect(realm.events).toEqual([]);
+  });
+
   test("oauthPublisher writes putRecord with the session and maps statuses", async () => {
     const calls: Array<{ path: string; body: Record<string, unknown> }> = [];
     let status = 200;
@@ -89,7 +149,7 @@ describe("EventPump", () => {
         return new Response("{}", { status });
       },
     };
-    const publish = oauthPublisher(async () => session, () => true, () => {});
+    const publish = oauthPublisher(async () => session, () => true, () => {}, () => true);
     const writes = recordsFor(parseEvents(ev(2, "level", 12))[0]!, { realm: REALM, publishQuests: false });
     expect(await publish(ALICE_DID, writes)).toBe("published");
     expect(calls[0]).toMatchObject({ path: "/xrpc/com.atproto.repo.putRecord", body: { repo: ALICE_DID, collection: NSID.character } });

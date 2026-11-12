@@ -47,6 +47,7 @@ const STYLE = `
   h1 { margin: 0 0 .25rem; font: 600 1.6rem/1.2 Georgia, "Times New Roman", serif; letter-spacing: .02em; color: var(--gold); }
   p { margin: .5rem 0; color: var(--dim); }
   label { display: block; margin: 1.25rem 0 .4rem; font-size: .9rem; color: var(--dim); }
+  input[type="checkbox"] { width: auto; margin-right: .5rem; }
   input { width: 100%; padding: .7rem .8rem; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); font-size: 1rem; }
   button { margin-top: 1rem; width: 100%; padding: .75rem; border: 0; border-radius: 8px; background: var(--ice); color: #04121f; font-weight: 600; font-size: 1rem; cursor: pointer; }
   dl { margin: 1.25rem 0 0; display: grid; grid-template-columns: auto 1fr; gap: .6rem 1rem; }
@@ -77,7 +78,7 @@ function page(title: string, body: string): string {
 export const BETA_GUIDE = "https://github.com/artivus-labs/wrathplus/blob/main/docs/BETA.md";
 
 /** What playing publishes, in one plain line, on the sign-in and account pages. */
-const DISCLOSURE = `<p><small>Playing publishes your characters and their level and achievement milestones as public records in your own ATProto repository; they are yours to delete. <a href="${BETA_GUIDE}#what-is-published" rel="noopener">What is published</a></small></p>`;
+const DISCLOSURE = `<p><small>Private by default: ATProto verifies your identity; we keep your identity-to-game-account link and gameplay data privately on the server. Other players can still see you in game. Opting in publishes your characters and their level and achievement milestones as public records in your own ATProto repository, potentially usable by public leaderboards. Existing public copies cannot be recalled. <a href="${BETA_GUIDE}#what-is-published" rel="noopener">What is published</a></small></p>`;
 
 const hidden = (name: string, value: string) => `<input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(value)}">`;
 
@@ -91,6 +92,7 @@ export function homePage(next?: string, intro?: string): string {
   <label for="handle">Your handle</label>
   <input id="handle" name="handle" placeholder="alice.bsky.social" autocomplete="username" autocapitalize="none" spellcheck="false" required>
   ${next ? hidden("next", next) : ""}
+  <label><input type="checkbox" name="publish" value="yes">Publish my characters and milestones publicly (optional)</label>
   <button type="submit">Sign in</button>
 </form>
 ${DISCLOSURE}
@@ -105,6 +107,7 @@ export interface AccountView {
   realm: string;
   csrf: string;
   notice?: string;
+  publishing: boolean;
 }
 
 export function accountPage(v: AccountView): string {
@@ -121,6 +124,9 @@ ${v.notice ? `<div class="note">${escapeHtml(v.notice)}</div>` : ""}
 <script src="/copy.js" defer></script>
 <p><small>Passwords are not case-sensitive in game. <a href="${BETA_GUIDE}" rel="noopener">How to play</a></small></p>
 ${DISCLOSURE}
+<p><strong>Public records: ${v.publishing ? "enabled" : "disabled"}</strong></p>
+${v.publishing ? `<form method="post" action="/account/privacy">${hidden("csrf", v.csrf)}<button class="quiet" type="submit">Stop public publishing</button></form>` : `<form method="post" action="/oauth/login">${hidden("handle", v.handle)}${hidden("publish", "yes")}<button class="quiet" type="submit">Enable public records with ATProto</button></form>`}
+<p><small>Disabling stops future writes and automatic recreation, but does not delete records already published or copies made by others.</small></p>
 <div class="row">
   <form method="post" action="/account/reset">${hidden("csrf", v.csrf)}<button type="submit">Reset password</button></form>
   <form method="post" action="/logout">${hidden("csrf", v.csrf)}<button class="quiet" type="submit">Sign out</button></form>
