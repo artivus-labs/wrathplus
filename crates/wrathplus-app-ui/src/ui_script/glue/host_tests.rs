@@ -16,7 +16,7 @@ fn vm() -> UiScript {
     s
 }
 
-fn app() -> (App, crossbeam_channel::Receiver<crate::net::LoginRequest>) {
+pub(super) fn app() -> (App, crossbeam_channel::Receiver<crate::net::LoginRequest>) {
     let (tx, rx) = crossbeam_channel::unbounded();
     let (realm_tx, _realm_rx) = crossbeam_channel::unbounded();
     let (pick_tx, _pick_rx) = crossbeam_channel::unbounded();

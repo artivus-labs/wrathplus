@@ -175,7 +175,13 @@ pub(crate) fn stock_glue(
         } else {
             crate::login::fail_text(strings, msg.refusal, msg.dial.as_ref())
         };
-        open_status(&mut script, "OKAY", &text);
+        // 12340 GlueDialog.lua routes markup through GlueDialogHTML, not GlueDialogText.
+        let which = if crate::login::is_html(&text) {
+            "OKAY_HTML"
+        } else {
+            "OKAY"
+        };
+        open_status(&mut script, which, &text);
     }
     // Reaching the realm list ends the connecting dialog, as `CGlueMgr::UpdateGlueDialog`
     // (`0x46b140`) does once the login state passes `LOGIN_STATE_CONNECTING`. The realm list to
