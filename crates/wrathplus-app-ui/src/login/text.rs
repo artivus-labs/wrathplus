@@ -89,11 +89,22 @@ fn world_refusal_text(strings: &GlueStrings, code: u8) -> &str {
     strings.text(key, fallback)
 }
 
+/// The stock GlueStrings HTML documents use GlueDialog's HTML variant.
+pub(crate) fn is_html(text: &str) -> bool {
+    text.trim_start()
+        .get(..6)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("<html>"))
+}
+
 /// Cut a failure string at the clause (comma or full stop) before its first web address.
 /// Deviation: the reference prints the address, but those Blizzard pages no longer serve and a
 /// private realm's player is not served by them. With no boundary before the address (as in
-/// `AUTH_BANNED`) the string is left whole.
+/// `AUTH_BANNED`) the string is left whole. HTML documents stay intact: cutting at punctuation
+/// would remove their closing tags and make SimpleHTML display raw markup. Glue LaunchURL is inert.
 pub(super) fn without_dead_url(text: &str) -> std::borrow::Cow<'_, str> {
+    if is_html(text) {
+        return std::borrow::Cow::Borrowed(text);
+    }
     let Some(url) = ["www.", "http://", "https://"]
         .iter()
         .filter_map(|p| text.find(p))

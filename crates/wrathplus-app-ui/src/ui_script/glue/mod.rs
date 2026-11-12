@@ -18,6 +18,8 @@ mod host_tests;
 #[cfg(test)]
 mod installed_tests;
 #[cfg(test)]
+mod login_dialog_tests;
+#[cfg(test)]
 mod measure_tests;
 #[cfg(test)]
 mod password_tests;

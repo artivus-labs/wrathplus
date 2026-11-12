@@ -42,6 +42,7 @@ use crate::sound::GlueSound;
 
 pub(crate) use screen::LoginAction;
 pub(crate) use smoke::smoke_character;
+pub(crate) use text::is_html;
 #[cfg(test)]
 use text::without_dead_url;
 pub(crate) use text::{fail_text, stage_text};
