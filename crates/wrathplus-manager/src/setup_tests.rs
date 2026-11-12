@@ -333,6 +333,12 @@ fn commands_keep_user_paths_as_single_arguments_and_clear_overrides() {
     let command = launch_command(&f.config, &state);
     assert_eq!(command.get_program(), f.config.binary_path().as_os_str());
     assert_eq!(command.get_current_dir(), Some(state.as_path()));
+    assert!(command
+        .get_envs()
+        .any(|(k, v)| k == "WRATHPLUS_HOME" && v == Some(state.as_os_str())));
+    assert!(!command
+        .get_envs()
+        .any(|(k, v)| k == "BENILLA_HOME" && v.is_some()));
     assert_eq!(
         command.get_args().collect::<Vec<_>>(),
         vec![
