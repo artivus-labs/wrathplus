@@ -8,7 +8,9 @@ import type { Store } from "./db.ts";
 import { assertPublicUrl, resolveHandle, type IdentityDeps } from "./identity.ts";
 import { NSID } from "./records.ts";
 
-/** `atproto` (identity) plus create/update on our two collections, nothing else. */
+/** Identity alone never grants permission to publish gameplay. */
+export const IDENTITY_SCOPE = "atproto";
+/** Maximum supported scope; requested only after explicit public-record consent. */
 export const OAUTH_SCOPE = ["atproto", `repo:${NSID.character}?action=create&action=update`, `repo:${NSID.milestone}?action=create&action=update`].join(" ");
 
 export function clientMetadata(publicUrl: string) {
@@ -48,25 +50,52 @@ export async function loadOrCreateKeys(path: string): Promise<JoseKey[]> {
 }
 
 export function createOAuthClient(publicUrl: string, keys: JoseKey[], store: Store, identity: IdentityDeps): NodeOAuthClient {
-  return new NodeOAuthClient({
+  const client = new NodeOAuthClient({
     // The library's default handle resolver and SSRF guard are built on undici dispatchers, which
     // Bun does not provide ("Unicast SSRF protection requires Node.js 20.6+"). Ours do the same
     // checks: https only, public addresses only, DNS TXT then well-known.
     handleResolver: { resolve: async (handle: string) => resolveHandle(handle, identity).catch(() => null) },
-    fetch: guardedFetch(identity),
+    fetch: guardedFetch(identity, (did) => store.publishingEnabled(did)),
     clientMetadata: clientMetadata(publicUrl),
     keyset: keys,
     stateStore: store.stateStore<NodeSavedState>(),
     sessionStore: store.sessionStore<NodeSavedSession>(),
     requestLock: requestLocalLock,
   });
+  const callback = client.callback.bind(client);
+  client.callback = async (params, options) => {
+    // Check saved application state before the SDK revokes/replaces the DID's current session.
+    const key = params.get("state");
+    const saved = key ? await store.stateStore<NodeSavedState>().get(key) : undefined;
+    if (saved && !currentConsentState(saved.appState, store)) {
+      await store.stateStore().del(key!);
+      throw new Error("Sign-in superseded; start again");
+    }
+    return callback(params, options);
+  };
+  return client;
+}
+
+/** Legacy states may sign in privately; versioned consent callbacks must still be current. */
+export function currentConsentState(state: unknown, store: Store): boolean {
+  if (typeof state !== "string") return true;
+  try {
+    const parsed = JSON.parse(state);
+    if (parsed?.v !== 1) return true;
+    return typeof parsed.did === "string" && Number.isSafeInteger(parsed.version) && store.publishingVersion(parsed.did) === parsed.version;
+  } catch { return true; }
 }
 
 /** fetch for the OAuth library: every URL (PDS, authorization server, did:web) must be public https. */
-export function guardedFetch(identity: Pick<IdentityDeps, "fetch" | "lookup">): typeof fetch {
+export function guardedFetch(identity: Pick<IdentityDeps, "fetch" | "lookup">, canPublish: (did: string) => boolean = () => false): typeof fetch {
   const f = async (input: string | URL | Request, init?: RequestInit) => {
     const request = (input instanceof Request ? new Request(input, init) : new Request(input.toString(), init));
+    const recordWrite = new URL(request.url).pathname === "/xrpc/com.atproto.repo.putRecord";
+    const repo = recordWrite ? (await request.clone().json() as { repo?: unknown }).repo : undefined;
     await assertPublicUrl(request.url, identity);
+    // The OAuth library may refresh asynchronously inside fetchHandler. Check again at the
+    // actual network boundary, after DNS validation, so withdrawal also fences that interval.
+    if (recordWrite && (typeof repo !== "string" || !canPublish(repo))) throw new Error("Public record consent withdrawn");
     return identity.fetch(request, { redirect: "error" });
   };
   return f as typeof fetch;

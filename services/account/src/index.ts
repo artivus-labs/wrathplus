@@ -32,6 +32,7 @@ const accounts = new Accounts({
 });
 
 const app = createApp({
+  store,
   publicUrl: config.publicUrl,
   accounts,
   sessions: new WebSessions(store, serviceKeys.cookie),
@@ -55,7 +56,14 @@ console.log(`account service on http://${server.hostname}:${server.port} for ${c
 if (config.eventPollMs > 0) {
   const pump = new EventPump({
     soap,
-    publish: oauthPublisher((did) => oauth.restore(did), (did) => store.hasSession(did)),
+    publish: async (did, writes) => {
+      try {
+        return await oauthPublisher((id) => oauth.restore(id), (id) => store.hasSession(id), console.log, (id) => store.publishingEnabled(id))(did, writes);
+      } finally {
+        // A refresh already in flight at withdrawal may have saved its token again.
+        if (!store.publishingEnabled(did)) store.forgetOAuthSession(did);
+      }
+    },
     realm: config.realmName,
     publishQuests: config.publishQuests,
   });

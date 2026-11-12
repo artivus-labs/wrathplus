@@ -7,16 +7,20 @@ import { accountPage, clientConfirmPage, clientHandoffPage, COPY_JS, errorPage, 
 import { normalizeHandle, verifiedHandleForDid, type IdentityDeps } from "./identity.ts";
 import { clientIp, RateLimiter } from "./ratelimit.ts";
 import { WebSessions, type WebSession } from "./sessions.ts";
+import type { Store } from "./db.ts";
+import { IDENTITY_SCOPE } from "./oauth.ts";
+import { resolveHandle } from "./identity.ts";
 
 /** The slice of NodeOAuthClient the routes use. */
 export interface OAuthPort {
   clientMetadata: unknown;
   jwks: unknown;
   authorize(handle: string, options: { scope: string; state?: string }): Promise<URL>;
-  callback(params: URLSearchParams): Promise<{ session: { did: string }; state?: string | null }>;
+  callback(params: URLSearchParams): Promise<{ session: { did: string; getTokenInfo(): Promise<{ scope: string }>; signOut(): Promise<void> }; state?: string | null }>;
 }
 
 export interface AppDeps {
+  store: Store;
   publicUrl: string;
   accounts: Accounts;
   identity: IdentityDeps;
@@ -56,6 +60,14 @@ function safeNext(next: unknown): string | undefined {
 export function createApp(deps: AppDeps) {
   const log = deps.log ?? ((m: string) => console.log(m));
   const origin = new URL(deps.publicUrl).origin;
+  // The SDK replaces sessions by DID. Keep callback replacement and consent inspection in one
+  // serial lifecycle so a second callback cannot inspect/revoke the first callback's grant.
+  let callbacks: Promise<unknown> = Promise.resolve();
+  function serialCallback(url: URL): Promise<Response> {
+    const run = callbacks.then(() => oauthCallback(url));
+    callbacks = run.catch(() => {});
+    return run;
+  }
 
   /** Same-origin check for state-changing form posts, on top of the CSRF token. */
   function sameOrigin(req: Request): boolean {
@@ -87,7 +99,7 @@ export function createApp(deps: AppDeps) {
     if (!session) return html(homePage());
     try {
       const a = await deps.accounts.ensure(session.did, session.handle);
-      return html(accountPage({ handle: session.handle, account: a.account, password: a.password, realm: deps.realmAddress, csrf: session.csrf }));
+      return html(accountPage({ handle: session.handle, account: a.account, password: a.password, realm: deps.realmAddress, csrf: session.csrf, publishing: deps.store.publishingEnabled(session.did) }));
     } catch (e) {
       log(`account view for ${session.did}: ${(e as Error).message}`);
       return html(errorPage("The realm could not look up your account right now. Try again shortly."), 503);
@@ -110,6 +122,7 @@ export function createApp(deps: AppDeps) {
           password: a.password,
           realm: deps.realmAddress,
           csrf: session.csrf,
+          publishing: deps.store.publishingEnabled(session.did),
           notice: "New password set. The old one no longer works.",
         }),
       );
@@ -153,6 +166,7 @@ export function createApp(deps: AppDeps) {
   }
 
   async function oauthLogin(req: Request, ip: string): Promise<Response> {
+    if (!sameOrigin(req)) return html(errorPage("Request from another site refused."), 403);
     const ipWait = deps.loginsPerIp.take(`ip:${ip}`);
     if (ipWait) return html(errorPage("Too many sign-ins from this address. Try again later."), 429);
     const fields = await form(req);
@@ -160,7 +174,9 @@ export function createApp(deps: AppDeps) {
     if (!handle) return html(errorPage("That is not a valid handle (like alice.bsky.social)."), 400);
     const next = safeNext(fields.next);
     try {
-      const url = await deps.oauth.authorize(handle, { scope: deps.scope, ...(next ? { state: next } : {}) });
+      const did = await resolveHandle(handle, deps.identity);
+      const state = JSON.stringify({ v: 1, did, version: deps.store.publishingVersion(did), publish: fields.publish === "yes", next });
+      const url = await deps.oauth.authorize(handle, { scope: fields.publish === "yes" ? deps.scope : IDENTITY_SCOPE, state });
       return redirect(url.toString());
     } catch (e) {
       log(`oauth authorize ${handle}: ${(e as Error).message}`);
@@ -171,9 +187,11 @@ export function createApp(deps: AppDeps) {
   async function oauthCallback(url: URL): Promise<Response> {
     let did: string;
     let state: string | null | undefined;
+    let oauthSession: Awaited<ReturnType<OAuthPort["callback"]>>["session"];
     try {
       const result = await deps.oauth.callback(url.searchParams);
       did = result.session.did;
+      oauthSession = result.session;
       state = result.state;
     } catch (e) {
       log(`oauth callback: ${(e as Error).message}`);
@@ -181,16 +199,39 @@ export function createApp(deps: AppDeps) {
     }
     try {
       const handle = await verifiedHandleForDid(did, deps.identity);
-      if (!handle) return html(errorPage("Your handle does not verify (its DNS or well-known record does not point at your account)."), 400);
+      if (!handle) {
+        deps.store.forgetOAuthSession(did);
+        return html(errorPage("Your handle does not verify (its DNS or well-known record does not point at your account)."), 400);
+      }
+      // Only verified OAuth application state can grant publication consent. A stale callback
+      // must not undo a withdrawal; legacy in-flight sign-ins fail closed to private.
+      let consent: { v?: unknown; did?: unknown; version?: unknown; publish?: unknown; next?: unknown } = {};
+      try { consent = JSON.parse(state ?? "{}"); } catch { /* legacy state is private */ }
+      const valid = consent?.v === 1 && consent.did === did && Number.isSafeInteger(consent.version);
+      const granted = (await oauthSession.getTokenInfo()).scope.split(" ");
+      const publish = valid && consent.publish === true && deps.scope.split(" ").every((s) => granted.includes(s));
+      const changed = deps.store.setPublishing(did, publish, valid ? consent.version as number : undefined);
+      if (!changed || !publish) {
+        await oauthSession.signOut().catch(() => {});
+        deps.store.forgetOAuthSession(did);
+      }
       // Make the account now, so the first page view (or the client) finds it ready.
       const a = await deps.accounts.ensure(did, handle);
       log(`oauth login: ${handle} (${did}) -> ${a.account}${a.created ? " (new)" : ""}`);
       const { setCookie } = deps.sessions.create(did, handle);
-      return redirect(safeNext(state) ?? "/", { "set-cookie": setCookie });
+      return redirect(safeNext(valid ? consent.next : state) ?? "/", { "set-cookie": setCookie });
     } catch (e) {
+      deps.store.forgetOAuthSession(did);
       log(`oauth sign-in for ${did}: ${(e as Error).message}`);
       return html(errorPage("The realm could not set up your account right now. Try again shortly."), 503);
     }
+  }
+
+  async function disablePublishing(req: Request): Promise<Response> {
+    const guarded = await guardedPost(req);
+    if (guarded instanceof Response) return guarded;
+    deps.store.setPublishing(guarded.session.did, false);
+    return redirect("/");
   }
 
   function clientLogin(req: Request, url: URL): Response {
@@ -261,7 +302,9 @@ export function createApp(deps: AppDeps) {
       case "POST /oauth/login":
         return oauthLogin(req, ip);
       case "GET /oauth/callback":
-        return oauthCallback(url);
+        return serialCallback(url);
+      case "POST /account/privacy":
+        return disablePublishing(req);
       case "POST /account/reset":
         return reset(req);
       case "POST /logout":

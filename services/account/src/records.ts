@@ -168,9 +168,10 @@ export function oauthPublisher(
   restore: (did: string) => Promise<{ fetchHandler(path: string, init?: RequestInit): Promise<Response> }>,
   hasSession: (did: string) => boolean,
   log: (message: string) => void = console.log,
+  canPublish: (did: string) => boolean = () => false,
 ): Publisher {
   return async (did, writes) => {
-    if (!hasSession(did)) return "no_session";
+    if (!canPublish(did) || !hasSession(did)) return "no_session";
     let session;
     try {
       session = await restore(did);
@@ -178,7 +179,10 @@ export function oauthPublisher(
       log(`records: no usable session for ${did}: ${(e as Error).message}`);
       return "no_session";
     }
+    // Restore can refresh credentials asynchronously; consent may have changed meanwhile.
+    if (!canPublish(did)) return "no_session";
     for (const w of writes) {
+      if (!canPublish(did)) return "no_session";
       const res = await session.fetchHandler("/xrpc/com.atproto.repo.putRecord", {
         method: "POST",
         headers: { "content-type": "application/json" },

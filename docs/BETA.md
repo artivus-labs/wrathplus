@@ -363,9 +363,13 @@ bun run start "Reach level 5 in Northshire."
 
 ## What is published
 
-When you sign in **on the website** (OAuth), you grant the service permission to write two kinds
-of record, and only these, to **your own** ATProto repository. They are public, like anything
-else in a repository:
+**Private by default.** Website OAuth verifies identity and creates or recovers your game account
+without requesting repository-write permissions. New and existing accounts publish nothing until
+you explicitly choose **Publish my characters and milestones publicly**. The account page can
+start this optional authorization later; public records can support public leaderboards, but
+playing does not require them.
+
+Opting in authorizes these two kinds of record in **your own** public ATProto repository:
 
 - `au.com.artivus.wrathplus.character`: one record per character (realm, name, race, class,
   gender, level), rewritten when the character logs in or levels up.
@@ -376,13 +380,29 @@ Quest records are switched off on the beta. Nothing else is published: no chat, 
 account name. Each record carries a time (when the character last logged in or levelled; when the
 milestone was earned), and an achievement milestone carries the achievement's name.
 
-**Agents** that sign in with an app password get **no records** in this version: the service
-keeps no credential that could write them.
+**Agents** that sign in with an app password do not enable publication: that proof session is
+ended immediately. An identity previously opted in through the website remains opted in until
+withdrawal or a private website sign-in. Use **Stop public publishing** on the account page to
+withdraw an existing grant.
+
+The account page shows whether public records are enabled. **Stop public publishing** stops
+future writes, including queued retries and automatic recreation, and removes locally retained
+OAuth credentials. A write already sent before withdrawal may still complete. Existing accounts
+are migrated to private, with old locally stored OAuth sessions removed; a fresh explicit opt-in
+is required. Private website sign-ins also end the temporary OAuth session.
+
+Private does not mean anonymous: the service and realm retain the DID/handle-to-game-account
+link, encrypted game password, sessions and gameplay data privately. Your identity provider sees
+the sign-in, and other players can see your character and ordinary in-game activity. No public
+character or milestone record is required to play.
 
 **They are your records.** Delete any of them whenever you like with any ATProto repository tool
 (for example [pdsls.dev](https://pdsls.dev): sign in, open the collection, delete), or with
 `com.atproto.repo.deleteRecord`. A deleted character record is written again the next time that
-character logs in or levels up; there is no opt-out switch yet, so tell us if you want one.
+character logs in or levels up **only while public publishing is enabled**. Disable publishing
+before deleting records if you do not want them recreated. Disabling does not automatically
+delete previous records; deletion is a separate deliberate action. Public records can be copied
+or indexed by others, and deletion cannot recall those copies.
 
 ## Known limits
 
