@@ -152,6 +152,64 @@ fn accepted_quests_are_tracked_expanded_and_the_button_toggles_them() {
     assert!(s.errors().is_empty(), "script errors: {:?}", s.errors());
 }
 
+/// A quest accepted under a collapsed header is watched too. The slot watcher's row search
+/// (`0x5deeb0`) walks every row, the folded tail included, so `QUEST_ACCEPTED` names the quest's
+/// place there, where `AddQuestWatch` finds it. Before the fix the search stopped at the visible
+/// count, fired 0 and nothing was watched.
+#[test]
+fn a_quest_accepted_under_a_collapsed_header_is_watched() {
+    let _data = wrathplus_formats::wow_data_or_skip!();
+    let (tx, _rx) = crossbeam_channel::unbounded();
+    let mut app = App::new();
+    app.insert_resource(NetCommands(tx))
+        .init_resource::<QuestLines>()
+        .init_resource::<QuestLog>()
+        .init_resource::<Items>()
+        .init_resource::<crate::app_core::chat::ChatLog>()
+        .init_resource::<crate::sound::MessageSounds>()
+        .add_systems(Update, feed_quest_lines);
+    let mut s = UiScript::new().unwrap();
+    s.set_screen_size(1024.0, 768.0);
+    crate::ui_script::test_ui::load_ui(&mut s, "Interface\\FrameXML\\QuestLogFrame.xml");
+    s.fire_event("VARIABLES_LOADED", vec![]);
+    s.fire_event("PLAYER_ENTERING_WORLD", vec![]);
+    let mut elwynn = header("Elwynn Forest");
+    elwynn.collapsed = true;
+    let mut folded = quest(7, "Kobold Camp Cleanup", "Kobold Vermin slain: 0/10");
+    folded.folded_under = 1;
+    s.set_quest_log(QuestLogState {
+        entries: vec![
+            elwynn,
+            header("Westfall"),
+            quest(12, "The People's Militia", "Defias Trapper slain: 0/15"),
+            folded,
+        ],
+        num_quests: 2,
+    });
+    s.fire_event("QUEST_LOG_UPDATE", vec![]);
+    app.insert_non_send_resource(s);
+    {
+        let world = app.world_mut();
+        let mut log = world.resource_mut::<QuestLog>();
+        log.insert_template(super::tests::template(7, "Kobold Camp Cleanup", 0));
+        world
+            .resource_mut::<QuestLines>()
+            .push(QuestLine::Accepted(7));
+    }
+    app.update();
+
+    let s = app.world_mut().non_send_resource_mut::<UiScript>();
+    assert!(s.errors().is_empty(), "script errors: {:?}", s.errors());
+    assert_eq!(
+        s.eval::<(i64, i64, i64)>(
+            "return GetNumQuestWatches(), GetQuestIndexForWatch(1), GetNumQuestLogEntries()"
+        )
+        .unwrap(),
+        (1, 4, 3),
+        "watched at its folded row, past the visible count"
+    );
+}
+
 /// Shannon's log (10-24): four watches, one complete, one an item objective. Every one draws its
 /// title and lines at the default filter, and the complete one its own completion text, read by
 /// row (`GetQuestLogCompletionText(questIndex)`, `WatchFrame.lua:827`), not the log selection's.

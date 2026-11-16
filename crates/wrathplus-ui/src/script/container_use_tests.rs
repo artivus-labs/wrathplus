@@ -75,6 +75,7 @@ fn a_right_click_goes_to_the_first_open_window_in_the_reference_order() {
 
     // The guild vault deposits into the current tab's first free slot (`0x5a56b0`).
     s.set_wrath_guild_bank(WrathGuildBankView {
+        open: true,
         money: 1,
         ..Default::default()
     });
@@ -83,6 +84,30 @@ fn a_right_click_goes_to_the_first_open_window_in_the_reference_order() {
     s.set_wrath_guild_bank(WrathGuildBankView::default());
     s.run("UseContainerItem(0, 1)").unwrap();
     assert_eq!(s.take_container_uses(), vec![(0, 1)], "closed, it uses");
+    assert!(s.take_guild_bank_deposits().is_empty());
+}
+
+/// A shut vault's view is not the default one: every character's carries the seven tab logs, and
+/// a guild member's the rank rights and purchased tab count `MSG_GUILD_PERMISSIONS` fills in. With
+/// no banker (`0xc1dc10`) a right-click and the tracker's quest item still use the item (an
+/// equippable one auto-equips). Before the fix any non-default view counted as an open vault, so
+/// both queued a deposit with no banker to send it to and nothing happened.
+#[test]
+fn a_shut_vault_view_leaves_the_right_click_a_use() {
+    let mut s = UiScript::new().unwrap();
+    s.set_container(0, Some(backpack()));
+    s.set_wrath_guild_bank(WrathGuildBankView {
+        open: false,
+        money: 5000,
+        tabs: vec![crate::script::WrathGuildBankTab::default(); 2],
+        tab_logs: vec![Vec::new(); 7],
+        remaining_withdrawals: -1,
+        rank_rights: vec![crate::script::WrathGuildBankRankRights::default(); 3],
+        withdraw_money_remaining: -1,
+        ..Default::default()
+    });
+    s.run("UseContainerItem(0, 1)").unwrap();
+    assert_eq!(s.take_container_uses(), vec![(0, 1)]);
     assert!(s.take_guild_bank_deposits().is_empty());
 }
 

@@ -328,4 +328,34 @@ mod tests {
         s.run("RemoveQuestWatch()").unwrap();
         assert!(!watched(&s, 2));
     }
+
+    /// `0x5deeb0`, the accept event's row: the first non-header row with the id among every row,
+    /// the folded tail included; a header with a matching number and an absent quest are 0.
+    #[test]
+    fn the_accept_row_search_walks_the_folded_tail() {
+        let mut s = UiScript::new().unwrap();
+        let row = |quest_id, is_header, folded_under| QuestLogEntryView {
+            quest_id,
+            is_header,
+            folded_under,
+            ..Default::default()
+        };
+        s.set_quest_log(QuestLogState {
+            entries: vec![
+                row(0, true, 0),
+                row(0, true, 0),
+                row(12, false, 0),
+                row(7, false, 1),
+            ],
+            num_quests: 2,
+        });
+        assert_eq!(s.quest_log_row(12), 3);
+        assert_eq!(
+            s.quest_log_row(7),
+            4,
+            "the folded tail, past the visible count"
+        );
+        assert_eq!(s.quest_log_row(0), 0, "a header never matches");
+        assert_eq!(s.quest_log_row(99), 0);
+    }
 }

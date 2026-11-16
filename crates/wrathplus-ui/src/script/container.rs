@@ -506,9 +506,10 @@ fn use_bag_item(model: &mut Model, item: CursorItem, unit: Option<String>) {
         cursor::queue_lock_changed(model, bag, slot);
     } else if model.trade.is_some() {
         trade_into_first_free(model, bag, slot);
-    } else if model.wrath_friends.bank != super::WrathGuildBankView::default() {
-        // 12340 tests the vault's banker (`0xc1dc10`). A closed vault is the default view, and an
-        // open one always carries its tab logs, so any other view is an open vault.
+    } else if model.wrath_friends.bank.open {
+        // 12340 tests the vault's banker (`0xc1dc10`), which only an open vault sets. A shut
+        // vault's view is never the default: it carries the seven tab logs, and a guild
+        // member's the rank rights and the purchased tab count.
         let tab = model.wrath_friends.current_tab;
         model.guild_bank_deposits.push((tab, bag, slot));
     } else {
