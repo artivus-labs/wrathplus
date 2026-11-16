@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
 # WrathPlus beta realm operations on the box (run as root). See README.md.
 #   realm.sh sources        fetch the pinned core, mod-playerbots and third-party modules
-#   realm.sh build          sources + stage selected modules + build the amd64 image
-#   realm.sh start          MySQL, bootstrap (dbimport), realm list row, auth + world; wait healthy
-#   realm.sh stop           stop world and auth (MySQL and volumes kept)
+#   realm.sh build          sources + stage selected modules + build the amd64 image and the LLM
+#                           chatter bridge image
+#   realm.sh start          MySQL, bootstrap (dbimport), realm list row, chatter config, auth + world;
+#                           wait healthy; then llm-guard + chatter bridge (if the key file exists)
+#   realm.sh stop           stop the chatter, world and auth (MySQL and volumes kept)
 #   realm.sh restart        stop + start
 #   realm.sh update         git pull, build, backup, then stop + start on the new image
+#   realm.sh chatter        (re)start llm-guard and the chatter bridge only, e.g. after installing
+#                           or rotating the key in /etc/wrathplus-beta/llm-chatter.env
 #   realm.sh backup         MySQL dump of the four schemas into $BACKUPS, keep $BACKUP_DAYS days
-#   realm.sh status         services, health, memory, online bots
+#   realm.sh status         services, health, memory, online bots, LLM spend this month
 #   realm.sh account NAME   create a player account (no GM rights) over SOAP; password file under
 #                           /etc/wrathplus-beta/accounts/NAME (0600), never printed
 #   realm.sh soap CMD       one worldserver command over SOAP as the SOAPADMIN account
@@ -46,6 +50,7 @@ cmd_sources() {
     [ "$before" = "$CORE_REV" ] || rm -rf "$CORE/modules/mod-playerbots"
     fetch_pinned "$CORE/modules/mod-playerbots" "$PLAYERBOTS_URL" "$PLAYERBOTS_REV"
     fetch_pinned "$SRC/mod-multibot-bridge" "$MULTIBOT_URL" "$MULTIBOT_REV"
+    fetch_pinned "$SRC/mod-llm-chatter" "$CHATTER_URL" "$CHATTER_REV"
 }
 
 # Module-only build context, as the Manager stages it (crates/wrathplus-manager/src/modules/
@@ -57,13 +62,33 @@ stage_modules() {
     local name
     rsync -a --chmod=Dgo+rx,Fgo+r --exclude .git "$CORE/modules/mod-playerbots/" "$CONTEXT/mod-playerbots/"
     rsync -a --chmod=Dgo+rx,Fgo+r --exclude .git "$SRC/mod-multibot-bridge/" "$CONTEXT/mod-multibot-bridge/"
+    # The C++ module and its SQL. dbimport applies every .sql under data/sql/{characters,world}
+    # (recursively), so the manual-only optional/ cleanup script is left out; tools/ is the
+    # bridge (staged below), images/ only illustrate the README.
+    rsync -a --chmod=Dgo+rx,Fgo+r --exclude .git --exclude /tools/ --exclude /images/ \
+        --exclude /data/sql/characters/optional/ "$SRC/mod-llm-chatter/" "$CONTEXT/mod-llm-chatter/"
     for name in $BUNDLED_MODULES; do
         rsync -a --chmod=Dgo+rx,Fgo+r --exclude .git "$RECIPE/modules/$name/" "$CONTEXT/$name/"
     done
-    if [ -n "$(find "$CONTEXT" \( -type l -o ! -type f ! -type d -o -iname '*.conf' -o -name .env -o -name '.env.*' \) -print -quit)" ]; then
-        die 'module context contains a link, special file or working .conf/.env file'
-    fi
+    refuse_unsafe_files "$CONTEXT"
     log "staged modules: $(cd "$CONTEXT" && echo *)"
+    stage_chatter_bridge
+}
+refuse_unsafe_files() {
+    if [ -n "$(find "$1" \( -type l -o ! -type f ! -type d -o -iname '*.conf' -o -name .env -o -name '.env.*' \) -print -quit)" ]; then
+        die "$1 contains a link, special file or working .conf/.env file"
+    fi
+}
+# The bridge's source (the pinned module's tools/) with our patch, for the bridge image build.
+stage_chatter_bridge() {
+    umask 022
+    rm -rf "$CHATTER_CONTEXT"
+    mkdir -p "$CHATTER_CONTEXT"
+    rsync -a --chmod=Dgo+rx,Fgo+r "$SRC/mod-llm-chatter/tools/" "$CHATTER_CONTEXT/tools/"
+    (cd "$CHATTER_CONTEXT" && git apply "$BETA_DIR/llm-chatter-anthropic-temperature.patch") \
+        || die 'llm-chatter-anthropic-temperature.patch does not apply to the pinned mod-llm-chatter'
+    refuse_unsafe_files "$CHATTER_CONTEXT"
+    log 'staged the chatter bridge (tools/ + temperature patch)'
 }
 
 cmd_build() {
@@ -74,14 +99,21 @@ cmd_build() {
     local image
     image=$(docker image ls --quiet --no-trunc "$IMAGE")
     [ -n "$image" ] || die 'build finished but no image found'
+    log "building $CHATTER_IMAGE (chatter bridge, pinned dependencies)"
+    compose --progress plain build llm-chatter-bridge
+    local chatter_image
+    chatter_image=$(docker image ls --quiet --no-trunc "$CHATTER_IMAGE")
+    [ -n "$chatter_image" ] || die 'bridge build finished but no image found'
     umask 022
     cat > "$ROOT/build-receipt.txt" <<EOF
 built $(date -u +%FT%TZ)
 image $IMAGE $image
+chatter-image $CHATTER_IMAGE $chatter_image
 repo $(git -C "$REPO" rev-parse HEAD)
 core $CORE_REV
 mod-playerbots $PLAYERBOTS_REV
 mod-multibot-bridge $MULTIBOT_REV
+mod-llm-chatter $CHATTER_REV
 bundled $BUNDLED_MODULES
 EOF
     log "built $image"
@@ -103,12 +135,49 @@ UPDATE acore_auth.realmlist SET name=$(sql_literal "$REALM_NAME"),
   address=$(sql_literal "$REALM_ADDRESS"), localAddress=$(sql_literal "$REALM_ADDRESS"),
   localSubnetMask='255.255.255.255', port=$REALM_PORT, gamebuild=12340 WHERE id=1;
 SQL
+    install_chatter_config
     log 'starting auth and world'
     compose up -d authserver worldserver
     wait_healthy 1200 || { compose ps; die 'auth/world not healthy after 20 minutes; see realm.sh status'; }
     log 'realm healthy'
+    # The realm runs without the chatter; a chatter problem is reported, not fatal.
+    start_chatter || log 'WARNING: LLM chatter not running (above); the realm is up without it'
 }
-cmd_stop() { compose stop worldserver authserver; }
+cmd_stop() { compose stop llm-chatter-bridge llm-guard worldserver authserver; }
+
+# --- LLM chatter (mod-llm-chatter bridge behind llm-guard) --------------------------------------
+# mod_llm_chatter.conf for the worldserver and the bridge: the pinned .dist with llm-chatter.conf
+# (then a host-local /etc/wrathplus-beta/llm-chatter.conf) applied. Rewritten on every start.
+install_chatter_config() {
+    local dist="$SRC/mod-llm-chatter/conf/mod_llm_chatter.conf.dist" out="$MODULE_CONFIG/mod_llm_chatter.conf"
+    local overrides=("$BETA_DIR/llm-chatter.conf")
+    [ -f "$dist" ] || die "no $dist; run: realm.sh build"
+    [ -f /etc/wrathplus-beta/llm-chatter.conf ] && overrides+=(/etc/wrathplus-beta/llm-chatter.conf)
+    render_chatter_config "$dist" "${overrides[@]}" > "$out.new"
+    chmod 600 "$out.new"
+    mv "$out.new" "$out"
+    log "chatter config: $out (${overrides[*]})"
+}
+start_chatter() {
+    if [ ! -f "$LLM_CHATTER_ENV" ]; then
+        log "no $LLM_CHATTER_ENV (ANTHROPIC_API_KEY=...): LLM chatter not started"
+        return 1
+    fi
+    [ "$(stat -c %a "$LLM_CHATTER_ENV")" = 600 ] || { log "$LLM_CHATTER_ENV must be mode 0600"; return 1; }
+    grep -q '^ANTHROPIC_API_KEY=.' "$LLM_CHATTER_ENV" || { log "$LLM_CHATTER_ENV has no ANTHROPIC_API_KEY= line"; return 1; }
+    [ -n "$(docker image ls --quiet "$CHATTER_IMAGE")" ] || { log "no $CHATTER_IMAGE image; run: realm.sh build"; return 1; }
+    # llm-guard runs as uid 1000 (the bun image's user) and keeps the month's spend here.
+    install -d -m 0700 -o 1000 -g 1000 "$LLM_GUARD_STATE"
+    log 'starting llm-guard and the chatter bridge'
+    # Recreate both so a rotated key or a new config is picked up.
+    compose up -d --force-recreate --no-deps --wait --wait-timeout 300 llm-guard llm-chatter-bridge || {
+        compose ps --all llm-guard llm-chatter-bridge
+        log 'llm-guard or the bridge is not healthy; see: docker logs wrathplus-beta-llm-guard-1 / -llm-chatter-bridge-1'
+        return 1
+    }
+    log "LLM chatter up; spend this month: curl -s http://127.0.0.1:8788/usage"
+}
+cmd_chatter() { start_chatter || die 'LLM chatter not started'; }
 cmd_restart() { cmd_stop; cmd_start; }
 
 cmd_backup() {
@@ -169,6 +238,10 @@ cmd_status() {
     echo
     printf 'online characters (bots + players): '
     mysql_root <<<'SELECT COUNT(*) FROM acore_characters.characters WHERE online = 1;' || true
+    echo
+    printf 'LLM spend this month (llm-guard): '
+    curl -s --max-time 3 http://127.0.0.1:8788/usage || echo 'llm-guard not running'
+    echo
 }
 
 # --- accounts over SOAP -------------------------------------------------------------------------
@@ -341,7 +414,7 @@ cmd_detach() {
 command=${1:-}
 shift || true
 case "$command" in
-sources|build|start|stop|restart|update|backup|status|account|soap|install|detach) "cmd_$command" "$@" ;;
+sources|build|start|stop|restart|update|chatter|backup|status|account|soap|install|detach) "cmd_$command" "$@" ;;
 account-service) cmd_account_service "$@" ;;
-*) sed -n '2,17p' "$0" >&2; exit 2 ;;
+*) sed -n '2,22p' "$0" >&2; exit 2 ;;
 esac

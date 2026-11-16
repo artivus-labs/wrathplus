@@ -1,0 +1,34 @@
+mod-llm-chatter: LLMChatter.Anthropic.SendTemperature (default 1). With 0 the Anthropic
+requests carry no temperature, so a model that rejects a non-default one (Claude Haiku 5.5)
+never sees it. Applied by realm.sh to the staged bridge source; carried here, not upstream.
+
+--- a/tools/chatter_llm.py
++++ b/tools/chatter_llm.py
+@@ -259,7 +259,18 @@
+         return {'type': 'adaptive'}
+     return None
+ 
++
++def _anthropic_sends_temperature(config):
++    """False when LLMChatter.Anthropic.SendTemperature = 0.
+ 
++    Models that reject a non-default temperature (Claude Haiku 5.5)
++    get the provider default instead of a 400 and a retry.
++    """
++    return str(config.get(
++        'LLMChatter.Anthropic.SendTemperature', '1'
++    )).strip() != '0'
++
++
+ def build_anthropic_request(
+     model, config, max_tokens, user_content, sys_msg=None,
+     temperature=None,
+@@ -271,7 +282,7 @@
+     llm_compat.create_anthropic_message for rejection recovery.
+     """
+     extra_body = {}
+-    if temperature is not None:
++    if temperature is not None and _anthropic_sends_temperature(config):
+         extra_body["temperature"] = temperature
+     thinking = _anthropic_thinking(config)
+     if thinking:

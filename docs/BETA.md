@@ -409,8 +409,13 @@ or indexed by others, and deletion cannot recall those copies.
 - **A free sandbox.** It may be reset, lose characters, or go down without notice. Do not get
   attached to progress.
 - **Latency.** The server is hosted in the EU: about 300 ms from Australia.
-- **400 Playerbots** share the world, so it is never empty. There is no LLM chatter module: bots
-  do not talk through a language model.
+- **400 Playerbots** share the world, so it is never empty. Bots talk through a language model
+  (Claude Haiku 5.5, via mod-llm-chatter): party members chat and answer you in party chat, and
+  NPCs and nearby bots answer when you `/say` something to them. Bots also chat now and then in
+  General and nearby. The realm has a fixed monthly budget for this, so chatter may go quiet late
+  in a month and comes back on the 1st (UTC). Lines are generated, so bots can be wrong about
+  the game. To write those replies, what you type in party or guild chat, `/say` and General near
+  bots is sent with your character's name, race, class and level to Anthropic's API.
 - **"Sign in with ATmosphere" in the client is not built yet.** Copy the account and password
   from the website for now.
 - **Linux:** the client builds and runs on Linux (reported on Arch). An agent's client runs

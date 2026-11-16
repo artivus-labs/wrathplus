@@ -13,22 +13,30 @@ pinned core, mod-playerbots and module set, and the Manager's Playerbots setting
 | World | `127.0.0.1:18085` | `8085` on all interfaces |
 | SOAP | `127.0.0.1:17878` | `127.0.0.1:17878` (box loopback only) |
 | MySQL | not published | not published (Docker network only) |
-| Restart | none | `unless-stopped` (mysql, auth, world) |
+| Restart | none | `unless-stopped` (mysql, auth, world, llm-guard, chatter bridge) |
 | World logs | `/state` tmpfs | `world-logs` volume (disk, not RAM) |
 | Settings | `server.env` written by Manager | `server.env` here; `/etc/wrathplus-beta/server.env` wins |
 | Realm list | `WrathPlus Local`, 127.0.0.1:18085 | `WrathPlus Beta`, wrathplus.artivus.com.au:8085 |
+| LLM chatter | Manager option, any provider | always on: Claude Haiku 5.5 through `llm-guard`, monthly cap |
 
 Modules: mod-playerbots, mod-multibot-bridge, mod-quest-minimap-points, mod-party-quest-share,
 mod-atproto-identity (the realm side of `services/account`) and mod-agent-nav (walking routes for
 agent clients, from the realm's `mmaps`; its limits are in `mod_agent_nav.conf.dist`).
-mod-llm-chatter is **off** (needs a paid LLM key). The module-config directory is empty: the local
-realm's saved `playerbots.conf` equals the shipped `.conf.dist`.
+mod-llm-chatter is **on**: bots talk through Claude Haiku 5.5 within a monthly budget (below, LLM
+chatter). Its Python bridge runs as the `llm-chatter-bridge` service and reaches Anthropic only
+through `llm-guard`. The module-config directory holds only the rendered `mod_llm_chatter.conf`;
+the local realm's saved `playerbots.conf` equals the shipped `.conf.dist`.
 
 ## Files
 
 - `beta.conf` — paths, project, image, realm row, pins. `/etc/wrathplus-beta/beta.conf` overrides.
-- `server.env` — Playerbots settings (Manager defaults; population sized for the box, below).
-- `compose.beta.yaml` — the override described above.
+- `server.env` — Playerbots settings (Manager defaults; population sized for the box, below;
+  mod-playerbots' canned chat off, since mod-llm-chatter replaces it).
+- `compose.beta.yaml` — the override described above, plus `llm-guard` and the chatter bridge.
+- `llm-chatter.conf` — mod-llm-chatter settings (rendered over the module's `.conf.dist`).
+- `llm-chatter.Dockerfile`, `llm-chatter.requirements.txt` — the bridge image: pinned base image,
+  hashed dependency lock.
+- `llm-chatter-anthropic-temperature.patch` — our one change to the bridge (below).
 - `bootstrap-host.sh` — one-time host setup.
 - `realm.sh` — everything else (`realm.sh` with no argument lists the commands); installed as
   `/usr/local/sbin/wrathplus-realm`.
@@ -40,13 +48,15 @@ realm's saved `playerbots.conf` equals the shipped `.conf.dist`.
 
 ```
 /srv/wrathplus/repo            this repository (scripts + recipe)
-/srv/wrathplus/src             pinned core fork (+ modules/mod-playerbots), mod-multibot-bridge
-/srv/wrathplus/build-context   module-only build context (copies, no .git)
+/srv/wrathplus/src             pinned core fork (+ modules/mod-playerbots), mod-multibot-bridge, mod-llm-chatter
+/srv/wrathplus/build-context   modules/: module-only build context; llm-chatter/: patched bridge source (copies, no .git)
 /srv/wrathplus/server-data     dbc/ maps/ vmaps/ mmaps/ Cameras/ Buildings/ (read-only mount)
-/srv/wrathplus/module-config   private .conf overrides (empty)
+/srv/wrathplus/module-config   private .conf overrides: mod_llm_chatter.conf (rendered on each start; no secrets)
+/srv/wrathplus/llm-guard       llm-guard state, usage.json: this month's LLM spend (0700, uid 1000)
 /srv/wrathplus/logs            logs of detached runs (realm.sh detach ...)
 /srv/wrathplus/build-receipt.txt  image id + revisions of the last build
-/etc/wrathplus-beta/           0700: soap-admin.secret, accounts/<NAME> (0600 password files)
+/etc/wrathplus-beta/           0700: soap-admin.secret, accounts/<NAME> (0600 password files),
+                               llm-chatter.env (0600, ANTHROPIC_API_KEY=...)
 /etc/wrathplus/                0750 root:wrathplus-account: account.env, soap-account (0600, service user)
 /var/lib/wrathplus-account/    account service state: account.sqlite, oauth-keys.json (0700)
 /var/backups/wrathplus/        daily dumps, 7 days
@@ -76,12 +86,17 @@ git clone https://github.com/artivus-labs/wrathplus.git /srv/wrathplus/repo
 wrathplus-realm detach build
 systemctl is-active wrathplus-build; tail -f /srv/wrathplus/logs/build-*.log
 
-# 4. Start (MySQL, dbimport, realm row, auth + world; waits for health). First start also
-#    creates the Playerbots accounts and characters, which takes a while.
+# 4. The Anthropic key for the LLM chatter (README: LLM chatter). Without it the realm starts
+#    and bots stay quiet.
+install -m 0600 /dev/null /etc/wrathplus-beta/llm-chatter.env   # then write ANTHROPIC_API_KEY=... into it
+
+# 5. Start (MySQL, dbimport, realm row, auth + world; waits for health; then llm-guard and the
+#    chatter bridge). First start also creates the Playerbots accounts and characters, which
+#    takes a while.
 wrathplus-realm start
 wrathplus-realm status
 
-# 5. Account service: Bun (pinned in beta.conf, 1.4+), services/account as wrathplus-account.service
+# 6. Account service: Bun (pinned in beta.conf, 1.4+), services/account as wrathplus-account.service
 #    on 127.0.0.1:8787, its SOAP account, Caddy with automatic TLS on 80/443 (needs DNS in place)
 wrathplus-realm account-service
 ```
@@ -95,6 +110,8 @@ wrathplus-realm restart                # stop world/auth, bootstrap (DB updates)
 wrathplus-realm soap ".server info"     # one GM command over SOAP (loopback)
 wrathplus-realm backup                 # dump now (also daily via wrathplus-backup.timer)
 wrathplus-realm detach update          # pull, rebuild, backup, restart on the new image
+wrathplus-realm chatter                # recreate llm-guard + chatter bridge (new key, say)
+curl -s http://127.0.0.1:8788/usage    # this month's LLM spend, calls and tokens
 ```
 
 `update` runs `git pull --ff-only` on the box checkout, so that checkout must track the branch
@@ -106,8 +123,8 @@ Changing the bot population or another Playerbots setting: edit `server.env` (or
 `/etc/wrathplus-beta/server.env`), then `wrathplus-realm restart`; Compose recreates the
 servers whose environment changed. Raising the population creates bot accounts on the next start.
 
-After a reboot Docker brings back mysql, auth and world (restart policy `unless-stopped`); auth
-and world retry until MySQL accepts connections. A realm stopped with `realm.sh stop` stays
+After a reboot Docker brings back mysql, auth, world, llm-guard and the chatter bridge (restart
+policy `unless-stopped`); auth and world retry until MySQL accepts connections. A realm stopped with `realm.sh stop` stays
 stopped across reboots.
 
 Restore a dump into the running MySQL (stop world and auth first):
@@ -128,6 +145,60 @@ with rclone to the bucket in `/etc/wrathplus-beta/offsite.env` (0600: `R2_ACCESS
 keeps 14 days. Without `offsite.env` the step is skipped. The age private key never goes on the
 box: a restore downloads the object elsewhere, decrypts it with `age -d -i <key>`, and copies the
 dump back.
+
+## LLM chatter
+
+mod-llm-chatter (pinned `CHATTER_REV` in `beta.conf`) has three parts. The C++ module is built
+into the realm image; dbimport applies its SQL from `data/sql/characters` and `data/sql/world`
+(every file, recursively, so staging leaves out the manual-only `data/sql/characters/optional/`).
+Its Python bridge, the `llm-chatter-bridge` service, polls the characters database for queued
+events and writes the replies back. And `llm-guard` (`services/llm-guard`) sits between the bridge
+and `api.anthropic.com`:
+
+```
+worldserver ⇄ MySQL ⇄ llm-chatter-bridge ──ANTHROPIC_BASE_URL──▶ llm-guard ──x-api-key──▶ api.anthropic.com
+```
+
+- **Key.** `/etc/wrathplus-beta/llm-chatter.env` (root, 0600) holds one line,
+  `ANTHROPIC_API_KEY=...`. Compose hands it to `llm-guard` only; the bridge's config carries a
+  placeholder and its requests are re-keyed by the guard. Without the file `realm.sh start` skips
+  the chatter and the realm runs without it. After creating or rotating the key:
+  `wrathplus-realm chatter`.
+- **Budget.** `llm-guard` prices every response's `usage`, adds it to the calendar month (UTC) in
+  `/srv/wrathplus/llm-guard/usage.json` (kept across restarts), and once the month reaches
+  `LLM_GUARD_MONTHLY_USD` (`beta.conf`, $100) answers every call with a 429 that names the budget
+  and the reset time, until the 1st. Bots then go quiet; nothing else changes. It logs at 50, 80
+  and 100 % (`docker logs wrathplus-beta-llm-guard-1`). Calls already in flight when the cap is
+  reached still complete, so the month can end a few cents over.
+- **Pricing assumptions** (Claude Haiku 5.5, USD per million tokens): input $0.10 and output
+  $0.50 when the prompt is at most 100K tokens; $0.50 and $2.50 for the whole request beyond
+  that. Cache writes cost 1.25× the input rate (2× for 1-hour writes, when the response says so),
+  cache reads 0.1×. Thinking tokens are billed as output and are already in `output_tokens`. The
+  guard allows only `claude-haiku-5-5`, the one model it has a price for; any other model is
+  refused with a 400 before it reaches the API.
+- **Haiku 5.5 settings.** It rejects a non-default `temperature`/`top_p`/`top_k` with a 400 and
+  thinks by default. The bridge sends no top_p/top_k; `LLMChatter.Anthropic.Thinking = disabled`
+  turns thinking off; and `llm-chatter-anthropic-temperature.patch` (applied to the staged bridge
+  source at build) adds `LLMChatter.Anthropic.SendTemperature = 0`, so no temperature is sent.
+- **Config.** `llm-chatter.conf` is rendered over the pinned `mod_llm_chatter.conf.dist` into
+  `/srv/wrathplus/module-config/mod_llm_chatter.conf` on every start (each key defined once). For
+  a host-only change put the keys in `/etc/wrathplus-beta/llm-chatter.conf`; then
+  `wrathplus-realm restart`. The live preflight probe is off (`HealthCheck.LLMProbe = 0`) so the
+  bridge stays up at the cap; a missing key stops `llm-guard` instead.
+- **Memory.** Bridge capped at 384 MB (about 130 MB after start), guard at 128 MB (about 30 MB).
+- **Privacy.** Real players' party, guild, `/say` and General lines near bots, with their
+  character's name, race, class and level, go to Anthropic's API; `docs/BETA.md` says so.
+
+```sh
+curl -s http://127.0.0.1:8788/usage     # month, usd, cap_usd, calls, refused, tokens, resets_at
+curl -s http://127.0.0.1:8788/healthz
+docker logs --tail 50 wrathplus-beta-llm-chatter-bridge-1
+```
+
+Raising or lowering the budget: set `LLM_GUARD_MONTHLY_USD` in `/etc/wrathplus-beta/beta.conf`,
+then `wrathplus-realm chatter`. A new pin (`CHATTER_REV`) needs `llm-chatter.requirements.txt`
+regenerated (its header has the command) and the patch checked; `realm.sh build` stops if the
+patch no longer applies.
 
 ## Network
 
