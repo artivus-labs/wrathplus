@@ -114,6 +114,9 @@ the same headless client in about 2 GiB and 0.6 of a core.
   start-up pass that compiles every shader variant behind the loading screen, which the software
   renderer keeps in memory, and start to in the world takes 40–75 seconds, most of it that pass.
   The default skips the pass and compiles each pipeline when it is first drawn.
+- On glibc the client hands freed heap back to the system every 30 seconds
+  (`WOW_HEAP_TRIM=<seconds>`, `0` for off). Without it a client's resident memory grows with the
+  ground it covers and never falls, because glibc keeps the pages streamed art frees.
 - A `/lua` call answers in 0.1–0.2 s and a screenshot in 0.3–0.9 s.
 
 ## Walking routes (`AgentMoveTo`)

@@ -205,6 +205,8 @@ pub(crate) struct ArtScopePlugin;
 
 impl Plugin for ArtScopePlugin {
     fn build(&self, app: &mut App) {
+        // Eviction frees heap; on glibc only the trim makes that show in the process's memory.
+        crate::heap_trim::start();
         app.init_resource::<ArtCensus>()
             .init_resource::<ArtScopeState>()
             .add_systems(Startup, configure_art_scope)
