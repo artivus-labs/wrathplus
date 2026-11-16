@@ -987,17 +987,11 @@ fn sample_track<V: CameraValue>(
     Ok(Some(match track.interpolation {
         0 => current.value,
         1 => V::linear(current.value, next.value, t),
-        2 => V::hermite(
-            current.value,
-            current
-                .out_tangent
-                .context("Hermite camera key has no outgoing tangent")?,
-            next.value,
-            next.in_tangent
-                .context("Hermite camera key has no incoming tangent")?,
-            t,
-        ),
-        3 => V::bezier(
+        // The reference's cubic dispatch (`0x716b51`): 2 is Bézier over {value, outTan, inTan,
+        // value} (`0x716c41`), what every `Cameras\*.m2` fly-by authors; 3 is Hermite (`0x716b9e`).
+        // These were swapped, so fly-bys read their absolute control points as velocities and
+        // looped hundreds of yards between keys (the Night Elf intro through trees and buildings).
+        2 => V::bezier(
             current.value,
             current
                 .out_tangent
@@ -1005,6 +999,16 @@ fn sample_track<V: CameraValue>(
             next.value,
             next.in_tangent
                 .context("Bézier camera key has no incoming tangent")?,
+            t,
+        ),
+        3 => V::hermite(
+            current.value,
+            current
+                .out_tangent
+                .context("Hermite camera key has no outgoing tangent")?,
+            next.value,
+            next.in_tangent
+                .context("Hermite camera key has no incoming tangent")?,
             t,
         ),
         mode => bail!("unsupported Wrath camera interpolation mode {mode}"),

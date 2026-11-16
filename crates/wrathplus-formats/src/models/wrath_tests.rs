@@ -290,7 +290,7 @@ fn camera_sampling_selects_the_requested_nested_sequence_and_keeps_cubic_tangent
         out_tangent,
     };
     let positions = WrathTrack {
-        interpolation: 3,
+        interpolation: 2,
         global_sequence: u16::MAX,
         sequences: vec![
             vec![key(0, [1.0, 0.0, 0.0], None, None)],
@@ -331,10 +331,17 @@ fn camera_sampling_selects_the_requested_nested_sequence_and_keeps_cubic_tangent
         target_base: [4.0, 5.0, 6.0],
         roll: empty_scalar,
     };
+    // Mode 2 is Bézier (12340 `0x716c41`): ⅛·10 + ⅜·12 + ⅜·18 + ⅛·20 = 15, plus the base.
     let pose = sample_wrath_camera(&camera, 1, 500, 0).expect("sample camera");
     assert!((pose.position[0] - 16.0).abs() < 1e-5, "{pose:?}");
     assert_eq!(pose.position[1..], [2.0, 3.0]);
     assert_eq!(pose.target, [4.0, 5.0, 6.0]);
+    // Mode 3 is Hermite (`0x716b9e`): the same keys' tangents read as velocities,
+    // ½·10 + ⅛·12 + ½·20 − ⅛·18 = 14.25, plus the base.
+    let mut hermite = camera.clone();
+    hermite.positions.interpolation = 3;
+    let pose = sample_wrath_camera(&hermite, 1, 500, 0).expect("sample camera");
+    assert!((pose.position[0] - 15.25).abs() < 1e-5, "{pose:?}");
 }
 
 /// Installed models the two-stage adapter used to refuse whole: a helm whose sheen stage draws
