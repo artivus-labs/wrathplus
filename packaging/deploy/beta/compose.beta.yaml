@@ -1,6 +1,7 @@
 # Beta override of packaging/server/compose.yaml (the Manager's recipe), applied with
 # `-f compose.yaml -f compose.beta.yaml` by lib.sh. Only what differs on the public box:
-# an amd64 image, public auth/world ports, loopback-only SOAP, restart after reboot, log caps.
+# an amd64 image, public auth/world ports, loopback-only SOAP, restart after reboot, log caps, and
+# the LLM chatter bridge behind llm-guard (always on here, not a Manager profile).
 # MySQL keeps no published port, as in the base recipe.
 x-beta-server: &beta-server
   image: ${BETA_IMAGE:?Set BETA_IMAGE}
@@ -38,5 +39,65 @@ services:
     # Logs on disk, not in the /state tmpfs (RAM) the base recipe uses for a short local session.
     volumes:
       - world-logs:/state/logs
+  # mod-llm-chatter's Python bridge (packaging/server/chatter.sh: private config copy with the
+  # instance DB credentials, runs as 10001). Its Anthropic client goes to llm-guard, never direct;
+  # its config holds only a placeholder key.
+  llm-chatter-bridge:
+    profiles: !reset []
+    image: ${BETA_CHATTER_IMAGE:?Set BETA_CHATTER_IMAGE}
+    platform: linux/amd64
+    build:
+      context: ${BETA_DIR:?Set BETA_DIR}
+      dockerfile: llm-chatter.Dockerfile
+    restart: unless-stopped
+    environment:
+      ANTHROPIC_BASE_URL: http://llm-guard:8788
+    mem_limit: 384m
+    logging:
+      driver: json-file
+      options: {max-size: "20m", max-file: "3"}
+    depends_on:
+      llm-guard:
+        condition: service_healthy
+  # Metering proxy (services/llm-guard): holds the API key, prices each response, refuses calls once
+  # the month (UTC) has spent LLM_GUARD_MONTHLY_USD. /healthz and /usage on the host's loopback.
+  llm-guard:
+    image: oven/bun:1.4.4-alpine@sha256:4cf82f5686b196504fe119db3fcd9185b191f82ece82c40680e597228ec6070a
+    platform: linux/amd64
+    init: true
+    user: "1000:1000"
+    restart: unless-stopped
+    read_only: true
+    tmpfs: ["/tmp"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    working_dir: /app
+    command: [bun, run, src/index.ts]
+    # ANTHROPIC_API_KEY. Optional here so Compose works without it; llm-guard exits without a key
+    # and realm.sh starts the chatter only when the file exists.
+    env_file:
+      - path: ${LLM_CHATTER_ENV_FILE:?Set LLM_CHATTER_ENV_FILE}
+        required: false
+    environment:
+      LLM_GUARD_MONTHLY_USD: ${LLM_GUARD_MONTHLY_USD:-100}
+      LLM_GUARD_MODELS: claude-haiku-5-5
+      LLM_GUARD_STATE_DIR: /var/lib/llm-guard
+      LLM_GUARD_HOST: 0.0.0.0
+      LLM_GUARD_PORT: "8788"
+      BUN_RUNTIME_TRANSPILER_CACHE_PATH: "0"
+    volumes:
+      - ${LLM_GUARD_SOURCE:?Set LLM_GUARD_SOURCE}:/app:ro
+      - ${LLM_GUARD_STATE:?Set LLM_GUARD_STATE}:/var/lib/llm-guard
+    ports: ["127.0.0.1:8788:8788"]
+    mem_limit: 128m
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1:8788/healthz]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 volumes:
   world-logs:

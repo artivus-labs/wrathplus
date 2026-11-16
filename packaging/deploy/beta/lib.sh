@@ -39,9 +39,15 @@ compose() {
         SERVER_RECIPE="$RECIPE" \
         SERVER_DATA="$SERVER_DATA" \
         SERVER_ENV_FILE="$(server_env_file)" \
-        CHATTER_SOURCE="$RECIPE" \
+        CHATTER_SOURCE="$CHATTER_CONTEXT" \
+        BETA_DIR="$BETA_DIR" \
         BETA_IMAGE="$IMAGE" \
         BETA_BUILD_JOBS="$BUILD_JOBS" \
+        BETA_CHATTER_IMAGE="$CHATTER_IMAGE" \
+        LLM_CHATTER_ENV_FILE="$LLM_CHATTER_ENV" \
+        LLM_GUARD_SOURCE="$REPO/services/llm-guard" \
+        LLM_GUARD_STATE="$LLM_GUARD_STATE" \
+        LLM_GUARD_MONTHLY_USD="$LLM_GUARD_MONTHLY_USD" \
         docker compose --project-name "$PROJECT" --project-directory "$RECIPE" \
         -f "$RECIPE/compose.yaml" -f "$BETA_DIR/compose.beta.yaml" "$@"
 }
@@ -64,4 +70,43 @@ wait_healthy() {
         [ "$(date +%s)" -lt "$deadline" ] || return 1
         sleep 10
     done
+}
+
+# mod_llm_chatter.conf from the module's .conf.dist and override files (stdout): each key an override
+# sets replaces the shipped line in place (one definition per key; the C++ and Python parsers each
+# need that); a later override wins; keys the .dist lacks are appended. Comments are kept.
+render_chatter_config() { # dist override...
+    local dist=$1
+    shift
+    awk -v dist="$dist" '
+        function key(line) {
+            if (line !~ /^[[:space:]]*[A-Za-z][A-Za-z0-9_.]*[[:space:]]*=/) return ""
+            sub(/^[[:space:]]*/, "", line)
+            sub(/[[:space:]]*=.*/, "", line)
+            return line
+        }
+        FILENAME != dist {
+            k = key($0)
+            if (k == "") next
+            if (!(k in value)) order[++n] = k
+            value[k] = $0
+            next
+        }
+        {
+            k = key($0)
+            if (k != "" && (k in value)) {
+                if (!(k in used)) print value[k]
+                used[k] = 1
+                next
+            }
+            print
+        }
+        END {
+            for (i = 1; i <= n; i++) {
+                if (order[i] in used) continue
+                if (!added++) print "\n# Added by the WrathPlus beta (packaging/deploy/beta/llm-chatter.conf)"
+                print value[order[i]]
+            }
+        }
+    ' "$@" "$dist"
 }

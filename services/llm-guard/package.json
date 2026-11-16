@@ -1,0 +1,19 @@
+{
+  "name": "@wrathplus/llm-guard",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Metering proxy in front of api.anthropic.com for the beta realm's LLM chatter: injects the API key, prices each response's usage and refuses calls once the month's budget is spent.",
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "bun": ">=1.2"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.4",
+    "typescript": "7.0.2"
+  }
+}

@@ -1,4 +1,5 @@
-# Services that run beside a realm: the beta account service (services/account).
+# Services that run beside a realm: the beta account service (services/account) and the LLM
+# chatter's metering proxy (services/llm-guard).
 name: Services
 
 on:
@@ -26,6 +27,24 @@ jobs:
     defaults:
       run:
         working-directory: services/account
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+      - name: Install
+        run: bun install --frozen-lockfile
+      - name: Typecheck
+        run: bun run typecheck
+      - name: Test
+        run: bun test
+
+  llm-guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: services/llm-guard
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
