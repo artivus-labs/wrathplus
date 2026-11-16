@@ -389,6 +389,47 @@ mod tests {
         }
     }
 
+    /// Every intro flies smoothly: sampled each 100 ms, no eye step over 60 yd and no turn of the
+    /// view over 25°. With the Bézier and Hermite modes swapped, the fly-bys read their absolute
+    /// control points as velocities: the Night Elf intro swung 100+ yd back and forth through
+    /// trees and buildings, and seven of the eleven broke these bounds (worst 158 yd, 171°).
+    /// Correct, the largest are the Death Knight's authored swoop (53 yd) and turn (18°).
+    #[test]
+    fn real_flyby_shots_fly_smoothly() {
+        let data = crate::wow_data_or_skip!();
+        let mut chain = crate::open_chain(&data).expect("open chain");
+        let cat = load_cinematics(&mut chain).expect("load cinematic tables");
+        let dir = |v: &CinematicView| {
+            let f: [f32; 3] = std::array::from_fn(|i| v.target[i] - v.eye[i]);
+            let n = f.iter().map(|x| x * x).sum::<f32>().sqrt().max(1e-6);
+            f.map(|x| x / n)
+        };
+        for id in INTROS {
+            let row = cat.shots(id)[0].clone();
+            let path = CinematicPath::load(&mut chain, &row).expect("path");
+            let mut prev = path.sample(0);
+            for ms in (100..=path.duration_ms).step_by(100) {
+                let v = path.sample(ms);
+                let step = (0..3)
+                    .map(|i| (v.eye[i] - prev.eye[i]).powi(2))
+                    .sum::<f32>()
+                    .sqrt();
+                let (a, b) = (dir(&prev), dir(&v));
+                let cos = (0..3).map(|i| a[i] * b[i]).sum::<f32>().clamp(-1.0, 1.0);
+                let turn = cos.acos().to_degrees();
+                assert!(
+                    step < 60.0,
+                    "sequence {id} at {ms} ms: the eye jumped {step:.0} yd"
+                );
+                assert!(
+                    turn < 25.0,
+                    "sequence {id} at {ms} ms: the view turned {turn:.0}°"
+                );
+                prev = v;
+            }
+        }
+    }
+
     #[test]
     fn real_flyby_shots_range_far_from_their_origin() {
         let data = crate::wow_data_or_skip!();
