@@ -288,3 +288,62 @@ fn lua_doc_reads_one_name_or_says_what_is_near() {
         .any(|s| s == "Quests.pick_up"));
     assert_eq!(json_get(address, "/lua/doc").0, 400);
 }
+
+#[test]
+fn globals_failures_are_not_successful_empty_searches_or_missing_docs() {
+    let (jobs, queue) = crossbeam_channel::unbounded::<Job>();
+    let shared = Port {
+        token: TOKEN.into(),
+        jobs,
+        events: Arc::new(EventLog::new()),
+        scripts: std::env::temp_dir().join("wp-no-such-discovery-folder"),
+    };
+    // Keep the game queue open without responding; exercise the actual timeout logic cheaply.
+    assert_eq!(
+        globals_wait(&shared, Duration::ZERO)
+            .unwrap_err()
+            .status_code()
+            .0,
+        504
+    );
+    drop(queue);
+    assert_eq!(
+        lua_search(&shared, "UnitName", Some("api"), None)
+            .status_code()
+            .0,
+        503
+    );
+    assert_eq!(
+        lua_search(&shared, "pick_up", Some("builtin"), None)
+            .status_code()
+            .0,
+        200
+    );
+    // Real HTTP routing must preserve unavailability rather than turn it into doc's 404.
+    let address = start(0, shared).unwrap();
+    assert_eq!(json_get(address, "/lua/search?q=UnitName").0, 503);
+    assert_eq!(json_get(address, "/lua/doc?name=UnitName").0, 503);
+    assert_eq!(json_get(address, "/lua/doc?name=Quests.pick_up").0, 200);
+}
+
+#[test]
+fn dropped_and_malformed_globals_replies_are_distinct_errors() {
+    for (response, status) in [(None, 503), (Some(json!({"wrong": true})), 502)] {
+        let (jobs, queue) = crossbeam_channel::unbounded::<Job>();
+        let shared = Port {
+            token: TOKEN.into(),
+            jobs,
+            events: Arc::new(EventLog::new()),
+            scripts: std::env::temp_dir(),
+        };
+        let worker = std::thread::spawn(move || {
+            if let Job::Globals { reply } = queue.recv().unwrap() {
+                if let Some(value) = response {
+                    reply.send(value).unwrap();
+                }
+            }
+        });
+        assert_eq!(globals(&shared).unwrap_err().status_code().0, status);
+        worker.join().unwrap();
+    }
+}

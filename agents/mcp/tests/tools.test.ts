@@ -357,13 +357,18 @@ describe("lua search", () => {
     reply = (req) =>
       req.query.name === "Quests.pick_up"
         ? Response.json({ kind: "builtin", name: "Quests.pick_up", source: "function Q.pick_up() ... end" })
-        : Response.json({ error: "nothing is named Nope", suggestions: [] }, { status: 404 });
+        : Response.json({ error: "nothing is named Nope", suggestions: ["Quests.pick_up"] }, { status: 404 });
     const found = await call("lua_doc", { name: "Quests.pick_up" });
     expect(seen[0]).toMatchObject({ path: "/lua/doc", query: { name: "Quests.pick_up" } });
     expect(JSON.parse(textOf(found)).source).toContain("function Q.pick_up");
     const missing = await call("lua_doc", { name: "Nope" });
     expect(missing.isError).toBe(true);
     expect(textOf(missing)).toContain("nothing is named Nope");
+    expect(JSON.parse(textOf(missing)).details.suggestions).toEqual(["Quests.pick_up"]);
+    reply = () => Response.json({ error: "ambiguous", candidates: ["Move.start", "Goals.start"] }, { status: 404 });
+    const ambiguous = await call("lua_doc", { name: "start" });
+    expect(ambiguous.isError).toBe(true);
+    expect(JSON.parse(textOf(ambiguous)).details.candidates).toEqual(["Move.start", "Goals.start"]);
   });
 
   test("the lua tool says to search before writing a helper", async () => {

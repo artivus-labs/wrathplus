@@ -22,7 +22,7 @@ pub(crate) struct Entry {
     pub doc: String,
     /// `file:line` (`wp/quest.lua:146`, `world.rs:412`, the agent's `grind/loop.lua:3`).
     pub at: String,
-    /// The function's text, for `/lua/doc` (Lua built-ins and own modules only).
+    /// The function's text, for `/lua/doc` (Lua built-ins only).
     pub source: Option<String>,
 }
 
@@ -134,8 +134,13 @@ fn header_entry(lines: &[&str], qualified: &str) -> String {
     out.join(" ")
 }
 
-/// The function's text from its definition to the `end` that closes it at the same indentation.
+/// The function's text from its definition to the `end` that closes it at the same indentation
+/// (the definition line alone when it closes there). `search_tests` checks every built-in's span.
 fn body(lines: &[&str], i: usize) -> String {
+    let def = lines[i].trim_end();
+    if def.ends_with(" end") || def.ends_with(")end") {
+        return def.to_string();
+    }
     let indent = lines[i].len() - lines[i].trim_start().len();
     let end = lines[i + 1..]
         .iter()
@@ -298,7 +303,7 @@ pub(crate) fn search(
     if kinds.contains(&"api") {
         for name in api() {
             // The Agent* functions are built-ins, with their docs.
-            if name.starts_with("Agent") {
+            if AGENT_FNS.iter().any(|f| f.0 == name) {
                 continue;
             }
             if let Some(s) = rank_name(&name.to_lowercase(), &q) {
@@ -336,6 +341,13 @@ pub(crate) fn doc(
     if let Some(e) = all.iter().find(|e| e.name.to_lowercase() == lower) {
         return Ok(e.json(true));
     }
+    if crate::env::valid_module(name) {
+        if let Ok(src) = std::fs::read_to_string(crate::env::module_path(scripts, name)) {
+            return Ok(
+                json!({"kind": "own", "name": name, "at": format!("{}.lua:1", name.replace('.', "/")), "source": src}),
+            );
+        }
+    }
     let by_last: Vec<&Entry> = all
         .iter()
         .filter(|e| {
@@ -352,13 +364,6 @@ pub(crate) fn doc(
             let names: Vec<&str> = many.iter().map(|e| e.name.as_str()).collect();
             return Err(
                 json!({"error": format!("{name} names several functions: ask for one"), "candidates": names}),
-            );
-        }
-    }
-    if crate::env::valid_module(name) {
-        if let Ok(src) = std::fs::read_to_string(crate::env::module_path(scripts, name)) {
-            return Ok(
-                json!({"kind": "own", "name": name, "at": format!("{}.lua:1", name.replace('.', "/")), "source": src}),
             );
         }
     }

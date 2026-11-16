@@ -181,9 +181,18 @@ fn route(shared: &Port, request: &mut HttpRequest) -> Reply {
         ),
         (Method::Get, "/lua/doc") => match param("name").map(|v| percent_decode(&v)) {
             Some(name) if !name.trim().is_empty() => {
-                match crate::search::doc(&name, &shared.scripts, |n| {
-                    globals(shared).iter().any(|g| g == n)
-                }) {
+                let mut unavailable = None;
+                let found = crate::search::doc(&name, &shared.scripts, |n| match globals(shared) {
+                    Ok(names) => names.iter().any(|g| g == n),
+                    Err(reply) => {
+                        unavailable = Some(reply);
+                        false
+                    }
+                });
+                if let Some(reply) = unavailable {
+                    return reply;
+                }
+                match found {
                     Ok(found) => json_response(200, &found),
                     Err(missing) => json_response(404, &missing),
                 }
@@ -368,21 +377,43 @@ fn lua_search(shared: &Port, q: &str, kind: Option<&str>, limit: Option<usize>) 
         }
     };
     let limit = limit.unwrap_or(DEFAULT_SEARCH).clamp(1, 200);
-    let found = crate::search::search(q, &kinds, &shared.scripts, || globals(shared), limit);
+    let api = if kinds.contains(&"api") {
+        match globals(shared) {
+            Ok(names) => names,
+            Err(reply) => return reply,
+        }
+    } else {
+        Vec::new()
+    };
+    let found = crate::search::search(q, &kinds, &shared.scripts, || api, limit);
     json_response(200, &found)
 }
 
-/// The VM's global function names, from the game loop (none when it does not answer in time).
-fn globals(shared: &Port) -> Vec<String> {
+/// Unavailability is not evidence of absence.
+fn globals(shared: &Port) -> Result<Vec<String>, Reply> {
+    globals_wait(shared, GAME_TIMEOUT)
+}
+
+fn globals_wait(shared: &Port, timeout: Duration) -> Result<Vec<String>, Reply> {
     let (reply, answer) = crossbeam_channel::bounded(1);
     if shared.jobs.send(Job::Globals { reply }).is_err() {
-        return Vec::new();
+        return Err(json_response(503, &json!({"error": "game loop stopped"})));
     }
-    answer
-        .recv_timeout(GAME_TIMEOUT)
-        .ok()
-        .and_then(|v| serde_json::from_value(v).ok())
-        .unwrap_or_default()
+    match answer.recv_timeout(timeout) {
+        Ok(value) => serde_json::from_value(value).map_err(|_| {
+            json_response(
+                502,
+                &json!({"error": "invalid globals answer from game loop"}),
+            )
+        }),
+        Err(crossbeam_channel::RecvTimeoutError::Timeout) => Err(json_response(
+            504,
+            &json!({"error": "the game did not answer in time"}),
+        )),
+        Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
+            Err(json_response(503, &json!({"error": "game loop stopped"})))
+        }
+    }
 }
 
 /// Queue a job for the game loop and wait for its JSON answer.

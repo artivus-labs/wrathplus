@@ -80,6 +80,9 @@ function text(value: unknown, isError = false): CallToolResult {
 }
 
 function failure(error: unknown): CallToolResult {
+  if (error instanceof AgentError && error.details !== undefined) {
+    return text({ message: error.message, status: error.status, details: error.details }, true);
+  }
   const message =
     error instanceof AgentError || error instanceof Error ? error.message : String(error);
   return { content: [{ type: "text", text: message }], isError: true };

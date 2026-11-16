@@ -30,7 +30,11 @@ fn the_agent_functions_and_their_registrations_are_in_step() {
                 let tail = &rest[i + 1..];
                 let end = tail.find('"').unwrap_or(0);
                 let name = &tail[..end];
-                if ident(name) && !line.trim_start().starts_with("//") && !line.contains("format!")
+                // `wp!(…, "Agent")` names a module's global table, not a function.
+                if ident(name)
+                    && !line.trim_start().starts_with("//")
+                    && !line.contains("format!")
+                    && !line.trim_start().starts_with("wp!(")
                 {
                     registered.push(name.to_string());
                 }
@@ -72,7 +76,9 @@ fn a_module_function_has_its_signature_doc_place_and_source() {
         "{}",
         pick_up.doc
     );
-    assert!(pick_up.doc.contains("AGENT_QUESTS_DONE"), "{}", pick_up.doc);
+    // A header entry runs on through its continuation lines (the shared note after hand_in).
+    let hand_in = all.iter().find(|e| e.name == "Quests.hand_in").unwrap();
+    assert!(hand_in.doc.contains("AGENT_QUESTS_DONE"), "{}", hand_in.doc);
     let (file, line) = pick_up.at.split_once(':').unwrap();
     assert_eq!(file, "wp/quest.lua");
     let src = crate::env::built_ins()
@@ -206,4 +212,56 @@ fn doc_reads_a_builtin_an_own_module_or_an_api_name() {
     let missing = doc("NoSuchThing", &dir, |_| false).unwrap_err();
     assert!(missing["error"].as_str().unwrap().contains("NoSuchThing"));
     assert!(missing["suggestions"].is_array());
+}
+
+#[test]
+fn every_builtin_span_runs_from_its_definition_to_its_own_end() {
+    for e in builtins().iter().filter(|e| e.source.is_some()) {
+        let src = e.source.as_deref().unwrap();
+        let first = src.lines().next().unwrap();
+        let last = src.lines().last().unwrap();
+        let indent = |l: &str| l.len() - l.trim_start().len();
+        assert!(first.contains("function"), "{}: {first}", e.name);
+        assert!(
+            last.trim_end().ends_with("end") && indent(last) == indent(first)
+                || src.lines().count() == 1,
+            "{} at {} ends {last:?}",
+            e.name,
+            e.at
+        );
+    }
+    // A one-line function is its own line, not the next function's body.
+    let src = "local M = {}\nfunction M.one() return 'x' end\nfunction M.two()\n  return 2\nend\nreturn M\n";
+    let found = lua_functions("builtin", "t", None, "t.lua", src);
+    assert_eq!(
+        found[0].source.as_deref(),
+        Some("function M.one() return 'x' end")
+    );
+    assert_eq!(
+        found[1].source.as_deref(),
+        Some("function M.two()\n  return 2\nend")
+    );
+}
+
+#[test]
+fn exact_own_module_precedes_builtin_shorthand_and_only_registered_agents_are_filtered() {
+    let dir = scratch("precedence");
+    std::fs::write(dir.join("pick_up.lua"), "return 'own'").unwrap();
+    assert_eq!(
+        doc("pick_up", &dir, |_| panic!("no VM needed")).unwrap()["kind"],
+        "own"
+    );
+    assert_eq!(
+        doc("Quests.pick_up", &dir, |_| false).unwrap()["kind"],
+        "builtin"
+    );
+    let found = search(
+        "agent",
+        &["api"],
+        &dir,
+        || vec!["AgentNearby".into(), "AgentAddonHelper".into()],
+        20,
+    );
+    assert_eq!(names(&found), ["AgentAddonHelper"]);
+    std::fs::remove_dir_all(dir).unwrap();
 }
