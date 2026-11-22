@@ -7,9 +7,7 @@
 //! - for each quest item `Qi`, the first item slot needing it (`0x5e2630`; the quest's own source
 //!   item only above a count of 1): that slot's line; and, while the row is not complete, the item's
 //!   name for each of the quest's source drops that is `Qi` (template `+0x1c74`, gated on
-//!   `0x5e0ea0`, approximated here by the row's COMPLETE state). Native `0x5e0ea0` also evaluates
-//!   live requirements; money/reputation/failed-state parity in source-drop suppression is not
-//!   qualified by this bounded projection.
+//!   `0x5e0ea0`, read here as the row's `isComplete`, the strict form of that test).
 //!
 //! A quest with any line adds its title above them. The lines are the log's own leaderboard texts,
 //! matched to their template slot by the POI bit (creature slot `i` is bit `i`, item slot `i` bit

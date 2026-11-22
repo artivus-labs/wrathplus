@@ -238,6 +238,9 @@ fn a_quest_template_keeps_its_pvp_objective() {
     // The 26 header columns: id, method, level, ..., title id 21, players slain 22.
     let mut header = [0u32; 26];
     header[0] = 9_001;
+    // The second reputation objective, read as a ceiling.
+    header[9] = 930;
+    header[10] = (-500i32) as u32;
     header[21] = 7;
     header[22] = 10;
     let mut b: Vec<u8> = header.iter().flat_map(|v| v.to_le_bytes()).collect();
@@ -245,7 +248,10 @@ fn a_quest_template_keeps_its_pvp_objective() {
     for s in ["Kill them", "objectives", "details", "", "end"] {
         cstr(&mut b, s);
     }
-    b.extend([0u8; 4 * (16 + 12)]); // objective quads, required items
+    b.extend([0u8; 4 * 16]); // objective quads
+                             // Six required items; the fifth and sixth have no objective row.
+    let items = [0u32, 0, 0, 0, 0, 0, 0, 0, 77, 3, 78, 2];
+    b.extend(items.iter().flat_map(|v| v.to_le_bytes()));
     for _ in 0..4 {
         cstr(&mut b, "");
     }
@@ -256,6 +262,8 @@ fn a_quest_template_keeps_its_pvp_objective() {
     assert_eq!((t.quest_id, t.title.as_str()), (9_001, "Kill them"));
     let native = t.wrath.as_ref().unwrap();
     assert_eq!((native.title_id, native.players_slain), (7, 10));
+    assert_eq!(native.rep_objective_max, (930, -500));
+    assert_eq!(native.required_items[4..], [(77, 3), (78, 2)]);
     for cut in 0..b.len() {
         assert!(decode(SMSG_QUEST_QUERY_RESPONSE, &b[..cut]).is_err());
     }

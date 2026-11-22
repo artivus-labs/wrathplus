@@ -60,6 +60,12 @@ pub struct WrathQuestInfo {
     pub reward_rep_show_mask: u32,
     /// The objectives' `ItemDrop` and `ItemDropQuantity`, the source items the quest log lists.
     pub item_drops: [(u32, u32); 4],
+    /// The query response's second reputation objective (faction, value), 12340 template
+    /// `+0x24`/`+0x28`: the done test (`0x5e1016`) wants the standing at or below the value.
+    pub rep_objective_max: (u32, i32),
+    /// All six `RequiredItemId`/`RequiredItemCount` pairs (template `+0x1c44`/`+0x1c5c`), which
+    /// the done test counts in the bags; the objectives keep the first four.
+    pub required_items: [(u32, u32); 6],
     /// The query response's fourth text, AzerothCore's `AreaDescription` (12340 template `+0x1a24`):
     /// an exploration or event quest's objective line, the log's first leaderboard row (`0x5e1460`).
     pub area_description: String,

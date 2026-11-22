@@ -47,8 +47,12 @@ pub struct QuestLogEntryView {
     /// A quest folded under a collapsed header: that header's 1-based place among the headers
     /// (`GetQuestSortIndex`); 0 on a visible row.
     pub folded_under: u32,
-    /// The slot state: `1` complete, `-1` failed, `0` in progress (`isComplete` 1, -1 or nil).
+    /// `isComplete` (`0x5e5cc0`): `-1` for a failed slot, `1` once the client's own done test
+    /// passes (`0x5e0ea0(i, 1)`, live counts, not the slot's COMPLETE bit), else `0` (nil).
     pub complete: i32,
+    /// `0x5e0ea0(i, 0)`, the done test that also passes a quest with nothing to do: the POI mask
+    /// (`0x5e2950`) answers -1, the turn-in, on it.
+    pub done: bool,
     /// The slot's deadline in unix seconds (`time(nullptr) + limitTime`, vmangos
     /// `Player::AddQuest`), 0 when untimed. A stamp, not a countdown: the app diffs this snapshot
     /// to fire `QUEST_LOG_UPDATE`, so a live number here would rebuild the log every frame.
