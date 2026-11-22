@@ -30,11 +30,12 @@ fn the_agent_functions_and_their_registrations_are_in_step() {
                 let tail = &rest[i + 1..];
                 let end = tail.find('"').unwrap_or(0);
                 let name = &tail[..end];
-                // `wp!(…, "Agent")` names a module's global table, not a function.
+                // A bare "Agent" is never a function: `wp!(…, "Agent")` names a module's global
+                // table, and `.join("Agent")` is the scripts folder's path.
                 if ident(name)
+                    && name != "Agent"
                     && !line.trim_start().starts_with("//")
                     && !line.contains("format!")
-                    && !line.trim_start().starts_with("wp!(")
                 {
                     registered.push(name.to_string());
                 }
@@ -47,7 +48,12 @@ fn the_agent_functions_and_their_registrations_are_in_step() {
     let mut listed: Vec<String> = AGENT_FNS.iter().map(|f| f.0.to_string()).collect();
     listed.sort();
     assert_eq!(registered, listed);
-    for e in builtins().iter().filter(|e| e.name.starts_with("Agent")) {
+    // The Rust registrations only: `wp.agent`'s Lua functions (`Agent.intent`, ...) also start
+    // with "Agent" but live in `wp/agent.lua`.
+    for e in builtins()
+        .iter()
+        .filter(|e| AGENT_FNS.iter().any(|f| f.0 == e.name))
+    {
         let (file, line) = e.at.split_once(':').unwrap();
         let text = AGENT_FNS.iter().find(|f| f.3 == file).unwrap().4;
         let at: usize = line.parse().unwrap();
