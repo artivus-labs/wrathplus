@@ -78,14 +78,15 @@ impl super::UiScript {
     }
 }
 
-/// The quest's incomplete-objective mask (`0x5e2950`): -1 when complete.
+/// The quest's incomplete-objective mask (`0x5e2950`): -1 when done (`0x5e0ea0(i, 0)`, which
+/// `isComplete`'s stricter test implies).
 fn incomplete_mask(m: &Model, quest_id: u32) -> Option<u32> {
     let e = m
         .quest_log
         .entries
         .iter()
         .find(|e| !e.is_header && e.quest_id == quest_id)?;
-    if e.complete == 1 {
+    if e.done || e.complete == 1 {
         return Some(u32::MAX);
     }
     // Bits are template slots (`0x5e2950`): an empty or source-item slot shifts rows, not bits.

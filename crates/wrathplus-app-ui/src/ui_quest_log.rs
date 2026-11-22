@@ -32,6 +32,8 @@ use crate::names::NameCache;
 use crate::net::{ClientCommand, Guid, NetCommands};
 use crate::query_cache::QueryCache;
 
+mod done;
+
 /// Marks a GameObject objective's entry on the wire (vmangos `Quest.cpp:512-516`).
 const GO_OBJECTIVE_BIT: u32 = 0x8000_0000;
 
@@ -736,6 +738,24 @@ pub(crate) fn feed_quest_log(
         subject: player.as_ref(),
         states: &states,
     };
+    let (race, class) = (
+        store.0.unit_race().unwrap_or(0),
+        store.0.unit_class().unwrap_or(0),
+    );
+    let standing = |f: u32| {
+        let info = factions.as_deref()?.catalog().faction(f)?;
+        let wire = usize::try_from(info.rep_index)
+            .ok()
+            .and_then(|i| reputations.as_ref()?.0.get(i))
+            .map_or(0, |&(_, s)| s);
+        Some(info.base_for(race, class) + wire)
+    };
+    let standing = |f: u32| standing(f).unwrap_or(0);
+    let live = done::DoneInputs {
+        bag_count: &|id| count_of(&store.0, &objects, id, InventoryScope::QUEST_ITEMS),
+        standing: &standing,
+        money: store.0.player_money().unwrap_or(0),
+    };
 
     let mut entries: Vec<QuestLogEntryView> = Vec::new();
     let mut header_keys: Vec<Option<String>> = Vec::new();
@@ -815,12 +835,13 @@ pub(crate) fn feed_quest_log(
                     // The in-flight filter above kept only cached rows.
                     None => unreachable!("the in-flight gate leaves only cached rows"),
                 };
-            let complete = if r.log_slot.state & quest_slot_state::COMPLETE != 0 {
-                1
-            } else if r.log_slot.state & quest_slot_state::FAIL != 0 {
+            let t = quest_log.template(r.quest_id, &commands);
+            let done = |strict| t.is_some_and(|t| done::quest_done(t, &r.log_slot, strict, &live));
+            // `isComplete` (`0x5e5cc0`): failed first, then the client's own strict done test.
+            let complete = if r.log_slot.state & quest_slot_state::FAIL != 0 {
                 -1
             } else {
-                0
+                i32::from(done(true))
             };
             tooltip_rows.push((
                 r.quest_id,
@@ -846,6 +867,7 @@ pub(crate) fn feed_quest_log(
                 is_header: false,
                 collapsed: false,
                 complete,
+                done: done(false),
                 pushable,
                 // Absolute unix seconds, 0 untimed; the bindings subtract the server clock.
                 timer: r.log_slot.timer,
@@ -882,19 +904,6 @@ pub(crate) fn feed_quest_log(
         factions.as_deref(),
     ) {
         let catalog = factions.catalog();
-        let (race, class) = (
-            store.0.unit_race().unwrap_or(0),
-            store.0.unit_class().unwrap_or(0),
-        );
-        let standing = |f: u32| {
-            catalog.faction(f).map_or(0, |info| {
-                let wire = usize::try_from(info.rep_index)
-                    .ok()
-                    .and_then(|i| reputations.as_ref()?.0.get(i))
-                    .map_or(0, |&(_, s)| s);
-                info.base_for(race, class) + wire
-            })
-        };
         script.set_wrath_quest_reward_factions(
             rows.iter()
                 .filter_map(|r| {
@@ -1054,11 +1063,11 @@ struct QuestProgress {
     /// The COMPLETE toast's `%s` here; empty takes `ERR_QUEST_UNKNOWN_COMPLETE`.
     title: String,
     changed_lines: Vec<String>,
-    /// The quest's COMPLETE state turned on in this diff.
+    /// The quest's `isComplete` turned on in this diff.
     completed: bool,
 }
 
-/// The quests in both states with a same-position line that advanced, or whose COMPLETE state
+/// The quests in both states with a same-position line that advanced, or whose `isComplete`
 /// turned on. A quest or a line appearing or leaving is not progress.
 fn quests_with_progressed_objectives(
     old: &QuestLogState,

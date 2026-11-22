@@ -509,8 +509,7 @@ fn quest_template(r: &mut Cursor<&[u8]>) -> io::Result<QuestTemplate> {
     native.suggested_players = u32_le(r)?;
     let rep_objective_faction = u32_le(r)?;
     let rep_objective_value = u32_le(r)?;
-    let _rep_objective_faction2 = u32_le(r)?;
-    let _rep_objective_value2 = u32_le(r)?;
+    native.rep_objective_max = (u32_le(r)?, u32_le(r)? as i32);
     let next_quest_in_chain = u32_le(r)?;
     native.reward_xp_id = u32_le(r)?;
     let money = u32_le(r)? as i32;
@@ -565,8 +564,9 @@ fn quest_template(r: &mut Cursor<&[u8]>) -> io::Result<QuestTemplate> {
         objective.required_count = u32_le(r)?;
         *drop = (u32_le(r)?, u32_le(r)?);
     }
-    for i in 0..6 {
+    for (i, slot) in native.required_items.iter_mut().enumerate() {
         let (item, count) = (u32_le(r)?, u32_le(r)?);
+        *slot = (item, count);
         if let Some(objective) = objectives.get_mut(i) {
             objective.item_id = item;
             objective.item_count = count;

@@ -290,3 +290,6 @@ fn the_map_draws_nothing_on_its_first_frames_that_it_then_drops() {
 
 #[path = "wrath_event_poi_tests.rs"]
 mod event_poi;
+
+#[path = "wrath_item_quest_poi_tests.rs"]
+mod item_quest_poi;
