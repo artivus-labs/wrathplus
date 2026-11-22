@@ -212,7 +212,8 @@ fn stock_world_map_shows_the_turn_in_swap_once_the_bags_hold_the_parts() {
     assert_eq!(swap(&mut app), format!("9305 nil {numeric} 4"));
     hold(&mut app, 4);
     let complete = ask(&app, "return QUEST_POI_COMPLETE_SWAP");
-    assert_eq!(swap(&mut app), format!("9305 true {complete} -1"));
+    // `completed` is GetQuestLogTitle's isComplete, which 12340 returns as the number 1.
+    assert_eq!(swap(&mut app), format!("9305 1 {complete} -1"));
     let s = app.world().non_send_resource::<UiScript>();
     assert!(s.errors().is_empty(), "{:?}", s.errors());
 }
