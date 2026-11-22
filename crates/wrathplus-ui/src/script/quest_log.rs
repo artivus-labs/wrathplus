@@ -142,6 +142,17 @@ impl super::UiScript {
         self.model_ref().quest_watches.ids.clone()
     }
 
+    /// `0x5deeb0`: the quest's 1-based row among all 50 rows, folded ones included (a header
+    /// never matches), else 0; `QUEST_ACCEPTED` carries it (`0x6df2b0`).
+    pub fn quest_log_row(&self, quest_id: u32) -> u32 {
+        let model = self.model_ref();
+        let rows = model.quest_log.entries.iter().take(50);
+        (1..)
+            .zip(rows)
+            .find(|(_, e)| !e.is_header && e.quest_id == quest_id)
+            .map_or(0, |(i, _)| i)
+    }
+
     /// The 1-based selection, 0 for none; the app reads it to re-point it across a rebuild.
     pub fn quest_log_selection(&self) -> u32 {
         self.model_ref().quest_log_selection

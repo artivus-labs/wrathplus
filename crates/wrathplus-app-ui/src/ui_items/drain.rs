@@ -472,6 +472,43 @@ fn run_container_clicks(world: &mut World) {
         .unwrap();
 }
 
+/// An app holding everything [`ScriptItemUse`] reads, sending into `tx`.
+#[cfg(test)]
+fn item_use_app(tx: crossbeam_channel::Sender<ClientCommand>) -> App {
+    let mut app = App::new();
+    app.add_message::<crate::sound::AutoEquipSound>()
+        .add_message::<crate::creature_anim::SheathRequest>()
+        .init_resource::<crate::app_core::interaction::MerchantOpen>()
+        .init_resource::<crate::ui_bank::BankOpen>()
+        .init_resource::<crate::app_core::interaction::ItemTextOpen>()
+        .init_resource::<PendingItemOps>()
+        .init_resource::<crate::ui_bind_confirm::PendingEquips>()
+        .init_resource::<crate::ui_bind_confirm::PendingBindOnUse>()
+        .init_resource::<crate::app_core::state::LootLatch>()
+        .init_resource::<crate::app_core::state::Selection>()
+        .init_resource::<crate::app_core::session::SelfGuid>()
+        .init_resource::<crate::spell::cast_target::AutoSelfCast>()
+        .init_resource::<crate::net::Reputations>()
+        .init_resource::<crate::app_core::player::Player>()
+        .init_resource::<crate::spell::PendingCast>()
+        .init_resource::<crate::spell::QueuedMeleeSpell>()
+        .init_resource::<crate::app_core::cooldowns::Cooldowns>()
+        .init_resource::<crate::spell::SpellModifiers>()
+        .init_resource::<crate::net::wrath_combo_points::NativeComboPoints>()
+        .init_resource::<crate::app_core::errors::CastErrors>()
+        .init_resource::<crate::app_core::errors::UiErrorKeys>()
+        .init_resource::<crate::app_core::chat::ChatLog>()
+        .init_resource::<crate::sound::MessageSounds>()
+        .init_resource::<crate::spell::AutoRepeatActive>()
+        .init_resource::<crate::app_core::interaction::TradeSkillOpens>()
+        .init_resource::<crate::spell::targeting::SpellTargeting>()
+        .init_resource::<crate::spell::HeldForPick>()
+        .init_resource::<Items>()
+        .init_resource::<crate::net::GuidIndex>()
+        .insert_resource(NetCommands(tx));
+    app
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -489,37 +526,7 @@ mod tests {
     /// Right-clicks backpack slot 1, holding a lootable template, and runs the click dispatcher.
     fn open_the_clam() -> (App, crossbeam_channel::Receiver<ClientCommand>) {
         let (tx, rx) = crossbeam_channel::unbounded();
-        let mut app = App::new();
-        app.add_message::<crate::sound::AutoEquipSound>()
-            .add_message::<crate::creature_anim::SheathRequest>()
-            .init_resource::<crate::app_core::interaction::MerchantOpen>()
-            .init_resource::<crate::ui_bank::BankOpen>()
-            .init_resource::<crate::app_core::interaction::ItemTextOpen>()
-            .init_resource::<PendingItemOps>()
-            .init_resource::<crate::ui_bind_confirm::PendingEquips>()
-            .init_resource::<crate::ui_bind_confirm::PendingBindOnUse>()
-            .init_resource::<crate::app_core::state::LootLatch>()
-            .init_resource::<crate::app_core::state::Selection>()
-            .init_resource::<crate::app_core::session::SelfGuid>()
-            .init_resource::<crate::spell::cast_target::AutoSelfCast>()
-            .init_resource::<crate::net::Reputations>()
-            .init_resource::<crate::app_core::player::Player>()
-            .init_resource::<crate::spell::PendingCast>()
-            .init_resource::<crate::spell::QueuedMeleeSpell>()
-            .init_resource::<crate::app_core::cooldowns::Cooldowns>()
-            .init_resource::<crate::spell::SpellModifiers>()
-            .init_resource::<crate::net::wrath_combo_points::NativeComboPoints>()
-            .init_resource::<crate::app_core::errors::CastErrors>()
-            .init_resource::<crate::app_core::errors::UiErrorKeys>()
-            .init_resource::<crate::app_core::chat::ChatLog>()
-            .init_resource::<crate::sound::MessageSounds>()
-            .init_resource::<crate::spell::AutoRepeatActive>()
-            .init_resource::<crate::app_core::interaction::TradeSkillOpens>()
-            .init_resource::<crate::spell::targeting::SpellTargeting>()
-            .init_resource::<crate::spell::HeldForPick>()
-            .init_resource::<Items>()
-            .init_resource::<crate::net::GuidIndex>()
-            .insert_resource(NetCommands(tx));
+        let mut app = item_use_app(tx);
 
         app.world_mut().spawn((
             SelfPlayer,
@@ -1430,37 +1437,7 @@ mod bind_confirm_tests {
         no_use_spell: bool,
     ) -> (App, crossbeam_channel::Receiver<ClientCommand>) {
         let (tx, rx) = crossbeam_channel::unbounded();
-        let mut app = App::new();
-        app.add_message::<crate::sound::AutoEquipSound>()
-            .add_message::<crate::creature_anim::SheathRequest>()
-            .init_resource::<crate::app_core::interaction::MerchantOpen>()
-            .init_resource::<crate::ui_bank::BankOpen>()
-            .init_resource::<crate::app_core::interaction::ItemTextOpen>()
-            .init_resource::<PendingItemOps>()
-            .init_resource::<crate::ui_bind_confirm::PendingEquips>()
-            .init_resource::<crate::ui_bind_confirm::PendingBindOnUse>()
-            .init_resource::<crate::app_core::state::LootLatch>()
-            .init_resource::<crate::app_core::state::Selection>()
-            .init_resource::<crate::app_core::session::SelfGuid>()
-            .init_resource::<crate::spell::cast_target::AutoSelfCast>()
-            .init_resource::<crate::net::Reputations>()
-            .init_resource::<crate::app_core::player::Player>()
-            .init_resource::<crate::spell::PendingCast>()
-            .init_resource::<crate::spell::QueuedMeleeSpell>()
-            .init_resource::<crate::app_core::cooldowns::Cooldowns>()
-            .init_resource::<crate::spell::SpellModifiers>()
-            .init_resource::<crate::net::wrath_combo_points::NativeComboPoints>()
-            .init_resource::<crate::app_core::errors::CastErrors>()
-            .init_resource::<crate::app_core::errors::UiErrorKeys>()
-            .init_resource::<crate::app_core::chat::ChatLog>()
-            .init_resource::<crate::sound::MessageSounds>()
-            .init_resource::<crate::spell::AutoRepeatActive>()
-            .init_resource::<crate::app_core::interaction::TradeSkillOpens>()
-            .init_resource::<crate::spell::targeting::SpellTargeting>()
-            .init_resource::<crate::spell::HeldForPick>()
-            .init_resource::<Items>()
-            .init_resource::<crate::net::GuidIndex>()
-            .insert_resource(NetCommands(tx));
+        let mut app = item_use_app(tx);
         app.world_mut().spawn((
             SelfPlayer,
             ObjectStore(ObjectFields::from_pairs(&[
@@ -1557,5 +1534,113 @@ mod bind_confirm_tests {
             "the reference's bind arm sits BELOW the on-use lookup's failure exits, not above them"
         );
         assert!(rx.try_iter().next().is_none());
+    }
+
+    /// The vault view the guild-bank feed publishes for a character that never opened a vault and
+    /// is in no guild: closed, but carrying the seven (empty) tab logs, so it is not the default.
+    fn guildless_vault_view() -> wrathplus_ui::script::WrathGuildBankView {
+        wrathplus_ui::script::WrathGuildBankView {
+            tab_logs: vec![Vec::new(); 7],
+            ..Default::default()
+        }
+    }
+
+    /// Backpack slot 1 holds the axe under `template`, the vault view is the one every character
+    /// is published, and `lua` runs through the click applier.
+    fn click_with_a_shut_vault(
+        template: ItemInfo,
+        lua: &str,
+    ) -> (App, crossbeam_channel::Receiver<ClientCommand>) {
+        let (tx, rx) = crossbeam_channel::unbounded();
+        let mut app = item_use_app(tx);
+        app.world_mut().spawn((
+            SelfPlayer,
+            ObjectStore(ObjectFields::from_pairs(&[
+                (F_PACK_SLOT_1, AXE_GUID as u32),
+                (F_PACK_SLOT_1 + 1, (AXE_GUID >> 32) as u32),
+            ])),
+        ));
+        crate::items::test_spawn_item(
+            app.world_mut(),
+            AXE_GUID,
+            ObjectFields::from_pairs(&[(F_OBJECT_ENTRY, FLURRY_AXE)]),
+            false,
+        );
+        app.world_mut()
+            .resource_mut::<Items>()
+            .insert_template(FLURRY_AXE, Some(template));
+        let mut script = UiScript::new().unwrap();
+        script.set_container(0, Some(bag_with_the_axe(4)));
+        script.set_wrath_guild_bank(guildless_vault_view());
+        script.set_quest_log(wrathplus_ui::script::QuestLogState {
+            entries: vec![wrathplus_ui::script::QuestLogEntryView {
+                quest_id: 10,
+                title: "Inoculation".into(),
+                ..Default::default()
+            }],
+            num_quests: 1,
+        });
+        script.set_wrath_quest_special_items(vec![(10, 0, 1)]);
+        script.run(lua).unwrap();
+        app.insert_non_send_resource(script);
+        run_container_clicks(app.world_mut());
+        (app, rx)
+    }
+
+    /// A right-click on an equippable bag item auto-equips it (`0x4fa3b9`) with the vault shut.
+    /// Before the fix the window ladder (`0x5d8650`) took any non-default vault view for an open
+    /// vault, and every character's view carries its tab logs, so the click queued a deposit
+    /// with no banker to send it to and nothing happened.
+    #[test]
+    fn a_right_click_on_an_equippable_item_auto_equips_it_with_the_vault_shut() {
+        let template = ItemInfo {
+            inventory_type: 13, // INVTYPE_WEAPON
+            ..crate::items::test_template("Flurry Axe")
+        };
+        let (mut app, rx) = click_with_a_shut_vault(template, "UseContainerItem(0, 1)");
+        let wire = wire_pos_for(0, 1).unwrap();
+        let sent = rx.try_iter().collect::<Vec<_>>();
+        assert!(
+            matches!(
+                sent.as_slice(),
+                [ClientCommand::AutoEquipItem { bag_index, slot }] if (*bag_index, *slot) == wire
+            ),
+            "one CMSG_AUTOEQUIP_ITEM from backpack slot 1, got {sent:?}"
+        );
+        let mut script = app.world_mut().non_send_resource_mut::<UiScript>();
+        assert!(script.take_guild_bank_deposits().is_empty());
+    }
+
+    /// A quest item with an on-use spell (the Inoculating Crystal shape) is used, by a right-click in the
+    /// bag and by the tracker's item button (`UseQuestLogSpecialItem`, `0x5e5640`, the same bag
+    /// use): `CMSG_USE_ITEM` names its spell and guid. The same shut-vault view swallowed both.
+    #[test]
+    fn a_quest_item_is_used_from_the_bag_and_from_the_tracker_with_the_vault_shut() {
+        use wrathplus_protocol::types::ItemUseSpell;
+        const INOCULATE: u32 = 4321;
+        for lua in ["UseContainerItem(0, 1)", "UseQuestLogSpecialItem(1)"] {
+            let mut template = crate::items::test_template("Inoculating Crystal");
+            template.use_spell = Some(ItemUseSpell {
+                spell_id: INOCULATE,
+                cooldown_ms: -1,
+                category: 0,
+                category_cooldown_ms: -1,
+            });
+            let (mut app, rx) = click_with_a_shut_vault(template, lua);
+            let sent = rx.try_iter().collect::<Vec<_>>();
+            assert!(
+                sent.iter().any(|c| matches!(
+                    c,
+                    ClientCommand::UseItem {
+                        spell_id: INOCULATE,
+                        item_guid: AXE_GUID,
+                        ..
+                    }
+                )),
+                "{lua}: one CMSG_USE_ITEM for the crystal, got {sent:?}"
+            );
+            let mut script = app.world_mut().non_send_resource_mut::<UiScript>();
+            assert!(script.take_guild_bank_deposits().is_empty(), "{lua}");
+        }
     }
 }

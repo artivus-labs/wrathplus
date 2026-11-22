@@ -113,18 +113,12 @@ fn feed_quest_lines(
     // The slot watcher's event (`0x6df370`, or `0x6df2b0` once the record lands): after its line,
     // `QUEST_ACCEPTED` with the quest's 1-based log row (`0x5deeb0`), which stock
     // `QuestLog_OnEvent` hands to `AddQuestWatch` under `AUTO_QUEST_WATCH`
-    // (`QuestLogFrame.lua:260-264`). The log was pushed earlier this frame (`feed_quest_log`).
-    // Labelled: a quest folded under a collapsed header has no row and fires 0, which
-    // `AddQuestWatch` (`0x5e67c0`) refuses; the reference's row search there is not traced.
+    // (`QuestLogFrame.lua:260-264`). The log was pushed earlier this frame (`feed_quest_log`), as
+    // the watcher rebuilds it (`0x5e6940(1)`) before it fires. The row search walks every row, so
+    // a quest folded under a collapsed header is found in the folded tail and watched there.
     for &id in &accepted {
-        let row = script
-            .eval::<i64>(&format!(
-                "for i = 1, GetNumQuestLogEntries() do \
-                 local _, _, _, _, header, _, _, _, id = GetQuestLogTitle(i) \
-                 if not header and id == {id} then return i end end return 0"
-            ))
-            .unwrap_or(0);
-        script.fire_event("QUEST_ACCEPTED", vec![ScriptValue::Int(row)]);
+        let row = script.quest_log_row(id);
+        script.fire_event("QUEST_ACCEPTED", vec![ScriptValue::Int(i64::from(row))]);
     }
     // The log update after it, which redraws the tracker the watch just grew: `AddQuestWatch`
     // (`0x5e64d0`) fires nothing, and the slot watcher marks the log dirty (`0x5e6940(1)`) ahead

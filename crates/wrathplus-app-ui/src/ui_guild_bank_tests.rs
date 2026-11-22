@@ -403,3 +403,35 @@ fn a_shut_vault_still_publishes_rank_rights_and_the_tab_count() {
     assert_eq!((view.tabs.len(), view.rank_rights.len()), (2, 1));
     assert_eq!(view.rank_rights[0].tabs[0], (1, 5));
 }
+
+/// A character that is in no guild and never opened a vault is still published a view that is not
+/// the default one (it carries the seven tab logs) and is not open, so nothing may take "not the
+/// default" for an open vault: the bag right-click did, and swallowed every use and equip.
+#[test]
+fn a_never_opened_vault_publishes_a_shut_view_that_is_not_the_default() {
+    let bank = GuildBank::default();
+    let native = crate::ui_guild::NativeGuild::default();
+    let view = view(&bank, &native, &|_, _| (None, None), &|_| None);
+    assert!(!view.open);
+    assert_ne!(view, WrathGuildBankView::default());
+    assert_eq!(view.tab_logs.len(), 7);
+
+    let mut s = UiScript::new().unwrap();
+    let mut bag = wrathplus_ui::script::ContainerState {
+        num_slots: 16,
+        ..Default::default()
+    };
+    bag.slots.insert(
+        1,
+        wrathplus_ui::script::ContainerSlot {
+            item_id: 25,
+            count: 1,
+            ..Default::default()
+        },
+    );
+    s.set_container(0, Some(bag));
+    s.set_wrath_guild_bank(view);
+    s.run("UseContainerItem(0, 1)").unwrap();
+    assert!(s.take_guild_bank_deposits().is_empty());
+    assert_eq!(s.take_container_uses(), vec![(0, 1)]);
+}
