@@ -53,6 +53,11 @@ const BUILT_IN: &[(&str, Option<&str>, &str)] = &[
     wp!("professions", "Professions"),
 ];
 
+/// The built-in modules: name, global, source (for `search`).
+pub(crate) fn built_ins() -> &'static [(&'static str, Option<&'static str>, &'static str)] {
+    BUILT_IN
+}
+
 /// Where the agent's modules live: `WOW_AGENT_SCRIPTS`, else `<client home>/Agent/scripts`.
 pub(crate) fn scripts_dir() -> PathBuf {
     if let Some(dir) = std::env::var_os("WOW_AGENT_SCRIPTS") {

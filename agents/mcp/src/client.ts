@@ -7,6 +7,8 @@ export class AgentError extends Error {
     message: string,
     /** The HTTP status, or undefined when the port could not be reached. */
     readonly status?: number,
+    /** Structured control-port error, including candidates/suggestions. */
+    readonly details?: unknown,
   ) {
     super(message);
     this.name = "AgentError";
@@ -57,6 +59,20 @@ export class AgentClient {
       names: names?.length ? names.join(",") : undefined,
       exclude: exclude?.length ? exclude.join(",") : undefined,
     });
+  }
+
+  /** `GET /lua/search?q=…[&kind=builtin,own,api][&limit=N]`: what exists to call. */
+  luaSearch(q: string, kinds?: string[], limit?: number): Promise<unknown> {
+    return this.#json("GET", "/lua/search", {
+      q,
+      kind: kinds?.length ? kinds.join(",") : undefined,
+      limit,
+    });
+  }
+
+  /** `GET /lua/doc?name=…`: one function's signature, doc and source, or a module's source. */
+  luaDoc(name: string): Promise<unknown> {
+    return this.#json("GET", "/lua/doc", { name });
   }
 
   /** `GET /files`: the agent's saved Lua modules. */
@@ -135,8 +151,10 @@ export class AgentClient {
 async function httpError(method: string, path: string, response: Response): Promise<AgentError> {
   const text = await response.text();
   let detail = text;
+  let details: unknown;
   try {
     const parsed: unknown = JSON.parse(text);
+    details = parsed;
     if (parsed && typeof parsed === "object" && "error" in parsed) {
       detail = String((parsed as { error: unknown }).error);
     }
@@ -152,5 +170,6 @@ async function httpError(method: string, path: string, response: Response): Prom
   return new AgentError(
     `${method} ${path} failed with HTTP ${response.status}: ${detail || response.statusText}${hint}`,
     response.status,
+    details,
   );
 }

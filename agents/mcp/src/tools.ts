@@ -23,8 +23,17 @@ It is the stock World of Warcraft 3.3.5a (build 12340) API as an addon sees it: 
 A bare expression (\`UnitLevel("player")\`) returns its values; otherwise use \`return a, b\`. The answer is JSON {ok, values, output}, output being what print()ed, or {ok:false, error, output} on a Lua error.
 A chunk runs to completion inside one game frame: never loop waiting for the world to change. Return, then call again or wait on the events tool.
 ${HELPERS}
+Search before writing a helper: lua_search finds what exists (built-ins, your modules, the API's names) and lua_doc reads one.
 For code that runs by itself every frame, save a module (save_module) and require("name") it (AgentReload("name") after a change; one named autoexec runs on entering the world). Frames work as in addons: CreateFrame("Frame"):SetScript("OnUpdate", fn) ticks, :RegisterEvent(...) reacts.
 Also: AgentFindNpc(service[, yards]) (the nearest "repair", "vendor", "classtrainer", "innkeeper"... in sight), AgentServices([kinds[, radius]]) (where services are on your map, from the realm: {pending = true} first, then after AGENT_SERVICES_READY the places with their distance, nearest first; 2000 yd and 20 places by default; the answer is reused for 120 s within 100 yd), AgentPath (a route preview; {pending = true} first when the realm routes, then the route after AGENT_PATH_READY), Rotation.list (what Combat casts), Agent.intent(name, {when, run}) and Agent.decide(name, {question, options, on}) for a fast decision loop when one runs, require("wp.engine") (a Playerbots-style decision engine) and require("wp.values") (health, power, auras, cooldowns, range, threat, bags).`;
+
+const LUA_SEARCH_DESCRIPTION = `Search the Lua you can call (built-ins, your modules, API names) before writing your own.
+builtin: the built-in modules' functions (Quests.pick_up, Goals.push, wp.values.health...) and the Agent* functions, each with its signature, doc and file:line. own: your saved modules, the lines that match. api: the names of the global functions in the game's Lua (the stock 3.3.5a addon API and anything defined since), names only.
+Case-insensitive; names that match come first, then docs, then source lines. Read one in full with lua_doc.`;
+
+const LUA_DOC_DESCRIPTION = `Read one Lua function or module in full: signature, doc and source.
+For a built-in, its signature, doc and source; for one of your modules, its source.
+Give the name lua_search returned (Quests.pick_up, AgentMoveTo, grind.loop); a bare function name works when only one function has it. A stock API name only says it exists: WrathPlus ships no stock API docs. Nothing by that name: an error with the nearest names.`;
 
 const MODULES_DESCRIPTION = `List your saved Lua modules, or read one when \`name\` is given (dotted names like grind.loop). Modules persist across reloads and restarts of the client.`;
 
@@ -71,6 +80,9 @@ function text(value: unknown, isError = false): CallToolResult {
 }
 
 function failure(error: unknown): CallToolResult {
+  if (error instanceof AgentError && error.details !== undefined) {
+    return text({ message: error.message, status: error.status, details: error.details }, true);
+  }
   const message =
     error instanceof AgentError || error instanceof Error ? error.message : String(error);
   return { content: [{ type: "text", text: message }], isError: true };
@@ -183,6 +195,37 @@ export function registerTools(server: McpServer, client: AgentClient, options: T
           }),
         ),
       ),
+  );
+
+  server.registerTool(
+    "lua_search",
+    {
+      title: "Search the Lua you can call",
+      description: LUA_SEARCH_DESCRIPTION,
+      inputSchema: {
+        query: z.string().describe("Words to look for in names, docs and source (case-insensitive)."),
+        kinds: z
+          .array(z.enum(["builtin", "own", "api"]))
+          .optional()
+          .describe("Where to look (default all three)."),
+        limit: z.number().int().min(1).max(200).optional().describe("Most results (default 20)."),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    ({ query, kinds, limit }) => guarded(async () => text(await client.luaSearch(query, kinds, limit))),
+  );
+
+  server.registerTool(
+    "lua_doc",
+    {
+      title: "Read a Lua function or module",
+      description: LUA_DOC_DESCRIPTION,
+      inputSchema: {
+        name: z.string().min(1).describe("A name from lua_search: Quests.pick_up, AgentMoveTo, grind.loop."),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    ({ name }) => guarded(async () => text(await client.luaDoc(name))),
   );
 
   server.registerTool(

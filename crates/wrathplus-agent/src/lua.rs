@@ -4,7 +4,7 @@
 use mlua::{Lua, MultiValue, Value as LuaValue};
 use serde_json::{json, Map, Value};
 use std::sync::{Arc, Mutex};
-use wrathplus_ui::script::UiScript;
+use wrathplus_ui::script::{ScriptValue, UiScript};
 
 /// Tables nest at most this deep in a reply; deeper ones read `"<table>"`.
 const MAX_DEPTH: usize = 8;
@@ -60,6 +60,36 @@ fn port_call(lua: &Lua, begin: bool) {
     if let Ok(hook) = hook {
         let _ = hook.call::<()>(begin);
     }
+}
+
+/// A UI event argument as JSON.
+pub(crate) fn script_value(value: &ScriptValue) -> Value {
+    match value {
+        ScriptValue::Nil => Value::Null,
+        ScriptValue::Bool(b) => json!(b),
+        ScriptValue::Int(i) => json!(i),
+        ScriptValue::Number(n) if n.is_finite() => json!(n),
+        ScriptValue::Number(n) => json!(n.to_string()),
+        ScriptValue::Str(s) => json!(s),
+        ScriptValue::Bytes(b) => json!(String::from_utf8_lossy(b)),
+    }
+}
+
+/// The names of every global function in the VM, sorted: the stock API, the agent functions and
+/// whatever addons and modules defined.
+pub(crate) fn globals(script: &UiScript) -> Vec<String> {
+    let mut out: Vec<String> = script
+        .lua()
+        .globals()
+        .pairs::<LuaValue, LuaValue>()
+        .filter_map(Result::ok)
+        .filter_map(|(k, v)| match (k, v) {
+            (LuaValue::String(k), LuaValue::Function(_)) => Some(k.to_string_lossy().to_string()),
+            _ => None,
+        })
+        .collect();
+    out.sort();
+    out
 }
 
 /// Call `f` and collect its results through a Lua-side pack, one table back to Rust. mlua 0.11's

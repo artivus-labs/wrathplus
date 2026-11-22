@@ -31,6 +31,10 @@ pub(crate) enum Job {
     Status {
         reply: Sender<Value>,
     },
+    /// The VM's global function names, for `/lua/search` and `/lua/doc` (kind `api`).
+    Globals {
+        reply: Sender<Value>,
+    },
     Screenshot {
         scale: f32,
         format: Format,
@@ -169,6 +173,35 @@ fn route(shared: &Port, request: &mut HttpRequest) -> Reply {
         .with_header(header("Content-Type", "text/html; charset=utf-8"))
         .with_header(header("Cache-Control", "no-store")),
         (Method::Get, "/status") => ask(shared, |reply| Job::Status { reply }),
+        (Method::Get, "/lua/search") => lua_search(
+            shared,
+            &param("q").map(|v| percent_decode(&v)).unwrap_or_default(),
+            param("kind").map(|v| percent_decode(&v)).as_deref(),
+            param("limit").and_then(|v| v.parse().ok()),
+        ),
+        (Method::Get, "/lua/doc") => match param("name").map(|v| percent_decode(&v)) {
+            Some(name) if !name.trim().is_empty() => {
+                let mut unavailable = None;
+                let found = crate::search::doc(&name, &shared.scripts, |n| match globals(shared) {
+                    Ok(names) => names.iter().any(|g| g == n),
+                    Err(reply) => {
+                        unavailable = Some(reply);
+                        false
+                    }
+                });
+                if let Some(reply) = unavailable {
+                    return reply;
+                }
+                match found {
+                    Ok(found) => json_response(200, &found),
+                    Err(missing) => json_response(404, &missing),
+                }
+            }
+            _ => json_response(
+                400,
+                &json!({"error": "name= the function or module to read"}),
+            ),
+        },
         (Method::Post, "/lua") => {
             let mut body = String::new();
             if let Err(e) = request
@@ -235,7 +268,7 @@ fn route(shared: &Port, request: &mut HttpRequest) -> Reply {
         }
         _ => json_response(
             404,
-            &json!({"error": "unknown route", "routes": ["GET /status", "POST /lua", "GET /screenshot", "GET /events", "GET /view", "GET|PUT|DELETE /files/<module>"]}),
+            &json!({"error": "unknown route", "routes": ["GET /status", "POST /lua", "GET /screenshot", "GET /events", "GET /view", "GET|PUT|DELETE /files/<module>", "GET /lua/search", "GET /lua/doc"]}),
         ),
     }
 }
@@ -318,6 +351,68 @@ fn files(shared: &Port, request: &mut HttpRequest, name: &str) -> Reply {
             Err(_) => json_response(404, &json!({"error": format!("no module {name}")})),
         },
         _ => json_response(405, &json!({"error": "GET, PUT or DELETE"})),
+    }
+}
+
+/// Results a search returns unless it names a `limit`.
+const DEFAULT_SEARCH: usize = 20;
+
+/// `GET /lua/search`: `kind` is a comma list of [`crate::search::KINDS`] (all when absent).
+fn lua_search(shared: &Port, q: &str, kind: Option<&str>, limit: Option<usize>) -> Reply {
+    let kinds: Vec<&str> = match kind {
+        None => crate::search::KINDS.to_vec(),
+        Some(list) => {
+            let asked: Vec<&str> = list
+                .split(',')
+                .map(str::trim)
+                .filter(|k| !k.is_empty())
+                .collect();
+            if let Some(bad) = asked.iter().find(|k| !crate::search::KINDS.contains(k)) {
+                return json_response(
+                    400,
+                    &json!({"error": format!("unknown kind {bad:?}: builtin, own or api")}),
+                );
+            }
+            asked
+        }
+    };
+    let limit = limit.unwrap_or(DEFAULT_SEARCH).clamp(1, 200);
+    let api = if kinds.contains(&"api") {
+        match globals(shared) {
+            Ok(names) => names,
+            Err(reply) => return reply,
+        }
+    } else {
+        Vec::new()
+    };
+    let found = crate::search::search(q, &kinds, &shared.scripts, || api, limit);
+    json_response(200, &found)
+}
+
+/// Unavailability is not evidence of absence.
+fn globals(shared: &Port) -> Result<Vec<String>, Reply> {
+    globals_wait(shared, GAME_TIMEOUT)
+}
+
+fn globals_wait(shared: &Port, timeout: Duration) -> Result<Vec<String>, Reply> {
+    let (reply, answer) = crossbeam_channel::bounded(1);
+    if shared.jobs.send(Job::Globals { reply }).is_err() {
+        return Err(json_response(503, &json!({"error": "game loop stopped"})));
+    }
+    match answer.recv_timeout(timeout) {
+        Ok(value) => serde_json::from_value(value).map_err(|_| {
+            json_response(
+                502,
+                &json!({"error": "invalid globals answer from game loop"}),
+            )
+        }),
+        Err(crossbeam_channel::RecvTimeoutError::Timeout) => Err(json_response(
+            504,
+            &json!({"error": "the game did not answer in time"}),
+        )),
+        Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
+            Err(json_response(503, &json!({"error": "game loop stopped"})))
+        }
     }
 }
 
