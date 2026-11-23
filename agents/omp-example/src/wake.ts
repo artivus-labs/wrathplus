@@ -10,8 +10,8 @@ export interface GameEvent {
 }
 
 /** urgent: deliver now, steering a turn that is running. notable: deliver when the planner is
- *  idle. minor: ride along with the next wake, or wake alone after a quiet spell. */
-export type Urgency = "urgent" | "notable" | "minor";
+ *  idle. Failures never wake it: they go to the check-ins' Evidence. */
+export type Urgency = "urgent" | "notable";
 
 /** The events the launcher asks the client for. Chat in /say is only kept when it names us. */
 export const WAKE_EVENTS = [
@@ -31,7 +31,12 @@ export const WAKE_EVENTS = [
   "AGENT_GOAL_BLOCKED",
   "AGENT_GOAL_DONE",
   "AGENT_HOLD_EXPIRED",
+  // Counted for the check-ins' evidence, never waking the planner by themselves:
   "AGENT_ACTION_FAILED",
+  "AGENT_PULL_REFUSED",
+  "AGENT_COMBAT_DONE",
+  "AGENT_COMBAT_REVIEW",
+  "UI_ERROR_MESSAGE",
 ] as const;
 
 const URGENT = new Set([
@@ -61,7 +66,6 @@ export function classify(e: GameEvent, self?: string): Urgency | null {
     if (!self) return null;
     return str(e.args[0]).toLowerCase().includes(self.toLowerCase()) ? "notable" : null;
   }
-  if (e.event === "AGENT_ACTION_FAILED") return "minor";
   return null;
 }
 
@@ -134,7 +138,7 @@ export class Inbox {
 
   /** The lines, most urgent first, and empty the inbox. */
   take(): string[] {
-    const order: Record<Urgency, number> = { urgent: 0, notable: 1, minor: 2 };
+    const order: Record<Urgency, number> = { urgent: 0, notable: 1 };
     const lines = [...this.#items]
       .sort((a, b) => order[a.urgency] - order[b.urgency])
       .map((i) => (i.count > 1 ? `${i.line} (x${i.count})` : i.line));
@@ -154,18 +158,67 @@ export function statusLine(status: unknown): string {
   return `${str(p.name)}, level ${str(p.level)} ${str(p.class_name ?? p.class)}, ${where}.${health}${flags ? ` (${flags})` : ""}`;
 }
 
+/** What went wrong (and how fights ended) between two check-ins, counted, so a check-in starts
+ *  from evidence rather than a glance: the controller's failures as the game and the built-ins
+ *  report them. The launcher only counts; what to make of them is the planner's call. */
+export class Evidence {
+  #counts = new Map<string, number>();
+  #outcomes = new Map<string, number>();
+  #review: string | undefined;
+
+  add(e: GameEvent): void {
+    const a = e.args;
+    const bump = (m: Map<string, number>, k: string) => m.set(k, (m.get(k) ?? 0) + 1);
+    switch (e.event) {
+      case "UI_ERROR_MESSAGE":
+        return void bump(this.#counts, `game error "${clip(str(a[0]), 120)}"`);
+      case "AGENT_ACTION_FAILED":
+        return void bump(this.#counts, `goal action ${str(a[1])} failed: ${clip(str(a[2]), 160)}`);
+      case "AGENT_PULL_REFUSED":
+        return void bump(this.#counts, `pull refused: ${clip(str(a[1]), 160)}`);
+      case "AGENT_COMBAT_DONE":
+        return void bump(this.#outcomes, str(a[1]) || "?");
+      case "AGENT_COMBAT_REVIEW":
+        this.#review = clip(str(a[0]), 600);
+        return;
+      case "PLAYER_DEAD":
+        return void bump(this.#outcomes, "you died");
+      default:
+        return;
+    }
+  }
+
+  /** The tally, most frequent first, and start a new one. */
+  take(top = 8): string[] {
+    const lines = [...this.#counts.entries()]
+      .sort((x, y) => y[1] - x[1])
+      .slice(0, top)
+      .map(([k, n]) => `${n}x ${k}`);
+    if (this.#outcomes.size) lines.unshift(`fights: ${[...this.#outcomes.entries()].map(([k, n]) => `${n} ${k}`).join(", ")}`);
+    if (this.#review) lines.push(`latest fight review: ${this.#review}`);
+    this.#counts.clear();
+    this.#outcomes.clear();
+    this.#review = undefined;
+    return lines;
+  }
+}
+
 export type WakeReason = "events" | "checkin" | "start" | "restart" | "reflect";
 
 /** The message the planner wakes to. */
-export function wakeMessage(reason: WakeReason, lines: string[], status: string, minutesQuiet?: number): string {
+export function wakeMessage(reason: WakeReason, lines: string[], status: string, minutesQuiet?: number, evidence: string[] = []): string {
   const head: Record<WakeReason, string> = {
     start: "A new session starts. Read your notes and skills, check status and the scorecard, then get your controller playing.",
     restart: "The launcher restarted and this session resumes. Check status and your controller, then carry on.",
     events: "Something happened in the game.",
-    checkin: `Check-in (every ${minutesQuiet ?? "few"} minutes). Glance at status, goals and the scorecard; fix what is off, or improve one thing in your controller, then end your turn.`,
+    checkin: `Check-in (every ${minutesQuiet ?? "few"} minutes): your turn to improve the controller. Take the most costly recurring failure in the evidence below, or the scorecard's weakest objective or need. Study it: Goals.log and Goals.list(), Rotation.stats, the module or built-in involved (lua_doc), recent events. Then write or change a module for it (propose_module when it changes how you play), or write in notes/journal.md why you are not changing anything and what you would need to. "No changes" without that note is not an answer. See the improve-the-controller skill.`,
     reflect:
       "Reflection is due. Dispatch the `reflector` agent with the task tool (a fresh context with the same game tools) and wait for its report; then act on it: proposals it made are queued with the judge, notes it wrote are in notes/. Keep your own turn short.",
   };
   const body = lines.length ? `\n\nEvents since your last turn:\n${lines.map((l) => `- ${l}`).join("\n")}` : "";
-  return `[launcher ${new Date().toISOString()}] ${head[reason]}\n${status}${body}`;
+  const seen =
+    reason === "checkin" || reason === "reflect"
+      ? `\n\nEvidence since the last check-in:\n${evidence.length ? evidence.map((l) => `- ${l}`).join("\n") : "- (nothing failed, and no fights ended)"}`
+      : "";
+  return `[launcher ${new Date().toISOString()}] ${head[reason]}\n${status}${body}${seen}`;
 }

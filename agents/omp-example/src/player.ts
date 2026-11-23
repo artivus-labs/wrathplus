@@ -12,7 +12,7 @@ import { AgentClient } from "../../mcp/src/client.ts";
 import { type Frame, OmpRpc } from "./rpc.ts";
 import { ompCli, ompEnv, prepareWorkDir, type Settings, settingsFromEnv, trialRunning } from "./setup.ts";
 import { appendJsonl, totals, usageFromFrame } from "./usage.ts";
-import { type GameEvent, Inbox, statusLine, WAKE_EVENTS, type WakeReason, wakeMessage } from "./wake.ts";
+import { Evidence, type GameEvent, Inbox, statusLine, WAKE_EVENTS, type WakeReason, wakeMessage } from "./wake.ts";
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -20,6 +20,7 @@ const HOUR = 60 * MINUTE;
 class Player {
   readonly client: AgentClient;
   readonly inbox = new Inbox();
+  readonly evidence = new Evidence();
   readonly usagePath: string;
   readonly logPath: string;
   rpc: OmpRpc | undefined;
@@ -28,18 +29,20 @@ class Player {
   busy = false;
   turnStarted = 0;
   aborting = false;
-  lastWake = 0;
   lastCheckin = Date.now();
   lastReflect = Date.now();
   sessionStarted = Date.now();
   pendingPrompt: string | undefined;
   stopping = false;
+  /** Continue the last session; off for a first start asked to be fresh. */
+  resume: boolean;
 
   constructor(readonly s: Settings) {
     this.client = new AgentClient(s.agentUrl, s.token);
     this.usagePath = join(s.stateDir, "usage.jsonl");
     this.logPath = join(s.stateDir, "launcher.log");
     mkdirSync(s.stateDir, { recursive: true, mode: 0o700 });
+    this.resume = !s.fresh;
   }
 
   log(line: string): void {
@@ -63,7 +66,7 @@ class Player {
       this.s.model,
       "--thinking",
       this.s.thinking,
-      "--continue",
+      ...(this.resume ? ["--continue"] : []),
       ...(this.s.maxCost ? ["--max-cost", String(this.s.maxCost)] : []),
     ];
     const rpc = new OmpRpc({
@@ -85,6 +88,7 @@ class Player {
     const messages = typeof state?.messageCount === "number" ? state.messageCount : 0;
     this.log(`omp ready: session ${this.session ?? "?"} (${messages} messages), model ${this.s.model}`);
     this.pendingPrompt = await this.message(messages > 0 ? "restart" : "start", []);
+    this.resume = true;
     void rpc.exited.then((code) => this.onExit(code));
   }
 
@@ -149,7 +153,6 @@ class Player {
     if (!rpc) return;
     this.busy = true;
     this.turnStarted = Date.now();
-    this.lastWake = Date.now();
     this.log(`prompt: ${message.split("\n")[0]?.slice(0, 200)}`);
     try {
       const r = await rpc.send({ type: "prompt", message });
@@ -169,7 +172,8 @@ class Player {
     } catch {
       // The client may be restarting; the planner will see that itself.
     }
-    return wakeMessage(reason, lines, status, Math.round((Date.now() - this.lastCheckin) / MINUTE));
+    const evidence = reason === "checkin" || reason === "reflect" ? this.evidence.take() : [];
+    return wakeMessage(reason, lines, status, this.s.checkinMinutes, evidence);
   }
 
   // -- The game's events -------------------------------------------------------------------------
@@ -191,6 +195,7 @@ class Player {
         }
         since = read.next;
         for (const e of read.events) {
+          this.evidence.add(e);
           const urgency = this.inbox.add(e, this.self);
           if (urgency) this.log(`event ${e.event} (${urgency})`);
         }
@@ -258,9 +263,6 @@ class Player {
         this.log(`new_session: ${(error as Error).message}`);
       }
       return this.prompt(await this.message("start", this.inbox.take()));
-    }
-    if (this.inbox.size > 0 && now - this.lastWake > this.s.minorMinutes * MINUTE) {
-      return this.prompt(await this.message("events", this.inbox.take()));
     }
     // Every checkinMinutes, whatever else woke it meanwhile: the turn for improving the controller.
     if (this.s.checkinMinutes > 0 && now - this.lastCheckin > this.s.checkinMinutes * MINUTE) {

@@ -25,8 +25,6 @@ export interface Settings {
   thinking: string;
   /** Minutes of quiet before a check-in prompt. */
   checkinMinutes: number;
-  /** Minutes between deliveries of minor events alone. */
-  minorMinutes: number;
   /** Hours between reflections (0: off). */
   reflectHours: number;
   /** Hours before the planner's session is replaced by a fresh one (0: never). */
@@ -36,6 +34,8 @@ export interface Settings {
   /** Passed as --max-cost when set (USD per session). */
   maxCost?: number;
   judgeDir?: string;
+  /** Start a fresh session rather than continue the last one (on the first start only). */
+  fresh: boolean;
 }
 
 const number = (v: string | undefined, fallback: number): number => {
@@ -62,12 +62,12 @@ export function settingsFromEnv(env: Record<string, string | undefined>, example
     model: env.WRATHPLUS_OMP_MODEL?.trim() || "anthropic/claude-sonnet-5-5",
     thinking: env.WRATHPLUS_OMP_THINKING?.trim() || "medium",
     checkinMinutes: number(env.WRATHPLUS_OMP_CHECKIN_MINUTES, 20),
-    minorMinutes: number(env.WRATHPLUS_OMP_MINOR_MINUTES, 10),
     reflectHours: number(env.WRATHPLUS_OMP_REFLECT_HOURS, 3),
     sessionHours: number(env.WRATHPLUS_OMP_SESSION_HOURS, 6),
     turnMaxMinutes: number(env.WRATHPLUS_OMP_TURN_MAX_MINUTES, 30),
     maxCost: maxCost && maxCost > 0 ? maxCost : undefined,
     judgeDir: env.WRATHPLUS_JUDGE_DIR?.trim() || undefined,
+    fresh: env.WRATHPLUS_OMP_FRESH === "1",
   };
 }
 

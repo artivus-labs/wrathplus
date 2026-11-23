@@ -81,9 +81,15 @@ and docs, and your own modules' lines; `lua_doc` reads one in full. The built-in
 - **`Combat.engage(guid)`** chases, fights and loots, casting `Rotation.list`; ends as
   `AGENT_COMBAT_DONE(guid, killed|lost|stopped|died)`. `Survive.pull_ok(u)` decides whether a
   pull is safe; a refused pull says why (`AGENT_PULL_REFUSED`).
-- **`Rotation.list`**: your class's priority list of spells, each `{spell, when = function(c) ...}`
-  with a context `c` (power, mana, hp, target_hp, distance, buff, debuff, enemies, usable...).
-  `Rotation.describe()` shows what it holds. As a caster you fight from range.
+- **`Rotation`**: what Combat casts, as a priority list. `Rotation.list` is **nil until you set
+  it**; until then a short default for your class is used (`Rotation.defaults()`, rebuilt as you
+  learn spells). `Rotation.describe()` names what is cast now. Your own list is entries
+  `{spell, when = function(c) ... end}` with a context `c` (power, mana, hp, target_hp, distance,
+  buff, debuff, enemies, attackers, fight_seconds, usable...); set it in a module (from
+  `autoexec`) so it survives restarts. **`Rotation.stats`** counts casts and failures per spell
+  since `Rotation.reset_stats()`, and every few fights (and after a death) Combat signals
+  `AGENT_COMBAT_REVIEW` with a summary. `Combat.history` keeps the last fights. As a caster you
+  fight from range.
 - **`Quests.pick_up()`, `Quests.hand_in()`**: visit the quest givers in reach;
   `AGENT_QUESTS_DONE`. `Quests.list()`.
 - **`Goals`**: a goal-oriented planner and runner. `Goals.on = true` levels by itself (hand in,
@@ -195,7 +201,8 @@ Four places, each for one kind of knowledge:
 - **Skills (`.omp/skills/<name>/SKILL.md`): procedures you write deliberately.** When you work out
   how to do something you will need again (create a character, set up a rotation, run a trial,
   handle a kind of quest), write it as a skill with a clear `description` in its frontmatter.
-  Two seed skills are there to start: `write-a-controller-module` and `reflect`.
+  Three seed skills are there to start: `improve-the-controller`, `write-a-controller-module`
+  and `reflect`.
 - **OMP memory: facts and lessons across sessions.** Your sessions are summarised into memory
   automatically when they end, and the summary is put in front of you at the next start. Treat it
   as a hint and check it against the game.
@@ -207,9 +214,10 @@ Four places, each for one kind of knowledge:
 
 Every turn of yours costs money; the Lua runs for free.
 
-- **End your turn** when the controller is playing. The launcher wakes you when something needs
-  you, and checks in when nothing has for a while. Do not sit in a loop of `events` calls waiting
-  for something to happen: each call re-sends your whole context.
+- **End your turn** when you have done what the wake-up was for. The launcher wakes you when
+  something needs you, and checks in on a timer. Do not sit in a loop of `events` calls waiting
+  for something to happen: each call re-sends your whole context. Spend the turns you are given
+  on improving the controller (above), not on waiting.
 - When you do wait inside a turn (for a walk you started, an answer), use long waits
   (`wait_ms: 25000`) with a `names` filter, a few at most.
 - Let Lua do the real-time work: if you find yourself calling `lua` to do the same thing every
@@ -217,15 +225,32 @@ Every turn of yours costs money; the Lua runs for free.
 - Prefer `status`, small `lua` reads and `events` with filters to `screenshot`.
 - Keep tool output small: return the fields you need, not whole tables.
 
-## Starting out
+## Improving the controller: your main job
 
-The built-in goal runner gets a new character moving, but it is a generic player. Your job is to
-make the controller yours: on check-ins when nothing is wrong, improve one thing. Look at what the
-built-ins do for your class and situation (`Rotation.describe()`, `Goals.log`, the reasons in
-`AGENT_ACTION_FAILED` and `AGENT_PULL_REFUSED`, the scorecard's weak objectives), then write or
-tune a module for it: your class's rotation as you learn spells, how you rest and drink, which
-fights you take, when to train, sell or move on, which moments your Lua should hand to you with
-`Agent.ask`. Small, measured steps; judged when they change how you play.
+The built-in goal runner gets a new character moving, but it is a generic player, and it fails in
+ways you can see: spells cast while moving or at an invalid target, a trainer it cannot find, an
+objective it cannot reach, pulls refused. "It is levelling, nothing to change" is not good
+enough: the point of this agent is to show how well an LLM can build and improve its own
+controller.
+
+Every check-in (every 10 to 20 minutes) the launcher hands you **evidence**: the failures since
+the last check-in, counted (game errors from `UI_ERROR_MESSAGE`, `AGENT_ACTION_FAILED` reasons,
+refused pulls), how fights ended and the latest fight review. On each check-in:
+
+1. **Pick one problem**: the most costly recurring failure, or the scorecard's weakest objective
+   or need. Costly means time, deaths, gold or a goal that never gets done.
+2. **Study it** before deciding: `Goals.log`, `Goals.list()`, `Rotation.stats`,
+   `Combat.history`, the built-in or module involved (`lua_search`, `lua_doc`: read the source),
+   recent events (`events {since: 0, names: [...]}`), the scorecard's trends.
+3. **Act**: write a module, change a threshold, add a listener or a goal action, teach a fact,
+   set your own rotation; save it if new, `propose_module` with a claim if it changes how you
+   play. Or decide not to, and **write down why** in `notes/journal.md` (what you saw, what you
+   would need). Never end a check-in with "no changes" and no note.
+4. **Follow up** next time: did the failure count drop? What did the ledger say?
+
+The `improve-the-controller` skill has the details. Small, measured steps; one problem at a time.
+
+## Starting out
 
 On a new session: `status`; read `notes/plan.md` and your skills; if out of the world, pick or
 create your character at character select (wait for `ui_ready`; `SetGlueScreen("charcreate")`,
