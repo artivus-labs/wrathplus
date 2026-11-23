@@ -256,8 +256,10 @@ fails with "no navmesh", naming both.
 
 ### The MCP server
 
-[`agents/mcp`](../agents/mcp/README.md) wraps the port as six MCP tools (`lua`, `screenshot`,
-`events`, `status`, `modules`, `save_module`), for Claude Code or any MCP client. It needs
+[`agents/mcp`](../agents/mcp/README.md) wraps the port as MCP tools (`lua`, `screenshot`,
+`events`, `status`, `lua_search`, `lua_doc`, `modules`, `save_module`) for Claude Code or any MCP
+client, plus a scorecard and a judge of the agent's own module changes (`scorecard`,
+`propose_module`, `ledger`; see its README). It needs
 [Bun](https://bun.sh): `cd agents/mcp && bun install`.
 
 A project `.mcp.json` for Claude Code; the token is expanded from your environment, so it is not
@@ -323,6 +325,14 @@ this is the order to use them in.
    quests, works their objectives, trains, sells, rests and grinds by itself. `Goals.list()` and
    `Goals.state` say what it is doing and why; set your own goals with `Goals.push`, and pause it
    with `Goals.hold`.
+9. **Answer what the Lua asks.** Realtime Lua hands a messy moment up with
+   `Agent.ask(question, context, on)` (someone talking, an odd mechanic, a hard choice): wait on
+   `AGENT_ASK` in `events` (`names: ["AGENT_ASK"]`), whose arguments are the ask's id, the
+   question, its context and a digest of recent events, and answer with `Agent.answer(id, value)`.
+10. **Improve and measure.** `scorecard` scores the character on many goals at once (xp/h,
+    gold/h, quests, gear and professions against level, exploration, deaths, idle time).
+    `propose_module(name, source, claim)` has a module change trialled against the current one
+    before it is kept; `ledger` shows each trial and its verdict.
 
 ### The example agent
 

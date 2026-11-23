@@ -25,6 +25,10 @@
 --   })
 -- Opening one signals AGENT_DECISION, which wakes the fast tier at once.
 --
+-- Asks hand a messy moment further up, to the LLM planner, with no fixed options (see A.ask):
+--   Agent.ask(question, context, on[, { timeout, default }]) signals AGENT_ASK; the planner
+--   answers with Agent.answer(id, value).
+--
 -- Agent.signal(name, ...) puts an event on the agent's event stream (AGENT_<NAME>), for anything
 -- else the tiers above should hear about.
 
@@ -131,7 +135,8 @@ local function decision_expiry(now)
   end
 end
 
--- One watcher frame: activity ends and decision timeouts, a few times a second.
+-- One watcher frame: activity ends, decision and ask timeouts, a few times a second.
+local ask_expiry -- defined with the asks, below
 local watcher
 local since = 0
 local function ensure_watcher()
@@ -143,6 +148,7 @@ local function ensure_watcher()
     since = 0
     local now = GetTime()
     decision_expiry(now)
+    ask_expiry(now)
     local c = A.current
     if c and c.spec.done then
       local ok, finished, succeeded, why = pcall(c.spec.done)
@@ -193,6 +199,106 @@ function A.resolve(id, choice)
   note("decision " .. d.name .. ": " .. tostring(choice))
   if d.on then return pcall(d.on, choice, "decided") end
   return true
+end
+
+-- Asks hand a messy moment up to the LLM planner, with what led to it: someone talking, an odd
+-- mechanic, a hard choice. Unlike a decision there are no fixed options; the answer is any value.
+--   Agent.ask("A player asks us to follow them into the cave. Go?", { who = "Brann", level = 12 },
+--     function(answer, how) ... end,          -- how: "answered" or "timeout"
+--     { timeout = 120, default = "no" })      -- optional: `on(default, "timeout")` if no answer
+-- Opening one signals AGENT_ASK(id, question, context, digest), digest being the recent events
+-- and agent notes as lines; the planner answers with Agent.answer(id, value). Without a timeout
+-- an ask stays open until answered. A timed-out ask signals AGENT_ASK_EXPIRED(id).
+A.asks = {}
+A.recent = {}
+
+local RECENT_MAX, DIGEST_LINES = 30, 15
+
+local function short(v)
+  local s = tostring(v)
+  return #s > 80 and (s:sub(1, 77) .. "...") or s
+end
+
+local function heard(event, ...)
+  local parts = { string.format("%.1f %s", GetTime(), event) }
+  for i = 1, math.min(select("#", ...), 4) do
+    local v = select(i, ...)
+    if v ~= nil and v ~= "" then parts[#parts + 1] = short(v) end
+  end
+  A.recent[#A.recent + 1] = table.concat(parts, " ")
+  if #A.recent > RECENT_MAX then table.remove(A.recent, 1) end
+end
+
+-- What an ask's digest is drawn from: what a player would notice, not combat-log noise.
+local HEARD = {
+  "CHAT_MSG_SAY", "CHAT_MSG_YELL", "CHAT_MSG_WHISPER", "CHAT_MSG_PARTY", "CHAT_MSG_PARTY_LEADER",
+  "CHAT_MSG_EMOTE", "CHAT_MSG_TEXT_EMOTE", "CHAT_MSG_MONSTER_SAY", "CHAT_MSG_MONSTER_YELL",
+  "CHAT_MSG_MONSTER_WHISPER", "CHAT_MSG_SYSTEM", "UI_ERROR_MESSAGE", "PLAYER_DEAD",
+  "PLAYER_REGEN_DISABLED", "PLAYER_REGEN_ENABLED", "PLAYER_LEVEL_UP", "PARTY_INVITE_REQUEST",
+  "TRADE_SHOW", "DUEL_REQUESTED", "QUEST_ACCEPTED", "ZONE_CHANGED_NEW_AREA",
+}
+local listener = CreateFrame("Frame")
+for _, event in ipairs(HEARD) do listener:RegisterEvent(event) end
+listener:SetScript("OnEvent", function(_, event, ...) heard(event, ...) end)
+
+-- The last lines of what happened lately (events heard and agent notes), oldest first.
+function A.digest(lines)
+  local all = {}
+  for _, l in ipairs(A.recent) do all[#all + 1] = l end
+  for _, l in ipairs(A.log) do all[#all + 1] = l end
+  table.sort(all, function(a, b) return (tonumber(a:match("^%S+")) or 0) < (tonumber(b:match("^%S+")) or 0) end)
+  local n = lines or DIGEST_LINES
+  local out = {}
+  for i = math.max(1, #all - n + 1), #all do out[#out + 1] = all[i] end
+  return out
+end
+
+-- Ask the planner (an LLM, seconds to minutes away): returns the ask's id.
+function A.ask(question, context, on, opts)
+  assert(type(question) == "string" and question ~= "", "Agent.ask needs a question")
+  assert(on == nil or type(on) == "function", "Agent.ask: on is a function")
+  opts = opts or {}
+  A.next_id = A.next_id + 1
+  local id = A.next_id
+  A.asks[id] = {
+    id = id, question = question, context = context, on = on, default = opts.default,
+    since = GetTime(), deadline = opts.timeout and (GetTime() + opts.timeout) or nil,
+  }
+  note("ask " .. id .. ": " .. short(question))
+  A.signal("ASK", id, question, context, A.digest())
+  return id
+end
+
+-- Answer an ask (called by the planner): `on(value, "answered")` runs and its results return.
+function A.answer(id, value)
+  local q = A.asks[id]
+  if not q then return false, "no open ask " .. tostring(id) end
+  A.asks[id] = nil
+  note("answer " .. id .. ": " .. short(value))
+  if q.on then return pcall(q.on, value, "answered") end
+  return true
+end
+
+-- The open asks, oldest first (without their callbacks), for a planner that missed AGENT_ASK.
+function A.open_asks()
+  local out = {}
+  for id, q in pairs(A.asks) do
+    out[#out + 1] = { id = id, question = q.question, context = q.context,
+      seconds = math.floor((GetTime() - q.since) * 10) / 10 }
+  end
+  table.sort(out, function(a, b) return a.id < b.id end)
+  return out
+end
+
+ask_expiry = function(now)
+  for id, q in pairs(A.asks) do
+    if q.deadline and now >= q.deadline then
+      A.asks[id] = nil
+      note("ask " .. id .. " timed out: " .. short(q.default))
+      A.signal("ASK_EXPIRED", id)
+      if q.on then pcall(q.on, q.default, "timeout") end
+    end
+  end
 end
 
 -- Steps: an ordered list from the planner ("walk here, then there, then talk to X"). They run as

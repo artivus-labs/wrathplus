@@ -179,6 +179,9 @@ fn load_module(lua: &Lua, dir: &Path, name: &str) -> mlua::Result<Value> {
 }
 
 #[cfg(test)]
+#[path = "ask_tests.rs"]
+mod ask_tests;
+#[cfg(test)]
 #[path = "avoid_tests.rs"]
 mod avoid_tests;
 #[cfg(test)]

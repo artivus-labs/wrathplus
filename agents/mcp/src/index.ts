@@ -3,6 +3,7 @@
 
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { AgentClient } from "./client.ts";
+import { Monitor } from "./monitor.ts";
 import { createServer } from "./tools.ts";
 
 /** Read and check the environment; the token is never echoed. */
@@ -28,10 +29,25 @@ if (import.meta.main) {
     console.error(`wrathplus-agent-mcp: ${(error as Error).message}`);
     process.exit(1);
   }
+  const client = new AgentClient(config.url, config.token);
+  // WRATHPLUS_SCORECARD_SECONDS: how often the scorecard samples (30 s; 0 turns the scorecard and
+  // the judge off). WRATHPLUS_JUDGE_DIR: where their files live (default <client home>/Agent/judge).
+  const seconds = Number(process.env.WRATHPLUS_SCORECARD_SECONDS ?? 30);
+  const monitor =
+    Number.isFinite(seconds) && seconds > 0
+      ? new Monitor({
+          client,
+          intervalMs: seconds * 1000,
+          dir: process.env.WRATHPLUS_JUDGE_DIR,
+          log: (line) => console.error(`wrathplus-agent-mcp: ${line}`),
+        })
+      : undefined;
   // WRATHPLUS_MCP_LONG_POLL=0: no events wait_ms (a host that wakes its agent itself).
-  const server = createServer(new AgentClient(config.url, config.token), {
+  const server = createServer(client, {
     longPoll: process.env.WRATHPLUS_MCP_LONG_POLL !== "0",
+    judging: monitor?.ready,
   });
+  monitor?.start();
   await server.connect(new StdioServerTransport());
   console.error(`wrathplus-agent-mcp: serving ${config.url} on stdio`);
 }

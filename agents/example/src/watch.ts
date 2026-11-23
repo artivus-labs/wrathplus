@@ -47,7 +47,16 @@ const NOTABLE: Record<string, (args: unknown[]) => string | null> = {
     `Combat refused to pull ${a[0]}: ${a[1]}. Pick a safer mob or place, rest or repair first; Combat.engage(guid, { force = true }) only if you are sure.`,
   AGENT_FLEEING: (a) => `Running from a fight (${a[0]}). What made it unwinnable: the mob's level, a second mob, your health at the pull, your weapon?`,
   PLAYER_CAMPING: () => "The client is logging out (20 s): CancelLogout() to stay in the world.",
+  AGENT_ASK: (a) => askLine(a),
 };
+
+/** Agent.ask from the client's Lua: AGENT_ASK(id, question, context, digest). */
+export function askLine(a: unknown[]): string {
+  const [id, question, context, digest] = a;
+  const ctx = context === null || context === undefined ? "" : ` Context: ${JSON.stringify(context).slice(0, 400)}.`;
+  const lately = Array.isArray(digest) && digest.length ? ` Lately: ${digest.slice(-10).join("; ")}.` : "";
+  return `Your Lua asks you (ask ${id}): ${question}${ctx}${lately} Answer with Agent.answer(${id}, value) in lua; it is waiting on you.`;
+}
 
 /** What wakes the planner: things only it should handle. The rest (combat, loot, quest windows,
  *  errors, level-ups) is the fast tier's, and reaches the planner through it. */
@@ -73,6 +82,7 @@ export const PLANNER_EVENTS = new Set([
   "AGENT_PULL_REFUSED",
   "AGENT_FLEEING",
   "AGENT_RESTED",
+  "AGENT_ASK",
 ]);
 
 /** Game errors that keep coming back (the same red line `times` times within `windowMs`): the
