@@ -75,7 +75,7 @@ has seen.
 | Line | Meaning |
 | --- | --- |
 | `S <id> <kinds> [radius]` | Kinds, a comma list: `vendor`, `repair`, `trainer` (the asker's own class trainer), `flightmaster`, `innkeeper`, `banker`, `questgiver-hub`, `trainer_cooking`, `trainer_first_aid`, `trainer_profession` (any profession trainer). Radius in yards; none (and at most) `AgentNav.ServiceRadius`. |
-| `s <id> <i> <n> <kind> <entry> <x> <y> <z> <members> <profession> <name>` | The `i`-th of `n` places, nearest first. `members`: the quest givers in a hub (1 otherwise). `profession`: the skill a profession trainer teaches, spaces as underscores (`First_Aid`), `-` otherwise. The name is the rest of the line. |
+| `s <id> <i> <n> <kind> <entry> <x> <y> <z> <members> <profession> <event> <name>` | The `i`-th of `n` places, nearest first. `members`: the quest givers in a hub (1 otherwise). `profession`: the skill a profession trainer teaches, spaces as underscores (`First_Aid`), `-` otherwise. `event`: `-` for a standing spawn; `on` or `off` for one a game event spawns, whether it is out as the events stand when the question is asked. The name is the rest of the line. |
 | `s <id> 0 0` | Nothing of those kinds within the radius. |
 
 How places are chosen (`src/AgentNavServices.h`, tested against a fixture by the client's tests):
@@ -97,6 +97,11 @@ How places are chosen (`src/AgentNavServices.h`, tested against a fixture by the
   once, at its nearest member.
 - A spawn offering several services is one place per kind. Nearest first, at most
   `AgentNav.MaxServices`.
+- Spawns a game event brings out (`game_event_creature`: Brewfest, the Lunar Festival, the generic
+  "Mage Trainer"s of the Anvilmar starting area...) are not left out but marked: `on` when one of
+  their events has them out now (a positive event while it is active, a negative one while it is
+  not, as `GameEventMgr` spawns them), else `off`. Which spawns an event owns is read at startup;
+  which events are active, at each question. Game-event pools are not looked at.
 
 The spawn table is read once at startup, on the world thread, from what ObjectMgr has already
 loaded (no database query, then or per request), and handed to the module's thread, which answers

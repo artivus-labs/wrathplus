@@ -111,6 +111,11 @@ fn places(query: &str, enemies_of_31: bool) -> Vec<Place> {
     if enemies_of_31 {
         spawns = spawns.replace("99 2 0 0 Renegade", "99 2 0 0 1 Renegade");
     }
+    over(&spawns, query)
+}
+
+/// The module's answer for a query over a spawn table, read back by the client.
+fn over(spawns: &str, query: &str) -> Vec<Place> {
     let (spawns, query) = (CString::new(spawns).unwrap(), CString::new(query).unwrap());
     let lines =
         text(|out, len| unsafe { realm_services(spawns.as_ptr(), query.as_ptr(), out, len) });
@@ -202,19 +207,22 @@ fn answer_lines_out_of_turn_or_unreadable_are_errors() {
     };
     let mut collect = Collect::default();
     assert_eq!(
-        collect.push(line("s 2 1 3 vendor 1 10.0 0.0 0.0 1 - A")),
+        collect.push(line("s 2 1 3 vendor 1 10.0 0.0 0.0 1 - - A")),
         Ok(None)
     );
     assert!(collect
-        .push(line("s 2 3 3 vendor 1 10.0 0.0 0.0 1 - C"))
+        .push(line("s 2 3 3 vendor 1 10.0 0.0 0.0 1 - - C"))
         .unwrap_err()
         .contains("came apart"));
     assert_eq!(collect.push(line("s 2 0 0")), Ok(Some(Vec::new())));
     for bad in [
-        "s 2 1 1 armorer 1 1 2 3 1 - X",
-        "s 2 2 1 vendor 1 1 2 3 1 - X",
-        "s 2 1 1 vendor 1 1 nan 3 1 - X",
-        "s 2 1 1 vendor 1 1 2 3 1",
+        "s 2 1 1 armorer 1 1 2 3 1 - - X",
+        "s 2 2 1 vendor 1 1 2 3 1 - - X",
+        "s 2 1 1 vendor 1 1 nan 3 1 - - X",
+        // The event field is "-", "on" or "off"; an older realm's line has a name word there.
+        "s 2 1 1 vendor 1 1 2 3 1 - maybe X",
+        "s 2 1 1 vendor 1 1 2 3 1 - Brother_Danil",
+        "s 2 1 1 vendor 1 1 2 3 1 -",
         "s 2 0 0 extra",
         "s 2 1 1 vendor",
     ] {
@@ -254,5 +262,58 @@ fn profession_trainers_are_found_by_profession_and_named() {
             Some("First Aid".to_string()),
             Some("Blacksmithing".to_string())
         ]
+    );
+}
+
+#[test]
+fn event_spawns_are_told_with_whether_their_event_has_them_out() {
+    // Anvilmar: the real mage trainer, a generic "Mage Trainer" of event 7, one of a negative
+    // event (out while event 8 is not), and one of two events.
+    let spawns = [
+        format!("944 0 1 30 0 0 0x33 8 0 {ALLIANCE} Marryk_Nurribit"),
+        format!("26326 0 1 10 0 0 0x33 8 0 {ALLIANCE} @7 Mage_Trainer"),
+        format!("26327 0 1 20 0 0 0x80 0 0 {ALLIANCE} @-8 Vendor_Off_Season"),
+        format!("26328 0 1 25 0 0 0x80 0 0 {ALLIANCE} @7,9 Two_Events"),
+    ]
+    .join("\n");
+    let told = |active: &str| {
+        over(
+            &spawns,
+            &format!("trainer,vendor 0 1 0 0 2000 8 20 {HUMAN} {active}"),
+        )
+        .into_iter()
+        .map(|p| format!("{} {:?}", p.entry, p.event))
+        .collect::<Vec<_>>()
+    };
+    // Nothing on: the event's trainer is off but still told, nearest first like any other.
+    assert_eq!(
+        told(""),
+        [
+            "26326 Some(false)",
+            "26327 Some(true)",
+            "26328 Some(false)",
+            "944 None"
+        ]
+    );
+    assert_eq!(
+        told("@7,8"),
+        [
+            "26326 Some(true)",
+            "26327 Some(false)",
+            "26328 Some(true)",
+            "944 None"
+        ]
+    );
+    assert_eq!(told("@9")[2], "26328 Some(true)");
+    // On the wire: "-", "on" or "off" before the name.
+    let Ok(Reply::Service(line)) =
+        decode("s 3 1 1 trainer 26326 10.0 0.0 0.0 1 - off Mage Trainer")
+    else {
+        panic!("decodes");
+    };
+    let place = line.place.unwrap();
+    assert_eq!(
+        (place.event, place.name.as_str()),
+        (Some(false), "Mage Trainer")
     );
 }

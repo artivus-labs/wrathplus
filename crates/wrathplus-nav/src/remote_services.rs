@@ -49,6 +49,10 @@ pub struct Place {
     pub members: u32,
     /// The profession a profession trainer teaches ("First Aid"); `None` for anything else.
     pub profession: Option<String>,
+    /// A spawn a game event brings out (`game_event_creature`): `Some(true)` while one of its
+    /// events has it out, as they stood when the realm answered, `Some(false)` while none does;
+    /// `None` for a standing spawn.
+    pub event: Option<bool>,
 }
 
 /// One line of the realm's answer: the `index`-th of `count` places (`None` with count 0: none).
@@ -62,7 +66,7 @@ pub struct Line {
 
 /// An `s` line (the verb already read), or `None` when it does not parse.
 pub(super) fn decode(payload: &str) -> Option<Line> {
-    let mut fields = payload.splitn(12, ' ');
+    let mut fields = payload.splitn(13, ' ');
     let _verb = fields.next()?;
     let id = fields.next()?.parse().ok()?;
     let index: u16 = fields.next()?.parse().ok()?;
@@ -93,6 +97,12 @@ pub(super) fn decode(payload: &str) -> Option<Line> {
         "-" => None,
         word => Some(word.replace('_', " ")),
     };
+    let event = match fields.next()? {
+        "-" => None,
+        "on" => Some(true),
+        "off" => Some(false),
+        _ => return None,
+    };
     let name = fields.next().unwrap_or("").trim().to_string();
     Some(Line {
         id,
@@ -105,6 +115,7 @@ pub(super) fn decode(payload: &str) -> Option<Line> {
             pos,
             members,
             profession,
+            event,
         }),
     })
 }

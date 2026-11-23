@@ -5,8 +5,8 @@
 -- On entering the world, on reaching a new zone, and every `every` seconds, the realm is asked for
 -- the `kinds` within `radius`; the answer is kept in Services.places and handed to
 -- Goals.learn_places(places) (one table per place: kind, name, x, y, z, map, zone; plus entry,
--- members and profession). A realm without the module says so once (Services.why), and is asked
--- again only in the next zone.
+-- members, profession, event and event_active). A realm without the module says so once
+-- (Services.why), and is asked again only in the next zone.
 --
 --   Services.on      false: never ask.
 --   Services.places  the last answer, nearest first.

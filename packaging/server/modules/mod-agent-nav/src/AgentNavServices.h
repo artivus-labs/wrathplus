@@ -9,11 +9,14 @@
 //                                  questgiver-hub, trainer_cooking, trainer_first_aid,
 //                                  trainer_profession (any profession trainer); radius in yards
 //                                  (default and most: AgentNav.ServiceRadius)
-//   s <id> <i> <n> <kind> <entry> <x> <y> <z> <members> <profession> <name>
+//   s <id> <i> <n> <kind> <entry> <x> <y> <z> <members> <profession> <event> <name>
 //                                  the i-th of n places, nearest first; members: the quest givers
 //                                  in a hub (1 for anything else); profession: the skill a
 //                                  profession trainer teaches, spaces as underscores ("First_Aid"),
-//                                  "-" for anything else; the name is the rest of the line
+//                                  "-" for anything else; event: "-" for a standing spawn, "on" or
+//                                  "off" for one a game event spawns (game_event_creature), as its
+//                                  events stand when the question was asked; the name is the rest
+//                                  of the line
 //   s <id> 0 0                     none
 #ifndef MOD_AGENT_NAV_SERVICES_H
 #define MOD_AGENT_NAV_SERVICES_H
@@ -169,7 +172,34 @@ struct Spawn
     std::string professionName;
     Faction faction;
     std::string name;
+    // The game events that spawn it (game_event_creature): a negative id spawns it while that
+    // event is NOT active. Empty for a standing spawn.
+    std::vector<std::int16_t> events;
 };
+
+// Whether one game_event_creature row has its spawn out, given whether its event is active: a
+// positive event spawns while active, a negative one while not (GameEventMgr's convention).
+constexpr bool EventSpawns(std::int16_t event, bool active)
+{
+    return event > 0 ? active : !active;
+}
+static_assert(EventSpawns(5, true) && !EventSpawns(5, false) && EventSpawns(-5, false) && !EventSpawns(-5, true),
+    "negative events spawn while the event is not active");
+
+// The place's event field: "-" for a standing spawn; "on" when one of its events has it spawned
+// now (`active`: the active event ids, sorted), else "off". Told, not filtered: the asker decides.
+inline std::string_view EventText(Spawn const& s, std::vector<std::uint16_t> const& active)
+{
+    if (s.events.empty())
+        return "-";
+    for (std::int16_t const e : s.events)
+    {
+        std::uint16_t const id = static_cast<std::uint16_t>(e < 0 ? -e : e);
+        if (EventSpawns(e, std::binary_search(active.begin(), active.end(), id)))
+            return "on";
+    }
+    return "off";
+}
 
 // Who asks, and what.
 struct ServiceQuery
@@ -183,6 +213,9 @@ struct ServiceQuery
     std::uint8_t playerClass = 0;
     Faction faction;
     std::size_t cap = 20;
+    // The game events active when the question was asked (GameEventMgr's list, read on the world
+    // thread then), sorted.
+    std::vector<std::uint16_t> activeEvents;
 };
 
 struct Place
@@ -191,6 +224,8 @@ struct Place
     Spawn const* spawn = nullptr;
     float distance = 0.0f;
     std::size_t members = 1;
+    // EventText at the asking: "-", "on" or "off".
+    std::string_view event = "-";
 };
 
 // The kinds a spawn offers to this asker (the hub kind aside: that takes its neighbours).
@@ -269,6 +304,8 @@ inline std::vector<Place> SelectServices(std::vector<Spawn> const& spawns, Servi
     std::sort(out.begin(), out.end(), nearest);
     if (out.size() > q.cap)
         out.resize(q.cap);
+    for (Place& p : out)
+        p.event = EventText(*p.spawn, q.activeEvents);
     return out;
 }
 
@@ -302,7 +339,7 @@ inline std::vector<std::string> ServiceReply(std::uint16_t id, std::vector<Place
         std::string line = "s " + std::to_string(id) + " " + std::to_string(i + 1) + " " +
             std::to_string(places.size()) + " " + std::string(KindText(p.kind)) + " " +
             std::to_string(p.spawn->entry) + " " + numbers + " " + std::to_string(p.members) + " " +
-            Word(p.spawn->professionName) + " ";
+            Word(p.spawn->professionName) + " " + std::string(p.event) + " ";
         for (char const c : p.spawn->name)
             line += (static_cast<unsigned char>(c) < 0x20 || c == 0x7f) ? ' ' : c;
         if (line.size() > max)

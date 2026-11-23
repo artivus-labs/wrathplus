@@ -200,6 +200,24 @@ AgentNav::Faction FactionFrom(std::vector<std::string_view> const& w, std::size_
         f.enemies[i] = U(w[at + 4 + i]);
     return f;
 }
+
+// Takes the "@e,e,..." word out of `w`, if there is one: game event ids (signed), else none.
+std::vector<long> Events(std::vector<std::string_view>& w)
+{
+    std::vector<long> out;
+    auto const at = std::find_if(w.begin(), w.end(), [](std::string_view s) { return !s.empty() && s[0] == '@'; });
+    if (at == w.end())
+        return out;
+    std::string_view rest = at->substr(1);
+    w.erase(at);
+    while (!rest.empty())
+    {
+        std::size_t const comma = rest.find(',');
+        out.push_back(std::strtol(std::string(rest.substr(0, comma)).c_str(), nullptr, 10));
+        rest = comma == std::string_view::npos ? std::string_view() : rest.substr(comma + 1);
+    }
+    return out;
+}
 }
 
 extern "C" {
@@ -208,7 +226,9 @@ extern "C" {
 // spawns: one per line, "entry map phase x y z flags trainerClass profession faction our friendly
 // hostile [enemy...] name"
 // (the name is one word, underscores for spaces); query: "kinds map phase x y radius class cap
-// faction our friendly hostile [enemy...]", kinds a comma list as on the wire.
+// faction our friendly hostile [enemy...]", kinds a comma list as on the wire. Either may hold an
+// "@e,e,..." word anywhere: a spawn's game events (negative: out while the event is not), the
+// query's active events.
 int realm_services(const char* spawns, const char* query, char* out, int out_len)
 {
     std::vector<AgentNav::Spawn> table;
@@ -220,8 +240,10 @@ int realm_services(const char* spawns, const char* query, char* out, int out_len
         rest = end == std::string_view::npos ? std::string_view() : rest.substr(end + 1);
         if (line.empty())
             continue;
-        std::vector<std::string_view> const w = Words(line);
+        std::vector<std::string_view> w = Words(line);
         AgentNav::Spawn s;
+        for (long const e : Events(w))
+            s.events.push_back(static_cast<std::int16_t>(e));
         s.entry = U(w[0]);
         s.map = U(w[1]);
         s.phaseMask = U(w[2]);
@@ -247,8 +269,11 @@ int realm_services(const char* spawns, const char* query, char* out, int out_len
                 c = ' ';
         table.push_back(s);
     }
-    std::vector<std::string_view> const w = Words(query);
+    std::vector<std::string_view> w = Words(query);
     AgentNav::ServiceQuery q;
+    for (long const e : Events(w))
+        q.activeEvents.push_back(static_cast<std::uint16_t>(e));
+    std::sort(q.activeEvents.begin(), q.activeEvents.end());
     q.kinds = AgentNav::ParseKinds(w[0]);
     q.map = U(w[1]);
     q.phaseMask = U(w[2]);

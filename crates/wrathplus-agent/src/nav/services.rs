@@ -7,10 +7,14 @@
 //! [`services::KINDS`], none for all; radius in yards, none for the realm's) → `{pending = true}`
 //! while the realm is asked; `AGENT_SERVICES_READY` (`true, count` or `false, why`) fires when it
 //! answers, and the next call for the same kinds returns the places,
-//! `{ { kind, entry, name, x, y, z, map, zone, distance, members, profession }, ... }`, nearest
-//! first: `distance` in yards on the ground (as the realm measures) from where the character
-//! stands at that call, `zone` from the client's own world map (`zones::Handles::name_at`),
-//! `members` the quest givers in a hub, `profession` the skill a profession trainer teaches.
+//! `{ { kind, entry, name, x, y, z, map, zone, distance, members, profession, event,
+//! event_active }, ... }`, nearest first: `distance` in yards on the ground (as the realm
+//! measures) from where the character stands at that call, `zone` from the client's own world map
+//! (`zones::Handles::name_at`), `members` the quest givers in a hub, `profession` the skill a
+//! profession trainer teaches. `event` is true for a spawn a game event brings out (a holiday's
+//! vendors, the generic "Mage Trainer"s by Anvilmar) and false for a standing one;
+//! `event_active` (event spawns only, else nil) says whether its event had it out when the realm
+//! answered. Event spawns are told, not left out: one whose event is off is likely not there.
 //! `nil, why` when it cannot be asked.
 //!
 //! The realm's defaults: every place within 2000 yards, at most 20 (its `AgentNav.ServiceRadius`
@@ -174,6 +178,8 @@ fn place_table(
     t.set("distance", (f64::from(distance) * 10.0).round() / 10.0)?;
     t.set("members", p.members)?;
     t.set("profession", p.profession.clone())?;
+    t.set("event", p.event.is_some())?;
+    t.set("event_active", p.event)?;
     Ok(t)
 }
 

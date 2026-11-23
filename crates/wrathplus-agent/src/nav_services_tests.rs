@@ -46,8 +46,8 @@ fn agent_services_asks_the_realm_once_and_the_next_call_reads_the_answer() {
     rig.later(1.0);
     assert!(rig.realm(&[]).is_empty());
     rig.realm(&[
-        "s 1 1 2 vendor 1 110.0 200.0 30.0 1 - Brother Danil",
-        "s 1 2 2 trainer_first_aid 41 120.0 200.0 30.0 1 First_Aid Medic",
+        "s 1 1 2 vendor 1 110.0 200.0 30.0 1 - - Brother Danil",
+        "s 1 2 2 trainer_first_aid 41 120.0 200.0 30.0 1 First_Aid - Medic",
     ]);
     assert_eq!(
         rig.events().last().unwrap(),
@@ -103,8 +103,8 @@ fn places_come_nearest_first_with_their_distance_from_where_you_stand() {
     assert_eq!(services(&rig, call), Ok(None));
     rig.realm(&[]);
     rig.realm(&[
-        "s 1 1 2 vendor 1 110.0 200.0 30.0 1 - Brother Danil",
-        "s 1 2 2 vendor 2 70.0 240.0 30.0 1 - Janos Hammerknuckle",
+        "s 1 1 2 vendor 1 110.0 200.0 30.0 1 - - Brother Danil",
+        "s 1 2 2 vendor 2 70.0 240.0 30.0 1 - - Janos Hammerknuckle",
     ]);
     let read = |rig: &Rig| -> Vec<(String, f64)> {
         let list: Table = rig.lua.load(format!("return {call}")).eval().unwrap();
@@ -129,6 +129,38 @@ fn places_come_nearest_first_with_their_distance_from_where_you_stand() {
         [
             ("Janos Hammerknuckle".to_string(), 14.1),
             ("Brother Danil".to_string(), 42.4)
+        ]
+    );
+}
+
+/// A spawn a game event brings out comes with `event = true` and whether its event had it out;
+/// a standing one with `event = false` and no `event_active`.
+#[test]
+fn event_spawns_carry_event_and_event_active() {
+    let rig = Rig::in_world();
+    let call = "AgentServices('trainer')";
+    assert_eq!(services(&rig, call), Ok(None));
+    rig.realm(&[]);
+    rig.realm(&[
+        "s 1 1 3 trainer 26326 110.0 200.0 30.0 1 - off Mage Trainer",
+        "s 1 2 3 trainer 26330 115.0 200.0 30.0 1 - on Paladin Trainer",
+        "s 1 3 3 trainer 944 120.0 200.0 30.0 1 - - Marryk Nurribit",
+    ]);
+    let fields: Vec<String> = rig
+        .lua
+        .load(format!(
+            "local out = {{}} for _, p in ipairs({call}) do \
+               out[#out + 1] = p.name .. ' ' .. tostring(p.event) .. ' ' .. tostring(p.event_active) \
+             end return out"
+        ))
+        .eval()
+        .unwrap();
+    assert_eq!(
+        fields,
+        [
+            "Mage Trainer true false",
+            "Paladin Trainer true true",
+            "Marryk Nurribit false nil"
         ]
     );
 }
