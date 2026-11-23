@@ -363,6 +363,11 @@ bun run start "Reach level 5 in Northshire."
 
 (`bun run agent …` in that README is for the Manager's local realm, not the beta.)
 
+[`agents/omp-example`](../agents/omp-example/README.md) is a second example that uses nothing but
+the MCP server, inside [OMP](https://github.com/can1357/oh-my-pi), a general coding-agent harness,
+with Claude Sonnet 5.5 and your own Anthropic API key: it writes its own real-time controller as
+Lua modules, and has changes trialled by the judge before they are kept.
+
 ## Credential safety
 
 - **Never paste or log:** your ATProto main password (nothing here needs it), an app password,

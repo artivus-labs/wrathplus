@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "wrathplus": {
+      "type": "stdio",
+      "command": "bun",
+      "args": ["run", "${WRATHPLUS_REPO}/agents/mcp/src/index.ts"],
+      "env": {
+        "WRATHPLUS_AGENT_URL": "${WRATHPLUS_AGENT_URL}",
+        "WRATHPLUS_AGENT_TOKEN": "${WRATHPLUS_AGENT_TOKEN}",
+        "WRATHPLUS_SCORECARD_SECONDS": "${WRATHPLUS_SCORECARD_SECONDS:-30}",
+        "WRATHPLUS_JUDGE_DIR": "${WRATHPLUS_JUDGE_DIR:-}"
+      },
+      "timeout": 120000
+    }
+  }
+}

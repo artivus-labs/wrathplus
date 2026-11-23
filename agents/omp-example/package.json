@@ -1,0 +1,20 @@
+{
+  "name": "@wrathplus/omp-example-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A WrathPlus agent on OMP (oh-my-pi): an LLM session over the client's MCP tools that builds its own real-time Lua controller.",
+  "scripts": {
+    "start": "bun run src/player.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@oh-my-pi/pi-coding-agent": "19.1.0",
+    "bun": "1.4.5"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.4",
+    "typescript": "7.0.2"
+  }
+}
