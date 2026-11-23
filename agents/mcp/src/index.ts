@@ -1,22 +1,40 @@
 #!/usr/bin/env bun
 // Entry point: an MCP server on stdio over the WrathPlus client's agent control port.
 
+import { readFileSync } from "node:fs";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { AgentClient } from "./client.ts";
 import { Monitor } from "./monitor.ts";
 import { createServer } from "./tools.ts";
 
-/** Read and check the environment; the token is never echoed. */
-export function configFromEnv(env: Record<string, string | undefined>): { url: string; token: string } {
+/**
+ * Read and check the environment; the token is never echoed. `WRATHPLUS_AGENT_TOKEN_FILE` (a file
+ * holding the token) is an alternative to `WRATHPLUS_AGENT_TOKEN` for hosts that pass a server's
+ * environment on a command line, where any local user could read it with `ps`.
+ */
+export function configFromEnv(
+  env: Record<string, string | undefined>,
+  read: (path: string) => string = (path) => readFileSync(path, "utf8"),
+): { url: string; token: string } {
   const url = env.WRATHPLUS_AGENT_URL?.trim();
-  const token = env.WRATHPLUS_AGENT_TOKEN?.trim();
   const problems: string[] = [];
   if (!url) {
     problems.push("WRATHPLUS_AGENT_URL is not set (e.g. http://127.0.0.1:17950)");
   } else if (!URL.canParse(url) || !/^https?:$/.test(new URL(url).protocol)) {
     problems.push(`WRATHPLUS_AGENT_URL is not an http(s) URL: ${url}`);
   }
-  if (!token) problems.push("WRATHPLUS_AGENT_TOKEN is not set (the client's WOW_AGENT_TOKEN)");
+  let token = env.WRATHPLUS_AGENT_TOKEN?.trim();
+  const file = env.WRATHPLUS_AGENT_TOKEN_FILE?.trim();
+  if (!token && file) {
+    try {
+      token = read(file).trim();
+      if (!token) problems.push(`WRATHPLUS_AGENT_TOKEN_FILE is empty: ${file}`);
+    } catch (error) {
+      problems.push(`WRATHPLUS_AGENT_TOKEN_FILE could not be read (${(error as NodeJS.ErrnoException).code ?? "error"}): ${file}`);
+    }
+  } else if (!token) {
+    problems.push("WRATHPLUS_AGENT_TOKEN is not set (the client's WOW_AGENT_TOKEN), nor WRATHPLUS_AGENT_TOKEN_FILE");
+  }
   if (problems.length > 0) throw new Error(problems.join("; "));
   return { url: url!, token: token! };
 }

@@ -115,10 +115,11 @@ proposal, window and verdict is a line in `<judge dir>/ledger.jsonl`, read with 
 |---|---|
 | `WRATHPLUS_AGENT_URL` | the port's base URL, e.g. `http://127.0.0.1:17950` |
 | `WRATHPLUS_AGENT_TOKEN` | the bearer token: the same value as the client's `WOW_AGENT_TOKEN` |
+| `WRATHPLUS_AGENT_TOKEN_FILE` | instead of `WRATHPLUS_AGENT_TOKEN`: a file holding the token, for hosts that put a server's environment on a command line (the Claude Agent SDK does), where `ps` shows it to every local user |
 | `WRATHPLUS_SCORECARD_SECONDS` | how often the scorecard samples (default 30; `0` turns the scorecard and judge off) |
 | `WRATHPLUS_JUDGE_DIR` | the judge's folder (default `judge` beside the client's modules folder: `<client home>/Agent/judge`) |
 
-The server exits at startup if either is missing. It never prints the token.
+The server exits at startup if the URL or the token is missing. It never prints the token.
 
 ## Start the client with the port open
 

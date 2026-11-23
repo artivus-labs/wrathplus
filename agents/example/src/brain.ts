@@ -12,7 +12,7 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import type { Policy } from "./policy.ts";
-import { claudeEnv } from "./env.ts";
+import { claudeEnv, tokenFile } from "./env.ts";
 import { NOTE_TOOLS, notesServer, type Notes } from "./notes.ts";
 import { sleepGuard, WAKE_TOOLS, wakeServer, type Waker, type WakeGate } from "./wake.ts";
 import { duration, type HoldGate } from "./waits.ts";
@@ -150,7 +150,8 @@ export function think(inbox: Inbox, options: BrainOptions): AsyncIterable<SDKMes
           args: ["run", options.mcpEntry],
           env: {
             WRATHPLUS_AGENT_URL: options.url,
-            WRATHPLUS_AGENT_TOKEN: options.token,
+            // A path, not the token: these settings reach Claude Code on its command line.
+            WRATHPLUS_AGENT_TOKEN_FILE: tokenFile(options.token),
             // It sleeps by ending its turn, not inside a tool call.
             ...(options.waker ? { WRATHPLUS_MCP_LONG_POLL: "0" } : {}),
           },

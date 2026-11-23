@@ -5,8 +5,9 @@
 // WRATHPLUS_ANTHROPIC_API_KEY is set: a stray ANTHROPIC_API_KEY in the shell would otherwise
 // replace the login, and an old one fails with "Invalid API key".
 
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { mainCheckout } from "./manager.ts";
 
 /** `agents/.env` in the main checkout; outside a git checkout (a source archive), the one beside
@@ -50,4 +51,25 @@ export function claudeEnv(env: Record<string, string | undefined> = process.env)
 
 export function claudeAuth(env: Record<string, string | undefined> = process.env): string {
   return env.WRATHPLUS_ANTHROPIC_API_KEY ? "API key (WRATHPLUS_ANTHROPIC_API_KEY)" : "Claude Code login";
+}
+
+const tokenFiles = new Map<string, string>();
+
+/**
+ * The control-port token in a file only this user can read (a fresh 0700 folder, removed at exit),
+ * for the MCP server's `WRATHPLUS_AGENT_TOKEN_FILE`. The Agent SDK starts Claude Code with the MCP
+ * servers' settings on its command line, where any local user could read a token with `ps`.
+ */
+export function tokenFile(token: string, dir = tmpdir()): string {
+  const known = tokenFiles.get(`${dir}\0${token}`);
+  if (known && existsSync(known)) return known;
+  const folder = mkdtempSync(join(dir, "wrathplus-token-"));
+  chmodSync(folder, 0o700);
+  const path = join(folder, "token");
+  writeFileSync(path, token, { mode: 0o600 });
+  tokenFiles.set(`${dir}\0${token}`, path);
+  if (tokenFiles.size === 1) process.on("exit", () => {
+    for (const file of tokenFiles.values()) rmSync(dirname(file), { recursive: true, force: true });
+  });
+  return path;
 }
