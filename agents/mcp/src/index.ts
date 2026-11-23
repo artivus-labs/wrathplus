@@ -48,6 +48,10 @@ if (import.meta.main) {
     judging: monitor?.ready,
   });
   monitor?.start();
+  // The host closing stdin ends the server: the monitor's timer would otherwise keep an orphan
+  // sampling and judging beside the host's next server, two judges on one folder.
+  process.stdin.once("end", () => process.exit(0));
+  process.stdin.once("close", () => process.exit(0));
   await server.connect(new StdioServerTransport());
   console.error(`wrathplus-agent-mcp: serving ${config.url} on stdio`);
 }

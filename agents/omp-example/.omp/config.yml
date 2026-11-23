@@ -1,0 +1,76 @@
+# OMP project settings for the WrathPlus OMP example. The launcher copies this file into the
+# agent's working directory (with AGENTS.md and mcp.json) at every start; see ../README.md.
+
+# The planner. `--model` from the launcher (WRATHPLUS_OMP_MODEL) wins over this for the session.
+modelRoles:
+  default: anthropic/claude-sonnet-5-5
+  # Memory consolidation (phase 2) and other light work.
+  smol: anthropic/claude-haiku-5-5
+
+# Memory: OMP's on-disk `local` backend, in the agent's own OMP directory (PI_CODING_AGENT_DIR,
+# under the launcher's state dir). It summarises finished sessions into MEMORY.md and a short
+# summary injected at session start. No embeddings, no remote memory service.
+memory:
+  backend: local
+memories:
+  # The launcher replaces the session every few hours; summarise one after an hour of quiet.
+  minRolloutIdleHours: 1
+# Lessons and skills are written deliberately (notes/, .omp/skills/), not captured automatically.
+autolearn:
+  enabled: false
+
+# Only this working directory's AGENTS.md is context. Other tools' files (a user's CLAUDE.md,
+# ~/.codex/AGENTS.md, Cursor rules...) are someone else's instructions.
+disabledProviders:
+  - claude
+  - claude-md
+  - claude-plugins
+  - codex
+  - gemini
+  - opencode
+  - cursor
+  - windsurf
+  - cline
+  - github
+  - vscode
+  - agents
+  - agent-plugins
+  - omp-plugins
+  - mcp-json
+
+# The agent plays through the WrathPlus MCP tools and keeps notes and skills with read/write/edit.
+# It has no shell, no code evaluation, no browser and no desktop control.
+bash:
+  enabled: false
+browser:
+  enabled: false
+computer:
+  enabled: false
+eval:
+  py: false
+  js: false
+tools:
+  # MCP tools as top-level tools (not bash commands, and there is no bash).
+  commands: false
+  approvalMode: yolo
+  approval:
+    bash: deny
+    eval: deny
+    browser: deny
+    computer: deny
+  # The launcher keeps secrets beside the working directory; nothing in the agent reads them.
+  restrictedFolders:
+    - ../secrets
+
+# MCP servers run inside this process (no shared daemon); the judge lives in the server process.
+mcp:
+  shared: false
+
+# Long gaps between turns: keep the prompt cache for an hour rather than re-warming it while idle.
+providers:
+  cacheRetention: long
+  cacheWarming: off
+
+# No OTLP export even if OTEL_* variables are set.
+telemetry:
+  otlpExportEnabled: false

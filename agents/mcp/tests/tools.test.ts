@@ -436,3 +436,17 @@ describe("judging tools", () => {
     expect(textOf(result)).toContain("once the client answers");
   });
 });
+
+test("the server exits when its host closes stdin", async () => {
+  const proc = Bun.spawn(["bun", "run", `${import.meta.dir}/../src/index.ts`], {
+    env: { ...process.env, WRATHPLUS_AGENT_URL: "http://127.0.0.1:9", WRATHPLUS_AGENT_TOKEN: "t".repeat(24) },
+    stdin: "pipe",
+    stdout: "ignore",
+    stderr: "ignore",
+  });
+  await Bun.sleep(500);
+  proc.stdin.end();
+  const code = await Promise.race([proc.exited, Bun.sleep(5000).then(() => "still running")]);
+  if (code === "still running") proc.kill();
+  expect(code).toBe(0);
+});
