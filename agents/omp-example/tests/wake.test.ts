@@ -71,7 +71,7 @@ describe("messages", () => {
     const m = wakeMessage("events", ["Bob whispers: hi"], "Sixer, level 3 Mage.");
     expect(m).toContain("Something happened");
     expect(m).toContain("- Bob whispers: hi");
-    expect(wakeMessage("checkin", [], "s", 20)).toContain("20 minutes");
+    expect(wakeMessage("checkin", [], "s", 20)).toContain("every 20 minutes");
     expect(wakeMessage("reflect", [], "s")).toContain("reflector");
   });
 });

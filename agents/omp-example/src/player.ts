@@ -29,7 +29,7 @@ class Player {
   turnStarted = 0;
   aborting = false;
   lastWake = 0;
-  lastDone = Date.now();
+  lastCheckin = Date.now();
   lastReflect = Date.now();
   sessionStarted = Date.now();
   pendingPrompt: string | undefined;
@@ -112,7 +112,6 @@ class Player {
       case "prompt_result":
         this.busy = false;
         this.aborting = false;
-        this.lastDone = Date.now();
         this.log(`turn ended: ${String(f.status)}${f.error ? ` ${JSON.stringify(f.error).slice(0, 300)}` : ""} (${Math.round((Date.now() - this.turnStarted) / 1000)} s)`);
         void this.sessionTotals();
         break;
@@ -170,7 +169,7 @@ class Player {
     } catch {
       // The client may be restarting; the planner will see that itself.
     }
-    return wakeMessage(reason, lines, status, Math.round((Date.now() - this.lastDone) / MINUTE));
+    return wakeMessage(reason, lines, status, Math.round((Date.now() - this.lastCheckin) / MINUTE));
   }
 
   // -- The game's events -------------------------------------------------------------------------
@@ -263,8 +262,11 @@ class Player {
     if (this.inbox.size > 0 && now - this.lastWake > this.s.minorMinutes * MINUTE) {
       return this.prompt(await this.message("events", this.inbox.take()));
     }
-    if (this.s.checkinMinutes > 0 && now - Math.max(this.lastDone, this.lastWake) > this.s.checkinMinutes * MINUTE) {
-      return this.prompt(await this.message("checkin", this.inbox.take()));
+    // Every checkinMinutes, whatever else woke it meanwhile: the turn for improving the controller.
+    if (this.s.checkinMinutes > 0 && now - this.lastCheckin > this.s.checkinMinutes * MINUTE) {
+      const message = await this.message("checkin", this.inbox.take());
+      this.lastCheckin = now;
+      return this.prompt(message);
     }
   }
 

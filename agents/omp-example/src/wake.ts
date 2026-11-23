@@ -162,7 +162,7 @@ export function wakeMessage(reason: WakeReason, lines: string[], status: string,
     start: "A new session starts. Read your notes and skills, check status and the scorecard, then get your controller playing.",
     restart: "The launcher restarted and this session resumes. Check status and your controller, then carry on.",
     events: "Something happened in the game.",
-    checkin: `Check-in: nothing has needed you for ${minutesQuiet ?? "a while"} minutes. Glance at status, goals and the scorecard; fix what is off, or improve one thing in your controller, then end your turn.`,
+    checkin: `Check-in (every ${minutesQuiet ?? "few"} minutes). Glance at status, goals and the scorecard; fix what is off, or improve one thing in your controller, then end your turn.`,
     reflect:
       "Reflection is due. Dispatch the `reflector` agent with the task tool (a fresh context with the same game tools) and wait for its report; then act on it: proposals it made are queued with the judge, notes it wrote are in notes/. Keep your own turn short.",
   };

@@ -66,7 +66,7 @@ The launcher:
   `/say` that names the character. Asks, deaths, whispers and invites are urgent: they steer a
   turn that is running. Failed goal actions ride along with the next wake, or wake it alone after
   `WRATHPLUS_OMP_MINOR_MINUTES`. Combat, loot and walks never wake it: that is the Lua's job.
-- **Checks in** after `WRATHPLUS_OMP_CHECKIN_MINUTES` of quiet.
+- **Checks in** every `WRATHPLUS_OMP_CHECKIN_MINUTES`, whatever else woke it meanwhile: the turn for fixing or improving one thing in the controller.
 - **Reflects** every `WRATHPLUS_OMP_REFLECT_HOURS`: it asks the planner to dispatch the
   `reflector` agent (the `reflect` skill: scorecard, needs, ledger, at most two proposals).
 - **Starts a fresh session** every `WRATHPLUS_OMP_SESSION_HOURS`, but never while the judge has a
@@ -148,7 +148,7 @@ Read `usage.jsonl` for the real numbers.
 | `WRATHPLUS_OMP_STATE` | `~/.local/share/wrathplus-omp-agent` | this agent's folder |
 | `WRATHPLUS_OMP_MODEL` | `anthropic/claude-sonnet-5-5` | OMP's model selector (`omp models find sonnet`) |
 | `WRATHPLUS_OMP_THINKING` | `medium` | `off`, `low`, `medium`, `high`, ... |
-| `WRATHPLUS_OMP_CHECKIN_MINUTES` | `20` | quiet before a check-in (`0`: never) |
+| `WRATHPLUS_OMP_CHECKIN_MINUTES` | `20` | between check-ins (`0`: never) |
 | `WRATHPLUS_OMP_MINOR_MINUTES` | `10` | minor events wake the planner alone after this |
 | `WRATHPLUS_OMP_REFLECT_HOURS` | `3` | between reflections (`0`: off) |
 | `WRATHPLUS_OMP_SESSION_HOURS` | `6` | before a fresh session (`0`: never) |
