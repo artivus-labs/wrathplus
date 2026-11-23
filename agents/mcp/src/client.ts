@@ -90,6 +90,11 @@ export class AgentClient {
     return this.#json("PUT", `/files/${encodeURIComponent(name)}`, {}, source);
   }
 
+  /** `DELETE /files/<name>`: remove a module's file (a loaded module stays loaded). */
+  deleteModule(name: string): Promise<unknown> {
+    return this.#json("DELETE", `/files/${encodeURIComponent(name)}`);
+  }
+
   /** `GET /screenshot[?scale=S]`: the next rendered frame as PNG bytes. */
   async screenshot(scale?: number): Promise<Uint8Array> {
     const response = await this.#request("GET", "/screenshot", { scale });

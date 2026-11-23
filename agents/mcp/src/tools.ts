@@ -4,6 +4,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { AgentError, type AgentClient } from "./client.ts";
+import { type Judge, trials } from "./judge.ts";
+import { characterKey, type SampleStore, type Sampler, scorecard } from "./scorecard.ts";
 
 /** The agent helpers an outside agent needs, and which of them finish in the background. Every
  *  claim here is checked against crates/wrathplus-agent (src/world.rs, src/nav.rs, lua/wp/*.lua);
@@ -25,7 +27,7 @@ A chunk runs to completion inside one game frame: never loop waiting for the wor
 ${HELPERS}
 Search before writing a helper: lua_search finds what exists (built-ins, your modules, the API's names) and lua_doc reads one.
 For code that runs by itself every frame, save a module (save_module) and require("name") it (AgentReload("name") after a change; one named autoexec runs on entering the world). Frames work as in addons: CreateFrame("Frame"):SetScript("OnUpdate", fn) ticks, :RegisterEvent(...) reacts.
-Also: AgentFindNpc(service[, yards]) (the nearest "repair", "vendor", "classtrainer", "innkeeper"... in sight), AgentServices([kinds[, radius]]) (where services are on your map, from the realm: {pending = true} first, then after AGENT_SERVICES_READY the places with their distance, nearest first; 2000 yd and 20 places by default; the answer is reused for 120 s within 100 yd), AgentPath (a route preview; {pending = true} first when the realm routes, then the route after AGENT_PATH_READY), Rotation.list (what Combat casts), Agent.intent(name, {when, run}) and Agent.decide(name, {question, options, on}) for a fast decision loop when one runs, require("wp.engine") (a Playerbots-style decision engine) and require("wp.values") (health, power, auras, cooldowns, range, threat, bags).`;
+Also: AgentFindNpc(service[, yards]) (the nearest "repair", "vendor", "classtrainer", "innkeeper"... in sight), AgentServices([kinds[, radius]]) (where services are on your map, from the realm: {pending = true} first, then after AGENT_SERVICES_READY the places with their distance, nearest first; 2000 yd and 20 places by default; the answer is reused for 120 s within 100 yd), AgentPath (a route preview; {pending = true} first when the realm routes, then the route after AGENT_PATH_READY), Rotation.list (what Combat casts), Agent.intent(name, {when, run}) and Agent.decide(name, {question, options, on}) for a fast decision loop when one runs, Agent.ask(question, context, on[, {timeout, default}]) to hand a messy moment (someone talking, an odd mechanic, a hard choice) to you, the planner: it signals AGENT_ASK(id, question, context, digest of recent events), so wait on AGENT_ASK in events and answer with Agent.answer(id, value), which calls on(value); Agent.open_asks() lists the unanswered ones, require("wp.engine") (a Playerbots-style decision engine) and require("wp.values") (health, power, auras, cooldowns, range, threat, bags).`;
 
 const LUA_SEARCH_DESCRIPTION = `Search the Lua you can call (built-ins, your modules, API names) before writing your own.
 builtin: the built-in modules' functions (Quests.pick_up, Goals.push, wp.values.health...) and the Agent* functions, each with its signature, doc and file:line. own: your saved modules, the lines that match. api: the names of the global functions in the game's Lua (the stock 3.3.5a addon API and anything defined since), names only.
@@ -38,6 +40,8 @@ Give the name lua_search returned (Quests.pick_up, AgentMoveTo, grind.loop); a b
 const MODULES_DESCRIPTION = `List your saved Lua modules, or read one when \`name\` is given (dotted names like grind.loop). Modules persist across reloads and restarts of the client.`;
 
 const SAVE_MODULE_DESCRIPTION = `Save a Lua module (source) under a dotted name like grind.loop, for require("grind.loop") in lua. Saving does not run it: call require (first load) or AgentReload("grind.loop") (after a change). Name it autoexec to run it whenever the client enters the world.`;
+
+const SAVE_MODULE_JUDGED = ` To have a change judged against the current version before it is kept, use propose_module instead.`;
 
 const SCREENSHOT_DESCRIPTION = `Capture the next rendered frame of the WrathPlus game client as a PNG image. scale (0-1, default 0.5) shrinks it; use 1 for full resolution when reading small text.`;
 
@@ -56,7 +60,31 @@ export interface ToolOptions {
   /** Offer events' wait_ms long-poll (default true). A host that wakes its agent on events itself
    *  turns it off, so the agent ends its turn instead of sleeping inside one. */
   longPoll?: boolean;
+  /** The scorecard and the judge: with them, the scorecard, propose_module and ledger tools. */
+  judging?: () => Judging | string;
 }
+
+export interface Judging {
+  judge: Judge;
+  store: SampleStore;
+  sampler: Sampler;
+  /** A gap between samples longer than this is not counted (ms). */
+  maxGapMs: number;
+  now?: () => number;
+}
+
+const SCORECARD_DESCRIPTION = `Your character's scorecard: many goals at once, sampled from the client and kept on disk.
+It samples about every 30 s while you are in the world.
+current: level, xp, money (copper), gear (average equipped item level), professions (rank, max), spells known, zone, zones and subzones visited, quests done (handed in) and accepted, deaths.
+needs: targets that rise with level, each a gap (0 = met): every known profession's skill near five a level, average item level near your level, a gold reserve. Falling behind on them is a regression the judge and your reviews see.
+trends: the last 15, 60 and 240 minutes and all of it, as counts and rates per hour: xp, gold, quests, exploration (new zones and subzones), profession skill-ups, deaths, idle share (sampled: alive, out of combat, still, not casting and full), needs gap per hour; breaks lists restarts and gaps.`;
+
+const PROPOSE_DESCRIPTION = `Propose a change to one of your Lua modules, to be judged before it is kept.
+Give the claim it should bear out ("pulls one mob at a time: fewer deaths, same xp/h"). The candidate is kept as a new version but not loaded. A deterministic judge then trials it against the module as it stands (the champion) in alternating windows of play (by default 12 minutes each, 3 pairs), loading one or the other between windows, and scores each window on the scorecard's objectives. The candidate is promoted only if it improves at least one objective and regresses none beyond that objective's tolerance; otherwise the champion is put back. Read the outcome with ledger.
+Meanwhile do not save_module the same module: a change mid-trial stops it. A loaded module that returns a table with a stop() function has it called before each swap; make the module safe to reload.`;
+
+const LEDGER_DESCRIPTION = `The judge's ledger: every module change proposed, how its trial went and the verdict.
+For each: the claim, the trial windows (arm, start, end, void and why, rates), and the verdict with each objective's champion and candidate values, the mean difference, the tolerance and the effect size (t, d), and the reasons. Also the trial running now and the queue.`;
 
 const STATUS_DESCRIPTION = `Report the WrathPlus client's state: {state, in_world, ui_ready, cinematic, time, player, nav}.
 state is the client phase (Login, CharSelect, InWorld, ...). ui_ready means its Lua answers, and out of the world that the login and character-select API (GetNumCharacters, CreateCharacter, EnterWorld...) is installed, so wait for it before calling those.
@@ -250,7 +278,7 @@ export function registerTools(server: McpServer, client: AgentClient, options: T
     "save_module",
     {
       title: "Save a Lua module",
-      description: SAVE_MODULE_DESCRIPTION,
+      description: SAVE_MODULE_DESCRIPTION + (options.judging ? SAVE_MODULE_JUDGED : ""),
       inputSchema: {
         name: z.string().regex(/^[A-Za-z0-9_]+(\.[A-Za-z0-9_]+)*$/).describe("Dotted module name."),
         source: z.string().describe("The module's Lua source; usually ends with `return M`."),
@@ -267,6 +295,68 @@ export function registerTools(server: McpServer, client: AgentClient, options: T
       annotations: { readOnlyHint: true },
     },
     () => guarded(async () => text(await client.status())),
+  );
+  if (options.judging) registerJudging(server, options.judging);
+}
+
+/** The scorecard and the judge's tools. Nothing here writes the judge's config or ledger but a
+ *  proposal, which only appends. */
+function registerJudging(server: McpServer, ready: () => Judging | string): void {
+  // The judge is set up once the client has said where its modules live; until then, why not.
+  const withJudging = (run: (j: Judging) => Promise<CallToolResult>) =>
+    guarded(async () => {
+      const j = ready();
+      return typeof j === "string" ? failure(new Error(j)) : run(j);
+    });
+  server.registerTool(
+    "scorecard",
+    {
+      title: "Character scorecard",
+      description: SCORECARD_DESCRIPTION,
+      inputSchema: {
+        sample: z.boolean().optional().describe("Take a fresh sample first (default false)."),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    ({ sample }) =>
+      withJudging(async ({ store, sampler, maxGapMs, now }) => {
+        if (sample) await sampler.tick();
+        const last = sampler.last;
+        if (!last) return text({ note: sampler.lastSkip ?? "no sample yet" });
+        const card = scorecard(store, characterKey(last.name, last.realm), (now ?? Date.now)(), { maxGapMs });
+        return text(sampler.lastSkip ? { ...card, note: `latest attempt: ${sampler.lastSkip}` } : card);
+      }),
+  );
+
+  server.registerTool(
+    "propose_module",
+    {
+      title: "Propose a module change",
+      description: PROPOSE_DESCRIPTION,
+      inputSchema: {
+        name: z.string().regex(/^[A-Za-z0-9_]+(\.[A-Za-z0-9_]+)*$/).describe("Dotted module name."),
+        source: z.string().describe("The candidate's full Lua source."),
+        claim: z.string().min(1).describe("What it should improve, and what it should not make worse."),
+      },
+    },
+    ({ name, source, claim }) => withJudging(async ({ judge }) => text(judge.propose(name, source, claim))),
+  );
+
+  server.registerTool(
+    "ledger",
+    {
+      title: "Judge ledger",
+      description: LEDGER_DESCRIPTION,
+      inputSchema: {
+        module: z.string().optional().describe("Only this module's trials."),
+        limit: z.number().int().min(1).max(200).optional().describe("Most recent trials (default 20)."),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    ({ module, limit }) =>
+      withJudging(async ({ judge }) =>
+        text({ ...judge.status(), trials: trials(judge.ledger.entries(), module).slice(-(limit ?? 20)) }),
+      ),
   );
 }
 

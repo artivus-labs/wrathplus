@@ -4,7 +4,11 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { AgentClient } from "../src/client.ts";
 import { configFromEnv } from "../src/index.ts";
-import { createServer, HELPERS, MAX_WAIT_MS } from "../src/tools.ts";
+import { join } from "node:path";
+import { Judge } from "../src/judge.ts";
+import { SampleStore, Sampler } from "../src/scorecard.ts";
+import { createServer, HELPERS, type Judging, MAX_WAIT_MS } from "../src/tools.ts";
+import { FakePort, sample, scratch } from "./fixtures.ts";
 
 const TOKEN = "test-token-0123456789";
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
@@ -375,5 +379,60 @@ describe("lua search", () => {
     const lua = (await (await connect()).listTools()).tools.find((t) => t.name === "lua");
     expect(lua?.description).toContain("lua_search");
     expect(lua?.description).toContain("lua_doc");
+  });
+});
+
+describe("judging tools", () => {
+  async function judged(ready: () => Judging | string): Promise<Client> {
+    const server = createServer(new AgentClient(port.url.href, TOKEN), { judging: ready });
+    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+    await server.connect(serverSide);
+    const client = new Client({ name: "test", version: "0" });
+    await client.connect(clientSide);
+    return client;
+  }
+
+  function judging(): Judging {
+    const dir = scratch();
+    const store = new SampleStore(join(dir, "characters"));
+    const sampler = new Sampler(new FakePort() as never, { store });
+    const judge = new Judge({ dir, port: new FakePort(), store, latest: () => sampler.last, maxGapMs: 90_000 });
+    return { judge, store, sampler, maxGapMs: 90_000 };
+  }
+
+  test("adds scorecard, propose_module and ledger, each opening with a short sentence", async () => {
+    const { tools } = await (await judged(judging)).listTools();
+    expect(tools.map((t) => t.name).sort()).toEqual([
+      "events", "ledger", "lua", "lua_doc", "lua_search", "modules", "propose_module", "save_module", "scorecard", "screenshot", "status",
+    ]);
+    for (const tool of tools) {
+      const opening = (tool.description ?? "").split(/(?<=\.)\s/)[0] ?? "";
+      expect(opening.length, `${tool.name}: ${opening}`).toBeLessThanOrEqual(100);
+    }
+    expect(tools.find((t) => t.name === "save_module")?.description).toContain("propose_module");
+    expect(tools.find((t) => t.name === "lua")?.description).toContain("Agent.ask(question, context, on");
+    expect(tools.find((t) => t.name === "lua")?.description).toContain("AGENT_ASK");
+  });
+
+  test("a proposal is queued in the ledger; the scorecard says when there is no sample", async () => {
+    const j = judging();
+    const client = await judged(() => j);
+    const proposed = await call("propose_module", { name: "grind.loop", source: "return {}", claim: "fewer deaths" }, client);
+    expect(JSON.parse(textOf(proposed))).toEqual({ trial: 1, version: 1, ahead: 0 });
+    const ledger = JSON.parse(textOf(await call("ledger", {}, client)));
+    expect(ledger.queued).toEqual([1]);
+    expect(ledger.trials[0]).toMatchObject({ trial: 1, module: "grind.loop", claim: "fewer deaths", status: "queued" });
+    j.store.add(sample(Date.now()));
+    j.sampler.last = j.store.all("Beta-Agentsix")[0];
+    const card = JSON.parse(textOf(await call("scorecard", {}, client)));
+    expect(card.character).toBe("Beta-Agentsix");
+    expect(card.current.level).toBe(10);
+  });
+
+  test("before the judge is set up, its tools say why", async () => {
+    const client = await judged(() => "the scorecard starts once the client answers (GET /files)");
+    const result = await call("ledger", {}, client);
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).toContain("once the client answers");
   });
 });

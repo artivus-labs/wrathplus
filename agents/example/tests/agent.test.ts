@@ -82,6 +82,17 @@ group("events a player would notice", () => {
     expect(overheard(events, "Agenttwo", undefined, false)).toHaveLength(2);
   });
 
+  test("an ask from the client's Lua wakes the planner with its question, context and digest", () => {
+    expect(PLANNER_EVENTS.has("AGENT_ASK")).toBe(true);
+    const lines = describe([
+      event(1, "AGENT_ASK", [7, "Brann asks us to follow him into the cave. Go?", { who: "Brann" }, ["12.0 CHAT_MSG_SAY follow me Brann", "12.5 ask 7: Brann asks"]]),
+      event(2, "AGENT_ASK_EXPIRED", [6]),
+    ], "Agenttwo", PLANNER_EVENTS);
+    expect(lines).toEqual([
+      'Your Lua asks you (ask 7): Brann asks us to follow him into the cave. Go? Context: {"who":"Brann"}. Lately: 12.0 CHAT_MSG_SAY follow me Brann; 12.5 ask 7: Brann asks. Answer with Agent.answer(7, value) in lua; it is waiting on you.',
+    ]);
+  });
+
   test("a game error that keeps coming back reaches the planner once, with its count", () => {
     const errors = new RepeatedErrors(3, 15_000, 60_000);
     const far = (seq: number) => event(seq, "UI_ERROR_MESSAGE", ["You are too far away!"]);
