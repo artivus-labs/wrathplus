@@ -241,12 +241,18 @@ realm's `mod-agent-nav`; no extra port, no extra credentials).
   first: `vendor`, `repair`, `trainer` (your class trainer), `flightmaster`, `innkeeper`,
   `banker`, `questgiver-hub`, `trainer_cooking`, `trainer_first_aid`, `trainer_profession`. Like
   `AgentPath` it returns `{pending = true}` first; `AGENT_SERVICES_READY` fires when the answer
-  is in, and the next call returns `{ { kind, name, x, y, z, map, zone, distance, members, profession }, ... }`,
-  nearest first from where you stand (`distance` in yards on the ground). By default the realm
+  is in, and the next call returns
+  `{ { kind, name, x, y, z, map, zone, distance, members, profession, event, event_active }, ... }`,
+  nearest first from where you stand (`distance` in yards on the ground). `event` is true for a
+  spawn a game event brings out (a holiday vendor, the generic "Mage Trainer"s by Anvilmar), and
+  `event_active` says whether its event had it out when the realm answered: one that is off is
+  most likely not there. By default the realm
   looks 2000 yards round and sends at most 20; the answer is reused for 120 seconds while you
   stay within 100 yards of where you asked.
   The built-in `Services` module asks on arrival and in each new zone, and hands the places to the
-  goal runner.
+  goal runner. An NPC the runner walks to and does not find goes into `Goals.missing` and is
+  not taken back from the realm's list for `Goals.missing_for` seconds (1800), unless seen again or
+  passed with `Goals.learn_places(list, { force = true })`.
 
 If you have made `mmaps` from your own game files (the Manager's **Server** page: **Prepare server
 data**, then **Make navigation meshes**; it needs Docker and takes hours), point `WOW_NAV_MMAPS`

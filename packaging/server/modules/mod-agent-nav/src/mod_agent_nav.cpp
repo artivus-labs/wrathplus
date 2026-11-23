@@ -18,13 +18,16 @@
 // It also tells a character where services are on its map (AgentNavServices.h): the spawn table
 // is read from what ObjectMgr loaded, once, on the world thread at startup, and handed to the
 // search thread, which answers from it; no database query per request. The faction check uses
-// the faction templates alone (reputation is not looked at).
+// the faction templates alone (reputation is not looked at). A spawn a game event brings out is
+// told as such, with whether its event has it out at the question (the active events are copied
+// into each request on the world thread): told, not left out, as the asker decides.
 
 #include "AgentNavProtocol.h"
 #include "AgentNavRoute.h"
 #include "AgentNavServices.h"
 #include "CreatureData.h"
 #include "DBCStores.h"
+#include "GameEventMgr.h"
 #include "ObjectMgr.h"
 #include "SpellInfo.h"
 #include "SpellMgr.h"
@@ -268,6 +271,10 @@ AgentNav::ServiceQuery Asking(Player* player, AgentNav::Message const& message, 
     q.playerClass = player->getClass();
     q.faction = FactionOf(player->GetFactionTemplateEntry());
     q.cap = limits.maxServices;
+    // The game events on now, so event spawns are told as they stand at this question. GameEventMgr
+    // changes the list on this (the world) thread; the search thread gets a copy, sorted (a set).
+    auto const& active = sGameEventMgr->GetActiveEventList();
+    q.activeEvents.assign(active.begin(), active.end());
     return q;
 }
 
@@ -318,12 +325,33 @@ uint32 ProfessionOf(Trainer::Trainer const& trainer, std::string& name)
     return best;
 }
 
+// The game events that spawn each creature (game_event_creature, as GameEventMgr loaded it: the
+// list for event e, a negative e included, is at index e + n - 1, n the size of its event table).
+// Read once at startup; whether an event is active is read per question (Asking).
+std::unordered_map<ObjectGuid::LowType, std::vector<int16>> EventSpawns()
+{
+    std::unordered_map<ObjectGuid::LowType, std::vector<int16>> out;
+    int32 const events = int32(sGameEventMgr->GetEventMap().size());
+    auto const& lists = sGameEventMgr->GameEventCreatureGuids;
+    for (int32 i = 0; i < int32(lists.size()); ++i)
+    {
+        int32 const event = i + 1 - events;
+        if (event == 0 || event < INT16_MIN || event > INT16_MAX)
+            continue;
+        for (ObjectGuid::LowType const guid : lists[i])
+            out[guid].push_back(int16(event));
+    }
+    return out;
+}
+
 // The creature spawns that offer a service, from the world database ObjectMgr has loaded: the
 // spawn's own NPC flags or its template's (ObjectMgr::ChooseCreatureFlags), the template's faction
-// and name, and the class its default trainer teaches. Read once, on the world thread at startup.
+// and name, the class its default trainer teaches, and the game events that spawn it (none for a
+// standing spawn). Read once, on the world thread at startup.
 std::vector<AgentNav::Spawn> ServiceSpawns()
 {
     std::vector<AgentNav::Spawn> out;
+    std::unordered_map<ObjectGuid::LowType, std::vector<int16>> const events = EventSpawns();
     for (auto const& [spawnId, data] : sObjectMgr->GetAllCreatureData())
     {
         CreatureTemplate const* info = sObjectMgr->GetCreatureTemplate(data.id);
@@ -350,6 +378,8 @@ std::vector<AgentNav::Spawn> ServiceSpawns()
         }
         s.faction = FactionOf(sFactionTemplateStore.LookupEntry(info->faction));
         s.name = info->Name;
+        if (auto const found = events.find(spawnId); found != events.end())
+            s.events = found->second;
         out.push_back(std::move(s));
     }
     return out;
@@ -485,11 +515,13 @@ public:
         std::string const mmaps = sWorld->GetDataPath() + "mmaps";
         std::vector<AgentNav::Spawn> spawns = ServiceSpawns();
         std::size_t const places = spawns.size();
+        std::size_t const evented = std::count_if(spawns.begin(), spawns.end(),
+            [](AgentNav::Spawn const& s) { return !s.events.empty(); });
         gService.Start(mmaps, settings, std::move(spawns));
         LOG_INFO("server.loading",
-            ">> mod-agent-nav: answering route requests from {} ({} a second and {} a minute per character, {} yd, {} corners); {} service spawns",
+            ">> mod-agent-nav: answering route requests from {} ({} a second and {} a minute per character, {} yd, {} corners); {} service spawns ({} of them game event spawns)",
             mmaps, settings.limits.perSecond, settings.limits.perMinute, uint32(settings.limits.maxDistance),
-            settings.limits.maxWaypoints, places);
+            settings.limits.maxWaypoints, places, evented);
     }
 
     void OnShutdown() override { gService.Stop(); }

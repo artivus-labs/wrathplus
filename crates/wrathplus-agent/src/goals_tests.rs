@@ -424,3 +424,7 @@ fn hurt_it_rests_eating_the_food_in_its_bags() {
     assert_eq!(text(&script, "return doing()"), "goal:rest");
     assert_eq!(text(&script, "return table.concat(calls, ' ')"), "use 0,2");
 }
+
+#[cfg(test)]
+#[path = "goals_missing_tests.rs"]
+mod goals_missing_tests;

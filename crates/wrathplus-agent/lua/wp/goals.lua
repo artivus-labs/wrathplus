@@ -72,7 +72,13 @@
 -- Places: Goals.places[kind] lists the NPCs seen (kinds trainer, our class's; vendor, every
 --   merchant, which buys any item, quartermasters too; repair), up to `places_max` each, and an
 --   action goes to the nearest. Goals.learn_places{ { kind, name, x, y [, z, map, zone, guid] }, ... }
---   adds places from elsewhere (the realm's own list of its NPCs).
+--   adds places from elsewhere (the realm's own list of its NPCs; its `event`, `event_active`
+--   and `entry` are kept on the place).
+--   An NPC a visit walks to and does not find is forgotten and listed in Goals.missing
+--   ({ name, map, x, y, z, guid, at }, newest last) for `missing_for` seconds (1800): until then
+--   Goals.learn_places does not add it back (it returns how many it took, then how many it left
+--   out as missing). Seeing the NPC again clears it. Goals.learn_places(list, { force = true })
+--   takes them anyway and clears their marks; so does emptying Goals.missing.
 -- Keep: Goals.keep{ "name", ... } adds items a full bag never sells at a merchant (Upkeep.keep);
 --   selling that still leaves the bags full fails sell_and_repair with what fills them, and it
 --   backs off like any failure.
@@ -105,6 +111,8 @@ local G = {
   unsafe_wait = 20, danger_wait = 600, food_money = 50,
   -- NPCs remembered per kind, and the longest a walk of the planner's holds the runner.
   places_max = 8, walk_hold_cap = 300,
+  -- An NPC a visit found absent stays out of Goals.places this many seconds (Goals.missing).
+  missing_for = 1800, missing = {},
   -- How long the runner holds after the planner stops the character or sits it down by hand.
   stop_hold = 30,
   failures = {}, current = nil, held = nil, after = nil,
@@ -348,6 +356,37 @@ local function forget(p)
   end
 end
 
+-- Goals.missing without the marks older than `missing_for`, and the mark for a place (if any).
+local function missing_mark(p)
+  local found
+  for i = #G.missing, 1, -1 do
+    local m = G.missing[i]
+    if now() - (m.at or 0) >= G.missing_for then
+      table.remove(G.missing, i)
+    elseif not found and same_place(m, p) then
+      found = m
+    end
+  end
+  return found
+end
+
+-- Clear the marks of a place, now seen (or wanted by the planner after all).
+local function unmark(p)
+  for i = #G.missing, 1, -1 do
+    if same_place(G.missing[i], p) then table.remove(G.missing, i) end
+  end
+end
+
+-- A visit found nobody there: forget the place and remember that, so the next list of places
+-- from elsewhere does not send us back at once.
+local function mark_missing(p)
+  forget(p)
+  unmark(p)
+  G.missing[#G.missing + 1] = { name = p.name, map = p.map, x = p.x, y = p.y, z = p.z, guid = p.guid,
+    at = now() }
+  note(tostring(p.name) .. " was not there: left out of places for " .. G.missing_for .. " s")
+end
+
 -- Remember where the NPCs we need stood, as a player remembers the trainer's house. A smith who
 -- repairs is a vendor too: every merchant buys any item.
 local function remember(list)
@@ -358,6 +397,8 @@ local function remember(list)
     if u.kind == "unit" and not u.dead and u.npc then
       local place = { guid = u.guid, name = u.name, x = u.x, y = u.y, z = u.z, zone = zone,
         map = pos and pos.map, at = now() }
+      -- Seen, so not missing (whether or not it offers what we remember).
+      unmark(place)
       for _, s in ipairs(u.npc) do
         if s == "classtrainer" and class and u.title and u.title:lower():find(class:lower(), 1, true) then
           learn("trainer", place)
@@ -373,23 +414,32 @@ local function remember(list)
 end
 
 -- Places from elsewhere: { { kind = "vendor" | "repair" | "trainer" | ..., name, x, y [, z, map,
--- zone, guid] }, ... }. A repair NPC is a vendor too. Returns how many were taken.
-function G.learn_places(list)
+-- zone, guid] }, ... }. A repair NPC is a vendor too. One a visit lately found absent
+-- (Goals.missing) is left out, unless `opts.force`. Returns how many were taken, and how many
+-- were left out as missing.
+function G.learn_places(list, opts)
   assert(type(list) == "table", "learn_places takes a list of places")
-  local n = 0
+  local force = type(opts) == "table" and opts.force
+  local n, skipped = 0, 0
   for _, p in ipairs(list) do
     -- mod-agent-nav names its quest hub "questgiver-hub"; goal/action/fact names stay snake_case.
     assert(type(p) == "table" and (valid_name(p.kind) or p.kind == "questgiver-hub")
       and type(p.name) == "string" and tonumber(p.x) and tonumber(p.y),
       "a place is { kind, name, x, y [, z, map, zone, guid] }")
     local place = { guid = p.guid, name = p.name, x = tonumber(p.x), y = tonumber(p.y), z = tonumber(p.z),
-      map = p.map, zone = p.zone, at = now() }
-    learn(p.kind, place)
-    if p.kind == "repair" then learn("vendor", place) end
-    n = n + 1
+      map = p.map, zone = p.zone, at = now(), entry = p.entry, event = p.event,
+      event_active = p.event_active }
+    if force then unmark(place) end
+    if missing_mark(place) then
+      skipped = skipped + 1
+    else
+      learn(p.kind, place)
+      if p.kind == "repair" then learn("vendor", place) end
+      n = n + 1
+    end
   end
   dirty = true
-  return n
+  return n, skipped
 end
 
 -- The nearest remembered place of a kind on this continent, else nil.
@@ -1203,7 +1253,7 @@ local function visit(st)
   if not arrived then
     return true, false, walk_failure(outcome, "could not reach " .. tostring(p.name) .. " (" .. tostring(outcome) .. ")")
   end
-  forget(p)
+  mark_missing(p)
   return true, false, tostring(p.name) .. " is not where they stood"
 end
 
