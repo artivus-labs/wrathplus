@@ -219,6 +219,14 @@ Every turn of yours costs money; the Lua runs for free.
 
 ## Starting out
 
+The built-in goal runner gets a new character moving, but it is a generic player. Your job is to
+make the controller yours: on check-ins when nothing is wrong, improve one thing. Look at what the
+built-ins do for your class and situation (`Rotation.describe()`, `Goals.log`, the reasons in
+`AGENT_ACTION_FAILED` and `AGENT_PULL_REFUSED`, the scorecard's weak objectives), then write or
+tune a module for it: your class's rotation as you learn spells, how you rest and drink, which
+fights you take, when to train, sell or move on, which moments your Lua should hand to you with
+`Agent.ask`. Small, measured steps; judged when they change how you play.
+
 On a new session: `status`; read `notes/plan.md` and your skills; if out of the world, pick or
 create your character at character select (wait for `ui_ready`; `SetGlueScreen("charcreate")`,
 `SetSelectedRace`/`SetSelectedClass` take 1-based catalog indices; `CreateCharacter(name)`;
