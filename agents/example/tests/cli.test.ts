@@ -1,9 +1,9 @@
 import { expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { recentLines } from "../src/dashboard.ts";
-import { claudeEnv, envFile, loadEnv, parseEnv } from "../src/env.ts";
+import { claudeEnv, envFile, loadEnv, parseEnv, tokenFile } from "../src/env.ts";
 import { NO_FAST_TIER, SYSTEM_PROMPT, systemPrompt } from "../src/prompt.ts";
 import { accountFor, exitReason, findAgent, needsRestart, stuckReason } from "../src/manager.ts";
 
@@ -88,4 +88,14 @@ test("without the fast tier the planner is told what is not there", () => {
   expect(systemPrompt(false)).toBe(SYSTEM_PROMPT + NO_FAST_TIER);
   expect(NO_FAST_TIER).toContain("no fast loop");
   expect(NO_FAST_TIER).toContain("wake_me");
+});
+
+test("tokenFile keeps the token in a private file, once per token", () => {
+  const dir = mkdtempSync(join(tmpdir(), "wp-tokenfile-"));
+  const path = tokenFile("t".repeat(24), dir);
+  expect(readFileSync(path, "utf8")).toBe("t".repeat(24));
+  expect(statSync(path).mode & 0o777).toBe(0o600);
+  expect(statSync(dirname(path)).mode & 0o777).toBe(0o700);
+  expect(tokenFile("t".repeat(24), dir)).toBe(path);
+  rmSync(dir, { recursive: true, force: true });
 });

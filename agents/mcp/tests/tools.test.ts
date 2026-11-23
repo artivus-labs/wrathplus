@@ -299,6 +299,22 @@ describe("configFromEnv", () => {
     });
   });
 
+  test("reads the token from WRATHPLUS_AGENT_TOKEN_FILE, never echoing it", () => {
+    const env = { WRATHPLUS_AGENT_URL: "http://127.0.0.1:17950", WRATHPLUS_AGENT_TOKEN_FILE: "/secret/token" };
+    expect(configFromEnv(env, (path) => (path === "/secret/token" ? `${TOKEN}\n` : ""))).toEqual({
+      url: "http://127.0.0.1:17950",
+      token: TOKEN,
+    });
+    expect(() => configFromEnv(env, () => " \n")).toThrow(/TOKEN_FILE is empty/);
+    expect(() =>
+      configFromEnv(env, () => {
+        throw Object.assign(new Error("nope"), { code: "ENOENT" });
+      }),
+    ).toThrow(/could not be read \(ENOENT\)/);
+    // The variable wins over the file.
+    expect(configFromEnv({ ...env, WRATHPLUS_AGENT_TOKEN: TOKEN }, () => "other").token).toBe(TOKEN);
+  });
+
   test("names every missing variable", () => {
     expect(() => configFromEnv({})).toThrow(/WRATHPLUS_AGENT_URL.*WRATHPLUS_AGENT_TOKEN/);
   });
