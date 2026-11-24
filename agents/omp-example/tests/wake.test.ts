@@ -24,6 +24,12 @@ describe("classify", () => {
     expect(classify(ev("UI_ERROR_MESSAGE", "Can't do that while moving"))).toBeNull();
     expect(classify(ev("UNIT_HEALTH", "player"))).toBeNull();
   });
+  test("a fight left without progress is urgent; other fight ends only feed the evidence", () => {
+    const stuck = ev("AGENT_COMBAT_DONE", "0xG", "no_progress", "Leper Gnome's health has not dropped in 12s");
+    expect(classify(stuck)).toBe("urgent");
+    expect(line(stuck)).toBe("Combat left 0xG without progress: Leper Gnome's health has not dropped in 12s");
+    expect(classify(ev("AGENT_COMBAT_DONE", "0xG", "killed"))).toBeNull();
+  });
 });
 
 describe("describe", () => {

@@ -17,9 +17,11 @@
 --                        hiding every unit) the reason says so, and a running fight waits it out
 --                        instead of counting its target lost.
 --   Combat.active        the guid being fought, or nil. Combat.state says what it is doing.
---   Combat.engaged(guid) for an intent's done: true once that fight is over (and the outcome).
+--   Combat.engaged(guid) for an intent's done: true once that fight is over (and the outcome, and
+--                        for "no_progress" what was seen).
 --   Combat.defend        (default true) with no fight of its own, engage whatever is attacking you;
---                        and while chasing a target out of reach, turn on one already hitting you.
+--                        and while chasing a target out of reach, turn on one already attacking
+--                        you within reach (melee or ranged, each by its own reach).
 --                        A walk such a fight broke off is walked on once it is won. Defence asks
 --                        nobody: no pull check, and a wrapper round Combat.engage cannot stop it.
 --   Combat.flee([why])   leave the fight and run: snare the mob if the class can, then run to
@@ -40,7 +42,14 @@
 -- healthstone, presses the class's emergency buttons, and says when to flee.
 --
 -- The end of a fight is signalled as AGENT_COMBAT_DONE (guid, "killed" | "lost" | "stopped" |
--- "died" | "fled"). Combat.history keeps the last fights ({ name, outcome, seconds, hp_lost });
+-- "died" | "fled" | "no_progress" [, why]). "no_progress": in reach for `no_progress` seconds, the
+-- target's health never dropped, the game refused our actions on it (its red error lines, the
+-- rotation's failed casts) and we lost health meanwhile. Combat does not judge what that means
+-- (a target we cannot hurt, a client fault): it stops, says what it saw in `why` (and in
+-- Combat.last.why, with the others attacking us in Combat.last.attackers), and leaves that unit
+-- to the planner. For `no_progress_hold` seconds neither `defend` nor Goals' own pulls turn back
+-- to it (Combat.gave_up(guid)); Combat.engage still does, if you choose to.
+-- Combat.history keeps the last fights ({ name, outcome, seconds, hp_lost });
 -- every `review_every` fights, and after a death, AGENT_COMBAT_REVIEW carries a summary with the
 -- rotation's casts and failures, for the planner to rework Rotation.list.
 
@@ -68,8 +77,14 @@ local C = {
   -- Refuse pulls Survive calls unsafe (Combat.engage's `force` overrides one).
   safe = true,
   -- Turn to the target when it stands more than this (radians) off our facing; start the attack
-  -- again when its health has not dropped for `stall` seconds in reach.
+  -- again when its health has not dropped for `stall` seconds in reach (a melee swing; from range,
+  -- facing and targeting it again for the rotation's casts).
   face_within = 0.6, stall = 4,
+  -- End a fight as "no_progress" after this many seconds in reach without a scratch on the target,
+  -- our actions on it refused and our health falling (false: never); leave that unit to the
+  -- planner for `no_progress_hold` seconds.
+  no_progress = 12, no_progress_hold = 60,
+  given_up = {},
   -- Give up running after this long with a mob still on us, and fight it out.
   flee_for = 20,
   fleeing = nil,
@@ -85,6 +100,9 @@ local aimed, swung, seen_at
 -- The target's health when it last dropped, and when: a fight in reach where it stops dropping
 -- means our attack is not going out.
 local hurt_hp, hurt_at
+-- Since the target's health last dropped (in reach): when, its health, ours, the rotation's failed
+-- casts so far, and the game's refusals since ({ [message] = n }).
+local still
 
 local function find(guid)
   for _, u in ipairs(AgentNearby(C.sight)) do
@@ -117,13 +135,13 @@ end
 
 -- A summary of the last fights and the rotation's record over them, for the planner.
 local function review(reason)
-  local n, won, died, fled, seconds = 0, 0, 0, 0, 0
+  local n, won, died, fled, stuck, seconds = 0, 0, 0, 0, 0, 0
   local from = math.max(1, #C.history - C.review_every + 1)
   for i = from, #C.history do
     local f = C.history[i]
     n, seconds = n + 1, seconds + f.seconds
     if f.outcome == "killed" then won = won + 1 elseif f.outcome == "died" then died = died + 1
-    elseif f.outcome == "fled" then fled = fled + 1 end
+    elseif f.outcome == "fled" then fled = fled + 1 elseif f.outcome == "no_progress" then stuck = stuck + 1 end
   end
   local spells = {}
   for spell, st in pairs(Rotation and Rotation.stats or {}) do
@@ -131,8 +149,9 @@ local function review(reason)
   end
   table.sort(spells)
   local text = string.format(
-    "%s. Last %d fights: %d won, %d died%s, %ds on average. Rotation (%s): %s.%s",
-    reason, n, won, died, fled > 0 and (", " .. fled .. " fled") or "", n > 0 and math.floor(seconds / n) or 0,
+    "%s. Last %d fights: %d won, %d died%s%s, %ds on average. Rotation (%s): %s.%s",
+    reason, n, won, died, fled > 0 and (", " .. fled .. " fled") or "",
+    stuck > 0 and (", " .. stuck .. " left without progress") or "", n > 0 and math.floor(seconds / n) or 0,
     Rotation and Rotation.describe() or "none", #spells > 0 and table.concat(spells, "; ") or "no spells cast",
     weapon_note())
   if Rotation then Rotation.reset_stats() end
@@ -141,14 +160,23 @@ end
 
 -- The goal of a walk a defensive fight broke off, to walk on to after it.
 local resume
+-- How the last fights ended, by guid (the last ten).
+local ended, ended_order = {}, {}
 
-local function done(outcome)
+local function done(outcome, why, attackers)
   local guid = C.active
   local seconds = started and math.floor(GetTime() - started) or 0
   local hp_lost = (hp_at_start or 0) - (UnitHealth("player") or 0)
-  C.active, C.state, aimed, swung, seen_at, faced = nil, nil, nil, nil, nil, nil
+  C.active, C.state, aimed, swung, seen_at, faced, still = nil, nil, nil, nil, nil, nil, nil
   died_at, opened_at, emptied_at, opens = nil, nil, nil, 0
-  C.last = { guid = guid, outcome = outcome }
+  C.last = { guid = guid, outcome = outcome, why = why, attackers = attackers }
+  -- By guid as well: a fight `defend` starts at once (an attacker still on us) clears C.last, and an
+  -- intent waiting on this one must still read how it ended.
+  if guid then
+    if not ended[guid] then ended_order[#ended_order + 1] = guid end
+    ended[guid] = C.last
+    if #ended_order > 10 then ended[table.remove(ended_order, 1)] = nil end
+  end
   if outcome ~= "stopped" then
     C.history[#C.history + 1] = { name = name_of, outcome = outcome, seconds = seconds, hp_lost = hp_lost }
     if #C.history > 20 then table.remove(C.history, 1) end
@@ -161,7 +189,7 @@ local function done(outcome)
   end
   resume = nil
   if Agent and Agent.signal then
-    Agent.signal("COMBAT_DONE", guid, outcome)
+    if why then Agent.signal("COMBAT_DONE", guid, outcome, why) else Agent.signal("COMBAT_DONE", guid, outcome) end
     if outcome == "died" then
       Agent.signal("COMBAT_REVIEW", review("You died fighting " .. tostring(name_of)))
     elseif outcome ~= "stopped" and C.fights % C.review_every == 0 then
@@ -173,7 +201,7 @@ end
 -- Start the fight with a unit in sight. Defence comes straight here: no pull check.
 local function begin(u)
   C.active, aimed, swung, seen_at, faced = u.guid, nil, nil, GetTime(), nil
-  C.last, C.fleeing, hurt_hp, hurt_at = nil, nil, nil, nil
+  C.last, C.fleeing, hurt_hp, hurt_at, still = nil, nil, nil, nil, nil
   name_of, started, hp_at_start, target_health = u.name, GetTime(), UnitHealth("player"), u.health_max
   if C.auto_reach then
     local _, class = UnitClass("player")
@@ -216,21 +244,35 @@ end
 -- For an intent's `done`: whether the fight with `guid` (the active one if nil) is over.
 function C.engaged(guid)
   if C.active and (guid == nil or C.active == guid) then return false end
-  local last = C.last
-  return true, last and last.outcome == "killed", last and last.outcome
+  local last = guid and ended[guid] or C.last
+  return true, last and last.outcome == "killed", last and last.outcome, last and last.why
 end
 
--- The nearest living unit fighting us within `yards` (not `except`), or nil.
-local function attacker(yards, except)
+-- Whether a fight with `guid` ended "no_progress" less than `no_progress_hold` seconds ago.
+function C.gave_up(guid)
+  local til = guid and C.given_up[guid]
+  if til and GetTime() >= til then C.given_up[guid], til = nil, nil end
+  return til ~= nil
+end
+
+-- The living units fighting us within `yards` (not `except`), nearest first.
+local function attackers(yards, except)
   local me = UnitGUID("player")
-  local best
+  local out = {}
   for _, u in ipairs(AgentNearby(yards)) do
-    if me and u.guid ~= except and not u.dead and u.in_combat and u.target == me and u.reaction ~= "friendly"
-      and (not best or u.distance < best.distance) then
-      best = u
+    if me and u.guid ~= except and not u.dead and u.in_combat and u.target == me and u.reaction ~= "friendly" then
+      out[#out + 1] = u
     end
   end
-  return best
+  table.sort(out, function(a, b) return a.distance < b.distance end)
+  return out
+end
+
+-- The nearest of them, or nil; `fresh` leaves out units a fight was given up on.
+local function attacker(yards, except, fresh)
+  for _, u in ipairs(attackers(yards, except)) do
+    if not (fresh and C.gave_up(u.guid)) then return u end
+  end
 end
 
 ---------------------------------------------------------------------------------------------------
@@ -331,6 +373,53 @@ local function rotate(u)
   C.rotation_error = tostring(cast)
 end
 
+-- Whether we fight this unit with swings: a melee class, or a hunter with the mob on top of it.
+local function swings(u)
+  return not C.ranged or (u.distance < 5 and select(2, UnitClass("player")) == "HUNTER")
+end
+
+-- The rotation's failed casts so far (Rotation.stats), to tell new refusals from old ones.
+local function cast_failures()
+  local n = 0
+  for _, st in pairs(Rotation and Rotation.stats or {}) do n = n + (st.failed or 0) end
+  return n
+end
+
+-- A fight going nowhere: why, once the target's health has not dropped for `no_progress` seconds
+-- in reach while the game refused our actions on it and we lost health; else nil.
+local function no_progress(u, now)
+  local hp, mine = u.health or 0, UnitHealth("player") or 0
+  if not still or hp < still.hp then
+    still = { at = now, hp = hp, mine = mine, failed = cast_failures(), refused = {}, n = 0 }
+    return nil
+  end
+  if not C.no_progress or now - still.at < C.no_progress then return nil end
+  local lost, failed = still.mine - mine, math.max(0, cast_failures() - still.failed)
+  if lost <= 0 or (still.n == 0 and failed == 0) then return nil end
+  local parts = {}
+  for message, n in pairs(still.refused) do parts[#parts + 1] = string.format('"%s" x%d', message, n) end
+  table.sort(parts)
+  if failed > 0 then parts[#parts + 1] = failed .. " rotation cast" .. (failed > 1 and "s" or "") .. " failed" end
+  return string.format("%s's health has not dropped in %ds in reach (%d) while we lost %d; refused: %s",
+    u.name or "the target", math.floor(now - still.at), hp, lost, table.concat(parts, ", "))
+end
+
+-- No progress: stop, say what was seen and who else is on us, and leave the unit be a while.
+-- Whether to fight one of the others, run or try again is the planner's call, not ours.
+local function give_up(why)
+  local others, names = {}, {}
+  for _, a in ipairs(attackers(40, C.active)) do
+    others[#others + 1] = { guid = a.guid, name = a.name, distance = a.distance, health = a.health }
+    names[#names + 1] = string.format("%s (%s, %d yd)", tostring(a.name), tostring(a.guid), math.floor(a.distance or 0))
+  end
+  if #names > 0 then why = why .. "; also attacking us: " .. table.concat(names, ", ") end
+  for guid, til in pairs(C.given_up) do
+    if GetTime() >= til then C.given_up[guid] = nil end
+  end
+  C.given_up[C.active] = GetTime() + C.no_progress_hold
+  done("no_progress", why, others)
+end
+
 local function tick(now)
   if UnitIsDeadOrGhost("player") then return done("died") end
   -- A cinematic: the target is out of sight with everything else, and no walk would start. That
@@ -357,9 +446,10 @@ local function tick(now)
     saved = ok and what or nil
     if not ok then C.survive_error = tostring(what) end
   end
-  if u.distance > C.reach and C.defend and not C.ranged then
-    -- Something else is already hitting us while we chase: fight that one first.
-    local other = attacker(C.reach + 1, C.active)
+  if u.distance > C.reach and C.defend then
+    -- Something else is already attacking us within our reach while we chase: fight that one
+    -- first (a caster's reach is its range).
+    local other = attacker(C.reach + 1, C.active, true)
     if other then
       local walk_on = resume
       done("stopped")
@@ -374,7 +464,7 @@ local function tick(now)
       AgentMoveTo(u.x, u.y, u.z)
       aimed = { x = u.x, y = u.y }
     end
-    swung, hurt_hp = nil, nil
+    swung, hurt_hp, still = nil, nil, nil
     -- An opener on the way in (Charge has a range band; melee spells wait for reach).
     local cast = u.distance <= 30 and rotate(u) or nil
     C.state = string.format("closing on %s (%d yd)%s", u.name or "the target", u.distance, cast and (": " .. cast) or "")
@@ -391,7 +481,7 @@ local function tick(now)
       if AgentFace then AgentFace(C.active) end
     end
     -- A hunter with the mob on top of it swings back.
-    if u.distance < 5 and select(2, UnitClass("player")) == "HUNTER" and (not swung or now - swung >= 1.5) then
+    if swings(u) and (not swung or now - swung >= 1.5) then
       swung = now
       AgentInteract(C.active)
     end
@@ -410,11 +500,20 @@ local function tick(now)
   if not hurt_hp or (u.health or 0) < hurt_hp then
     hurt_hp, hurt_at = u.health or 0, now
   elseif now - hurt_at >= C.stall then
-    hurt_at, swung, faced = now, now, now
+    hurt_at, faced = now, now
     if AgentFace then AgentFace(C.active) end
-    if StartAttack then StartAttack() else AgentInteract(C.active) end
+    if swings(u) then
+      swung = now
+      if StartAttack then StartAttack() else AgentInteract(C.active) end
+    elseif UnitGUID and UnitGUID("target") ~= C.active then
+      -- From range the rotation's casts are the attack: a melee swing would only walk in or be
+      -- refused as too far. They need the unit targeted (and faced, above); the rotation runs below.
+      AgentTarget(C.active)
+    end
     C.kicks = (C.kicks or 0) + 1
   end
+  local stuck = no_progress(u, now)
+  if stuck then return give_up(stuck) end
   local cast = rotate(u) or saved
   C.state = "fighting " .. (u.name or "the target") .. (cast and (": " .. cast) or "")
 end
@@ -440,6 +539,14 @@ frame:SetScript("OnEvent", function(_, event, message)
     if C.active and died_at then ConfirmLootSlot(message) end
     return
   end
+  -- A refusal while the target's health stands still: evidence for `no_progress` (the global
+  -- cooldown and a cast already going are not refusals).
+  if still and type(message) == "string" then
+    local lower = message:lower()
+    if not (lower:find("not ready") or lower:find("another action")) then
+      still.refused[message], still.n = (still.refused[message] or 0) + 1, still.n + 1
+    end
+  end
   -- The server says too far or facing away: take it as a cue to close in and face again.
   if C.active and type(message) == "string"
     and (message:find("too far") or message:find("in front") or message:find("facing")) then
@@ -463,7 +570,7 @@ frame:SetScript("OnUpdate", function(_, dt)
     tick(GetTime())
   elseif C.defend and not UnitIsDeadOrGhost("player") and not held() then
     -- Attacked with no fight of our own (resting, walking, between pulls): fight back.
-    local foe = attacker(30)
+    local foe = attacker(30, nil, true)
     if foe then
       local walk = AgentWalk()
       begin(foe)

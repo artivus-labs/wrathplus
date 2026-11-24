@@ -38,7 +38,8 @@
 --       pick_up_quests, work_objective, train, sell_and_repair, buy_food, rest, grind, seek_mobs,
 --       travel_to_zone (and wp.professions' learn_professions, craft). Fights are only started
 --       when Survive.pull_ok says so (grind and work_objective take the nearest safe mob, and wait
---       for or give up on an unsafe one),
+--       for or give up on an unsafe one; a fight Combat ended "no_progress" fails the action with
+--       what Combat saw, and that unit is left alone for Combat.no_progress_hold seconds),
 --       and whatever the plan, the runner rests first when hurt.
 --       A plan is the cheapest chain of actions (A* over the facts) from now to
 --       the goal's `want`; plans are made again on the agent's signals (an activity's end, a
@@ -174,7 +175,9 @@ end
 
 -- Whether a unit is worth fighting for XP: alive, not friendly, not someone else's tap, no NPC
 -- service, no elite, rare or critter, and inside the levels we pull (Survive.fits, Survive.band).
+-- A unit Combat just left without progress (Combat.gave_up) is not one, for `no_progress_hold`.
 function G.fits(u)
+  if Combat and Combat.gave_up and Combat.gave_up(u.guid) then return false end
   if Survive then return (Survive.fits(u)) end
   local lvl = level()
   return u.kind == "unit" and not u.dead and (u.reaction == "hostile" or u.reaction == "neutral")
@@ -1421,7 +1424,8 @@ local function objective_target(o)
   local list = seen(100)
   local best
   for _, u in ipairs(list) do
-    if u.distance <= 60 then
+    -- A unit Combat just left without progress waits out its hold (Combat.gave_up).
+    if u.distance <= 60 and not (Combat and Combat.gave_up and Combat.gave_up(u.guid)) then
       local named = u.name and u.name:lower() == lower
       local fight = u.kind == "unit" and not u.dead and u.reaction ~= "friendly" and not (u.tapped and not u.tapped_by_me)
       local ok = (named and (fight or u.kind == "gameobject"))
@@ -1513,10 +1517,11 @@ G.action({
     end
     if Combat.active then return false end
     if job.fighting then
-      local _, _, outcome = Combat.engaged(job.fighting)
+      local _, _, outcome, why = Combat.engaged(job.fighting)
       job.fighting = nil
       if outcome == "died" then return true, false, "died fighting" end
       if outcome == "fled" then return true, false, "fled a fight" end
+      if outcome == "no_progress" then return true, false, "no progress fighting: " .. tostring(why) end
     end
     local t, unsafe = objective_target(o)
     if t and unsafe then
@@ -1741,9 +1746,10 @@ G.action({
   end,
   stop = function() Combat.stop() end,
   done = function()
-    local over, won, outcome = Combat.engaged(grind.guid)
+    local over, won, outcome, why = Combat.engaged(grind.guid)
     if not over then return false end
-    return true, won, outcome
+    -- No progress: a failure like any other (grind backs off), saying what Combat saw.
+    return true, won, why and (outcome .. ": " .. why) or outcome
   end,
   timeout = 180,
 })

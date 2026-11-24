@@ -34,6 +34,7 @@ export const WAKE_EVENTS = [
   // Counted for the check-ins' evidence, never waking the planner by themselves:
   "AGENT_ACTION_FAILED",
   "AGENT_PULL_REFUSED",
+  // (but for a fight left "no_progress", which wakes it: see classify)
   "AGENT_COMBAT_DONE",
   "AGENT_COMBAT_REVIEW",
   "UI_ERROR_MESSAGE",
@@ -61,6 +62,9 @@ export function classify(e: GameEvent, self?: string): Urgency | null {
   const speaker = str(e.args[1]);
   if (e.event.startsWith("CHAT_MSG_") && self && speaker.toLowerCase() === self.toLowerCase()) return null;
   if (URGENT.has(e.event)) return "urgent";
+  // A fight Combat left without progress, while still being hit: whether to fight another, run or
+  // retry is the planner's call, and it cannot wait for a check-in.
+  if (e.event === "AGENT_COMBAT_DONE" && str(e.args[1]) === "no_progress") return "urgent";
   if (NOTABLE.has(e.event)) return "notable";
   if (NEARBY.has(e.event)) {
     if (!self) return null;
@@ -109,6 +113,9 @@ export function describe(e: GameEvent): string {
       return `Your hold "${str(a[0])}" ran out after ${str(a[1])} s: hold again or Goals.release().`;
     case "AGENT_ACTION_FAILED":
       return `Goal action ${str(a[1])} (goal ${str(a[0])}) failed: ${clip(str(a[2]), 200)}`;
+    case "AGENT_COMBAT_DONE":
+      if (str(a[1]) === "no_progress") return `Combat left ${str(a[0])} without progress: ${clip(str(a[2]), 400)}`;
+      return `${e.event} ${clip(JSON.stringify(a), 200)}`;
     default:
       return `${e.event} ${clip(JSON.stringify(a), 200)}`;
   }
