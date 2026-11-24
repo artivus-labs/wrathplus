@@ -15,6 +15,9 @@ use sha1::{Digest, Sha1};
 use wrathplus_srp::wrath_header::{DecrypterHalf, EncrypterHalf, HeaderCrypto};
 use wrathplus_srp::{NormalizedString, SESSION_KEY_LENGTH};
 
+#[path = "wrath_world_receive.rs"]
+mod receive;
+
 /// The 3.3.5a client build accepted by AzerothCore.
 pub const WRATH_CLIENT_BUILD: u32 = 12_340;
 /// AzerothCore's usual world-server port.
@@ -1001,11 +1004,8 @@ fn recv_raw_fail_closed_until(
         let mut reader = DeadlineReader::new(stream, deadline);
         recv_raw_fail_closed(&mut reader, decrypter, failed)
     };
-    if let Err(error) = stream.set_read_timeout(original_timeout) {
-        *failed = true;
-        return Err(error).context("restoring Wrath world socket timeout after deadline receive");
-    }
-    result
+    let restored = stream.set_read_timeout(original_timeout);
+    receive::after_receive(result, restored, failed, receive::DEADLINE)
 }
 
 fn recv_raw_fail_closed_with_frame_timeout(
@@ -1019,11 +1019,8 @@ fn recv_raw_fail_closed_with_frame_timeout(
         let mut reader = FrameDeadlineReader::new(stream, idle_timeout, frame_timeout);
         recv_raw_fail_closed(&mut reader, decrypter, failed)
     };
-    if let Err(error) = stream.set_read_timeout(idle_timeout) {
-        *failed = true;
-        return Err(error).context("restoring Wrath world socket idle timeout after frame receive");
-    }
-    result
+    let restored = stream.set_read_timeout(idle_timeout);
+    receive::after_receive(result, restored, failed, receive::IDLE)
 }
 
 struct DeadlineReader<'a> {
