@@ -2,7 +2,7 @@
 //! format): the request line, and the realm's answer one place a line.
 
 /// The kinds a request may name.
-pub const KINDS: [&str; 10] = [
+pub const KINDS: [&str; 12] = [
     "vendor",
     "repair",
     "trainer",
@@ -13,6 +13,8 @@ pub const KINDS: [&str; 10] = [
     "trainer_cooking",
     "trainer_first_aid",
     "trainer_profession",
+    "auctioneer",
+    "mailbox",
 ];
 
 /// A services request: `kinds` (from [`KINDS`]; empty: all of them) within `radius` yards (none:
@@ -40,7 +42,7 @@ pub fn request(id: u16, kinds: &[String], radius: Option<u32>) -> Result<String,
 pub struct Place {
     /// One of [`KINDS`].
     pub kind: String,
-    /// The creature's template entry.
+    /// The creature's template entry; a mailbox's gameobject entry.
     pub entry: u32,
     pub name: String,
     /// WoW coordinates, on the asker's map.
@@ -53,6 +55,10 @@ pub struct Place {
     /// events has it out, as they stood when the realm answered, `Some(false)` while none does;
     /// `None` for a standing spawn.
     pub event: Option<bool>,
+    /// The auction house an auctioneer serves: `"alliance"`, `"horde"` or `"neutral"` (Booty Bay,
+    /// Gadgetzan, Everlook; every one on a realm that lets both sides trade); `None` for anything
+    /// else. The other side's auctioneers are never named: the realm leaves out what is hostile.
+    pub house: Option<String>,
 }
 
 /// One line of the realm's answer: the `index`-th of `count` places (`None` with count 0: none).
@@ -66,7 +72,7 @@ pub struct Line {
 
 /// An `s` line (the verb already read), or `None` when it does not parse.
 pub(super) fn decode(payload: &str) -> Option<Line> {
-    let mut fields = payload.splitn(13, ' ');
+    let mut fields = payload.splitn(14, ' ');
     let _verb = fields.next()?;
     let id = fields.next()?.parse().ok()?;
     let index: u16 = fields.next()?.parse().ok()?;
@@ -103,6 +109,11 @@ pub(super) fn decode(payload: &str) -> Option<Line> {
         "off" => Some(false),
         _ => return None,
     };
+    let house = match fields.next()? {
+        "-" => None,
+        word @ ("alliance" | "horde" | "neutral") => Some(word.to_string()),
+        _ => return None,
+    };
     let name = fields.next().unwrap_or("").trim().to_string();
     Some(Line {
         id,
@@ -116,6 +127,7 @@ pub(super) fn decode(payload: &str) -> Option<Line> {
             members,
             profession,
             event,
+            house,
         }),
     })
 }

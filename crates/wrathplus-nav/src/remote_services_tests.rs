@@ -36,10 +36,10 @@ fn the_module_reads_a_services_request_as_the_client_wrote_it() {
     let all = request(3, &[], None).unwrap();
     assert_eq!(
         all,
-        "S 3 vendor,repair,trainer,flightmaster,innkeeper,banker,questgiver-hub,trainer_cooking,trainer_first_aid,trainer_profession"
+        "S 3 vendor,repair,trainer,flightmaster,innkeeper,banker,questgiver-hub,trainer_cooking,trainer_first_aid,trainer_profession,auctioneer,mailbox"
     );
     assert!(all.len() <= crate::remote::MAX_PAYLOAD);
-    assert_eq!(parsed(&all), "services 3 1023 0.000");
+    assert_eq!(parsed(&all), "services 3 4095 0.000");
     let some = request(4, &words(&["repair", "trainer"]), Some(800)).unwrap();
     assert_eq!(some, "S 4 repair,trainer 800");
     assert_eq!(parsed(&some), "services 4 6 800.000");
@@ -207,22 +207,27 @@ fn answer_lines_out_of_turn_or_unreadable_are_errors() {
     };
     let mut collect = Collect::default();
     assert_eq!(
-        collect.push(line("s 2 1 3 vendor 1 10.0 0.0 0.0 1 - - A")),
+        collect.push(line("s 2 1 3 vendor 1 10.0 0.0 0.0 1 - - - A")),
         Ok(None)
     );
     assert!(collect
-        .push(line("s 2 3 3 vendor 1 10.0 0.0 0.0 1 - - C"))
+        .push(line("s 2 3 3 vendor 1 10.0 0.0 0.0 1 - - - C"))
         .unwrap_err()
         .contains("came apart"));
     assert_eq!(collect.push(line("s 2 0 0")), Ok(Some(Vec::new())));
     for bad in [
-        "s 2 1 1 armorer 1 1 2 3 1 - - X",
-        "s 2 2 1 vendor 1 1 2 3 1 - - X",
-        "s 2 1 1 vendor 1 1 nan 3 1 - - X",
+        "s 2 1 1 armorer 1 1 2 3 1 - - - X",
+        "s 2 2 1 vendor 1 1 2 3 1 - - - X",
+        "s 2 1 1 vendor 1 1 nan 3 1 - - - X",
         // The event field is "-", "on" or "off"; an older realm's line has a name word there.
-        "s 2 1 1 vendor 1 1 2 3 1 - maybe X",
+        "s 2 1 1 vendor 1 1 2 3 1 - maybe - X",
         "s 2 1 1 vendor 1 1 2 3 1 - Brother_Danil",
         "s 2 1 1 vendor 1 1 2 3 1 -",
+        // The house field is "-", "alliance", "horde" or "neutral"; the last realm's line (before
+        // auctioneers) has a name word there, or nothing.
+        "s 2 1 1 auctioneer 1 1 2 3 1 - - goblin X",
+        "s 2 1 1 vendor 1 1 2 3 1 - - Brother_Danil",
+        "s 2 1 1 vendor 1 1 2 3 1 - -",
         "s 2 0 0 extra",
         "s 2 1 1 vendor",
     ] {
@@ -307,7 +312,7 @@ fn event_spawns_are_told_with_whether_their_event_has_them_out() {
     assert_eq!(told("@9")[2], "26328 Some(true)");
     // On the wire: "-", "on" or "off" before the name.
     let Ok(Reply::Service(line)) =
-        decode("s 3 1 1 trainer 26326 10.0 0.0 0.0 1 - off Mage Trainer")
+        decode("s 3 1 1 trainer 26326 10.0 0.0 0.0 1 - off - Mage Trainer")
     else {
         panic!("decodes");
     };
@@ -316,4 +321,91 @@ fn event_spawns_are_told_with_whether_their_event_has_them_out() {
         (place.event, place.name.as_str()),
         (Some(false), "Mage Trainer")
     );
+}
+
+/// A Horde player (orc): Horde and player, hostile to monsters.
+const ORC: &str = "2 5 4 8";
+
+#[test]
+fn auctioneers_are_told_with_the_house_they_serve() {
+    // Stormwind's and Orgrimmar's auctioneers, Booty Bay's (goblins: anyone's), and a vendor that
+    // is an auctioneer too.
+    let spawns = [
+        format!("8719 0 1 10 0 0 0x200000 0 0 {ALLIANCE} +alliance Auctioneer_Fitch"),
+        format!("8673 0 1 5 0 0 0x200000 0 0 {HORDE} +horde Auctioneer_Thathung"),
+        format!("2622 0 1 20 0 0 0x200000 0 0 {GOBLIN} +neutral Auctioneer_Kresky"),
+        format!("9999 0 1 30 0 0 0x200080 0 0 {ALLIANCE} +alliance Trader"),
+    ]
+    .join("\n");
+    let told = |me: &str| {
+        over(
+            &spawns,
+            &format!("auctioneer,vendor 0 1 0 0 2000 1 20 {me}"),
+        )
+        .into_iter()
+        .map(|p| format!("{} {} {:?}", p.kind, p.entry, p.house))
+        .collect::<Vec<_>>()
+    };
+    // The other side's house is left out, as any hostile spawn is; the neutral one is told as
+    // neutral, and only an auctioneer place carries a house.
+    assert_eq!(
+        told(HUMAN),
+        [
+            "auctioneer 8719 Some(\"alliance\")",
+            "auctioneer 2622 Some(\"neutral\")",
+            "vendor 9999 None",
+            "auctioneer 9999 Some(\"alliance\")",
+        ]
+    );
+    assert_eq!(
+        told(ORC),
+        [
+            "auctioneer 8673 Some(\"horde\")",
+            "auctioneer 2622 Some(\"neutral\")",
+        ]
+    );
+    // On the wire: the house before the name.
+    let Ok(Reply::Service(line)) =
+        decode("s 3 1 1 auctioneer 2622 20.0 0.0 0.0 1 - - neutral Auctioneer Kresky")
+    else {
+        panic!("decodes");
+    };
+    let place = line.place.unwrap();
+    assert_eq!(
+        (place.house.as_deref(), place.name.as_str()),
+        (Some("neutral"), "Auctioneer Kresky")
+    );
+}
+
+#[test]
+fn mailboxes_are_gameobjects_told_to_either_side_with_their_events() {
+    // Two standing mailboxes, one a game event puts out (a fair's), and an innkeeper beside them.
+    let spawns = [
+        "143981 0 1 15 0 0 0 0 0 0 0 0 0 +mailbox Mailbox".to_string(),
+        "32349 0 1 2500 0 0 0 0 0 0 0 0 0 +mailbox Far_Mailbox".to_string(),
+        "187113 0 1 8 0 0 0 0 0 0 0 0 0 +mailbox @110 Fair_Mailbox".to_string(),
+        format!("6740 0 1 12 0 0 0x10000 0 0 {ALLIANCE} Innkeeper_Allison"),
+    ]
+    .join("\n");
+    let told = |kinds: &str, me: &str, active: &str| {
+        over(&spawns, &format!("{kinds} 0 1 0 0 2000 1 20 {me} {active}"))
+            .into_iter()
+            .map(|p| format!("{} {} {:?} {:?}", p.kind, p.entry, p.event, p.house))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        told("mailbox", HUMAN, ""),
+        [
+            "mailbox 187113 Some(false) None",
+            "mailbox 143981 None None"
+        ]
+    );
+    // A mailbox has no faction: the Horde is told the same ones, the fair's out while it runs.
+    assert_eq!(
+        told("mailbox", ORC, "@110"),
+        ["mailbox 187113 Some(true) None", "mailbox 143981 None None"]
+    );
+    // Asked for, or not at all; and an NPC is never a mailbox.
+    assert_eq!(told("innkeeper", HUMAN, ""), ["innkeeper 6740 None None"]);
+    assert_eq!(told("mailbox,innkeeper", HUMAN, "").len(), 3);
 }

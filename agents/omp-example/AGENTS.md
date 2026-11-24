@@ -102,9 +102,10 @@ and docs, and your own modules' lines; `lua_doc` reads one in full. The built-in
   `Goals.facts()`, `Goals.state`, `Goals.log`; teach facts (`Goals.fact(name, fn)`) and actions
   (`Goals.action{name, pre, effects, run, done, cost}`); pause with `Goals.hold{reason, seconds}`.
   `Goals.zones()` lists the zones that fit your level.
-- **`AgentServices([kinds[, radius]])`**: where vendors, trainers, flight masters and the like
-  are on your map, from the realm: `{pending = true}` first, then the list after
-  `AGENT_SERVICES_READY`. `AgentFindNpc(service)` finds the nearest one in sight.
+- **`AgentServices([kinds[, radius]])`**: where vendors, trainers, flight masters, auctioneers
+  (with the `house` they serve), mailboxes and the like are on your map, from the realm:
+  `{pending = true}` first, then the list after `AGENT_SERVICES_READY`. `AgentFindNpc(service)`
+  finds the nearest one in sight.
 - **`Upkeep`** (equips upgrades, bags, sells junk, repairs, trains), **`Professions`** (Cooking and
   First Aid: learnt, levelled and used), **`Revive`** (release, run back, resurrect),
   **`Avoid`** (routes around hostile mobs), **`Survive`** (eat, drink, flee bands).

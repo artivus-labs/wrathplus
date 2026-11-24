@@ -46,8 +46,8 @@ fn agent_services_asks_the_realm_once_and_the_next_call_reads_the_answer() {
     rig.later(1.0);
     assert!(rig.realm(&[]).is_empty());
     rig.realm(&[
-        "s 1 1 2 vendor 1 110.0 200.0 30.0 1 - - Brother Danil",
-        "s 1 2 2 trainer_first_aid 41 120.0 200.0 30.0 1 First_Aid - Medic",
+        "s 1 1 2 vendor 1 110.0 200.0 30.0 1 - - - Brother Danil",
+        "s 1 2 2 trainer_first_aid 41 120.0 200.0 30.0 1 First_Aid - - Medic",
     ]);
     assert_eq!(
         rig.events().last().unwrap(),
@@ -103,8 +103,8 @@ fn places_come_nearest_first_with_their_distance_from_where_you_stand() {
     assert_eq!(services(&rig, call), Ok(None));
     rig.realm(&[]);
     rig.realm(&[
-        "s 1 1 2 vendor 1 110.0 200.0 30.0 1 - - Brother Danil",
-        "s 1 2 2 vendor 2 70.0 240.0 30.0 1 - - Janos Hammerknuckle",
+        "s 1 1 2 vendor 1 110.0 200.0 30.0 1 - - - Brother Danil",
+        "s 1 2 2 vendor 2 70.0 240.0 30.0 1 - - - Janos Hammerknuckle",
     ]);
     let read = |rig: &Rig| -> Vec<(String, f64)> {
         let list: Table = rig.lua.load(format!("return {call}")).eval().unwrap();
@@ -142,9 +142,9 @@ fn event_spawns_carry_event_and_event_active() {
     assert_eq!(services(&rig, call), Ok(None));
     rig.realm(&[]);
     rig.realm(&[
-        "s 1 1 3 trainer 26326 110.0 200.0 30.0 1 - off Mage Trainer",
-        "s 1 2 3 trainer 26330 115.0 200.0 30.0 1 - on Paladin Trainer",
-        "s 1 3 3 trainer 944 120.0 200.0 30.0 1 - - Marryk Nurribit",
+        "s 1 1 3 trainer 26326 110.0 200.0 30.0 1 - off - Mage Trainer",
+        "s 1 2 3 trainer 26330 115.0 200.0 30.0 1 - on - Paladin Trainer",
+        "s 1 3 3 trainer 944 120.0 200.0 30.0 1 - - - Marryk Nurribit",
     ]);
     let fields: Vec<String> = rig
         .lua
@@ -161,6 +161,37 @@ fn event_spawns_carry_event_and_event_active() {
             "Mage Trainer true false",
             "Paladin Trainer true true",
             "Marryk Nurribit false nil"
+        ]
+    );
+}
+
+/// An auctioneer comes with the house it serves; a mailbox (a game object) with none.
+#[test]
+fn auctioneers_carry_their_house_and_mailboxes_come_too() {
+    let rig = Rig::in_world();
+    let call = "AgentServices('auctioneer,mailbox')";
+    assert_eq!(services(&rig, call), Ok(None));
+    assert_eq!(rig.realm(&[]), ["S 1 auctioneer,mailbox"]);
+    rig.realm(&[
+        "s 1 1 3 mailbox 143981 105.0 200.0 30.0 1 - - - Mailbox",
+        "s 1 2 3 auctioneer 8719 110.0 200.0 30.0 1 - - alliance Auctioneer Fitch",
+        "s 1 3 3 auctioneer 2622 115.0 200.0 30.0 1 - - neutral Auctioneer Kresky",
+    ]);
+    let fields: Vec<String> = rig
+        .lua
+        .load(format!(
+            "local out = {{}} for _, p in ipairs({call}) do \
+               out[#out + 1] = p.kind .. ' ' .. p.entry .. ' ' .. tostring(p.house) \
+             end return out"
+        ))
+        .eval()
+        .unwrap();
+    assert_eq!(
+        fields,
+        [
+            "mailbox 143981 nil",
+            "auctioneer 8719 alliance",
+            "auctioneer 2622 neutral"
         ]
     );
 }

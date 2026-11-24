@@ -74,8 +74,8 @@ has seen.
 
 | Line | Meaning |
 | --- | --- |
-| `S <id> <kinds> [radius]` | Kinds, a comma list: `vendor`, `repair`, `trainer` (the asker's own class trainer), `flightmaster`, `innkeeper`, `banker`, `questgiver-hub`, `trainer_cooking`, `trainer_first_aid`, `trainer_profession` (any profession trainer). Radius in yards; none (and at most) `AgentNav.ServiceRadius`. |
-| `s <id> <i> <n> <kind> <entry> <x> <y> <z> <members> <profession> <event> <name>` | The `i`-th of `n` places, nearest first. `members`: the quest givers in a hub (1 otherwise). `profession`: the skill a profession trainer teaches, spaces as underscores (`First_Aid`), `-` otherwise. `event`: `-` for a standing spawn; `on` or `off` for one a game event spawns, whether it is out as the events stand when the question is asked. The name is the rest of the line. |
+| `S <id> <kinds> [radius]` | Kinds, a comma list: `vendor`, `repair`, `trainer` (the asker's own class trainer), `flightmaster`, `innkeeper`, `banker`, `questgiver-hub`, `trainer_cooking`, `trainer_first_aid`, `trainer_profession` (any profession trainer), `auctioneer`, `mailbox`. Radius in yards; none (and at most) `AgentNav.ServiceRadius`. |
+| `s <id> <i> <n> <kind> <entry> <x> <y> <z> <members> <profession> <event> <house> <name>` | The `i`-th of `n` places, nearest first. `entry`: the creature's template entry, a mailbox's gameobject entry. `members`: the quest givers in a hub (1 otherwise). `profession`: the skill a profession trainer teaches, spaces as underscores (`First_Aid`), `-` otherwise. `event`: `-` for a standing spawn; `on` or `off` for one a game event spawns, whether it is out as the events stand when the question is asked. `house`: the auction house an auctioneer serves, `alliance`, `horde` or `neutral`; `-` otherwise. The name is the rest of the line. |
 | `s <id> 0 0` | Nothing of those kinds within the radius. |
 
 How places are chosen (`src/AgentNavServices.h`, tested against a fixture by the client's tests):
@@ -84,7 +84,16 @@ How places are chosen (`src/AgentNavServices.h`, tested against a fixture by the
   to the asker's either way (`FactionTemplateEntry::IsHostileTo`, templates only: reputation and
   at-war states are not looked at).
 - The NPC flags are the spawn's own, else its template's (`ObjectMgr::ChooseCreatureFlags`):
-  vendor (any vendor flag), repair, flight master, innkeeper, banker.
+  vendor (any vendor flag), repair, flight master, innkeeper, banker, auctioneer.
+- `auctioneer`: its `house` is the auction house the core opens for it
+  (`AuctionHouseMgr::GetAuctionHouseEntryFromFactionTemplate`): its faction template's side, else
+  neutral (Booty Bay, Gadgetzan, Everlook), and neutral for every auctioneer when
+  `AllowTwoSide.Interaction.Auction` is on (as configured at startup). The other side's
+  auctioneers are hostile, so left out like any hostile spawn (the core would not open them).
+- `mailbox`: gameobject spawns of type `GAMEOBJECT_TYPE_MAILBOX` (19), on the asker's map and
+  phase, within the radius, except one that cannot be selected (`GO_FLAG_NOT_SELECTABLE` in its
+  `gameobject_template_addon`) or has the "Point" icon (the core refuses those). No faction check:
+  anyone may use a mailbox.
 - `trainer`: a trainer whose default trainer (`creature_default_trainer`) is of type Class for the
   asker's class.
 - Profession trainers: AzerothCore's `trainer` rows of type Tradeskill carry no requirement and
@@ -97,7 +106,7 @@ How places are chosen (`src/AgentNavServices.h`, tested against a fixture by the
   once, at its nearest member.
 - A spawn offering several services is one place per kind. Nearest first, at most
   `AgentNav.MaxServices`.
-- Spawns a game event brings out (`game_event_creature`: Brewfest, the Lunar Festival, the generic
+- Spawns a game event brings out (`game_event_creature`, `game_event_gameobject` for mailboxes: Brewfest, the Lunar Festival, the generic
   "Mage Trainer"s of the Anvilmar starting area...) are not left out but marked: `on` when one of
   their events has them out now (a positive event while it is active, a negative one while it is
   not, as `GameEventMgr` spawns them), else `off`. Which spawns an event owns is read at startup;

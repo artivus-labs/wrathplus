@@ -1,22 +1,28 @@
 // mod-agent-nav: where services are. The realm tells an agent where the vendors, repairers, its
-// class trainer, flight masters, innkeepers, bankers and quest hubs on its map are, as a player
-// knows a town and as Playerbots knows the world: from the creature spawns the world database
-// holds, read once at startup (mod_agent_nav.cpp), never per request. Standard library only, so
-// the WrathPlus client's tests compile this file and check the selection against a fixture.
+// class trainer, flight masters, innkeepers, bankers, auctioneers, mailboxes and quest hubs on its
+// map are, as a player knows a town and as Playerbots knows the world: from the creature and
+// gameobject spawns the world database holds, read once at startup (mod_agent_nav.cpp), never per
+// request. Standard library only, so the WrathPlus client's tests compile this file and check the
+// selection against a fixture.
 //
 //   S <id> <kinds> [radius]        kinds: a comma list of vendor, repair, trainer (the asker's
 //                                  class trainer), flightmaster, innkeeper, banker,
 //                                  questgiver-hub, trainer_cooking, trainer_first_aid,
-//                                  trainer_profession (any profession trainer); radius in yards
-//                                  (default and most: AgentNav.ServiceRadius)
-//   s <id> <i> <n> <kind> <entry> <x> <y> <z> <members> <profession> <event> <name>
-//                                  the i-th of n places, nearest first; members: the quest givers
-//                                  in a hub (1 for anything else); profession: the skill a
+//                                  trainer_profession (any profession trainer), auctioneer,
+//                                  mailbox; radius in yards (default and most:
+//                                  AgentNav.ServiceRadius)
+//   s <id> <i> <n> <kind> <entry> <x> <y> <z> <members> <profession> <event> <house> <name>
+//                                  the i-th of n places, nearest first; entry: the creature's
+//                                  template entry, a mailbox's gameobject entry; members: the quest
+//                                  givers in a hub (1 for anything else); profession: the skill a
 //                                  profession trainer teaches, spaces as underscores ("First_Aid"),
 //                                  "-" for anything else; event: "-" for a standing spawn, "on" or
-//                                  "off" for one a game event spawns (game_event_creature), as its
-//                                  events stand when the question was asked; the name is the rest
-//                                  of the line
+//                                  "off" for one a game event spawns (game_event_creature,
+//                                  game_event_gameobject), as its events stand when the question
+//                                  was asked; house: the auction house an auctioneer serves,
+//                                  "alliance", "horde" or "neutral" (Booty Bay, Gadgetzan,
+//                                  Everlook; every one when the realm lets both sides trade), "-"
+//                                  for anything else; the name is the rest of the line
 //   s <id> 0 0                     none
 #ifndef MOD_AGENT_NAV_SERVICES_H
 #define MOD_AGENT_NAV_SERVICES_H
@@ -41,8 +47,9 @@ constexpr std::uint32_t kFlagRepair = 0x00001000;
 constexpr std::uint32_t kFlagFlightMaster = 0x00002000;
 constexpr std::uint32_t kFlagInnkeeper = 0x00010000;
 constexpr std::uint32_t kFlagBanker = 0x00020000;
+constexpr std::uint32_t kFlagAuctioneer = 0x00200000;
 constexpr std::uint32_t kServiceFlags = kFlagQuestGiver | kFlagTrainer | kFlagVendors | kFlagRepair |
-    kFlagFlightMaster | kFlagInnkeeper | kFlagBanker;
+    kFlagFlightMaster | kFlagInnkeeper | kFlagBanker | kFlagAuctioneer;
 
 // A spawn a player can use: one that cannot be selected (UNIT_FLAG_NOT_SELECTABLE) or is an
 // invisible trigger (CREATURE_FLAG_EXTRA_TRIGGER) offers nothing, whatever its NPC flags say. The
@@ -60,6 +67,49 @@ constexpr bool Usable(std::uint32_t unitFlags, std::uint32_t flagsExtra)
 // 0x82040000 with not-selectable), a holiday bunny (trigger).
 static_assert(Usable(512, 2) && !Usable(0x82040000u | kUnitFlagNotSelectable, 0) && !Usable(0, 128),
     "usable spawns");
+
+// A mailbox a player can use: not one that cannot be selected (GO_FLAG_NOT_SELECTABLE, from its
+// gameobject_template_addon) nor one with the "Point" icon, which the core refuses
+// (Player::GetGameObjectIfCanInteractWith). Mailboxes have no faction check. (Core values;
+// mod_agent_nav.cpp asserts them.)
+constexpr std::uint32_t kGameObjectTypeMailbox = 19;
+constexpr std::uint32_t kGoFlagNotSelectable = 0x00000010;
+constexpr bool UsableObject(std::uint32_t goFlags, std::string_view icon)
+{
+    return !(goFlags & kGoFlagNotSelectable) && icon != "Point";
+}
+// A stock mailbox (no flags, no icon; one template has 0x640000), an unselectable one, a "Point".
+static_assert(UsableObject(0, "") && UsableObject(0x640000, "") && !UsableObject(kGoFlagNotSelectable, "") &&
+        !UsableObject(0, "Point"),
+    "usable mailboxes");
+
+// The auction house an auctioneer serves (core: AuctionHouseMgr::GetAuctionHouseEntryFromFactionTemplate,
+// which mod_agent_nav.cpp asks): its faction template's side, or neutral when it has none or the
+// realm lets both sides trade (AllowTwoSide.Interaction.Auction). None for anything else.
+enum class House : std::uint8_t
+{
+    None,
+    Alliance,
+    Horde,
+    Neutral,
+};
+
+constexpr std::string_view HouseText(House house)
+{
+    switch (house)
+    {
+        case House::Alliance:
+            return "alliance";
+        case House::Horde:
+            return "horde";
+        case House::Neutral:
+            return "neutral";
+        case House::None:
+            break;
+    }
+    return "-";
+}
+static_assert(HouseText(House::Neutral) == "neutral" && HouseText(House::None) == "-", "house words");
 
 // A quest hub: at least this many quest givers within this many yards of one of them.
 constexpr std::size_t kHubMembers = 3;
@@ -81,6 +131,8 @@ enum Kind : std::uint16_t
     KindCookingTrainer = 1 << 7,
     KindFirstAidTrainer = 1 << 8,
     KindProfessionTrainer = 1 << 9,
+    KindAuctioneer = 1 << 10,
+    KindMailbox = 1 << 11,
 };
 
 struct KindName
@@ -89,7 +141,7 @@ struct KindName
     std::string_view name;
 };
 
-constexpr std::array<KindName, 10> kKindNames{{
+constexpr std::array<KindName, 12> kKindNames{{
     {KindVendor, "vendor"},
     {KindRepair, "repair"},
     {KindTrainer, "trainer"},
@@ -100,6 +152,8 @@ constexpr std::array<KindName, 10> kKindNames{{
     {KindCookingTrainer, "trainer_cooking"},
     {KindFirstAidTrainer, "trainer_first_aid"},
     {KindProfessionTrainer, "trainer_profession"},
+    {KindAuctioneer, "auctioneer"},
+    {KindMailbox, "mailbox"},
 }};
 
 // A comma list of kind names as a mask; 0 for an empty list or an unknown name.
@@ -155,10 +209,15 @@ inline bool HostileTo(Faction const& a, Faction const& b)
     return (a.hostileMask & b.ourMask) != 0;
 }
 
-// One creature spawn that offers a service.
+// One creature spawn that offers a service, or a mailbox (a gameobject spawn).
 struct Spawn
 {
+    // The creature's template entry, or the mailbox's gameobject entry.
     std::uint32_t entry = 0;
+    // A mailbox: a gameobject, with no NPC flags and no faction (Faction{}: hostile to nobody).
+    bool mailbox = false;
+    // The auction house an auctioneer serves; None for anything else.
+    House house = House::None;
     std::uint32_t map = 0;
     std::uint32_t phaseMask = 1;
     float x = 0.0f;
@@ -172,8 +231,8 @@ struct Spawn
     std::string professionName;
     Faction faction;
     std::string name;
-    // The game events that spawn it (game_event_creature): a negative id spawns it while that
-    // event is NOT active. Empty for a standing spawn.
+    // The game events that spawn it (game_event_creature, game_event_gameobject): a negative id
+    // spawns it while that event is NOT active. Empty for a standing spawn.
     std::vector<std::int16_t> events;
 };
 
@@ -232,6 +291,10 @@ struct Place
 inline std::uint16_t KindsOf(Spawn const& s, ServiceQuery const& q)
 {
     std::uint16_t out = 0;
+    if (s.mailbox)
+        return KindMailbox & q.kinds;
+    if (s.npcFlags & kFlagAuctioneer)
+        out |= KindAuctioneer;
     if (s.npcFlags & kFlagVendors)
         out |= KindVendor;
     if (s.npcFlags & kFlagRepair)
@@ -256,9 +319,10 @@ inline std::uint16_t KindsOf(Spawn const& s, ServiceQuery const& q)
 }
 
 // The places for a query: each kind asked for that a spawn on the asker's map and phase, within
-// the radius and not hostile either way, offers; a spawn offering several kinds is one place per
-// kind. Quest hubs are quest givers with at least kHubMembers within kHubRadius, one place per
-// hub (its nearest member). Nearest first, at most `cap`.
+// the radius and not hostile either way, offers (so the other side's auctioneers are left out, as
+// the core would not deal with the asker; mailboxes have no faction); a spawn offering several
+// kinds is one place per kind. Quest hubs are quest givers with at least kHubMembers within
+// kHubRadius, one place per hub (its nearest member). Nearest first, at most `cap`.
 inline std::vector<Place> SelectServices(std::vector<Spawn> const& spawns, ServiceQuery const& q)
 {
     std::vector<Place> out;
@@ -339,7 +403,8 @@ inline std::vector<std::string> ServiceReply(std::uint16_t id, std::vector<Place
         std::string line = "s " + std::to_string(id) + " " + std::to_string(i + 1) + " " +
             std::to_string(places.size()) + " " + std::string(KindText(p.kind)) + " " +
             std::to_string(p.spawn->entry) + " " + numbers + " " + std::to_string(p.members) + " " +
-            Word(p.spawn->professionName) + " " + std::string(p.event) + " ";
+            Word(p.spawn->professionName) + " " + std::string(p.event) + " " +
+            std::string(p.kind == KindAuctioneer ? HouseText(p.spawn->house) : HouseText(House::None)) + " ";
         for (char const c : p.spawn->name)
             line += (static_cast<unsigned char>(c) < 0x20 || c == 0x7f) ? ' ' : c;
         if (line.size() > max)
