@@ -36,7 +36,11 @@ export interface JudgeConfig {
   min_valid_pairs: number;
   /** A gain or loss also needs |mean delta| / standard error at least this (with 2+ pairs). */
   min_t: number;
-  /** A death in a window voids it for the rates; its deaths still count against its arm. */
+  /**
+   * Off (the default): a window with a death is scored like any other: its deaths count in deaths/h
+   * and the time lost (dying, the corpse run) in every rate. On: such a window is void for the
+   * rates, its deaths still counted against its arm.
+   */
   void_on_death: boolean;
   /** Deaths are rare: a gain or loss in deaths/h also needs this many more or fewer deaths. */
   deaths_min_count: number;
@@ -50,7 +54,7 @@ export const DEFAULT_CONFIG: JudgeConfig = {
   extra_pairs: 2,
   min_valid_pairs: 2,
   min_t: 1,
-  void_on_death: true,
+  void_on_death: false,
   deaths_min_count: 2,
   objectives: {
     xp_per_hour: { better: "higher", abs: 0, rel: 0.1 },

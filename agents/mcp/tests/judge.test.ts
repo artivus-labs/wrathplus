@@ -139,8 +139,26 @@ describe("trials", () => {
     expect(trial).toMatchObject({ status: "promoted", valid_pairs: 2 });
   });
 
-  test("a death voids its window for the rates but still counts against its arm", async () => {
+  test("a death is scored in its window: deaths/h regress and the candidate is not kept", async () => {
     const w = new World({ ...FAST, deaths_min_count: 1, extra_pairs: 0 });
+    w.port.files.set(MODULE, CHAMPION);
+    const xp = xpRate(200)(w);
+    // The candidate dies once in each of its windows (steps 7-10 and 12-15).
+    w.play = (source, step) => ({ ...xp(source), deaths: step === 8 || step === 13 ? 1 : 0 });
+    w.judge.propose(MODULE, CANDIDATE, "more xp");
+    await w.run(20);
+    const [trial] = w.ledger();
+    const windows = trial!.windows as { arm: string; void?: string }[];
+    expect(windows.every((x) => x.void === undefined)).toBe(true);
+    expect(trial!.valid_pairs).toBe(2);
+    const deaths = (trial!.objectives as { objective: string; outcome: string }[]).find((o) => o.objective === "deaths_per_hour")!;
+    expect(deaths.outcome).toBe("regressed");
+    expect(trial!.status).not.toBe("promoted");
+    expect(w.port.files.get(MODULE)).toBe(CHAMPION);
+  });
+
+  test("void_on_death: a death voids its window for the rates but still counts against its arm", async () => {
+    const w = new World({ ...FAST, void_on_death: true, deaths_min_count: 1, extra_pairs: 0 });
     w.port.files.set(MODULE, CHAMPION);
     const xp = xpRate(200)(w);
     // The candidate dies once in each of its windows (steps 7-10 and 12-15).

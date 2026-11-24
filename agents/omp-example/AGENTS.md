@@ -150,7 +150,8 @@ gap. The candidate is kept only if it improves at least one objective and regres
 its tolerance; otherwise the champion is put back. `ledger` shows every trial and its verdict.
 
 - While a module is on trial, do not `save_module` it: a hand edit ends the trial.
-- A death voids its window but still counts against that arm: you cannot hide deaths.
+- A death is scored, not excused: it counts in deaths/h, and the time it costs (dying, the corpse
+  run) lowers every rate of the window it happened in.
 - **Do not game the scorecard.** It measures many goals at once precisely so that no single
   trick (endless safe grinding, never leaving town, avoiding every fight) looks like progress.
   Never replace or wrap the stock functions it reads (`UnitLevel`, `GetMoney`, `GetQuestLogTitle`,

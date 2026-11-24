@@ -92,9 +92,10 @@ objective, both means, the mean difference, its share of the champion, the toler
 `t` and `d` (Cohen's d of the pair differences).
 
 A window is void when the client restarts, the UI reloads, the samples stop for long, another
-character plays, a stock function is replaced, or the character dies. A void pair is replaced by
-a spare (`extra_pairs`). A window voided by a death still counts its deaths and time in the deaths
-objective, so a candidate cannot hide its deaths in void windows. A module saved by hand during a
+character plays or a stock function is replaced: what can't be measured. A void pair is replaced
+by a spare (`extra_pairs`). A death does not void its window: its deaths count in deaths/h and the
+time it cost (dying, the corpse run) in every rate. (`void_on_death: true` in `judge.json` voids
+such windows for the rates, still counting their deaths.) A module saved by hand during a
 trial stops it, leaving the module as saved. If this server restarts mid-trial the trial is
 abandoned and the champion put back; queued proposals resume.
 
