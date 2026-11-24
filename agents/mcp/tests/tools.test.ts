@@ -246,7 +246,7 @@ describe("tools", () => {
     }
     // The walk's statuses and the fight's outcomes, as the client's Lua spells them.
     expect(HELPERS).toContain("idle|routing|walking|arrived|stopped|failed|stuck");
-    expect(HELPERS).toContain("killed|lost|stopped|died");
+    expect(HELPERS).toContain("killed|lost|stopped|died|fled|no_progress");
   });
 
   test("status says what a null player and cinematic mean", async () => {

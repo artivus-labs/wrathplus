@@ -2,6 +2,9 @@
 
 use wrathplus_ui::script::UiScript;
 
+#[path = "combat_progress_tests.rs"]
+mod progress;
+
 const GAME: &str = r#"
 calls = {}
 wolf = { guid = "0xW", name = "Mangy Wolf", kind = "unit", reaction = "hostile", level = 5, x = 20, y = 0, z = 0,

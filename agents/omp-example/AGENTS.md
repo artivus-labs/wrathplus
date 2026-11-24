@@ -79,8 +79,12 @@ and docs, and your own modules' lines; `lua_doc` reads one in full. The built-in
   `routing`, then `walking`); `AgentWalk()` says how it is going; ends as `AGENT_WALK_DONE`.
   `Move.to(unit | x, y)`, `Move.follow(unit)`, `Move.free()`.
 - **`Combat.engage(guid)`** chases, fights and loots, casting `Rotation.list`; ends as
-  `AGENT_COMBAT_DONE(guid, killed|lost|stopped|died)`. `Survive.pull_ok(u)` decides whether a
-  pull is safe; a refused pull says why (`AGENT_PULL_REFUSED`).
+  `AGENT_COMBAT_DONE(guid, killed|lost|stopped|died|fled|no_progress[, why])`. `no_progress`: in
+  reach, the target never lost health, the game refused your actions on it and you lost health;
+  `why` says what it saw and who else is attacking you. Combat stops there and leaves that unit
+  alone a minute (`Combat.no_progress_hold`): whether to fight another, run or retry is yours.
+  `Survive.pull_ok(u)` decides whether a pull is safe; a refused pull says why
+  (`AGENT_PULL_REFUSED`).
 - **`Rotation`**: what Combat casts, as a priority list. `Rotation.list` is **nil until you set
   it**; until then a short default for your class is used (`Rotation.defaults()`, rebuilt as you
   learn spells). `Rotation.describe()` names what is cast now. Your own list is entries

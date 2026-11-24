@@ -10,14 +10,14 @@ import { characterKey, type SampleStore, type Sampler, scorecard } from "./score
 /** The agent helpers an outside agent needs, and which of them finish in the background. Every
  *  claim here is checked against crates/wrathplus-agent (src/world.rs, src/nav.rs, lua/wp/*.lua);
  *  keep it under 1500 characters. */
-export const HELPERS = `Helpers (guids: "0x..." strings). What walks or fights returns at once, ending as an AGENT_* event (events names=["AGENT_"]).
+export const HELPERS = `Helpers (guids: "0x..." strings). Walks and fights return at once, ending as an AGENT_* event (events names=["AGENT_"]).
 - AgentNearby([yards]), nearest first: {guid, name, kind, distance, x, y, z, level, health, dead, reaction, creature_type, quest, npc, lootable}. AgentPosition(): {x, y, z, map}. AgentTarget(guid).
 - AgentMoveTo(x, y[, z] | guid): walks a navmesh route; returns the route, {pending = true} while the realm routes it, or nil, why. AgentWalk(): {status = idle|routing|walking|arrived|stopped|failed|stuck, note, cinematic}, ending as AGENT_WALK_DONE(status). AgentStop(). A later walk or fight replaces it.
-- AgentInteract(guid): talk to, loot, use or attack it; walks there itself. At a vendor the window opens a moment later; Upkeep may sell junk.
-- Combat.engage(guid): true if in sight; chases, fights, loots: AGENT_COMBAT_DONE(guid, killed|lost|stopped|died). Combat.engaged(guid): over, won, outcome. Combat.stop().
+- AgentInteract(guid): talk to, loot, use or attack it; walks there. A vendor's window opens a moment later; Upkeep may sell junk.
+- Combat.engage(guid): true if in sight; chases, fights, loots: AGENT_COMBAT_DONE(guid, killed|lost|stopped|died|fled|no_progress[, why]). Combat.engaged(guid): over, won, outcome. Combat.stop().
 - Quests.pick_up(), Quests.hand_in(): visit givers within 30 yd: AGENT_QUESTS_DONE(kind asked, picked, handed), one per call. Quests.list().
 - Move.to(unit | x, y[, z]): AGENT_MOVE_DONE(target, arrived|lost|failed). Move.follow(unit), Move.free().
-- Goals.on = true levels by itself. Goals.list(), Goals.facts(), Goals.state; Goals.push{name, why, priority, want}; Goals.hold{reason, seconds} pauses it. Agent.activity(): {name, seconds}, nil between actions.
+- Goals.on = true levels alone. Goals.list(), Goals.facts(), Goals.state; Goals.push{name, why, priority, want}; Goals.hold{reason, seconds} pauses it. Agent.activity(): {name, seconds}, nil between actions.
 - StopCinematic() skips a cinematic (status.cinematic); a new character starts in one.`;
 
 const LUA_DESCRIPTION = `Run Lua in the WrathPlus game client's UI VM (the WoW 3.3.5a addon API) to read game state and act.
