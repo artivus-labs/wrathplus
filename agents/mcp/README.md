@@ -7,7 +7,8 @@ tool is one HTTP call to the port.
 | Tool | Port route | Returns |
 |---|---|---|
 | `lua(code, budget?)` | `POST /lua[?budget=N]` | `{ok, values, output}` or `{ok:false, error, output}` (a tool error) |
-| `screenshot(scale?)` | `GET /screenshot?scale=S` | PNG image content, scale 0.5 by default |
+| `screenshot(scale?)` | `GET /screenshot?scale=S` | PNG image content, scale 0.5 by default, and its frame as text (the `X-Agent-Frame` header): `{frame, width, height, camera, player}` |
+| `point(u, v, frame?)` | `GET /point?u=…&v=…&frame=N` | the world point at pixel (u, v) of that screenshot: `{x, y, z, hit, distance, range, bearing, turn, pitch, frame}`, or `{why, bearing, turn, pitch, frame}` when the ray meets nothing loaded |
 | `events(since?, names?, exclude?, wait_ms?, limit?)` | `GET /events` | `{events, next, missed}`; pass `next` as the next `since` |
 | `status()` | `GET /status` | `{state, in_world, ui_ready, cinematic, time, player, nav}` (`nav`: where walking routes come from) |
 | `lua_search(query, kinds?, limit?)` | `GET /lua/search?q=…&kind=…&limit=…` | what exists to call: built-in helpers (signature, doc, file:line), your modules' matching lines, the API's names |
@@ -33,6 +34,27 @@ because hosts time a tool call out at about 30 s.
 character's record has arrived (wait for `in_world` with a `player`), and `cinematic: true` while
 a cinematic holds the client: a new character starts in its intro, during which nothing is near
 and walking is refused. `StopCinematic()` in Lua skips it; the tools never skip one themselves.
+
+`screenshot` returns, beside the image, the frame it shows: its number, the image's size as
+sent, the camera (world position, `yaw` and `pitch`, vertical and horizontal field of view
+`fov_v`/`fov_h`) and the player (position, `facing`, map), read in the frame the image was
+rendered from. Angles are radians as `AgentPosition().facing` counts them: 0 north (+x),
+counter-clockwise. A headless client (`WOW_HEADLESS=1`) reports the same from its offscreen frame.
+
+`point` (or `AgentPoint(u, v[, frame])` in Lua) turns a pixel of that image into a world point:
+`u`, `v` are pixels of the image as received, from its top-left corner, and `frame` the number
+the screenshot reported (the newest without it; the client keeps the last 16, and a person's
+`/view` page takes screenshots too, so pass it). The ray is that frame's camera's through the
+pixel, the same unprojection as the mouse pick, met against the world as it is now: the pick's
+occluders (terrain, building faces, static doodad hulls such as trees, fences and rocks) and,
+farther out, the terrain heightfield. `hit` says which: `terrain`, `wmo`, `doodad` or `other`.
+`distance` is yards from the player, `range` from the camera, `bearing` the direction from the
+player and `turn` how far to turn from the player's facing (positive left). Creatures and water
+surfaces are not met (the ray stops on the lake bed). When it meets nothing loaded (sky, past the
+streamed tiles) the answer is the ray's `bearing`, `turn` and `pitch` with `why`. The point is a
+place to walk to with `AgentMoveTo(x, y, z)`; look again to see where you got. `AgentPoint`
+traces the world only in a control-port call (the `lua` tool, `/point`); from a frame script it
+answers the bearing alone.
 
 The `lua` tool's description carries a short reference of the agent helpers (`AgentNearby`,
 `AgentMoveTo`, `Combat.engage`, `Quests`, `Move`, `Goals`...) and which of them finish in the

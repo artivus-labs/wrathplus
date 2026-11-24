@@ -1,4 +1,5 @@
-// The MCP tools an agent plays through: Lua, screenshots, events and status.
+// The MCP tools an agent plays through: Lua, screenshots (and the world point at a pixel), events
+// and status.
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
@@ -27,7 +28,7 @@ A chunk runs to completion inside one game frame: never loop waiting for the wor
 ${HELPERS}
 Search before writing a helper: lua_search finds what exists (built-ins, your modules, the API's names) and lua_doc reads one.
 For code that runs by itself every frame, save a module (save_module) and require("name") it (AgentReload("name") after a change; one named autoexec runs on entering the world). Frames work as in addons: CreateFrame("Frame"):SetScript("OnUpdate", fn) ticks, :RegisterEvent(...) reacts.
-Also: AgentFindNpc(service[, yards]) (the nearest "repair", "vendor", "classtrainer", "innkeeper"... in sight), AgentServices([kinds[, radius]]) (where services are on your map, from the realm: {pending = true} first, then after AGENT_SERVICES_READY the places with their distance, nearest first, a game-event spawn marked event = true with event_active saying whether its event has it out, an auctioneer with house = "alliance", "horde" or "neutral", mailboxes too (kinds "auctioneer", "mailbox"); 2000 yd and 20 places by default; the answer is reused for 120 s within 100 yd), AgentPath (a route preview; {pending = true} first when the realm routes, then the route after AGENT_PATH_READY), Rotation.list (what Combat casts), Agent.intent(name, {when, run}) and Agent.decide(name, {question, options, on}) for a fast decision loop when one runs, Agent.ask(question, context, on[, {timeout, default}]) to hand a messy moment (someone talking, an odd mechanic, a hard choice) to you, the planner: it signals AGENT_ASK(id, question, context, digest of recent events), so wait on AGENT_ASK in events and answer with Agent.answer(id, value), which calls on(value); Agent.open_asks() lists the unanswered ones, require("wp.engine") (a Playerbots-style decision engine) and require("wp.values") (health, power, auras, cooldowns, range, threat, bags).`;
+Also: AgentPoint(u, v[, frame]) (what is at a pixel of a screenshot: {x, y, z, hit, distance, bearing, turn}, or nil, why and the bearing; see the point tool), AgentFindNpc(service[, yards]) (the nearest "repair", "vendor", "classtrainer", "innkeeper"... in sight), AgentServices([kinds[, radius]]) (where services are on your map, from the realm: {pending = true} first, then after AGENT_SERVICES_READY the places with their distance, nearest first, a game-event spawn marked event = true with event_active saying whether its event has it out, an auctioneer with house = "alliance", "horde" or "neutral", mailboxes too (kinds "auctioneer", "mailbox"); 2000 yd and 20 places by default; the answer is reused for 120 s within 100 yd), AgentPath (a route preview; {pending = true} first when the realm routes, then the route after AGENT_PATH_READY), Rotation.list (what Combat casts), Agent.intent(name, {when, run}) and Agent.decide(name, {question, options, on}) for a fast decision loop when one runs, Agent.ask(question, context, on[, {timeout, default}]) to hand a messy moment (someone talking, an odd mechanic, a hard choice) to you, the planner: it signals AGENT_ASK(id, question, context, digest of recent events), so wait on AGENT_ASK in events and answer with Agent.answer(id, value), which calls on(value); Agent.open_asks() lists the unanswered ones, require("wp.engine") (a Playerbots-style decision engine) and require("wp.values") (health, power, auras, cooldowns, range, threat, bags).`;
 
 const LUA_SEARCH_DESCRIPTION = `Search the Lua you can call (built-ins, your modules, API names) before writing your own.
 builtin: the built-in modules' functions (Quests.pick_up, Goals.push, wp.values.health...) and the Agent* functions, each with its signature, doc and file:line. own: your saved modules, the lines that match. api: the names of the global functions in the game's Lua (the stock 3.3.5a addon API and anything defined since), names only.
@@ -43,7 +44,11 @@ const SAVE_MODULE_DESCRIPTION = `Save a Lua module (source) under a dotted name 
 
 const SAVE_MODULE_JUDGED = ` To have a change judged against the current version before it is kept, use propose_module instead.`;
 
-const SCREENSHOT_DESCRIPTION = `Capture the next rendered frame of the WrathPlus game client as a PNG image. scale (0-1, default 0.5) shrinks it; use 1 for full resolution when reading small text.`;
+const SCREENSHOT_DESCRIPTION = `Capture the next rendered frame of the WrathPlus game client as a PNG image. scale (0-1, default 0.5) shrinks it; use 1 for full resolution when reading small text.
+With it comes the frame as JSON: {frame, width, height, camera {x, y, z, yaw, pitch, fov_v, fov_h}, player {x, y, z, facing, map}}, world coordinates, angles in radians as AgentPosition().facing counts them (0 north, counter-clockwise). Pass frame to point (or AgentPoint in lua) to turn a pixel of this image into a world point.`;
+
+const POINT_DESCRIPTION = `Find the world point at a pixel of a screenshot, to walk to what you see.
+u, v are pixels of that screenshot's image as you received it (from its top-left corner); frame is the number the screenshot reported (the newest without it). The camera ray of that frame meets the world: {x, y, z, hit, distance, range, bearing, turn, pitch, frame}. hit is terrain, wmo (a building), doodad (a tree, a fence, a rock) or other; distance is yards from you, range from the camera; bearing is the direction from you as AgentPosition().facing counts it, turn how far to turn from your facing (radians, positive left). Units and water surfaces are not met. Nothing met (sky, beyond the loaded world): {why, bearing, turn, pitch}. Then AgentMoveTo(x, y, z) in lua, and look again.`;
 
 const EVENTS_DESCRIPTION = `Read game UI events after cursor \`since\` (omit it to start from now), optionally filtered by name.
 They are the events addons receive (PLAYER_TARGET_CHANGED, CHAT_MSG_SAY, UNIT_HEALTH, COMBAT_LOG_EVENT_UNFILTERED, ...) plus the agent's own AGENT_* signals. Returns JSON {events:[{seq, time, event, args}], next, missed}: pass \`next\` as \`since\` on the following call.
@@ -168,13 +173,29 @@ export function registerTools(server: McpServer, client: AgentClient, options: T
     },
     ({ scale }) =>
       guarded(async () => {
-        const png = await client.screenshot(scale ?? 0.5);
+        const { png, frame } = await client.screenshot(scale ?? 0.5);
         return {
           content: [
             { type: "image", data: Buffer.from(png).toString("base64"), mimeType: "image/png" },
+            ...(frame ? [{ type: "text" as const, text: JSON.stringify(frame) }] : []),
           ],
         };
       }),
+  );
+
+  server.registerTool(
+    "point",
+    {
+      title: "World point at a pixel",
+      description: POINT_DESCRIPTION,
+      inputSchema: {
+        u: z.number().min(0).describe("Pixels from the image's left edge."),
+        v: z.number().min(0).describe("Pixels from the image's top edge."),
+        frame: z.number().int().positive().optional().describe("The screenshot's frame number (default: the newest)."),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    ({ u, v, frame }) => guarded(async () => text(await client.point(u, v, frame))),
   );
 
   server.registerTool(

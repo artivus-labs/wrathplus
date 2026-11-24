@@ -8777,6 +8777,7 @@ dependencies = [
 name = "wrathplus-agent"
 version = "0.2.0"
 dependencies = [
+ "avian3d",
  "bevy",
  "crossbeam-channel",
  "image",

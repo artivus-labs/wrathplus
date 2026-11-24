@@ -205,14 +205,15 @@ Local HTTP on `127.0.0.1` only, bearer token on every request, open only when th
 |---|---|
 | `GET /status` | `{state, in_world, ui_ready, cinematic, time, player, nav}`; `nav` says where walking routes come from |
 | `POST /lua[?budget=N]` | run the body in the UI's Lua: `{ok, values, output}` or `{ok:false, error, output}` |
-| `GET /screenshot[?scale=0.5][&format=jpeg[&quality=85]]` | the next rendered frame, PNG or JPEG |
+| `GET /screenshot[?scale=0.5][&format=jpeg[&quality=85]]` | the next rendered frame, PNG or JPEG; the `X-Agent-Frame` header carries its frame number, camera and player |
+| `GET /point?u=…&v=…[&frame=N]` | the world point at pixel (u, v) of a screenshot, or the bearing when the ray meets nothing loaded |
 | `GET /events[?since=N][&names=…][&exclude=…][&wait_ms=M][&limit=K]` | UI events after cursor `N` (from now without one), filtered by name, long-polling: `{events, next, missed}` |
 | `GET /files`, `GET` / `PUT` / `DELETE /files/<module>` | the agent's own Lua modules, kept across restarts; `autoexec` runs on entering the world |
 | `GET /view?token=…` | a read-only page for people: the live frame, the character, events and the agent's Lua |
 
 Lua is the stock addon API plus a few agent functions (`AgentNearby`, `AgentFindNpc`,
 `AgentPosition`, `AgentTarget`, `AgentInteract`, `AgentQuestPOI`, `AgentZones`, `AgentPath`,
-`AgentMoveTo`, `AgentStop`, `AgentWalk`), and with the port open the movement verbs
+`AgentMoveTo`, `AgentStop`, `AgentWalk`, `AgentPoint`), and with the port open the movement verbs
 (`MoveForwardStart`, `TurnLeftStart`, …) work from any Lua. Built-in modules: `wp.engine`,
 `wp.values`, `wp.goals`.
 
@@ -266,7 +267,7 @@ fails with "no navmesh", naming both.
 
 ### The MCP server
 
-[`agents/mcp`](../agents/mcp/README.md) wraps the port as MCP tools (`lua`, `screenshot`,
+[`agents/mcp`](../agents/mcp/README.md) wraps the port as MCP tools (`lua`, `screenshot`, `point`,
 `events`, `status`, `lua_search`, `lua_doc`, `modules`, `save_module`) for Claude Code or any MCP
 client, plus a scorecard and a judge of the agent's own module changes (`scorecard`,
 `propose_module`, `ledger`; see its README). It needs
