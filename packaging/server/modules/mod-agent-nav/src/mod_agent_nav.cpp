@@ -18,16 +18,19 @@
 // It also tells a character where services are on its map (AgentNavServices.h): the spawn table
 // is read from what ObjectMgr loaded, once, on the world thread at startup, and handed to the
 // search thread, which answers from it; no database query per request. The faction check uses
-// the faction templates alone (reputation is not looked at). A spawn a game event brings out is
-// told as such, with whether its event has it out at the question (the active events are copied
-// into each request on the world thread): told, not left out, as the asker decides.
+// the faction templates alone (reputation is not looked at). Mailboxes are gameobjects, read from
+// ObjectMgr's gameobject spawns the same way. A spawn a game event brings out is told as such,
+// with whether its event has it out at the question (the active events are copied into each
+// request on the world thread): told, not left out, as the asker decides.
 
 #include "AgentNavProtocol.h"
 #include "AgentNavRoute.h"
 #include "AgentNavServices.h"
+#include "AuctionHouseMgr.h"
 #include "CreatureData.h"
 #include "DBCStores.h"
 #include "GameEventMgr.h"
+#include "GameObject.h"
 #include "ObjectMgr.h"
 #include "SpellInfo.h"
 #include "SpellMgr.h"
@@ -50,6 +53,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <deque>
+#include <list>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -64,10 +68,13 @@ static_assert(AgentNav::kMmapHeaderSize == sizeof(MmapTileHeader), "mmtile heade
 static_assert(AgentNav::kFlagQuestGiver == UNIT_NPC_FLAG_QUESTGIVER && AgentNav::kFlagTrainer == UNIT_NPC_FLAG_TRAINER &&
     AgentNav::kFlagRepair == UNIT_NPC_FLAG_REPAIR && AgentNav::kFlagFlightMaster == UNIT_NPC_FLAG_FLIGHTMASTER &&
     AgentNav::kFlagInnkeeper == UNIT_NPC_FLAG_INNKEEPER && AgentNav::kFlagBanker == UNIT_NPC_FLAG_BANKER &&
+    AgentNav::kFlagAuctioneer == UNIT_NPC_FLAG_AUCTIONEER &&
     AgentNav::kFlagVendors == (uint32(UNIT_NPC_FLAG_VENDOR_MASK) | uint32(UNIT_NPC_FLAG_VENDOR_FOOD)), "npc flags");
 static_assert(AgentNav::kSkillCooking == SKILL_COOKING && AgentNav::kSkillFirstAid == SKILL_FIRST_AID, "skill lines");
 static_assert(AgentNav::kUnitFlagNotSelectable == UNIT_FLAG_NOT_SELECTABLE &&
     AgentNav::kFlagExtraTrigger == CREATURE_FLAG_EXTRA_TRIGGER, "usable spawn flags");
+static_assert(AgentNav::kGameObjectTypeMailbox == GAMEOBJECT_TYPE_MAILBOX &&
+    AgentNav::kGoFlagNotSelectable == GO_FLAG_NOT_SELECTABLE, "mailboxes");
 static_assert(std::tuple_size_v<decltype(AgentNav::Faction::enemies)> == MAX_FACTION_RELATIONS, "faction relations");
 static_assert(AgentNav::kGround == NAV_GROUND && AgentNav::kMagma == NAV_MAGMA && AgentNav::kSlime == NAV_SLIME &&
     AgentNav::kWater == NAV_WATER && AgentNav::kSteep == NAV_GROUND_STEEP, "terrain flags");
@@ -325,14 +332,14 @@ uint32 ProfessionOf(Trainer::Trainer const& trainer, std::string& name)
     return best;
 }
 
-// The game events that spawn each creature (game_event_creature, as GameEventMgr loaded it: the
-// list for event e, a negative e included, is at index e + n - 1, n the size of its event table).
-// Read once at startup; whether an event is active is read per question (Asking).
-std::unordered_map<ObjectGuid::LowType, std::vector<int16>> EventSpawns()
+// The game events that spawn each creature or gameobject (game_event_creature,
+// game_event_gameobject: `lists`, as GameEventMgr loaded it: the list for event e, a negative e
+// included, is at index e + n - 1, n the size of its event table). Read once at startup; whether
+// an event is active is read per question (Asking).
+std::unordered_map<ObjectGuid::LowType, std::vector<int16>> EventSpawns(std::vector<std::list<ObjectGuid::LowType>> const& lists)
 {
     std::unordered_map<ObjectGuid::LowType, std::vector<int16>> out;
     int32 const events = int32(sGameEventMgr->GetEventMap().size());
-    auto const& lists = sGameEventMgr->GameEventCreatureGuids;
     for (int32 i = 0; i < int32(lists.size()); ++i)
     {
         int32 const event = i + 1 - events;
@@ -344,14 +351,65 @@ std::unordered_map<ObjectGuid::LowType, std::vector<int16>> EventSpawns()
     return out;
 }
 
+// The mailboxes (gameobjects of GAMEOBJECT_TYPE_MAILBOX) a player can use, from the gameobject
+// spawns ObjectMgr has loaded, with the game events that spawn them (game_event_gameobject); added
+// to `out`. No faction: the core lets anyone use a mailbox.
+void MailboxSpawns(std::vector<AgentNav::Spawn>& out)
+{
+    std::unordered_map<ObjectGuid::LowType, std::vector<int16>> const events =
+        EventSpawns(sGameEventMgr->GameEventGameobjectGuids);
+    for (auto const& [spawnId, data] : sObjectMgr->GetAllGOData())
+    {
+        GameObjectTemplate const* info = sObjectMgr->GetGameObjectTemplate(data.id);
+        if (!info || info->type != GAMEOBJECT_TYPE_MAILBOX)
+            continue;
+        GameObjectTemplateAddon const* addon = sObjectMgr->GetGameObjectTemplateAddon(data.id);
+        if (!AgentNav::UsableObject(addon ? addon->flags : 0, info->IconName))
+            continue;
+        AgentNav::Spawn s;
+        s.entry = data.id;
+        s.mailbox = true;
+        s.map = data.mapid;
+        s.phaseMask = data.phaseMask;
+        s.x = data.posX;
+        s.y = data.posY;
+        s.z = data.posZ;
+        s.name = info->name;
+        if (auto const found = events.find(spawnId); found != events.end())
+            s.events = found->second;
+        out.push_back(std::move(s));
+    }
+}
+
+// The auction house an auctioneer of this faction template serves, as the core picks it when the
+// asker opens it (AllowTwoSide.Interaction.Auction included, as configured at startup).
+AgentNav::House HouseOf(uint32 factionTemplate)
+{
+    AuctionHouseEntry const* house = AuctionHouseMgr::GetAuctionHouseEntryFromFactionTemplate(factionTemplate);
+    if (!house)
+        return AgentNav::House::Neutral;
+    switch (AuctionHouseId(house->houseId))
+    {
+        case AuctionHouseId::Alliance:
+            return AgentNav::House::Alliance;
+        case AuctionHouseId::Horde:
+            return AgentNav::House::Horde;
+        case AuctionHouseId::Neutral:
+            break;
+    }
+    return AgentNav::House::Neutral;
+}
+
 // The creature spawns that offer a service, from the world database ObjectMgr has loaded: the
 // spawn's own NPC flags or its template's (ObjectMgr::ChooseCreatureFlags), the template's faction
-// and name, the class its default trainer teaches, and the game events that spawn it (none for a
-// standing spawn). Read once, on the world thread at startup.
+// and name, the class its default trainer teaches, the auction house an auctioneer serves, and the
+// game events that spawn it (none for a standing spawn). Then the mailboxes (MailboxSpawns). Read
+// once, on the world thread at startup.
 std::vector<AgentNav::Spawn> ServiceSpawns()
 {
     std::vector<AgentNav::Spawn> out;
-    std::unordered_map<ObjectGuid::LowType, std::vector<int16>> const events = EventSpawns();
+    std::unordered_map<ObjectGuid::LowType, std::vector<int16>> const events =
+        EventSpawns(sGameEventMgr->GameEventCreatureGuids);
     for (auto const& [spawnId, data] : sObjectMgr->GetAllCreatureData())
     {
         CreatureTemplate const* info = sObjectMgr->GetCreatureTemplate(data.id);
@@ -377,11 +435,14 @@ std::vector<AgentNav::Spawn> ServiceSpawns()
                 s.profession = ProfessionOf(*trainer, s.professionName);
         }
         s.faction = FactionOf(sFactionTemplateStore.LookupEntry(info->faction));
+        if (npcflag & AgentNav::kFlagAuctioneer)
+            s.house = HouseOf(info->faction);
         s.name = info->Name;
         if (auto const found = events.find(spawnId); found != events.end())
             s.events = found->second;
         out.push_back(std::move(s));
     }
+    MailboxSpawns(out);
     return out;
 }
 
@@ -517,11 +578,13 @@ public:
         std::size_t const places = spawns.size();
         std::size_t const evented = std::count_if(spawns.begin(), spawns.end(),
             [](AgentNav::Spawn const& s) { return !s.events.empty(); });
+        std::size_t const mailboxes = std::count_if(spawns.begin(), spawns.end(),
+            [](AgentNav::Spawn const& s) { return s.mailbox; });
         gService.Start(mmaps, settings, std::move(spawns));
         LOG_INFO("server.loading",
-            ">> mod-agent-nav: answering route requests from {} ({} a second and {} a minute per character, {} yd, {} corners); {} service spawns ({} of them game event spawns)",
+            ">> mod-agent-nav: answering route requests from {} ({} a second and {} a minute per character, {} yd, {} corners); {} service spawns ({} of them mailboxes, {} game event spawns)",
             mmaps, settings.limits.perSecond, settings.limits.perMinute, uint32(settings.limits.maxDistance),
-            settings.limits.maxWaypoints, places, evented);
+            settings.limits.maxWaypoints, places, mailboxes, evented);
     }
 
     void OnShutdown() override { gService.Stop(); }

@@ -16,6 +16,8 @@ local M = {
   on = true,
   every = 300,
   radius = nil,
+  -- Not auctioneer nor mailbox: a town's mailboxes would crowd the realm's 20 places; ask
+  -- AgentServices for them when wanted, or add them here.
   kinds = {
     "vendor", "repair", "trainer", "flightmaster", "innkeeper", "banker", "questgiver-hub",
     "trainer_cooking", "trainer_first_aid", "trainer_profession",

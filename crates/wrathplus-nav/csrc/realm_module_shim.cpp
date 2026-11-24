@@ -218,6 +218,30 @@ std::vector<long> Events(std::vector<std::string_view>& w)
     }
     return out;
 }
+
+// Takes the "+word" words out of `w`: a spawn's marks ("+mailbox", "+alliance", "+horde",
+// "+neutral": the auction house an auctioneer serves).
+void Marks(std::vector<std::string_view>& w, AgentNav::Spawn& s)
+{
+    for (auto at = w.begin(); at != w.end();)
+    {
+        if (at->empty() || (*at)[0] != '+')
+        {
+            ++at;
+            continue;
+        }
+        std::string_view const mark = at->substr(1);
+        if (mark == "mailbox")
+            s.mailbox = true;
+        else if (mark == "alliance")
+            s.house = AgentNav::House::Alliance;
+        else if (mark == "horde")
+            s.house = AgentNav::House::Horde;
+        else if (mark == "neutral")
+            s.house = AgentNav::House::Neutral;
+        at = w.erase(at);
+    }
+}
 }
 
 extern "C" {
@@ -228,7 +252,8 @@ extern "C" {
 // (the name is one word, underscores for spaces); query: "kinds map phase x y radius class cap
 // faction our friendly hostile [enemy...]", kinds a comma list as on the wire. Either may hold an
 // "@e,e,..." word anywhere: a spawn's game events (negative: out while the event is not), the
-// query's active events.
+// query's active events. A spawn may hold "+word" marks anywhere (Marks): a mailbox, an
+// auctioneer's house.
 int realm_services(const char* spawns, const char* query, char* out, int out_len)
 {
     std::vector<AgentNav::Spawn> table;
@@ -244,6 +269,7 @@ int realm_services(const char* spawns, const char* query, char* out, int out_len
         AgentNav::Spawn s;
         for (long const e : Events(w))
             s.events.push_back(static_cast<std::int16_t>(e));
+        Marks(w, s);
         s.entry = U(w[0]);
         s.map = U(w[1]);
         s.phaseMask = U(w[2]);

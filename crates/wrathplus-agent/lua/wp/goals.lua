@@ -72,8 +72,8 @@
 -- Places: Goals.places[kind] lists the NPCs seen (kinds trainer, our class's; vendor, every
 --   merchant, which buys any item, quartermasters too; repair), up to `places_max` each, and an
 --   action goes to the nearest. Goals.learn_places{ { kind, name, x, y [, z, map, zone, guid] }, ... }
---   adds places from elsewhere (the realm's own list of its NPCs; its `event`, `event_active`
---   and `entry` are kept on the place).
+--   adds places from elsewhere (the realm's own list of its NPCs; its `event`, `event_active`,
+--   `house` and `entry` are kept on the place).
 --   An NPC a visit walks to and does not find is forgotten and listed in Goals.missing
 --   ({ name, map, x, y, z, guid, at }, newest last) for `missing_for` seconds (1800): until then
 --   Goals.learn_places does not add it back (it returns how many it took, then how many it left
@@ -428,7 +428,7 @@ function G.learn_places(list, opts)
       "a place is { kind, name, x, y [, z, map, zone, guid] }")
     local place = { guid = p.guid, name = p.name, x = tonumber(p.x), y = tonumber(p.y), z = tonumber(p.z),
       map = p.map, zone = p.zone, at = now(), entry = p.entry, event = p.event,
-      event_active = p.event_active }
+      event_active = p.event_active, house = p.house }
     if force then unmark(place) end
     if missing_mark(place) then
       skipped = skipped + 1

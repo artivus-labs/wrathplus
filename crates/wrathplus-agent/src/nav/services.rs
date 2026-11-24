@@ -1,21 +1,27 @@
 //! Where services are, asked of the realm (`mod-agent-nav`): the vendors, repairers, the
-//! character's class trainer, profession trainers, flight masters, innkeepers, bankers and quest
-//! hubs on its map, nearest first, as a player knows a town. Not a route, so it works with local
-//! mmaps too, as long as the realm runs the module.
+//! character's class trainer, profession trainers, flight masters, innkeepers, bankers,
+//! auctioneers, mailboxes and quest hubs on its map, nearest first, as a player knows a town. Not
+//! a route, so it works with local mmaps too, as long as the realm runs the module.
 //!
 //! Lua: `AgentServices([kinds [, radius]])` (kinds: a list or comma string of
-//! [`services::KINDS`], none for all; radius in yards, none for the realm's) → `{pending = true}`
-//! while the realm is asked; `AGENT_SERVICES_READY` (`true, count` or `false, why`) fires when it
-//! answers, and the next call for the same kinds returns the places,
+//! [`services::KINDS`]: vendor, repair, trainer, flightmaster, innkeeper, banker,
+//! questgiver-hub, trainer_cooking, trainer_first_aid, trainer_profession, auctioneer, mailbox;
+//! none for all; radius in yards, none for the realm's) → `{pending = true}` while the realm is
+//! asked; `AGENT_SERVICES_READY` (`true, count` or `false, why`) fires when it answers, and the
+//! next call for the same kinds returns the places,
 //! `{ { kind, entry, name, x, y, z, map, zone, distance, members, profession, event,
-//! event_active }, ... }`, nearest first: `distance` in yards on the ground (as the realm
+//! event_active, house }, ... }`, nearest first: `distance` in yards on the ground (as the realm
 //! measures) from where the character stands at that call, `zone` from the client's own world map
 //! (`zones::Handles::name_at`), `members` the quest givers in a hub, `profession` the skill a
 //! profession trainer teaches. `event` is true for a spawn a game event brings out (a holiday's
-//! vendors, the generic "Mage Trainer"s by Anvilmar) and false for a standing one;
-//! `event_active` (event spawns only, else nil) says whether its event had it out when the realm
-//! answered. Event spawns are told, not left out: one whose event is off is likely not there.
-//! `nil, why` when it cannot be asked.
+//! vendors, the generic "Mage Trainer"s by Anvilmar, a fair's mailbox) and false for a standing
+//! one; `event_active` (event spawns only, else nil) says whether its event had it out when the
+//! realm answered. Event spawns are told, not left out: one whose event is off is likely not
+//! there. `house` (auctioneers only, else nil) is the auction house it serves: `"alliance"`,
+//! `"horde"` or `"neutral"` (Booty Bay, Gadgetzan, Everlook: a smaller market both sides share,
+//! with a higher cut; every house is neutral on a realm that lets both sides trade). The other
+//! side's auctioneers are not told, as no hostile NPC is. A mailbox is a game object: its `entry`
+//! is the gameobject's, and it has no faction. `nil, why` when it cannot be asked.
 //!
 //! The realm's defaults: every place within 2000 yards, at most 20 (its `AgentNav.ServiceRadius`
 //! and `AgentNav.MaxServices`; a smaller radius may be asked for). An answer is given back,
@@ -180,6 +186,7 @@ fn place_table(
     t.set("profession", p.profession.clone())?;
     t.set("event", p.event.is_some())?;
     t.set("event_active", p.event)?;
+    t.set("house", p.house.as_deref())?;
     Ok(t)
 }
 

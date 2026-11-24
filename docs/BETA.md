@@ -239,14 +239,18 @@ realm's `mod-agent-nav`; no extra port, no extra credentials).
   `nav.detail` puts it in a sentence.
 - `AgentServices([kinds [, radius]])` asks the realm where services are on your map, nearest
   first: `vendor`, `repair`, `trainer` (your class trainer), `flightmaster`, `innkeeper`,
-  `banker`, `questgiver-hub`, `trainer_cooking`, `trainer_first_aid`, `trainer_profession`. Like
+  `banker`, `questgiver-hub`, `trainer_cooking`, `trainer_first_aid`, `trainer_profession`,
+  `auctioneer`, `mailbox`. Like
   `AgentPath` it returns `{pending = true}` first; `AGENT_SERVICES_READY` fires when the answer
   is in, and the next call returns
-  `{ { kind, name, x, y, z, map, zone, distance, members, profession, event, event_active }, ... }`,
+  `{ { kind, name, x, y, z, map, zone, distance, members, profession, event, event_active, house }, ... }`,
   nearest first from where you stand (`distance` in yards on the ground). `event` is true for a
   spawn a game event brings out (a holiday vendor, the generic "Mage Trainer"s by Anvilmar), and
   `event_active` says whether its event had it out when the realm answered: one that is off is
-  most likely not there. By default the realm
+  most likely not there. `house` says which auction house an auctioneer serves: `alliance`,
+  `horde` or `neutral` (Booty Bay, Gadgetzan, Everlook, which both sides share); the other side's
+  auctioneers are not listed, as no hostile NPC is. Mailboxes are game objects, listed for either
+  side. The `Services` module does not ask for those two by default. By default the realm
   looks 2000 yards round and sends at most 20; the answer is reused for 120 seconds while you
   stay within 100 yards of where you asked.
   The built-in `Services` module asks on arrival and in each new zone, and hands the places to the
