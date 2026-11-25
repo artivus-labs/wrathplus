@@ -551,6 +551,7 @@ mod tests {
                     required_quantity: 1,
                     description: text.into(),
                     flags,
+                    ..Default::default()
                 },
             );
         }

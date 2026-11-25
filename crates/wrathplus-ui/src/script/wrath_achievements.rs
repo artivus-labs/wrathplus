@@ -20,6 +20,8 @@ pub struct WrathAchievement {
     /// The `SpellIcon` texture path, empty for none.
     pub icon: String,
     pub reward: String,
+    /// The `Order` column, the earned list's same-minute tie-break (`[row+0x20]`, `0x5b29fb`).
+    pub order: u32,
 }
 
 /// An Achievement_Category.dbc row.
@@ -32,7 +34,7 @@ pub struct WrathAchievementCategory {
 }
 
 /// Actual Achievement_Criteria.dbc rows, not synthetic special-flag criteria.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct WrathAchievementCriterion {
     pub id: u32,
     pub achievement_id: u32,
@@ -41,6 +43,8 @@ pub struct WrathAchievementCriterion {
     pub required_quantity: u32,
     pub description: String,
     pub flags: u32,
+    /// Seconds, 0 for an untimed criterion (`[crit+0x34]`).
+    pub time_limit: u32,
 }
 
 /// Achievement.dbc's rows in file order, the order 12340 walks its row array (`[0xad3078]`,
@@ -406,6 +410,7 @@ mod tests {
                     required_quantity: 100,
                     description: format!("criterion {id}"),
                     flags,
+                    ..Default::default()
                 },
             );
         }

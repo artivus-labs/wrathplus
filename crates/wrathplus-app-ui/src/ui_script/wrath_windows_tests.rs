@@ -196,6 +196,7 @@ fn installed_wrath_opens_every_major_window() {
         earned: vec![(6, 0)],
         criteria: Default::default(),
         faction: 1,
+        received: true,
     });
     // The guild tab opens only in a guild (`ToggleFriendsFrame`, `FriendsFrame.lua:1435`).
     script.set_guild(wrathplus_ui::script::GuildState {

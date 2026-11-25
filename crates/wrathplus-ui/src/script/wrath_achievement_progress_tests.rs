@@ -35,7 +35,10 @@ fn script() -> UiScript {
         achievement(20, 92, 0, 0, 0),
         achievement(30, 81, 0, -1, 0),
         achievement(40, 130, 0, -1, FLAG_STATISTIC | FLAG_SUM),
-        achievement(41, 130, 0, -1, FLAG_STATISTIC),
+        WrathAchievement {
+            reference_achievement_id: 40,
+            ..achievement(41, 130, 0, -1, FLAG_STATISTIC)
+        },
         achievement(42, 130, 0, -1, FLAG_STATISTIC),
         achievement(43, 130, 0, -1, FLAG_STATISTIC),
         achievement(50, 92, 0, -1, FLAG_HIDDEN),
@@ -53,6 +56,7 @@ fn script() -> UiScript {
                 required_quantity: 0,
                 description: format!("C{id}"),
                 flags: 0,
+                time_limit: if id == 401 { 60 } else { 0 },
             },
         );
     }
@@ -74,6 +78,7 @@ fn progress() -> WrathAchievementProgress {
         earned: vec![(10, OCT_17_2009)],
         criteria: BTreeMap::from([(400, 3), (401, 4), (100, 1)]),
         faction: 1,
+        received: true,
     }
 }
 
@@ -85,18 +90,21 @@ fn published_progress_answers_the_achievement_window() {
         assert(CanShowAchievementUI() == false and HasCompletedAnyAchievement() == false)
         seen = {}
         local f = CreateFrame('Frame')
-        for _, e in ipairs({'CRITERIA_UPDATE', 'ACHIEVEMENT_EARNED', 'TRACKED_ACHIEVEMENT_UPDATE'}) do f:RegisterEvent(e) end
-        f:SetScript('OnEvent', function(_, e, a, b) seen[#seen+1] = {e, a, b} end)
+        for _, e in ipairs({'CRITERIA_UPDATE', 'ACHIEVEMENT_EARNED', 'TRACKED_ACHIEVEMENT_UPDATE', 'RECEIVED_ACHIEVEMENT_LIST'}) do f:RegisterEvent(e) end
+        f:SetScript('OnEvent', function(_, e, ...) seen[#seen+1] = {e, ...} end)
     "#,
     )
     .unwrap();
     ui.set_wrath_achievement_progress(progress());
     ui.set_wrath_achievement_progress(progress());
+    ui.wrath_achievement_list_arrived(&[(100, 0), (401, 7)]);
     ui.wrath_achievement_earned(10);
     ui.tick(0.0);
     ui.run(
         r#"
-        assert(#seen == 2 and seen[1][1] == 'CRITERIA_UPDATE' and seen[2][1] == 'ACHIEVEMENT_EARNED' and seen[2][2] == 10)
+        local function is(i, ...) return table.concat(seen[i], ' ') == table.concat({...}, ' ') end
+        assert(#seen == 4 and is(1, 'TRACKED_ACHIEVEMENT_UPDATE', 40, 401, 7, 60), 'a timed criterion')
+        assert(is(2, 'CRITERIA_UPDATE') and is(3, 'RECEIVED_ACHIEVEMENT_LIST') and is(4, 'ACHIEVEMENT_EARNED', 10))
         assert(CanShowAchievementUI() == true and HasCompletedAnyAchievement() == true)
         local cats = GetCategoryList()
         assert(#cats == 2 and cats[1] == 92 and cats[2] == 81, #cats)
@@ -141,15 +149,23 @@ fn published_progress_answers_the_achievement_window() {
     .unwrap();
     ui.tick(0.0);
     ui.wrath_achievement_earned(11);
+    ui.wrath_criteria_updated(401, 5);
+    ui.wrath_criteria_updated(400, 9);
+    ui.wrath_criteria_updated(999, 0);
     ui.tick(0.0);
     ui.run(
         r#"
-        assert(#seen == 17, #seen)
-        for i = 3, 15 do assert(seen[i][1] == 'TRACKED_ACHIEVEMENT_UPDATE' and seen[i][3] == nil) end
-        assert(seen[3][2] == 11 and seen[4][2] == 11 and seen[5][2] == 12 and seen[6][2] == 12)
-        assert(seen[16][1] == 'TRACKED_ACHIEVEMENT_UPDATE' and seen[16][2] == 11, 'earned: untracked')
-        assert(seen[17][1] == 'ACHIEVEMENT_EARNED' and seen[17][2] == 11)
+        local function is(i, ...) return table.concat(seen[i], ' ') == table.concat({...}, ' ') end
+        assert(#seen == 25, #seen)
+        for i = 5, 17 do assert(seen[i][1] == 'TRACKED_ACHIEVEMENT_UPDATE' and seen[i][3] == nil) end
+        assert(seen[5][2] == 11 and seen[6][2] == 11 and seen[7][2] == 12 and seen[8][2] == 12)
+        assert(is(18, 'TRACKED_ACHIEVEMENT_UPDATE', 11), 'earned: untracked')
+        assert(is(19, 'ACHIEVEMENT_EARNED', 11))
         assert(GetNumTrackedAchievements() == 9 and not IsTrackedAchievement(11))
+        assert(is(20, 'CRITERIA_UPDATE') and is(21, 'TRACKED_ACHIEVEMENT_UPDATE', 40, 401, 5, 60))
+        assert(is(22, 'CRITERIA_UPDATE') and is(23, 'TRACKED_ACHIEVEMENT_UPDATE', 40))
+        assert(is(24, 'TRACKED_ACHIEVEMENT_UPDATE', 41), 'tracked through its reference')
+        assert(is(25, 'CRITERIA_UPDATE'), 'every packet')
     "#,
     )
     .unwrap();
@@ -165,7 +181,7 @@ fn a_compared_player_joins_the_listing_and_answers_comparisons() {
         ready = 0
         local f = CreateFrame('Frame')
         f:RegisterEvent('INSPECT_ACHIEVEMENT_READY')
-        f:SetScript('OnEvent', function() ready = ready + 1 end)
+        f:SetScript('OnEvent', function(_, _, ...) ready = ready + 1 + select('#', ...) end)
         assert(SetAchievementComparisonUnit('target') == 1)
         assert(select('#', GetAchievementComparisonInfo(11)) == 0, 'not yet')
     "#,
@@ -179,13 +195,14 @@ fn a_compared_player_joins_the_listing_and_answers_comparisons() {
         earned: vec![(11, OCT_17_2009)],
         criteria: BTreeMap::from([(400, 10)]),
         faction: 0,
+        ..Default::default()
     };
     ui.set_wrath_achievement_comparison(0x43, theirs.clone());
     ui.set_wrath_achievement_comparison(0x42, theirs);
     ui.tick(0.0);
     ui.run(
         r#"
-        assert(ready == 1, 'only the asked player')
+        assert(ready == 2, 'every response, no argument')
         local done, m, d, y = GetAchievementComparisonInfo(11)
         assert(done == true and m == 10 and d == 17 and y == 9)
         assert(GetComparisonAchievementPoints() == 11)
@@ -207,6 +224,7 @@ fn a_compared_player_joins_the_listing_and_answers_comparisons() {
     ui.set_wrath_achievement_comparison(0x42, mine(10));
     ui.run(
         r#"
+        assert(CanShowAchievementUI() == false, 'the host holds the latch')
         local order = {}
         for i = 1, 4 do order[i] = GetAchievementInfo(92, i) or 0 end
         assert(table.concat(order, ',') == '11,21,12,0', table.concat(order, ','))

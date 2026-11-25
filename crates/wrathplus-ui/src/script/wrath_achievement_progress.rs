@@ -35,12 +35,15 @@ pub(super) const ALL_STATISTICS: i64 = -2;
 /// and later updates leave it.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct WrathAchievementProgress {
-    /// Earned achievements with their packed dates, newest first.
+    /// Earned achievements with their packed dates, in the client's list order (`0x5b28d0`).
     pub earned: Vec<(u32, u32)>,
     /// Criteria counters by criteria id.
     pub criteria: BTreeMap<u32, u64>,
     /// The player's achievement faction: 0 Horde, 1 Alliance, -1 unknown.
     pub faction: i32,
+    /// The player's own data has arrived this session (`[0xc1f454]`, set by the all-data and
+    /// criteria-update handlers at `0x5b32fc` and `0x5b316c`).
+    pub received: bool,
 }
 
 impl WrathAchievementProgress {
@@ -68,20 +71,35 @@ pub(super) struct State {
 }
 
 impl UiScript {
-    /// The player's progress, full replacement; changed criteria queue `CRITERIA_UPDATE`.
+    /// The player's progress, full replacement; the packets' events are queued on their own.
     pub fn set_wrath_achievement_progress(&mut self, progress: WrathAchievementProgress) {
-        let changed = match self.lua.app_data_mut::<State>() {
-            Some(mut state) => {
-                state.received = true;
-                let changed = state.mine.criteria != progress.criteria;
-                state.mine = progress;
-                changed
-            }
-            None => false,
-        };
-        if changed {
-            self.queue_event("CRITERIA_UPDATE", Vec::new());
+        if let Some(mut state) = self.lua.app_data_mut::<State>() {
+            state.received = progress.received;
+            state.mine = progress;
         }
+    }
+
+    /// `SMSG_ALL_ACHIEVEMENT_DATA` (`0x5b32f0`), after its progress is published: each timed
+    /// criterion's `TRACKED_ACHIEVEMENT_UPDATE`, then `CRITERIA_UPDATE` and
+    /// `RECEIVED_ACHIEVEMENT_LIST` (`0x5b3471`, `0x5b347d`). `criteria` is `(id, elapsed)`.
+    pub fn wrath_achievement_list_arrived(&mut self, criteria: &[(u32, u32)]) {
+        for &(id, elapsed) in criteria {
+            super::wrath_achievement_tracked::criteria_progress(&self.lua, id, elapsed, false);
+        }
+        self.queue_event("CRITERIA_UPDATE", Vec::new());
+        self.queue_event("RECEIVED_ACHIEVEMENT_LIST", Vec::new());
+    }
+
+    /// `SMSG_CRITERIA_UPDATE` (`0x5b3160`): `CRITERIA_UPDATE` for every packet, then the tracked
+    /// update its criterion calls for.
+    pub fn wrath_criteria_updated(&mut self, criteria: u32, elapsed: u32) {
+        self.queue_event("CRITERIA_UPDATE", Vec::new());
+        super::wrath_achievement_tracked::criteria_progress(&self.lua, criteria, elapsed, true);
+    }
+
+    /// `SMSG_CRITERIA_DELETED` that removed a counter: `CRITERIA_UPDATE` (`0x5b3764`).
+    pub fn wrath_criteria_deleted(&mut self) {
+        self.queue_event("CRITERIA_UPDATE", Vec::new());
     }
 
     /// The player's own earn, after its progress is published: off the tracked list, then
@@ -91,25 +109,26 @@ impl UiScript {
         self.queue_event("ACHIEVEMENT_EARNED", vec![ScriptValue::Int(id.into())]);
     }
 
-    /// A compared player's progress arrived: `INSPECT_ACHIEVEMENT_READY`.
+    /// `SMSG_ACHIEVEMENT_DELETED` that removed an earn fires `ACHIEVEMENT_EARNED(id)` too
+    /// (`0x5b3687`).
+    pub fn wrath_achievement_deleted(&mut self, id: u32) {
+        self.queue_event("ACHIEVEMENT_EARNED", vec![ScriptValue::Int(id.into())]);
+    }
+
+    /// `SMSG_RESPOND_INSPECT_ACHIEVEMENTS` (`0x5b34a0`): kept for the compared player only
+    /// (`0x5b2ab0`), and `INSPECT_ACHIEVEMENT_READY` fires for every response, with no argument
+    /// (`0x5b35e8`).
     pub fn set_wrath_achievement_comparison(
         &mut self,
         guid: u64,
         progress: WrathAchievementProgress,
     ) {
-        let ready = match self.lua.app_data_mut::<State>() {
-            Some(mut state) if state.compared.as_ref().is_some_and(|(g, _)| *g == guid) => {
+        if let Some(mut state) = self.lua.app_data_mut::<State>() {
+            if state.compared.as_ref().is_some_and(|(g, _)| *g == guid) {
                 state.compared = Some((guid, Some(progress)));
-                true
             }
-            _ => false,
-        };
-        if ready {
-            self.queue_event(
-                "INSPECT_ACHIEVEMENT_READY",
-                vec![ScriptValue::Str(format!("0x{guid:016X}"))],
-            );
         }
+        self.queue_event("INSPECT_ACHIEVEMENT_READY", Vec::new());
     }
 
     pub fn take_wrath_achievement_requests(&mut self) -> Vec<WrathAchievementRequest> {

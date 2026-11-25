@@ -1,6 +1,7 @@
 //! The tracked achievements (`[0xacfde8]`, oldest first): `AddTrackedAchievement` (`0x5b4870`)
 //! appends through `0x5b23e0`, `RemoveTrackedAchievement` (`0x5b48d0`) drops through `0x5b24d0`,
-//! and each fires `TRACKED_ACHIEVEMENT_UPDATE` with the id alone (`"%d"`, `0x9e289c`).
+//! and each fires `TRACKED_ACHIEVEMENT_UPDATE` with the id alone (`"%d"`, `0x9e289c`). A criteria
+//! update fires it too ([`criteria_progress`]).
 
 use super::wrath_achievement_progress::State;
 use super::ScriptValue;
@@ -9,12 +10,56 @@ use mlua::{Lua, Value};
 /// `0x5b23e0` refuses a new id once ten are tracked (`cmp edx,0xa`, `0x5b2407`).
 const MAX_TRACKED: usize = 10;
 
-fn updated(lua: &Lua, id: u32) {
+fn updated(lua: &Lua, args: &[u32]) {
     let mut model = lua.app_data_mut::<super::Model>().expect("model");
     model.pending_events.push((
         "TRACKED_ACHIEVEMENT_UPDATE".into(),
-        vec![ScriptValue::Int(id.into())],
+        args.iter().map(|&a| ScriptValue::Int(a.into())).collect(),
     ));
+}
+
+/// A criteria counter arrived (`0x5b3229`-`0x5b32e2`, `0x5b3410`-`0x5b3459`): a timed criterion
+/// (`[crit+0x34]` nonzero) fires `(achievement, criteria, elapsed, duration)` with the packet's
+/// elapsed seconds; an untimed one from `SMSG_CRITERIA_UPDATE` (`single`) fires the id of each
+/// tracked achievement that owns it, itself or through its reference achievement.
+pub(super) fn criteria_progress(lua: &Lua, criteria: u32, elapsed: u32, single: bool) {
+    let fired: Vec<Vec<u32>> = {
+        let Some(model) = lua.app_data_ref::<super::Model>() else {
+            return;
+        };
+        let Some((meta, c)) = model
+            .wrath_achievements
+            .as_ref()
+            .and_then(|m| Some((m, m.criteria.get(&criteria)?)))
+        else {
+            return;
+        };
+        if c.time_limit != 0 {
+            vec![vec![c.achievement_id, c.id, elapsed, c.time_limit]]
+        } else if single {
+            let owns = |t: u32| {
+                t == c.achievement_id
+                    || meta
+                        .achievements
+                        .get(&t)
+                        .is_some_and(|r| r.reference_achievement_id == c.achievement_id)
+            };
+            lua.app_data_ref::<State>()
+                .map(|s| {
+                    s.tracked
+                        .iter()
+                        .filter(|&&t| owns(t))
+                        .map(|&t| vec![t])
+                        .collect()
+                })
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        }
+    };
+    for args in fired {
+        updated(lua, &args);
+    }
 }
 
 /// `0x5b23e0`: a tracked id fires again, a new one is appended under the cap.
@@ -30,7 +75,7 @@ fn track(lua: &Lua, id: u32) {
         room
     });
     if fire {
-        updated(lua, id);
+        updated(lua, &[id]);
     }
 }
 
@@ -42,7 +87,7 @@ pub(super) fn untrack(lua: &Lua, id: u32) {
         s.tracked.len() != before
     });
     if removed {
-        updated(lua, id);
+        updated(lua, &[id]);
     }
 }
 
