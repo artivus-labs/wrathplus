@@ -23,6 +23,10 @@ pub(crate) struct Bowstring {
     /// The `$WTT` top and `$WTB` bottom anchors as `(bone, model-local offset)`.
     pub(crate) top: (u16, Vec3),
     pub(crate) bottom: (u16, Vec3),
+    /// The same anchors as offsets from their bones' bind pivots, `[top, bottom]`, for the flexed
+    /// pose: a `RigPose` bone frame sits at the bone's pivot (as for every `BoneAttach` marker),
+    /// so posing the model-local point adds the pivot twice and flings the tips yards away.
+    pub(crate) from_pivot: [Vec3; 2],
 }
 
 /// Draws every visible bow's string, tip to middle to tip, from this frame's joint frames.
@@ -49,12 +53,12 @@ fn draw_bowstrings(
         }
         // The prop's own pose when it flexes (`joints_root` is this entity); its rigid frame
         // otherwise.
-        let tip = |(bone, offset): (u16, Vec3)| {
-            flex.and_then(|p| p.posed_point(prop, bone, offset))
+        let tip = |(bone, offset): (u16, Vec3), from_pivot: Vec3| {
+            flex.and_then(|p| p.posed_point(prop, bone, from_pivot))
                 .unwrap_or_else(|| prop.transform_point(offset))
         };
-        let top = tip(bs.top);
-        let bottom = tip(bs.bottom);
+        let top = tip(bs.top, bs.from_pivot[0]);
+        let bottom = tip(bs.bottom, bs.from_pivot[1]);
         let middle = owners
             .get(bs.owner)
             .ok()

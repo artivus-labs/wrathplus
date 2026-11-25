@@ -282,11 +282,19 @@ fn spawn_slot(
     // author them too for the swing trail (`0x6c67f0`).
     if slot_idx == 2 && hs.attach == attach_id::HAND_LEFT {
         if let Some([top, bottom]) = dm.string_anchors {
+            // The baked markers hold the same anchors relative to their bone pivots.
+            let from_pivot = |ident: [u8; 4], (_, point): (u16, Vec3)| {
+                dm.markers
+                    .iter()
+                    .find(|m| m.ident == ident)
+                    .map_or(point, |m| m.offset)
+            };
             commands.entity(root).insert(crate::bowstring::Bowstring {
                 owner: entity,
                 // Bone and offset: the prop flexes, so the tips move.
                 top,
                 bottom,
+                from_pivot: [from_pivot(*b"$WTT", top), from_pivot(*b"$WTB", bottom)],
             });
         }
     }
