@@ -984,4 +984,6 @@ pub fn encode_teleport_ack(mover_guid: u64, counter: u32, timestamp: u32) -> Vec
 }
 
 #[cfg(test)]
+mod flight_tests;
+#[cfg(test)]
 mod tests;
