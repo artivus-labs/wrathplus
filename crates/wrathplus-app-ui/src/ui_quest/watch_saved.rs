@@ -18,23 +18,56 @@ use wrathplus_ui::script::UiScript;
 use crate::app_core::state::ClientState;
 use crate::app_core::vm_memo::VmMemo;
 
-/// The character whose list is live, its file, and the permanent watches as last seen: the save
-/// runs after the VM may be gone, and a new VM is seated from them.
-#[derive(Resource, Default)]
-pub(crate) struct TrackedQuestsFile {
+/// A character's id list in `wrathplus-config/<dir>/`: the character whose list is live, its
+/// file, and the ids as last seen. The save runs after the VM may be gone, and a new VM is seated
+/// from them.
+#[derive(Default)]
+pub(crate) struct CharacterIds {
     identity: Option<(String, String)>,
     path: Option<PathBuf>,
-    watched: Vec<u32>,
+    pub(crate) ids: Vec<u32>,
 }
 
-/// `wrathplus-config/quests/<realm>-<character>.txt`, named as the layout cache's file is.
-fn path_for(realm: &str, character: &str) -> Option<PathBuf> {
+impl CharacterIds {
+    /// Reads `dir`'s file when `id` names a new character; true when it did.
+    pub(crate) fn select(&mut self, dir: &str, id: (String, String)) -> bool {
+        if self.identity.as_ref() == Some(&id) {
+            return false;
+        }
+        self.path = path_for(dir, &id.0, &id.1);
+        self.identity = Some(id);
+        self.ids = match self.path.as_ref().map(std::fs::read_to_string) {
+            Some(Ok(text)) => parse(&text),
+            Some(Err(e)) if e.kind() != std::io::ErrorKind::NotFound => {
+                warn!("{dir}: cannot read: {e}");
+                Vec::new()
+            }
+            _ => Vec::new(),
+        };
+        true
+    }
+
+    pub(crate) fn save(&self) {
+        let Some(path) = &self.path else {
+            return; // never loaded: a glue-only run or a hermetic capture
+        };
+        if let Err(e) = crate::local_state::write_atomic(path, &render(&self.ids)) {
+            warn!("cannot write {}: {e}", path.display());
+        }
+    }
+}
+
+#[derive(Resource, Default)]
+pub(crate) struct TrackedQuestsFile(CharacterIds);
+
+/// `wrathplus-config/<dir>/<realm>-<character>.txt`, named as the layout cache's file is.
+fn path_for(dir: &str, realm: &str, character: &str) -> Option<PathBuf> {
     let layout = crate::local_state::layout_character_path(realm, character)?;
     Some(
         layout
             .parent()?
             .parent()?
-            .join("quests")
+            .join(dir)
             .join(layout.file_name()?),
     )
 }
@@ -66,20 +99,9 @@ pub(crate) fn sync_tracked_quests(
     let Some(id) = crate::app_core::state::identity(&roster) else {
         return;
     };
-    if file.identity.as_ref() != Some(&id) {
-        file.path = path_for(&id.0, &id.1);
-        file.identity = Some(id);
-        file.watched = match file.path.as_ref().map(std::fs::read_to_string) {
-            Some(Ok(text)) => parse(&text),
-            Some(Err(e)) if e.kind() != std::io::ErrorKind::NotFound => {
-                warn!("tracked quests: cannot read: {e}");
-                Vec::new()
-            }
-            _ => Vec::new(),
-        };
-    }
+    file.0.select("quests", id);
     let seated = seated.get(&script);
-    follow(&mut script, &mut file.watched, seated);
+    follow(&mut script, &mut file.0.ids, seated);
 }
 
 /// Seats `watched` into a VM not yet `seated` once its log has a quest row, then follows the VM's
@@ -100,25 +122,16 @@ fn follow(script: &mut UiScript, watched: &mut Vec<u32>, seated: &mut bool) {
     *watched = script.quest_watches_permanent();
 }
 
-fn save(file: &TrackedQuestsFile) {
-    let Some(path) = &file.path else {
-        return; // never loaded: a glue-only run or a hermetic capture
-    };
-    if let Err(e) = crate::local_state::write_atomic(path, &render(&file.watched)) {
-        warn!("tracked quests: cannot write {}: {e}", path.display());
-    }
-}
-
 /// `OnExit(InWorld)`: `/logout` back to the glue, or a disconnect. The next login re-reads.
 fn save_on_session_end(mut file: ResMut<TrackedQuestsFile>) {
-    save(&file);
+    file.0.save();
     *file = TrackedQuestsFile::default();
 }
 
 /// `AppExit`, as a quit from in-world never leaves `InWorld`.
 fn save_on_exit(file: Res<TrackedQuestsFile>, mut exits: MessageReader<AppExit>) {
     if exits.read().next().is_some() {
-        save(&file);
+        file.0.save();
     }
 }
 
@@ -192,7 +205,7 @@ mod tests {
 
     #[test]
     fn the_file_sits_beside_the_layout_cache() {
-        let quests = path_for("Realm", "Char").unwrap();
+        let quests = path_for("quests", "Realm", "Char").unwrap();
         let layout = crate::local_state::layout_character_path("Realm", "Char").unwrap();
         assert_eq!(quests.file_name(), layout.file_name());
         assert!(quests.parent().unwrap().ends_with("quests"));

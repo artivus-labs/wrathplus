@@ -115,7 +115,7 @@ fn snapshot_progress(data: &Snapshot, order: OrderOf, now: i64) -> WrathAchievem
 }
 
 #[allow(clippy::too_many_arguments)]
-fn feed_achievements(
+pub(super) fn feed_achievements(
     script: Option<NonSendMut<UiScript>>,
     mut packets: ResMut<NativeAchievementPackets>,
     mut receipts: ResMut<NativeCriteriaReceipts>,

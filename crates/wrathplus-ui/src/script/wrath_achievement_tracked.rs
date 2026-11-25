@@ -62,9 +62,28 @@ pub(super) fn criteria_progress(lua: &Lua, criteria: u32, elapsed: u32, single: 
     }
 }
 
+impl super::UiScript {
+    /// The tracked achievements, oldest first.
+    pub fn wrath_tracked_achievements(&self) -> Vec<u32> {
+        self.lua
+            .app_data_ref::<State>()
+            .map(|s| s.tracked.clone())
+            .unwrap_or_default()
+    }
+
+    /// Re-adds saved ids through `0x5b23e0`, as the `trackedAchievements` loader `0x5b3840`
+    /// does, so the cap applies; `fire` queues one `TRACKED_ACHIEVEMENT_UPDATE` per id, as that
+    /// load does. A reloaded VM is seated without them: 12340's list outlives its Lua state.
+    pub fn restore_wrath_tracked_achievements(&mut self, ids: &[u32], fire: bool) {
+        for &id in ids {
+            track(&self.lua, id, fire);
+        }
+    }
+}
+
 /// `0x5b23e0`: a tracked id fires again, a new one is appended under the cap.
-fn track(lua: &Lua, id: u32) {
-    let fire = lua.app_data_mut::<State>().is_some_and(|mut s| {
+fn track(lua: &Lua, id: u32, fire: bool) {
+    let fired = lua.app_data_mut::<State>().is_some_and(|mut s| {
         if s.tracked.contains(&id) {
             return true;
         }
@@ -74,7 +93,7 @@ fn track(lua: &Lua, id: u32) {
         }
         room
     });
-    if fire {
+    if fire && fired {
         updated(lua, &[id]);
     }
 }
@@ -110,7 +129,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                     "Usage: AddTrackedAchievement(achievementID)".into(),
                 ));
             }
-            track(lua, id);
+            track(lua, id, true);
             Ok(())
         })?,
     )?;
