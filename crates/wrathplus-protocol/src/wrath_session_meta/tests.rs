@@ -38,7 +38,7 @@ fn fixtures() -> Vec<(u16, Vec<u8>, SessionEvent)> {
         ),
         (
             0x2f4,
-            [w(1), 0.5f32.to_le_bytes().to_vec(), vec![1]].concat(),
+            [w(4), 0.5f32.to_le_bytes().to_vec(), vec![1]].concat(),
             SessionEvent::Weather {
                 weather_type: 1,
                 grade: 0.5,
@@ -164,5 +164,26 @@ fn commands_encode_ac_read_order() {
         (Command::SetTitle { title: -1 }, 0x374, vec![0xff; 4]),
     ] {
         assert_eq!(encode(&command), (opcode, body), "{command:?}");
+    }
+}
+
+#[test]
+fn weather_state_maps_to_the_shared_kinds() {
+    // AzerothCore `WeatherState` -> 1.12 type: rain 3..5, snow 6..8, sand 22/41/42, the rest clear.
+    for (state, kind) in [
+        (0, 0),
+        (1, 0),
+        (3, 1),
+        (5, 1),
+        (6, 2),
+        (8, 2),
+        (22, 3),
+        (42, 3),
+        (86, 1),
+        (90, 1),
+        (106, 2),
+        (2, 0),
+    ] {
+        assert_eq!(weather_kind(state), kind, "state {state}");
     }
 }
