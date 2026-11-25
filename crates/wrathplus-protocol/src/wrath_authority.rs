@@ -841,9 +841,15 @@ pub fn encode_mode_ack(
     } else {
         pose
     };
+    let bit = kind.flag() & (wrath_ground::GROUND_FLAG_MASK | wrath_ground::MOVE_CAN_FLY);
+    // A grant keeps a flier's bit (AzerothCore's login SetCanFly meets a create block that already
+    // says FLYING|CAN_FLY; FLYING without CAN_FLY is not a state a mover reports); a revoke clears it.
     let pose = OnFootPose {
-        flags: pose.flags
-            & !(kind.flag() & (wrath_ground::GROUND_FLAG_MASK | wrath_ground::MOVE_CAN_FLY)),
+        flags: if apply {
+            pose.flags | bit
+        } else {
+            pose.flags & !bit
+        },
         ..pose
     };
     let extra = if apply { kind.flag() } else { 0 };
