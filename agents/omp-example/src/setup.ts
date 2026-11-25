@@ -31,6 +31,9 @@ export interface Settings {
   sessionHours: number;
   /** A turn running longer than this is aborted (minutes; 0: never). */
   turnMaxMinutes: number;
+  /** A notable event repeating one that woke the planner this many minutes ago or less does not
+   *  wake it again; it is counted for the next check-in (0: every one wakes it). */
+  repeatMinutes: number;
   /** Passed as --max-cost when set (USD per session). */
   maxCost?: number;
   judgeDir?: string;
@@ -65,6 +68,7 @@ export function settingsFromEnv(env: Record<string, string | undefined>, example
     reflectHours: number(env.WRATHPLUS_OMP_REFLECT_HOURS, 3),
     sessionHours: number(env.WRATHPLUS_OMP_SESSION_HOURS, 6),
     turnMaxMinutes: number(env.WRATHPLUS_OMP_TURN_MAX_MINUTES, 30),
+    repeatMinutes: number(env.WRATHPLUS_OMP_REPEAT_MINUTES, 15),
     maxCost: maxCost && maxCost > 0 ? maxCost : undefined,
     judgeDir: env.WRATHPLUS_JUDGE_DIR?.trim() || undefined,
     fresh: env.WRATHPLUS_OMP_FRESH === "1",

@@ -16,9 +16,11 @@
 --       highest first; status is "active", "blocked" (no plan reaches it now: AGENT_GOAL_BLOCKED
 --       (name, why) once as it blocks), "done" or "failed".
 --   `progress` is always there, at the lowest priority: hand in, pick up, work objectives, train,
---       sell and repair, rest, else grind, else look further afield or travel to a better zone.
+--       sell and repair, rest, else walk to a known quest hub, else grind, else look further afield
+--       or travel to a better zone.
 -- Facts, the planner's world state, read fresh each pass (Goals.facts(); Goals.fact(name, fn) adds
---   one): quest_ready, objectives_open, quest_giver_near, hand_in_near, bags_full (fewer free
+--   one): quest_ready, objectives_open, quest_giver_near, quest_hub_known (a hub to walk to:
+--   below), hand_in_near, bags_full (fewer free
 --   slots than Upkeep.full_below), needs_repair, can_train, trainer_known, vendor_known,
 --   repair_known, food_vendor_known (seen this session, and where: Goals.places), hp_low,
 --   mana_low (below what a fight is started at), gear_broken
@@ -35,8 +37,19 @@
 --       `args` is { goal, data, facts }; `run` may set args.subject (the quest objective, the zone)
 --       so a failure backs off that one, not the whole action; `stop` undoes what an action that
 --       ended badly left going (its fight, its walk). Built in: hand_in_quests,
---       pick_up_quests, work_objective, train, sell_and_repair, buy_food, rest, grind, seek_mobs,
---       travel_to_zone (and wp.professions' learn_professions, craft). Fights are only started
+--       pick_up_quests, visit_quest_hub, work_objective, train, sell_and_repair, buy_food, rest,
+--       grind, seek_mobs, travel_to_zone (and wp.professions' learn_professions, craft).
+--       visit_quest_hub walks to the nearest quest hub (Goals.places' questgiver-hub, from the
+--       realm, and questgiver, the givers seen with a quest for us) further than Quests.reach, on
+--       this continent, in a zone that suits our level (Goals.zones(); none in a zone below or
+--       above us), and on to a giver in sight with a quest for us; it ends as one is in reach, so
+--       pick_up_quests runs. It costs less than grinding: quests come first. A hub with nothing for
+--       us fails it "nothing to pick up at ...", and that hub and those within `hub_radius` yards
+--       (the town) wait `hub_wait` seconds, or the next level. travel_to_zone walks to a quest hub
+--       it knows in the zone, else the zone's middle (AgentZones' point), and ends when the walk
+--       does (or in the zone, once the realm names a hub there), not at the zone line. seek_mobs'
+--       steps further afield leave out those that head toward a zone below us (away from our
+--       zone's middle, nearer its), unless no other way goes on. Fights are only started
 --       when Survive.pull_ok says so (grind and work_objective take the nearest safe mob, and wait
 --       for or give up on an unsafe one; a fight Combat ended "no_progress" fails the action with
 --       what Combat saw, and that unit is left alone for Combat.no_progress_hold seconds),
@@ -63,6 +76,10 @@
 --   there is no unlimited form. On expiry AGENT_HOLD_EXPIRED(reason, waited) is signalled and the
 --   runner waits `grace` seconds more for a Goals.hold (keep waiting: `waited` keeps counting while
 --   the reason stays the same) or Goals.release(). Goals.holding() → reason, waited, remaining.
+--   Goals.hold{ reason, seconds, until_walk = true } also ends when a walk ends (AgentMoveTo's,
+--   Move.to's): the one under way, else the next to start, arrived or not; `seconds` stays the cap.
+--   Its end is AGENT_HOLD_EXPIRED(reason, waited, "walk arrived" | "walk stuck" | ...). A walk the
+--   planner starts by hand holds the runner by itself (below), with no Goals.hold.
 -- Zones: Goals.zones() → the zones on this continent we may level in (AgentZones: our faction's
 --   and contested, no capitals), each with `fit` against our level and `distance`. The planner can
 --   push its own travel goal: a goal's `data.zone` names the zone travel_to_zone heads for. A
@@ -71,10 +88,11 @@
 --   is stopped there and fails with the same list.
 --
 -- Places: Goals.places[kind] lists the NPCs seen (kinds trainer, our class's; vendor, every
---   merchant, which buys any item, quartermasters too; repair), up to `places_max` each, and an
+--   merchant, which buys any item, quartermasters too; repair; questgiver, one with a quest for us,
+--   until seen with none), up to `places_max` each, and an
 --   action goes to the nearest. Goals.learn_places{ { kind, name, x, y [, z, map, zone, guid] }, ... }
 --   adds places from elsewhere (the realm's own list of its NPCs; its `event`, `event_active`,
---   `house` and `entry` are kept on the place).
+--   `house`, `entry` and `members` are kept on the place).
 --   An NPC a visit walks to and does not find is forgotten and listed in Goals.missing
 --   ({ name, map, x, y, z, guid, at }, newest last) for `missing_for` seconds (1800): until then
 --   Goals.learn_places does not add it back (it returns how many it took, then how many it left
@@ -116,6 +134,9 @@ local G = {
   missing_for = 1800, missing = {},
   -- How long the runner holds after the planner stops the character or sits it down by hand.
   stop_hold = 30,
+  -- A quest hub a visit found nothing at (and every hub this many yards from it: the town) is
+  -- not walked to again for `hub_wait` seconds.
+  hub_radius = 100, hub_wait = 900,
   failures = {}, current = nil, held = nil, after = nil,
 }
 
@@ -397,6 +418,20 @@ local function remember(list)
   local zone = GetRealZoneText and GetRealZoneText()
   local pos = me()
   for _, u in ipairs(list) do
+    -- A quest giver with a quest for us (its "!") is somewhere to come back to, out of reach or
+    -- not; one seen again with nothing for us is no longer.
+    if u.kind == "unit" and not u.dead and u.x then
+      local giver = { guid = u.guid, name = u.name, x = u.x, y = u.y, z = u.z, zone = zone,
+        map = pos and pos.map, at = now() }
+      if u.quest == "available" and not (Quests and Quests.skipping and Quests.skipping(u.guid)) then
+        learn("questgiver", giver)
+      elseif G.places.questgiver then
+        local givers = G.places.questgiver
+        for i = #givers, 1, -1 do
+          if same_place(givers[i], giver) then table.remove(givers, i) end
+        end
+      end
+    end
     if u.kind == "unit" and not u.dead and u.npc then
       local place = { guid = u.guid, name = u.name, x = u.x, y = u.y, z = u.z, zone = zone,
         map = pos and pos.map, at = now() }
@@ -431,7 +466,7 @@ function G.learn_places(list, opts)
       "a place is { kind, name, x, y [, z, map, zone, guid] }")
     local place = { guid = p.guid, name = p.name, x = tonumber(p.x), y = tonumber(p.y), z = tonumber(p.z),
       map = p.map, zone = p.zone, at = now(), entry = p.entry, event = p.event,
-      event_active = p.event_active, house = p.house }
+      event_active = p.event_active, house = p.house, members = p.members }
     if force then unmark(place) end
     if missing_mark(place) then
       skipped = skipped + 1
@@ -474,12 +509,69 @@ local function free_slots()
   return free
 end
 
--- The zone we stand in, from the client's zone list.
-local function current_zone()
-  local name = GetRealZoneText and GetRealZoneText()
+-- A zone from the client's zone list, by name (nil for none, or no client data).
+local function zone_named(name)
+  if not name then return nil end
   for _, z in ipairs(AgentZones and AgentZones() or {}) do
     if z.name == name then return z end
   end
+end
+
+-- The zone we stand in, from the client's zone list.
+local function current_zone()
+  return zone_named(GetRealZoneText and GetRealZoneText())
+end
+
+-- How a zone's level band suits our level: "low" (below us), "ok" or "high" (above us).
+local function band_fit(z)
+  local lvl = level()
+  if lvl > z.max + 1 then return "low" end
+  if lvl < z.min - 1 then return "high" end
+  return "ok"
+end
+
+-- Quest hubs: the realm's "questgiver-hub" places and the givers we saw with a quest for us.
+local HUB_KINDS = { "questgiver-hub", "questgiver" }
+
+local function hubs()
+  local out = {}
+  for _, kind in ipairs(HUB_KINDS) do
+    for _, p in ipairs(G.places[kind] or {}) do out[#out + 1] = p end
+  end
+  return out
+end
+
+-- A hub a visit lately found nothing at backs off (the "visit_quest_hub:<name>" failure), and so
+-- does every hub within `hub_radius` of it: the same town.
+local function hub_cooling(p)
+  for _, q in ipairs(hubs()) do
+    if G.cooling("visit_quest_hub:" .. tostring(q.name)) and q.map == p.map and far(p, q) < G.hub_radius then
+      return true
+    end
+  end
+  return false
+end
+
+-- Whether a place's zone suits our level (a zone the client's tables do not list, or a city, does).
+local function zone_suits(name)
+  local z = zone_named(name)
+  return not z or z.city or band_fit(z) == "ok"
+end
+
+-- The nearest hub to walk to on this continent: further than a giver's reach (where we stand is
+-- for pick_up_quests), in a zone that suits our level, and not backing off. `zone` keeps to one
+-- zone. nil when there is none.
+local function hub_target(zone)
+  local pos, best, best_d = me(), nil, math.huge
+  local reach = (Quests and Quests.reach) or 30
+  for _, p in ipairs(hubs()) do
+    local d = pos and far(pos, p) or 0
+    if not (pos and p.map and pos.map ~= p.map) and (not pos or d > reach) and d < best_d
+      and (zone == nil or p.zone == zone) and zone_suits(p.zone) and not hub_cooling(p) then
+      best, best_d = p, d
+    end
+  end
+  return best, best_d
 end
 
 local function median(list)
@@ -504,10 +596,7 @@ local function zone_fit()
     here = median(levels)
   else
     local z = current_zone()
-    if not z then return "ok" end
-    if lvl > z.max + 1 then return "low" end
-    if lvl < z.min - 1 then return "high" end
-    return "ok"
+    return z and band_fit(z) or "ok"
   end
   if here <= grey(lvl) then return "low" end
   if here > lvl + G.above + 1 then return "high" end
@@ -576,6 +665,14 @@ local BUILT_IN_FACTS = {
   { "pull_ok", function() return Survive == nil or (Survive.ready()) end },
   { "recent_deaths", function() return Survive and Survive.recent_deaths() or 0 end },
   { "food_vendor_known", function() return place("food") ~= nil end },
+  -- A quest hub to walk to (Goals.places' questgiver-hub and questgiver): see hub_target.
+  { "quest_hub_known", function()
+    if pass.hub == nil then
+      local p, d = hub_target()
+      pass.hub, pass.hub_d = p or false, d
+    end
+    return pass.hub ~= false
+  end },
   { "needs_food", function()
     if not Survive or (GetMoney and GetMoney() or 0) < G.food_money then return false end
     local mana_user = UnitPowerType ~= nil and UnitPowerType("player") == 0
@@ -831,6 +928,8 @@ local function ended(ok, why)
     local wait = math.min(G.retry_cap, G.retry_after * 2 ^ (f.n - 1))
     -- A place that would kill us is not tried again in twenty seconds.
     if tostring(why):find("^too dangerous") then wait = math.max(wait, G.danger_wait) end
+    -- Nor a quest hub that had nothing for us: its givers offer the same until we level.
+    if tostring(why):find("^nothing to pick up at") then wait = math.max(wait, G.hub_wait) end
     f.until_ = now() + wait
     f.waiting = true
     G.failures[key] = f
@@ -919,10 +1018,11 @@ function G.hold(spec)
   local t = now()
   local before = G.held or G.after
   local since = before and before.reason == spec.reason and before.since or t
-  G.held, G.after = { reason = spec.reason, since = since, until_ = t + seconds }, nil
+  G.held, G.after = { reason = spec.reason, since = since, until_ = t + seconds,
+    until_walk = spec.until_walk == true and { started = false } or nil }, nil
   local a = Agent and Agent.activity and Agent.activity()
   if G.current and a and a.name == G.current.intent then Agent.stop("hold: " .. spec.reason) end
-  note("hold " .. math.floor(seconds) .. "s: " .. spec.reason)
+  note("hold " .. math.floor(seconds) .. "s" .. (spec.until_walk == true and " or until the walk ends" or "") .. ": " .. spec.reason)
   return true
 end
 
@@ -937,15 +1037,36 @@ function G.holding()
   return h.reason, math.floor(t - h.since), math.max(0, math.ceil(h.until_ - t))
 end
 
+-- A hold is over: AGENT_HOLD_EXPIRED(reason, waited[, how the walk it waited for ended]), and the
+-- runner waits `grace` seconds more for another.
+local function end_hold(h, t, walk)
+  G.held = nil
+  G.after = { reason = h.reason, since = h.since, until_ = t + G.grace }
+  local waited = math.floor(t - h.since)
+  note("hold over after " .. waited .. "s" .. (walk and (" (" .. walk .. ")") or "") .. ": " .. h.reason)
+  if walk then signal("HOLD_EXPIRED", h.reason, waited, walk) else signal("HOLD_EXPIRED", h.reason, waited) end
+end
+
+-- Whether a walk is under way (AgentWalk's, or Move.to's), and the walk's status.
+local function walk_going()
+  local walk = AgentWalk and AgentWalk()
+  local status = walk and walk.status
+  return status == "walking" or status == "routing" or (Move ~= nil and Move.mode == "to"), status
+end
+
 local function check_hold(t)
   local h = G.held
-  if h and t >= h.until_ then
-    G.held = nil
-    G.after = { reason = h.reason, since = h.since, until_ = t + G.grace }
-    local waited = math.floor(t - h.since)
-    note("hold over after " .. waited .. "s: " .. h.reason)
-    signal("HOLD_EXPIRED", h.reason, waited)
+  -- A hold `until_walk` ends with the walk under way, or the next one to start: arrived or not.
+  if h and h.until_walk then
+    local going, status = walk_going()
+    if going then
+      h.until_walk.started = true
+    elseif h.until_walk.started then
+      end_hold(h, t, "walk " .. tostring(status or "over"))
+      h = nil
+    end
   end
+  if h and t >= h.until_ then end_hold(h, t) end
   if G.after and t >= G.after.until_ then G.after = nil end
 end
 
@@ -1167,6 +1288,12 @@ frame:SetScript("OnEvent", function(_, event)
   end
   dirty = true
   if event == "MERCHANT_SHOW" then G.merchant_at = now() end
+  -- A new level opens new quests: the hubs that had nothing are worth a visit again.
+  if event == "PLAYER_LEVEL_UP" then
+    for key in pairs(G.failures) do
+      if key:find("^visit_quest_hub:") then G.failures[key] = nil end
+    end
+  end
 end)
 local since = 0
 frame:SetScript("OnUpdate", function(_, dt)
@@ -1180,13 +1307,13 @@ end)
 -- Zones
 
 function G.zones()
-  local pos, lvl = me(), level()
+  local pos = me()
   local faction = UnitFactionGroup and UnitFactionGroup("player")
   local here = GetRealZoneText and GetRealZoneText()
   local out = {}
   for _, z in ipairs(AgentZones and AgentZones() or {}) do
     if (not pos or z.map == pos.map) and not z.city and (z.faction == "contested" or z.faction == faction) then
-      z.fit = lvl > z.max + 1 and "low" or (lvl < z.min - 1 and "high" or "ok")
+      z.fit = band_fit(z)
       z.distance = pos and math.floor(far(pos, z)) or nil
       z.current = z.name == here
       out[#out + 1] = z
@@ -1386,6 +1513,73 @@ G.action({
     return true, false, "took nothing"
   end,
   timeout = 150,
+})
+
+local hub_visit = {}
+
+-- The nearest giver in sight with a quest for us that we have not walked up to yet this visit.
+local function giver_in_sight()
+  local best
+  for _, u in ipairs(nearby()) do
+    if u.quest == "available" and not u.dead and not hub_visit.tried[u.guid]
+      and not (Quests and Quests.skipping and Quests.skipping(u.guid))
+      and (not best or u.distance < best.distance) then
+      best = u
+    end
+  end
+  return best
+end
+
+-- Questing before grinding, as `progress` says: with no giver in reach, walk to the nearest
+-- known quest hub that suits our level, so pick_up_quests can run there. Working an open
+-- objective (5) is cheaper; the hub and its pick-up (3.5 + yards / 400, at most 5.5, then 2) come
+-- before grind (8) and seek_mobs (6 + 8), and far before travel_to_zone (20 or 40).
+G.action({
+  name = "visit_quest_hub",
+  stop = function() Move.free() end,
+  why = "Walk to the nearest known quest hub in a zone that suits our level, to pick up its quests.",
+  pre = function(f) return f.quest_hub_known and not f.quest_giver_near end,
+  effects = { quest_giver_near = true, quest_hub_known = false },
+  cost = function()
+    local d = pass.hub and pass.hub_d
+    return 3.5 + ((d and d < math.huge) and math.min(d / 400, 2) or 0)
+  end,
+  run = function(args)
+    local p = hub_target()
+    assert(p, "no quest hub known that suits our level")
+    args.subject = p.name
+    args.going = p.zone and (p.name .. " in " .. p.zone) or p.name
+    hub_visit = { place = p, tried = {} }
+    note("quest hub: " .. args.going)
+    local ok, why = Move.to(p.x, p.y, p.z)
+    if not ok then error("no way to the quest hub at " .. tostring(p.name) .. ": " .. tostring(why), 0) end
+  end,
+  done = function()
+    pass = {}
+    if marker("available") then
+      if walking() then Move.free() end
+      return true, true
+    end
+    if walking() then return false end
+    local arrived, outcome = walk_over()
+    local p, pos = hub_visit.place, me()
+    if not hub_visit.there then
+      if not arrived and not (pos and far(pos, p) <= G.hand_in_reach) then
+        return true, false, walk_failure(outcome, "could not reach the quest hub at " .. tostring(p.name)
+          .. " (" .. tostring(outcome) .. ")")
+      end
+      hub_visit.there = true
+    end
+    -- At the hub: a giver in sight with a quest for us, beyond reach, is walked up to.
+    local u = giver_in_sight()
+    if u then
+      hub_visit.tried[u.guid] = true
+      if Move.to(u.x, u.y, u.z) then return false end
+    end
+    return true, false, string.format("nothing to pick up at %s: no quest giver in sight has a quest for us; this hub and those within %d yards wait %d s (or the next level)",
+      tostring(p.name), G.hub_radius, G.hub_wait)
+  end,
+  timeout = 900,
 })
 
 -- The open objectives as { quest, index, text, kind, name, have, need, poi }.
@@ -1754,6 +1948,18 @@ G.action({
   timeout = 180,
 })
 
+-- Whether a step from `pos` to `p` heads toward a zone below us: away from the middle of the zone
+-- we stand in and nearer the middle of one below (AgentZones' points). A rough reading of where
+-- the border lies, but one that costs nothing.
+local function toward_lower_zone(pos, p)
+  local here = current_zone()
+  if not here or far(p, here) <= far(pos, here) then return false end
+  for _, z in ipairs(G.zones()) do
+    if z.fit == "low" and z.name ~= here.name and far(p, z) < far(pos, z) then return true end
+  end
+  return false
+end
+
 local seek = {}
 
 G.action({
@@ -1775,10 +1981,18 @@ G.action({
         if ok then return end
       end
     end
+    -- A step that heads back into a zone below us is taken only when no other way goes on.
+    local back
     for _ = 1, 6 do
       local a = math.random() * 2 * math.pi
-      if Move.to(pos.x + math.cos(a) * 100, pos.y + math.sin(a) * 100) then return end
+      local p = { x = pos.x + math.cos(a) * 100, y = pos.y + math.sin(a) * 100 }
+      if toward_lower_zone(pos, p) then
+        back = back or p
+      elseif Move.to(p.x, p.y) then
+        return
+      end
     end
+    if back and Move.to(back.x, back.y) then return end
     error("no way on from here")
   end,
   done = function()
@@ -1815,20 +2029,28 @@ G.action({
   run = function(args)
     local z = travel_target(args.data and args.data.zone or top_zone_wish())
     assert(z, "no zone to travel to")
-    args.subject, args.going = z.name, z.name
-    travel = { zone = z }
-    note("travel to " .. z.name .. " (levels " .. z.min .. "-" .. z.max .. ")")
-    local ok, why = Move.to(z.x, z.y)
+    -- Crossing the zone line is not arriving: head for something there, a quest hub we know of in
+    -- it, else the zone's middle.
+    local hub = hub_target(z.name)
+    local to = hub or z
+    args.subject, args.going = z.name, hub and (hub.name .. " in " .. z.name) or z.name
+    travel = { zone = z, to = to, hub = hub }
+    note("travel to " .. args.going .. " (levels " .. z.min .. "-" .. z.max .. ")")
+    local ok, why = Move.to(to.x, to.y, to.z)
     assert(ok, why)
   end,
+  -- Over when the walk is: arrived, or ended anywhere in the zone. A walk to the middle also ends
+  -- once in the zone with a quest hub known there (the realm names its hubs as we enter): the hub
+  -- visit takes over.
   done = function()
-    if GetRealZoneText and GetRealZoneText() == travel.zone.name then
+    local inside = GetRealZoneText and GetRealZoneText() == travel.zone.name
+    if inside and not travel.hub and hub_target(travel.zone.name) then
       if walking() then Move.free() end
       return true, true
     end
     if walking() then return false end
     local arrived, outcome = walk_over()
-    if arrived then return true, true end
+    if arrived or inside then return true, true end
     return true, false, walk_failure(outcome, "could not reach " .. travel.zone.name .. " (" .. tostring(outcome) .. ")")
   end,
   timeout = 1800,
