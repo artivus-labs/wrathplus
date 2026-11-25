@@ -272,8 +272,13 @@ fn ids(lua: &Lua, ids: impl IntoIterator<Item = u32>) -> MultiValue {
     )
 }
 
-fn category_list(lua: &Lua, statistics: bool) -> mlua::Result<Value> {
-    let table = lua.create_table()?;
+/// `0x5b1390`/`0x5b14b0`: a table passed as the first argument is filled and returned
+/// (`lua_type(1) == 5`, `0x5b13ad`), through `lua_settable`; otherwise a new one is.
+fn category_list(lua: &Lua, statistics: bool, into: Value) -> mlua::Result<Value> {
+    let table = match into {
+        Value::Table(t) => t,
+        _ => lua.create_table()?,
+    };
     let list = with(lua, |meta, _| {
         let parent = |id: u32| {
             meta.categories
@@ -308,9 +313,25 @@ fn category_list(lua: &Lua, statistics: bool) -> mlua::Result<Value> {
     })
     .unwrap_or_default();
     for (i, id) in list.into_iter().enumerate() {
-        table.raw_set(i + 1, id)?;
+        table.set(i + 1, id)?;
     }
     Ok(Value::Table(table))
+}
+
+/// The compared player's achievement faction, from the unit held for its guid (`0x4d4db0`,
+/// then `0x6d6e90`), -1 with none, which filters nothing. Labelled: the race-to-faction split
+/// is `Achievement.dbc`'s, not traced through `0x6d6e90`.
+pub(super) fn compared_faction(lua: &Lua) -> i32 {
+    let guid = lua
+        .app_data_ref::<State>()
+        .and_then(|s| s.compared.as_ref().map(|(g, _)| *g));
+    let model = lua.app_data_ref::<super::Model>();
+    let race = guid.and_then(|g| model.as_ref()?.units_by_guid.get(&g)?.race_file.clone());
+    match race.as_deref() {
+        Some("Orc" | "Scourge" | "Tauren" | "Troll" | "BloodElf") => 0,
+        Some("Human" | "Dwarf" | "NightElf" | "Gnome" | "Draenei") => 1,
+        _ => -1,
+    }
 }
 
 fn guid_of(lua: &Lua, unit: &str) -> Option<u64> {
@@ -341,11 +362,11 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     )?;
     g.set(
         "GetCategoryList",
-        lua.create_function(|lua, ()| category_list(lua, false))?,
+        lua.create_function(|lua, into: Value| category_list(lua, false, into))?,
     )?;
     g.set(
         "GetStatisticsCategoryList",
-        lua.create_function(|lua, ()| category_list(lua, true))?,
+        lua.create_function(|lua, into: Value| category_list(lua, true, into))?,
     )?;
     g.set(
         "GetCategoryInfo",
@@ -398,15 +419,19 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 "Usage: GetComparisonCategoryNumAchievements(categoryID)",
             )? as i64;
             let all = id == ALL_ACHIEVEMENTS || id == ALL_STATISTICS;
+            let faction = compared_faction(lua);
             Ok(with(lua, |meta, state| {
                 let Some(theirs) = compared(state) else {
                     return 0;
                 };
+                // `0x5b3bd7`: the row's faction against the compared player's; a series step
+                // is superseded by a later one in MY list (`0x5b3c33`).
                 meta.achievements
                     .values()
                     .filter(|r| in_category(r, id) && r.flags & FLAG_HIDDEN == 0)
+                    .filter(|r| faction_ok(r, faction))
                     .filter(|r| theirs.earned_date(r.id).is_some())
-                    .filter(|r| all || !superseded(meta, theirs, r.id))
+                    .filter(|r| all || !superseded(meta, &state.mine, r.id))
                     .count() as i64
             })
             .unwrap_or(0))
@@ -471,7 +496,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 let (mut total, mut completed) = (0i64, 0i64);
                 for row in meta.achievements.values() {
                     if row.flags & (FLAG_STATISTIC | FLAG_HIDDEN) != 0
-                        || !faction_ok(row, &state.mine)
+                        || !faction_ok(row, state.mine.faction)
                         || row.category_id == FEATS_OF_STRENGTH
                     {
                         continue;

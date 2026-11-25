@@ -15,8 +15,8 @@ pub(super) fn in_category(row: &WrathAchievement, category: i64) -> bool {
     }
 }
 
-pub(super) fn faction_ok(row: &WrathAchievement, mine: &WrathAchievementProgress) -> bool {
-    row.required_faction == -1 || mine.faction == -1 || row.required_faction == mine.faction
+pub(super) fn faction_ok(row: &WrathAchievement, faction: i32) -> bool {
+    row.required_faction == -1 || faction == -1 || row.required_faction == faction
 }
 
 /// A later step of the row's series is in MY earned list, whichever list is being walked
@@ -72,7 +72,7 @@ pub(super) fn listing(meta: &WrathAchievementMetadata, state: &State, category: 
     }
     let mut last = 0;
     for row in meta.achievements.values() {
-        if !faction_ok(row, mine) || !in_category(row, category) {
+        if !faction_ok(row, mine.faction) || !in_category(row, category) {
             continue;
         }
         let earned = mine.earned_date(row.id).is_some() || in_theirs(row.id);
@@ -113,7 +113,7 @@ pub(super) fn category_counts(
         }
         let earned = mine.earned_date(row.id).is_some();
         let their = theirs.is_some_and(|p| p.earned_date(row.id).is_some());
-        if !(faction_ok(row, mine) || their) {
+        if !(faction_ok(row, mine.faction) || their) {
             continue;
         }
         let listed = row.category_id != FEATS_OF_STRENGTH && row.flags & FLAG_EARNED_ONLY == 0;

@@ -133,6 +133,8 @@ fn published_progress_answers_the_achievement_window() {
         assert(CanShowAchievementUI() == true and HasCompletedAnyAchievement() == true)
         local cats = GetCategoryList()
         assert(#cats == 2 and cats[1] == 92 and cats[2] == 81, #cats)
+        local into = {}
+        assert(GetCategoryList(into) == into and #into == 2, 'fills the table passed')
         local stats = GetStatisticsCategoryList()
         assert(#stats == 1 and stats[1] == 130)
         local name, parent, flags = GetCategoryInfo(130.9)
@@ -253,13 +255,30 @@ fn a_compared_player_joins_the_listing_and_answers_comparisons() {
         ..Default::default()
     };
     ui.set_wrath_achievement_progress(mine(11));
-    ui.set_wrath_achievement_comparison(0x42, mine(10));
+    let theirs = WrathAchievementProgress {
+        earned: vec![(10, OCT_17_2009), (21, OCT_17_2009)],
+        ..Default::default()
+    };
+    ui.set_wrath_achievement_comparison(0x42, theirs);
     ui.run(
         r#"
         assert(CanShowAchievementUI() == false, 'the host holds the latch')
         local order = {}
         for i = 1, 4 do order[i] = GetAchievementInfo(92, i) or 0 end
         assert(table.concat(order, ',') == '11,21,12,0', table.concat(order, ','))
+        assert(GetComparisonCategoryNumAchievements(92) == 1, 'their 10 is superseded by my 11')
+    "#,
+    )
+    .unwrap();
+    // An Alliance row does not count for a Horde compared player (`0x5b3bd7`).
+    let orc = crate::script::UnitState {
+        race_file: Some("Orc".into()),
+        ..Default::default()
+    };
+    ui.model_mut().units_by_guid.insert(0x42, orc);
+    ui.run(
+        r#"
+        assert(GetComparisonCategoryNumAchievements(92) == 0)
         ClearAchievementComparisonUnit()
         assert(GetComparisonAchievementPoints() == 0)
     "#,
