@@ -33,6 +33,10 @@ mod xp_diagnostics;
 mod reference_ui;
 pub use reference_ui::initialize_asset_overrides;
 
+/// The stock interface's text off the player's chain, for the agent port's `framexml` search.
+mod stock_sources;
+pub use stock_sources::{stock_ui_files, StockFile};
+
 /// The feed gate: a UI feed's input-side early-out, audited by `WOW_FEED_GATE_CHECK=1`.
 pub(crate) mod gate;
 

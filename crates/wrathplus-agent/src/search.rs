@@ -7,8 +7,11 @@
 //!   `wp.values.health`) and the `Agent*` functions registered from Rust ([`AGENT_FNS`]), each with
 //!   its signature line, doc comment and `file:line`.
 //! - `own`: the agent's saved modules: the module's name, and the lines that match, with a snippet.
-//! - `api`: the global function names in the UI VM, names only (no stock docs ship with WrathPlus);
-//!   the server asks the game loop for them ([`crate::lua::globals`]).
+//! - `api`: the global functions in the UI VM, which the server asks the game loop for
+//!   ([`crate::lua::globals`]); a stock function we bind carries the comment above its binding,
+//!   its `file:line` and the binding's source ([`crate::stock_api`]).
+//! - `framexml`: lines of the stock interface's Lua and XML off the player's own install, with
+//!   the lines around them ([`crate::framexml`]); never shipped, read only when asked.
 
 use serde_json::{json, Value};
 use std::path::Path;
@@ -137,7 +140,7 @@ fn header_entry(lines: &[&str], qualified: &str) -> String {
 
 /// The function's text from its definition to the `end` that closes it at the same indentation
 /// (the definition line alone when it closes there). `search_tests` checks every built-in's span.
-fn body(lines: &[&str], i: usize) -> String {
+pub(crate) fn body(lines: &[&str], i: usize) -> String {
     let def = lines[i].trim_end();
     if def.ends_with(" end") || def.ends_with(")end") {
         return def.to_string();
@@ -278,15 +281,32 @@ fn rank_builtin(e: &Entry, q: &str) -> Option<u8> {
         })
 }
 
-pub(crate) const KINDS: [&str; 3] = ["builtin", "own", "api"];
+/// Every kind, in rank order; all are searched by default. `framexml` comes last: it shows how the
+/// stock UI uses a function once the builtin, own and api hits have said what exists.
+pub(crate) const KINDS: [&str; 4] = ["builtin", "own", "api", "framexml"];
 
-/// Search `kinds` for `q`; `api` is the VM's global function names, asked of the game loop only
-/// when that kind is wanted. Best first: by score, then kind (builtin, own, api), then name.
+/// [`search_in`] over the player's own stock UI ([`crate::framexml::installed`]).
 pub(crate) fn search(
     q: &str,
     kinds: &[&str],
     scripts: &Path,
     api: impl FnOnce() -> Vec<String>,
+    limit: usize,
+) -> Value {
+    search_in(q, kinds, scripts, api, crate::framexml::installed, limit)
+}
+
+/// Search `kinds` for `q`; `api` is the VM's global function names, asked of the game loop only
+/// when that kind is wanted, and `stock_ui` the stock interface's files, read only when
+/// `framexml` is. A stock function matches by name or by the doc of its binding
+/// ([`crate::stock_api`]). Best first: by score, then kind (builtin, own, api, framexml), then
+/// name; a `framexml` hit carries the lines around it as `source`.
+pub(crate) fn search_in<'a>(
+    q: &str,
+    kinds: &[&str],
+    scripts: &Path,
+    api: impl FnOnce() -> Vec<String>,
+    stock_ui: impl FnOnce() -> &'a [wrathplus_app_ui::ui_script::StockFile],
     limit: usize,
 ) -> Value {
     let q = q.trim().to_lowercase();
@@ -307,35 +327,49 @@ pub(crate) fn search(
             if AGENT_FNS.iter().any(|f| f.0 == name) {
                 continue;
             }
-            if let Some(s) = rank_name(&name.to_lowercase(), &q) {
-                let entry = Entry {
-                    kind: "api",
-                    name,
-                    signature: String::new(),
-                    doc: String::new(),
-                    at: String::new(),
-                    source: None,
-                };
+            let entry = crate::stock_api::entry(&name)
+                .unwrap_or_else(|| crate::stock_api::bare(name.clone()));
+            let score = rank_name(&name.to_lowercase(), &q)
+                .or_else(|| (!q.is_empty() && entry.doc.to_lowercase().contains(&q)).then_some(3));
+            if let Some(s) = score {
                 hits.push((s, 2, entry));
             }
         }
+    }
+    if kinds.contains(&"framexml") {
+        hits.extend(
+            crate::framexml::search(stock_ui(), &q)
+                .into_iter()
+                .map(|(s, e)| (s, 3, e)),
+        );
     }
     hits.sort_by(|a, b| (a.0, a.1, &a.2.name, &a.2.at).cmp(&(b.0, b.1, &b.2.name, &b.2.at)));
     let total = hits.len();
     let results: Vec<Value> = hits
         .iter()
         .take(limit)
-        .map(|(_, _, e)| e.json(false))
+        .map(|(_, k, e)| e.json(*k == 3))
         .collect();
     json!({"query": q, "kinds": kinds, "total": total, "results": results})
 }
 
-/// What one name is: a built-in (with its source when it is Lua), an own module (its source), or a
-/// global of the VM (`in_api`). `Err` carries suggestions.
+/// [`doc_in`] over the player's own stock UI.
 pub(crate) fn doc(
     name: &str,
     scripts: &Path,
     in_api: impl FnOnce(&str) -> bool,
+) -> Result<Value, Value> {
+    doc_in(name, scripts, in_api, crate::framexml::installed)
+}
+
+/// What one name is: a built-in (with its source when it is Lua), an own module (its source), a
+/// global of the VM (`in_api`: with our binding's doc and source when we bind it), or the stock
+/// UI's (a function it defines, a file, `file:line`). `Err` carries suggestions.
+pub(crate) fn doc_in<'a>(
+    name: &str,
+    scripts: &Path,
+    in_api: impl FnOnce(&str) -> bool,
+    stock_ui: impl FnOnce() -> &'a [wrathplus_app_ui::ui_script::StockFile],
 ) -> Result<Value, Value> {
     let lower = name.trim().to_lowercase();
     let all = builtins();
@@ -368,9 +402,18 @@ pub(crate) fn doc(
             );
         }
     }
-    if in_api(name) {
+    let global = in_api(name);
+    if global {
+        if let Some(e) = crate::stock_api::entry(name.trim()) {
+            return Ok(e.json(true));
+        }
+    }
+    if let Some(found) = crate::framexml::doc(stock_ui(), name) {
+        return Ok(found);
+    }
+    if global {
         return Ok(
-            json!({"kind": "api", "name": name, "doc": "A global function of the UI's Lua: the stock 3.3.5a addon API (or a function an addon or module defined). WrathPlus ships no stock API docs; its behaviour is the 3.3.5a client's."}),
+            json!({"kind": "api", "name": name, "doc": "A global function of the UI's Lua that WrathPlus does not bind itself: Lua's own library, or one an addon or module defined. Its behaviour is the 3.3.5a client's."}),
         );
     }
     let suggestions = search(&lower, &["builtin", "own"], scripts, Vec::new, 5)["results"]
