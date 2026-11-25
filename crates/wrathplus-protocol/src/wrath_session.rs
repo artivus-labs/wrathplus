@@ -392,13 +392,29 @@ fn spell_start(r: &mut Cursor<&[u8]>) -> io::Result<Vec<SessionEvent>> {
     let cast_flags = u32_le(r)?;
     let cast_time_ms = u32_le(r)?;
     let t = targets(r)?;
+    // AzerothCore's tail after the targets: power left (`CAST_FLAG_POWER_LEFT_SELF`), then the ammo
+    // (`CAST_FLAG_PROJECTILE`: display id + inventory type) that ranged shots fly. A short tail loses
+    // only the ammo.
+    let ammo_display_id = (|| -> io::Result<Option<u32>> {
+        if cast_flags & CAST_FLAG_POWER_LEFT_SELF != 0 {
+            u32_le(r)?;
+        }
+        if cast_flags & CAST_FLAG_PROJECTILE == 0 {
+            return Ok(None);
+        }
+        let display = u32_le(r)?;
+        u32_le(r)?; // inventory type
+        Ok((display != 0).then_some(display))
+    })()
+    .ok()
+    .flatten();
     Ok(vec![SessionEvent::SpellStart {
         caster: if caster == 0 { item_or_caster } else { caster },
         spell_id,
         cast_flags: cast_flags as u16,
         cast_time_ms,
         target: t.unit,
-        ammo_display_id: None,
+        ammo_display_id,
         cast_count: Some(count),
     }])
 }
@@ -430,29 +446,40 @@ fn spell_go(r: &mut Cursor<&[u8]>, self_guid: Option<u64>) -> io::Result<Vec<Ses
         misses.push((guid, condition));
     }
     let t = targets(r)?;
-    // The tail AzerothCore writes after the targets: the caster's power (`CAST_FLAG_POWER_LEFT_SELF`)
-    // then the rune list. A short tail drops the runes, never the spell-go itself.
-    let runes = (|| -> io::Result<Option<crate::wrath_spell_control::RunePacket>> {
+    // The tail AzerothCore writes after the targets (Spell::SendSpellGo): the caster's power
+    // (`CAST_FLAG_POWER_LEFT_SELF`), the rune list, the missile elevation + delay
+    // (`CAST_FLAG_ADJUST_MISSILE`), then the ammo a ranged shot flies (`CAST_FLAG_PROJECTILE`: display
+    // id + inventory type). A short tail drops what is left, never the spell-go itself.
+    let mut runes = None;
+    let mut ammo_display_id = None;
+    let _ = (|| -> io::Result<()> {
         if cast_flags & CAST_FLAG_POWER_LEFT_SELF != 0 {
             u32_le(r)?;
         }
-        if cast_flags & CAST_FLAG_RUNE_LIST == 0 {
-            return Ok(None);
+        if cast_flags & CAST_FLAG_RUNE_LIST != 0 {
+            let (before, after) = (u8_le(r)?, u8_le(r)?);
+            let passed = (0..6)
+                .filter(|i| before >> i & 1 == 1 && after >> i & 1 == 0)
+                .map(|_| u8_le(r))
+                .collect::<io::Result<_>>()?;
+            runes = Some(crate::wrath_spell_control::RunePacket::Spend {
+                before,
+                after,
+                passed,
+            });
         }
-        let (before, after) = (u8_le(r)?, u8_le(r)?);
-        let passed = (0..6)
-            .filter(|i| before >> i & 1 == 1 && after >> i & 1 == 0)
-            .map(|_| u8_le(r))
-            .collect::<io::Result<_>>()?;
-        Ok(Some(crate::wrath_spell_control::RunePacket::Spend {
-            before,
-            after,
-            passed,
-        }))
-    })()
-    .ok()
-    .flatten()
-    .filter(|_| Some(caster) == self_guid);
+        if cast_flags & CAST_FLAG_ADJUST_MISSILE != 0 {
+            f32_le(r)?;
+            u32_le(r)?;
+        }
+        if cast_flags & CAST_FLAG_PROJECTILE != 0 {
+            let display = u32_le(r)?;
+            u32_le(r)?; // inventory type
+            ammo_display_id = (display != 0).then_some(display);
+        }
+        Ok(())
+    })();
+    let runes = runes.filter(|_| Some(caster) == self_guid);
     let mut events = Vec::with_capacity(3);
     if count != 0 && Some(caster) == self_guid {
         events.push(SessionEvent::CastResult {
@@ -471,7 +498,7 @@ fn spell_go(r: &mut Cursor<&[u8]>, self_guid: Option<u64>) -> io::Result<Vec<Ses
         target: t.unit,
         go_target: t.game_object,
         dest: t.dest,
-        ammo_display_id: None,
+        ammo_display_id,
         item_caster: (item_or_caster != caster).then_some(item_or_caster),
         cast_count: Some(count),
     });
@@ -484,6 +511,8 @@ fn spell_go(r: &mut Cursor<&[u8]>, self_guid: Option<u64>) -> io::Result<Vec<Ses
 /// AzerothCore `SpellCastFlags`: the power word and the rune list that follow a spell-go's targets.
 const CAST_FLAG_POWER_LEFT_SELF: u32 = 0x0000_0800;
 const CAST_FLAG_RUNE_LIST: u32 = 0x0020_0000;
+const CAST_FLAG_PROJECTILE: u32 = 0x0000_0020;
+const CAST_FLAG_ADJUST_MISSILE: u32 = 0x0002_0000;
 
 /// Caster guid, a flags byte, then `(spell, cooldown ms)` pairs.
 fn spell_cooldown(r: &mut Cursor<&[u8]>) -> io::Result<Vec<SessionEvent>> {
