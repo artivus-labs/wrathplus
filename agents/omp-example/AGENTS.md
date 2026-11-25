@@ -103,6 +103,9 @@ The built-ins, each documented in its own source (`lua_doc("Goals.push")`,
   `require("wp.engine")` (a Playerbots-style decision engine) and `require("wp.values")`.
 - A zone you have outlevelled (fact `zone_outlevelled`) is left for the nearest zone that fits once
   no quest work is left there; your own goals, holds and `data.zone` still come first.
+- **`Taxi`** (flight paths): `Taxi.known()` lists the ones you know (`AgentTaxiNodes()` all of
+  them); `Move.travel(x, y)` is `Move.to` that flies a long trip when that saves time; the goal
+  action `learn_flight_path` talks to a flight master whose `AgentNearby` `taxi` is `"unknown"`.
 - A walk you start by hand already holds the goal runner until it ends. Its arrival can be a
   reflex in your own Lua (watch `AgentWalk().status`, then `Goals.release()` or the next step) or
   a wake-up when it needs judgement (`Agent.ask`): which is yours to choose.
