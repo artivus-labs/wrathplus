@@ -43,11 +43,45 @@ pub struct WrathAchievementCriterion {
     pub flags: u32,
 }
 
+/// Achievement.dbc's rows in file order, the order 12340 walks its row array (`[0xad3078]`,
+/// stride 0x38), with an id index.
+#[derive(Clone, Debug, Default)]
+pub struct WrathAchievementTable {
+    rows: Vec<WrathAchievement>,
+    index: BTreeMap<u32, usize>,
+}
+
+impl WrathAchievementTable {
+    /// Appends `row`, or replaces the row already under `id` in place.
+    pub fn insert(&mut self, id: u32, row: WrathAchievement) {
+        match self.index.get(&id) {
+            Some(&i) => self.rows[i] = row,
+            None => {
+                self.index.insert(id, self.rows.len());
+                self.rows.push(row);
+            }
+        }
+    }
+    pub fn get(&self, id: &u32) -> Option<&WrathAchievement> {
+        self.index.get(id).map(|&i| &self.rows[i])
+    }
+    pub fn get_mut(&mut self, id: &u32) -> Option<&mut WrathAchievement> {
+        self.index.get(id).map(|&i| &mut self.rows[i])
+    }
+    pub fn contains_key(&self, id: &u32) -> bool {
+        self.index.contains_key(id)
+    }
+    /// The rows in file order.
+    pub fn values(&self) -> impl Iterator<Item = &WrathAchievement> {
+        self.rows.iter()
+    }
+}
+
 /// Metadata installation is explicit: unavailable catalogs are distinct from valid empty
 /// progress. Per-owner vectors retain the catalog's raw linked-row order.
 #[derive(Clone, Debug, Default)]
 pub struct WrathAchievementMetadata {
-    pub achievements: BTreeMap<u32, WrathAchievement>,
+    pub achievements: WrathAchievementTable,
     pub criteria: BTreeMap<u32, WrathAchievementCriterion>,
     pub linked_criteria: BTreeMap<u32, Vec<u32>>,
     /// In file order, as the category lists walk them.

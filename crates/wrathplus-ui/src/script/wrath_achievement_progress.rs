@@ -4,29 +4,32 @@
 //! table `0xacfc70`): the earned list is walked newest first, a compared player's earned list
 //! (`0xacfddc`) joins the category listings, Feats of Strength (category 81) and flag `0x800`
 //! rows count only once earned, a series shows its first unearned step, and Statistics' children
-//! report the root as their parent. Labelled where untraced: "superseded" is a later earned step
-//! of the series (`0x5b37c0`), the completed-count filter is "not a statistic" (`0x5b0d50`), and
+//! report the root as their parent. "Superseded" is a later step of the series in the player's
+//! own earned list (`0x5b37c0`), the completed-count filter is "not a statistic" (`0x5b0d50`), and
 //! `GetStatistic`'s text (`0x5b0ea0`) is the sum, maximum, met-count or last counter by the
 //! achievement's flags, money-formatted for money criteria, `--` while zero.
 
 use std::collections::BTreeMap;
 
-use super::wrath_achievements::{WrathAchievement, WrathAchievementMetadata};
+use super::wrath_achievement_listing::{
+    category_counts, faction_ok, in_category, listing, superseded,
+};
+use super::wrath_achievements::WrathAchievementMetadata;
 use super::{binding_abi::number_arg, ScriptValue, UiScript};
 use mlua::{Lua, MultiValue, Value};
 
-const FLAG_STATISTIC: u32 = 0x1;
-const FLAG_HIDDEN: u32 = 0x2;
+pub(super) const FLAG_STATISTIC: u32 = 0x1;
+pub(super) const FLAG_HIDDEN: u32 = 0x2;
 const FLAG_SUM: u32 = 0x8;
 const FLAG_MAX: u32 = 0x10;
 const FLAG_MET_COUNT: u32 = 0x20;
 /// Shown only once earned (`piVar[9] & 0x800`).
-const FLAG_EARNED_ONLY: u32 = 0x800;
-const FEATS_OF_STRENGTH: u32 = 81;
+pub(super) const FLAG_EARNED_ONLY: u32 = 0x800;
+pub(super) const FEATS_OF_STRENGTH: u32 = 81;
 const STATISTICS_ROOT: u32 = 1;
 /// `GetCategoryNumAchievements`/`GetAchievementInfo` pseudo-categories.
-const ALL_ACHIEVEMENTS: i64 = -1;
-const ALL_STATISTICS: i64 = -2;
+pub(super) const ALL_ACHIEVEMENTS: i64 = -1;
+pub(super) const ALL_STATISTICS: i64 = -2;
 
 /// One player's progress, as `SMSG_ALL_ACHIEVEMENT_DATA` / `SMSG_RESPOND_INSPECT_ACHIEVEMENTS`
 /// and later updates leave it.
@@ -41,7 +44,7 @@ pub struct WrathAchievementProgress {
 }
 
 impl WrathAchievementProgress {
-    fn earned_date(&self, id: u32) -> Option<u32> {
+    pub(super) fn earned_date(&self, id: u32) -> Option<u32> {
         self.earned.iter().find(|(e, _)| *e == id).map(|(_, d)| *d)
     }
 }
@@ -54,8 +57,8 @@ pub enum WrathAchievementRequest {
 }
 
 #[derive(Default)]
-struct State {
-    mine: WrathAchievementProgress,
+pub(super) struct State {
+    pub(super) mine: WrathAchievementProgress,
     /// The list has arrived (`CanShowAchievementUI`, `0xc1f454`).
     received: bool,
     compared: Option<(u64, Option<WrathAchievementProgress>)>,
@@ -141,134 +144,8 @@ fn with<R>(lua: &Lua, f: impl FnOnce(&WrathAchievementMetadata, &State) -> R) ->
     Some(f(meta, &state))
 }
 
-fn compared(state: &State) -> Option<&WrathAchievementProgress> {
+pub(super) fn compared(state: &State) -> Option<&WrathAchievementProgress> {
     state.compared.as_ref().and_then(|(_, p)| p.as_ref())
-}
-
-fn in_category(row: &WrathAchievement, category: i64) -> bool {
-    match category {
-        ALL_ACHIEVEMENTS => row.flags & FLAG_STATISTIC == 0,
-        ALL_STATISTICS => row.flags & FLAG_STATISTIC != 0,
-        c => i64::from(row.category_id) == c,
-    }
-}
-
-fn faction_ok(row: &WrathAchievement, mine: &WrathAchievementProgress) -> bool {
-    row.required_faction == -1 || mine.faction == -1 || row.required_faction == mine.faction
-}
-
-/// A later step of the row's series is earned (`0x5b37c0`, untraced).
-fn superseded(
-    meta: &WrathAchievementMetadata,
-    progress: &WrathAchievementProgress,
-    id: u32,
-) -> bool {
-    meta.achievements
-        .values()
-        .any(|r| r.parent_achievement_id == id && progress.earned_date(r.id).is_some())
-}
-
-/// `GetAchievementInfo(category, index)`'s order: earned by both, by the player, by the compared
-/// player, then the rest in file order, a series by its first unearned step.
-fn listing(meta: &WrathAchievementMetadata, state: &State, category: i64) -> Vec<u32> {
-    let mine = &state.mine;
-    let theirs = compared(state);
-    let in_theirs = |id: u32| theirs.is_some_and(|p| p.earned_date(id).is_some());
-    let pseudo = category == ALL_ACHIEVEMENTS || category == ALL_STATISTICS;
-    let earned_pass = |id: u32, progress: &WrathAchievementProgress| {
-        meta.achievements.get(&id).is_some_and(|row| {
-            in_category(row, category)
-                && row.flags & FLAG_HIDDEN == 0
-                && (pseudo || !superseded(meta, progress, id))
-        })
-    };
-    let mut out = Vec::new();
-    for &(id, _) in &mine.earned {
-        if in_theirs(id) && earned_pass(id, mine) {
-            out.push(id);
-        }
-    }
-    for &(id, _) in &mine.earned {
-        if !in_theirs(id) && earned_pass(id, mine) {
-            out.push(id);
-        }
-    }
-    if let Some(theirs) = theirs {
-        for &(id, _) in &theirs.earned {
-            if mine.earned_date(id).is_none() && earned_pass(id, theirs) {
-                out.push(id);
-            }
-        }
-    }
-    let mut last = 0;
-    for row in meta.achievements.values() {
-        if mine.earned_date(row.id).is_some() || in_theirs(row.id) || !faction_ok(row, mine) {
-            continue;
-        }
-        if row.flags & FLAG_EARNED_ONLY != 0 || !in_category(row, category) {
-            continue;
-        }
-        if pseudo {
-            if row.category_id != FEATS_OF_STRENGTH && row.flags & FLAG_HIDDEN == 0 {
-                out.push(row.id);
-            }
-        } else if last == 0 || last != row.parent_achievement_id {
-            out.push(row.id);
-            last = row.id;
-        }
-    }
-    out
-}
-
-/// `GetCategoryNumAchievements` (`0x5b38e0`): `(total, completed)`.
-fn category_counts(
-    meta: &WrathAchievementMetadata,
-    state: &State,
-    category: i64,
-    all: bool,
-) -> (i64, i64) {
-    let mine = &state.mine;
-    let theirs = compared(state);
-    let all = all || category == ALL_ACHIEVEMENTS || category == ALL_STATISTICS;
-    let (mut total, mut completed, mut theirs_only, mut last) = (0, 0, 0, 0);
-    for row in meta.achievements.values() {
-        if !in_category(row, category) || row.flags & FLAG_HIDDEN != 0 {
-            continue;
-        }
-        let earned = mine.earned_date(row.id).is_some();
-        let their = theirs.is_some_and(|p| p.earned_date(row.id).is_some());
-        if !(faction_ok(row, mine) || their) {
-            continue;
-        }
-        let listed = row.category_id != FEATS_OF_STRENGTH && row.flags & FLAG_EARNED_ONLY == 0;
-        if !(listed || earned || their) {
-            continue;
-        }
-        if last == 0 || last != row.parent_achievement_id {
-            if earned {
-                if !superseded(meta, mine, row.id) || all {
-                    total += 1;
-                    completed += 1;
-                }
-            } else if their {
-                theirs_only += 1;
-            } else {
-                last = row.id;
-                total += 1;
-            }
-        } else {
-            last = row.id;
-            if all {
-                total += 1;
-            } else if their {
-                theirs_only += 1;
-            }
-        }
-    }
-    if category == i64::from(FEATS_OF_STRENGTH) {
-        total = completed;
-    }
-    (total + theirs_only, completed)
 }
 
 /// The 11 values of `GetAchievementInfo` (`0x5b3fc0`), or none for a hidden or unearned
@@ -455,13 +332,13 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     g.set(
         "GetCategoryInfo",
         lua.create_function(|lua, id: Value| {
-            // Rounded, as `0x5b15c0` does.
+            // Truncated: `0x5b15c0` sets the x87 control word to chop before `fistp`.
             let id = lua
                 .coerce_number(id)?
                 .ok_or_else(|| {
                     mlua::Error::RuntimeError("Usage: GetCategoryInfo(categoryID)".into())
                 })?
-                .round() as i64;
+                .trunc() as i64;
             let row = with(lua, |meta, _| {
                 meta.categories
                     .iter()
@@ -521,10 +398,11 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         "GetAchievementInfo",
         lua.create_function(|lua, (first, index): (Value, Value)| {
             let first = number_arg(lua, first, "Usage: GetAchievementInfo(achievementID)")?;
-            let id = match index {
-                Value::Nil => Some(first as u32),
-                index => {
-                    let index = lua.coerce_number(index)?.unwrap_or(0.0) as i64;
+            // `lua_isnumber(2)` picks the `(category, index)` form (`0x5b3fe9`).
+            let id = match lua.coerce_number(index)? {
+                None => Some(first as u32),
+                Some(index) => {
+                    let index = index as i64;
                     with(lua, |meta, state| {
                         let list = listing(meta, state, first as i64);
                         usize::try_from(index - 1)

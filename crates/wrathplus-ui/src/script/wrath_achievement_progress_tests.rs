@@ -1,6 +1,6 @@
 use super::*;
 use crate::script::wrath_achievements::{
-    WrathAchievementCategory, WrathAchievementCriterion, WrathAchievementMetadata,
+    WrathAchievement, WrathAchievementCategory, WrathAchievementCriterion, WrathAchievementMetadata,
 };
 
 /// 2009-10-17, packed as AzerothCore `secsToTimeBitFields` does (0-based month and day).
@@ -25,12 +25,14 @@ fn achievement(id: u32, category: u32, parent: u32, faction: i32, flags: u32) ->
 fn script() -> UiScript {
     let mut ui = UiScript::new().unwrap();
     let mut meta = WrathAchievementMetadata::default();
+    // Out of id order, as Achievement.dbc is: the listing walks the file.
     for row in [
         achievement(10, 92, 0, -1, 0),
+        achievement(21, 92, 0, 1, 0),
         achievement(11, 92, 10, -1, 0),
         achievement(12, 92, 11, -1, 0),
+        achievement(13, 92, 12, -1, 0),
         achievement(20, 92, 0, 0, 0),
-        achievement(21, 92, 0, 1, 0),
         achievement(30, 81, 0, -1, 0),
         achievement(40, 130, 0, -1, FLAG_STATISTIC | FLAG_SUM),
         achievement(50, 92, 0, -1, FLAG_HIDDEN),
@@ -97,23 +99,25 @@ fn published_progress_answers_the_achievement_window() {
         assert(#cats == 2 and cats[1] == 92 and cats[2] == 81, #cats)
         local stats = GetStatisticsCategoryList()
         assert(#stats == 1 and stats[1] == 130)
-        local name, parent, flags = GetCategoryInfo(130)
-        assert(name == 'Cat130' and parent == -1 and flags == 0)
+        local name, parent, flags = GetCategoryInfo(130.9)
+        assert(name == 'Cat130' and parent == -1 and flags == 0, 'truncated')
         assert(select(2, GetCategoryInfo(92)) == -1)
         local total, done = GetCategoryNumAchievements(92)
         assert(total == 3 and done == 1, total)
-        assert(GetCategoryNumAchievements(92, true) == 4)
+        assert(GetCategoryNumAchievements(92, true) == 5)
         assert(GetCategoryNumAchievements(81) == 0)
         local id, n, pts, completed, m, d, y, desc, fl, icon, reward = GetAchievementInfo(92, 1)
         assert(id == 10 and completed == true and m == 10 and d == 17 and y == 9 and desc == 'D10')
         assert(icon == 'Interface\\Icons\\Achievement_General' and reward == '')
-        assert(GetAchievementInfo(92, 2) == 11 and GetAchievementInfo(92, 3) == 21)
-        assert(select('#', GetAchievementInfo(92, 4)) == 0)
+        assert(GetAchievementInfo(92, 2) == 21 and GetAchievementInfo(92, '3') == 11)
+        assert(select('#', GetAchievementInfo(92, 4)) == 0, 'the cursor skips 12 and 13')
+        assert(select('#', GetAchievementInfo(81, 1)) == 0, 'no unearned Feats of Strength')
+        assert(GetAchievementInfo(10, false) == 10 and select('#', GetAchievementInfo(10, {})) == 11)
         local id, _, _, completed, m = GetAchievementInfo(11)
         assert(id == 11 and completed == false and m == nil)
         assert(select('#', GetAchievementInfo(50)) == 0, 'hidden')
         local total, done = GetNumCompletedAchievements()
-        assert(total == 4 and done == 1, total)
+        assert(total == 5 and done == 1, total)
         assert(GetTotalAchievementPoints() == 10)
         assert(GetLatestCompletedAchievements() == 10 and select('#', GetLatestCompletedAchievements()) == 1)
         assert(GetNextAchievement(10) == 11 and select('#', GetNextAchievement(10)) == 1)
@@ -178,8 +182,24 @@ fn a_compared_player_joins_the_listing_and_answers_comparisons() {
         assert(GetComparisonCategoryNumAchievements(92) == 1)
         assert(GetComparisonStatistic(40) == '10')
         local order = {}
-        for i = 1, 4 do order[i] = GetAchievementInfo(92, i) end
-        assert(order[1] == 10 and order[2] == 11 and order[3] == 12 and order[4] == 21)
+        for i = 1, 5 do order[i] = GetAchievementInfo(92, i) or 0 end
+        assert(table.concat(order, ',') == '10,11,21,12,0', table.concat(order, ','))
+    "#,
+    )
+    .unwrap();
+    // Their earn of a step whose successor I have is superseded by MY list (`0x5b37c0`).
+    let mine = |id| WrathAchievementProgress {
+        earned: vec![(id, OCT_17_2009)],
+        faction: 1,
+        ..Default::default()
+    };
+    ui.set_wrath_achievement_progress(mine(11));
+    ui.set_wrath_achievement_comparison(0x42, mine(10));
+    ui.run(
+        r#"
+        local order = {}
+        for i = 1, 4 do order[i] = GetAchievementInfo(92, i) or 0 end
+        assert(table.concat(order, ',') == '11,21,12,0', table.concat(order, ','))
         ClearAchievementComparisonUnit()
         assert(GetComparisonAchievementPoints() == 0)
     "#,

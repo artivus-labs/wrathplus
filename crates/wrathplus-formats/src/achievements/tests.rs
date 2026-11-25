@@ -26,7 +26,9 @@ fn achievement_preserves_raw_fields_and_selected_locale() {
         r[base] = 1;
         r[base + 2] = 9;
     }
-    let b = dbc(&[r], b"\0English\0Francais\0");
+    let mut later = r.clone();
+    later[0] = 7;
+    let b = dbc(&[r, later], b"\0English\0Francais\0");
     let c = achievements(&b, "enUS").unwrap();
     let a = c.get(95).unwrap();
     assert_eq!((a.required_faction, a.map_id), (-1, -1));
@@ -54,9 +56,13 @@ fn achievement_preserves_raw_fields_and_selected_locale() {
     assert_eq!(fr.get(95).unwrap().description, "Francais");
     assert_eq!(fr.get(95).unwrap().reward, "Francais");
     assert_eq!(achievements(&b, "deDE").unwrap().get(95).unwrap().name, "");
-    assert_eq!(c.len(), 1);
+    assert_eq!(c.len(), 2);
     assert!(!c.is_empty());
-    assert_eq!(c.iter().count(), 1);
+    assert_eq!(
+        c.iter().map(|a| a.id).collect::<Vec<_>>(),
+        [95, 7],
+        "file order"
+    );
     assert!(c.get(999).is_none());
 }
 
