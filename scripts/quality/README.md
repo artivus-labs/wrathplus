@@ -28,7 +28,7 @@ python3 scripts/quality/test_gate.py               # cheap synthetic contract te
 ```
 
 - LoC counts physical lines in tracked `.rs` files (including tests/examples/vendor code).
-  Limit 500. Generated sources listed in `gate.py`'s `GENERATED` are exempt by name. An existing offender can shrink or stay the same; new/grown violations fail.
+  Limit 800 lines per Rust file, tests included: small enough for an agent to read a file whole, and no boss files. Generated sources listed in `gate.py`'s `GENERATED` are exempt by name. An existing offender can shrink or stay the same; new/grown violations fail.
   Deletions pass; moving an offender to a new path does not preserve its allowance.
 - Formatting is `rustfmt --check`, edition 2021, `skip_children=true` for explicitly selected
   files; no recursive check of unstaged module children and no automatic formatting.

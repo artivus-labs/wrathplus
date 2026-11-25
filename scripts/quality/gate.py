@@ -37,15 +37,17 @@ GENERATED = {
 
 
 def loc(paths):
-    baseline = load('loc')['files']
+    data = load('loc')
+    limit, baseline = data['limit'], data['files']
     failures = []
     for path in paths:
         if path in GENERATED:
             continue
         if path.endswith('.rs') and Path(path).is_file():
             count = len(Path(path).read_bytes().splitlines())
-            if count > max(500, baseline.get(path, 500)):
-                failures.append(f'{path}: {count} > {max(500, baseline.get(path, 500))}')
+            ceiling = max(limit, baseline.get(path, limit))
+            if count > ceiling:
+                failures.append(f'{path}: {count} > {ceiling}')
     if failures:
         raise ValueError('\n'.join(failures))
 

@@ -18,16 +18,18 @@ class RatchetTests(unittest.TestCase):
     def test_loc_new_growth_and_shrink(self):
         with tempfile.TemporaryDirectory() as directory:
             p = Path(directory) / 'a.rs'
-            with patch.object(gate, 'load', return_value={'files': {str(p): 510}}):
-                p.write_text('\n' * 510)
+            with patch.object(gate, 'load', return_value={'limit': 800, 'files': {str(p): 810}}):
+                p.write_text('\n' * 810)
                 gate.loc([str(p)])
-                p.write_text('\n' * 511)
+                p.write_text('\n' * 811)
                 with self.assertRaises(ValueError):
                     gate.loc([str(p)])
-                p.write_text('\n' * 499)
+                p.write_text('\n' * 799)
                 gate.loc([str(p)])
-            with patch.object(gate, 'load', return_value={'files': {}}):
-                p.write_text('\n' * 501)
+            with patch.object(gate, 'load', return_value={'limit': 800, 'files': {}}):
+                p.write_text('\n' * 800)
+                gate.loc([str(p)])
+                p.write_text('\n' * 801)
                 with self.assertRaises(ValueError):
                     gate.loc([str(p)])
 
@@ -35,7 +37,7 @@ class RatchetTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             p = Path(directory) / 'generated.rs'
             p.write_text('\n' * 900)
-            with patch.object(gate, 'load', return_value={'files': {}}), \
+            with patch.object(gate, 'load', return_value={'limit': 800, 'files': {}}), \
                     patch.object(gate, 'GENERATED', {str(p)}):
                 gate.loc([str(p)])
 
@@ -89,14 +91,14 @@ class RatchetTests(unittest.TestCase):
                 shutil.copy(Path(__file__).with_name(name), tooling / name)
             subprocess.run(['git', 'init', '-q', str(root)], check=True)
             source = root / 'a.rs'
-            source.write_text('fn main() {}\n' * 501)
+            source.write_text('fn main() {}\n' * 801)
             subprocess.run(['git', 'add', '.'], cwd=root, check=True)
-            # An unstaged repair must not hide the staged 501-line violation.
+            # An unstaged repair must not hide the staged 801-line violation.
             source.write_text('fn main() {}\n')
             result = subprocess.run(['python3', str(tooling / 'pre-commit')], cwd=root,
                                     capture_output=True, text=True)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn('501 > 500', result.stderr)
+            self.assertIn('801 > 800', result.stderr)
             self.assertEqual(source.read_text(), 'fn main() {}\n')
 
 
