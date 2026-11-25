@@ -428,3 +428,7 @@ fn hurt_it_rests_eating_the_food_in_its_bags() {
 #[cfg(test)]
 #[path = "goals_missing_tests.rs"]
 mod goals_missing_tests;
+
+#[cfg(test)]
+#[path = "quest_hub_tests.rs"]
+mod quest_hub_tests;

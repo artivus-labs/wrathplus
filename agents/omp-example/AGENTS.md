@@ -109,11 +109,25 @@ and docs, and your own modules' lines; `lua_doc` reads one in full. The built-in
 - **`Quests.pick_up()`, `Quests.hand_in()`**: visit the quest givers in reach;
   `AGENT_QUESTS_DONE`. `Quests.list()`.
 - **`Goals`**: a goal-oriented planner and runner. `Goals.on = true` levels by itself (hand in,
-  pick up, work objectives, train, sell and repair, rest, grind, travel to a fitting zone).
+  pick up, work objectives, train, sell and repair, rest, walk to a known quest hub, grind, travel
+  to a fitting zone).
   `Goals.push{name, why, priority, want, done, data}`, `Goals.drop(name)`, `Goals.list()`,
   `Goals.facts()`, `Goals.state`, `Goals.log`; teach facts (`Goals.fact(name, fn)`) and actions
   (`Goals.action{name, pre, effects, run, done, cost}`); pause with `Goals.hold{reason, seconds}`.
   `Goals.zones()` lists the zones that fit your level.
+- **Walks and the runner.** A walk you start by hand (`AgentMoveTo`, `Move.to`, `AgentInteract`
+  from afar) already holds the runner until the walk ends; it needs no `Goals.hold`. A hold you
+  set yourself lasts its `seconds` whatever the walk does, unless you give
+  `Goals.hold{reason, seconds, until_walk = true}`: then it also ends when the walk under way (or
+  the next one) arrives or fails, as `AGENT_HOLD_EXPIRED(reason, waited, "walk arrived" | ...)`.
+  For somewhere the built-ins already go (a quest hub, a zone), a goal hands the destination to
+  the runner instead: `data.zone` for `travel_to_zone`, or `Goals.learn_places` for a hub.
+  A walk's end is an event too: `AGENT_WALK_DONE(status)` (`arrived`, `failed`, `stuck`) on the
+  event stream, which does not wake you; in Lua, `AgentWalk().status` says the same. So arrival
+  can be (a) a reflex in your own Lua: a frame that watches `AgentWalk().status` and calls
+  `Goals.release()` or starts the next step, with no model call; or (b) a wake-up when arrival
+  needs judgement: that watcher calls `Agent.ask(...)`, and `AGENT_ASK` wakes you at once.
+  Which is yours to choose.
 - **`AgentServices([kinds[, radius]])`**: where vendors, trainers, flight masters, auctioneers
   (with the `house` they serve), mailboxes and the like are on your map, from the realm:
   `{pending = true}` first, then the list after `AGENT_SERVICES_READY`. `AgentFindNpc(service)`
@@ -233,7 +247,9 @@ Four places, each for one kind of knowledge:
 Every turn of yours costs money; the Lua runs for free.
 
 - **End your turn** when you have done what the wake-up was for. The launcher wakes you when
-  something needs you, and checks in on a timer. Do not sit in a loop of `events` calls waiting
+  something needs you, and checks in on a timer. The same goal blocked again for the same reason, or the
+  same hold running out again, wakes you once per `WRATHPLUS_OMP_REPEAT_MINUTES` (15); the repeats
+  are counted in the next check-in's evidence. Do not sit in a loop of `events` calls waiting
   for something to happen: each call re-sends your whole context. Spend the turns you are given
   on improving the controller (above), not on waiting.
 - When you do wait inside a turn (for a walk you started, an answer), use long waits

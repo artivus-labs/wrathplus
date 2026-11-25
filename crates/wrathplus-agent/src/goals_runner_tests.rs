@@ -112,3 +112,47 @@ fn the_runner_waits_out_a_cinematic() {
     ticks(&mut script, 0.5);
     assert_eq!(text(&script, "return doing()"), "goal:grind");
 }
+
+/// A hold `until_walk` ends with the walk it waits for (the planner held the runner for a walk to
+/// Thelsamar, arrived in a minute, and the runner sat out the other four); `seconds` stays the
+/// cap, and a plain hold is not ended by a walk.
+#[test]
+fn a_hold_until_walk_ends_with_the_walk_and_its_seconds_stay_the_cap() {
+    let mut script = goals();
+    script
+        .run("Goals.on = true Goals.hold({ reason = 'to Thelsamar', seconds = 300, until_walk = true })")
+        .unwrap();
+    // No walk yet: it waits for the next one to start, and through it.
+    ticks(&mut script, 1.0);
+    script.run("AgentMoveTo(600, 0)").unwrap();
+    ticks(&mut script, 1.0);
+    assert_eq!(text(&script, "return (Goals.holding())"), "to Thelsamar");
+    script.run("walking = false").unwrap();
+    ticks(&mut script, 0.5);
+    let expired = text(&script, "return heard('HOLD_EXPIRED')");
+    assert!(
+        expired.starts_with("HOLD_EXPIRED to Thelsamar "),
+        "{expired}"
+    );
+    assert!(expired.ends_with(" walk arrived"), "{expired}");
+    assert!(script
+        .eval::<bool>("return Goals.holding() == nil")
+        .unwrap());
+    // A plain hold outlasts the walk.
+    script
+        .run("said = {} Goals.hold({ reason = 'plain', seconds = 300 }) AgentMoveTo(0, 0)")
+        .unwrap();
+    ticks(&mut script, 1.0);
+    script.run("walking = false").unwrap();
+    ticks(&mut script, 1.0);
+    assert_eq!(text(&script, "return (Goals.holding())"), "plain");
+    // With no walk at all, until_walk ends at its seconds, as any hold.
+    script
+        .run("Goals.release() Goals.hold({ reason = 'cap', seconds = 1, until_walk = true })")
+        .unwrap();
+    ticks(&mut script, 1.5);
+    assert_eq!(
+        text(&script, "return heard('HOLD_EXPIRED')"),
+        "HOLD_EXPIRED cap 1"
+    );
+}

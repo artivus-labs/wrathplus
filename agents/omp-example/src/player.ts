@@ -12,7 +12,7 @@ import { AgentClient } from "../../mcp/src/client.ts";
 import { type Frame, OmpRpc } from "./rpc.ts";
 import { ompCli, ompEnv, prepareWorkDir, type Settings, settingsFromEnv, trialRunning } from "./setup.ts";
 import { appendJsonl, totals, usageFromFrame } from "./usage.ts";
-import { Evidence, type GameEvent, Inbox, statusLine, WAKE_EVENTS, type WakeReason, wakeMessage } from "./wake.ts";
+import { classify, Evidence, type GameEvent, Inbox, Repeats, statusLine, WAKE_EVENTS, type WakeReason, wakeMessage } from "./wake.ts";
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -21,6 +21,7 @@ class Player {
   readonly client: AgentClient;
   readonly inbox = new Inbox();
   readonly evidence = new Evidence();
+  readonly repeats: Repeats;
   readonly usagePath: string;
   readonly logPath: string;
   rpc: OmpRpc | undefined;
@@ -39,6 +40,7 @@ class Player {
 
   constructor(readonly s: Settings) {
     this.client = new AgentClient(s.agentUrl, s.token);
+    this.repeats = new Repeats(s.repeatMinutes * MINUTE);
     this.usagePath = join(s.stateDir, "usage.jsonl");
     this.logPath = join(s.stateDir, "launcher.log");
     mkdirSync(s.stateDir, { recursive: true, mode: 0o700 });
@@ -172,7 +174,7 @@ class Player {
     } catch {
       // The client may be restarting; the planner will see that itself.
     }
-    const evidence = reason === "checkin" || reason === "reflect" ? this.evidence.take() : [];
+    const evidence = reason === "checkin" || reason === "reflect" ? [...this.repeats.take(), ...this.evidence.take()] : [];
     return wakeMessage(reason, lines, status, this.s.checkinMinutes, evidence);
   }
 
@@ -196,6 +198,11 @@ class Player {
         since = read.next;
         for (const e of read.events) {
           this.evidence.add(e);
+          // A notable event repeating a recent wake (the same goal blocked again) is only counted.
+          if (this.repeats.hold(e, classify(e, this.self), Date.now())) {
+            this.log(`event ${e.event} (repeat, counted for the check-in)`);
+            continue;
+          }
           const urgency = this.inbox.add(e, this.self);
           if (urgency) this.log(`event ${e.event} (${urgency})`);
         }

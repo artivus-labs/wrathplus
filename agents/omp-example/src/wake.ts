@@ -110,6 +110,7 @@ export function describe(e: GameEvent): string {
     case "AGENT_GOAL_DONE":
       return `Goal ${str(a[0])} ended (${a[1] ? "ok" : "not ok"}).`;
     case "AGENT_HOLD_EXPIRED":
+      if (a[2]) return `Your hold "${str(a[0])}" ended with its walk (${str(a[2])}) after ${str(a[1])} s: hold again or Goals.release().`;
       return `Your hold "${str(a[0])}" ran out after ${str(a[1])} s: hold again or Goals.release().`;
     case "AGENT_ACTION_FAILED":
       return `Goal action ${str(a[1])} (goal ${str(a[0])}) failed: ${clip(str(a[2]), 200)}`;
@@ -206,6 +207,63 @@ export class Evidence {
     this.#counts.clear();
     this.#outcomes.clear();
     this.#review = undefined;
+    return lines;
+  }
+}
+
+/** What makes a notable event the same as an earlier one: its name and the arguments that say
+ *  what it is about (a hold's reason, not how long it waited). */
+function repeatKey(e: GameEvent): string {
+  const args = e.event === "AGENT_HOLD_EXPIRED" ? e.args.slice(0, 1) : e.args;
+  return `${e.event} ${JSON.stringify(args)}`;
+}
+
+/** How a repeat is shown in the check-in's evidence. */
+function repeatLabel(e: GameEvent): string {
+  const a = e.args;
+  switch (e.event) {
+    case "AGENT_GOAL_BLOCKED":
+      return `${e.event} ${str(a[0])}: '${clip(str(a[1]), 120)}'`;
+    case "AGENT_HOLD_EXPIRED":
+      return `${e.event} '${clip(str(a[0]), 120)}'`;
+    default:
+      return clip(describe(e), 160);
+  }
+}
+
+/** Notable events that repeat one that woke the planner within `windowMs` (the same goal blocked
+ *  for the same reason, the same hold running out) do not wake it again: they are counted and shown
+ *  in the next check-in's evidence. Urgent events are never held back. A window of 0 is off. */
+export class Repeats {
+  #woke = new Map<string, number>();
+  #held = new Map<string, { label: string; count: number }>();
+
+  constructor(readonly windowMs: number) {}
+
+  /** Whether `e` repeats a recent wake and is held back (and counted); else it is recorded as a
+   *  wake when notable. */
+  hold(e: GameEvent, urgency: Urgency | null, now: number): boolean {
+    if (urgency !== "notable" || this.windowMs <= 0) return false;
+    const key = repeatKey(e);
+    const last = this.#woke.get(key);
+    if (last !== undefined && now - last < this.windowMs) {
+      const held = this.#held.get(key) ?? { label: repeatLabel(e), count: 0 };
+      held.count += 1;
+      this.#held.set(key, held);
+      return true;
+    }
+    this.#woke.set(key, now);
+    for (const [k, t] of this.#woke) if (now - t >= this.windowMs) this.#woke.delete(k);
+    return false;
+  }
+
+  /** The repeats held back since the last take, most frequent first, and start a new count. */
+  take(): string[] {
+    const minutes = Math.round(this.windowMs / 60_000);
+    const lines = [...this.#held.values()]
+      .sort((x, y) => y.count - x.count)
+      .map((h) => `${h.label} ×${h.count} (repeats within ${minutes} min of a wake; not woken for)`);
+    this.#held.clear();
     return lines;
   }
 }

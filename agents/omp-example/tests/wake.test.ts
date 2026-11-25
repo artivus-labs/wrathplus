@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { classify, describe as line, Evidence, type GameEvent, Inbox, statusLine, wakeMessage } from "../src/wake.ts";
+import { classify, describe as line, Evidence, type GameEvent, Inbox, Repeats, statusLine, wakeMessage } from "../src/wake.ts";
 
 const ev = (event: string, ...args: unknown[]): GameEvent => ({ seq: 1, time: 0, event, args });
 
@@ -39,6 +39,12 @@ describe("describe", () => {
     expect(text).toContain("Agent.answer(7, value)");
     expect(text).toContain('"who":"Bob"');
     expect(text).toContain("You killed a wolf");
+  });
+  test("a hold that ended with its walk says so", () => {
+    expect(line(ev("AGENT_HOLD_EXPIRED", "to Thelsamar", 64, "walk arrived"))).toBe(
+      'Your hold "to Thelsamar" ended with its walk (walk arrived) after 64 s: hold again or Goals.release().',
+    );
+    expect(line(ev("AGENT_HOLD_EXPIRED", "resting", 300))).toBe('Your hold "resting" ran out after 300 s: hold again or Goals.release().');
   });
   test("chat lines are clipped", () => {
     expect(line(ev("CHAT_MSG_WHISPER", "x".repeat(1000), "Bob")).length).toBeLessThan(330);
@@ -104,4 +110,55 @@ test("evidence: failures counted, most frequent first, fights and the latest rev
   expect(lines).toContain("1x pull refused: an elite");
   expect(lines.at(-1)).toContain("Fireball 55 cast, 16 failed");
   expect(e.take()).toEqual([]);
+});
+
+describe("Repeats", () => {
+  const MIN = 60_000;
+  const blocked = ev("AGENT_GOAL_BLOCKED", "progress", "no plan reaches progressed = true now");
+  const held = (r: Repeats, e: GameEvent, at: number) => r.hold(e, classify(e, "Sixer"), at);
+
+  test("the same goal blocked for the same reason wakes once per window; repeats go to the check-in", () => {
+    const r = new Repeats(15 * MIN);
+    expect(held(r, blocked, 0)).toBe(false);
+    for (let i = 1; i <= 19; i++) expect(held(r, blocked, i * 30_000)).toBe(true);
+    // Another reason, or another goal, is news.
+    expect(held(r, ev("AGENT_GOAL_BLOCKED", "progress", "something else"), MIN)).toBe(false);
+    expect(held(r, ev("AGENT_GOAL_BLOCKED", "reach_loch", "no plan reaches progressed = true now"), MIN)).toBe(false);
+    expect(r.take()).toEqual([
+      "AGENT_GOAL_BLOCKED progress: 'no plan reaches progressed = true now' ×19 (repeats within 15 min of a wake; not woken for)",
+    ]);
+    expect(r.take()).toEqual([]);
+    // Once the window since the last wake is over, it wakes again.
+    expect(held(r, blocked, 15 * MIN)).toBe(false);
+    expect(held(r, blocked, 16 * MIN)).toBe(true);
+  });
+
+  test("a hold that runs out again is the same hold however long it waited", () => {
+    const r = new Repeats(15 * MIN);
+    expect(held(r, ev("AGENT_HOLD_EXPIRED", "watching the camp", 60), 0)).toBe(false);
+    expect(held(r, ev("AGENT_HOLD_EXPIRED", "watching the camp", 125), MIN)).toBe(true);
+    expect(held(r, ev("AGENT_HOLD_EXPIRED", "resting", 30), MIN)).toBe(false);
+    expect(r.take()).toEqual(["AGENT_HOLD_EXPIRED 'watching the camp' ×1 (repeats within 15 min of a wake; not woken for)"]);
+  });
+
+  test("urgent events are never held back, and a window of 0 is off", () => {
+    const r = new Repeats(15 * MIN);
+    for (const e of [
+      ev("CHAT_MSG_WHISPER", "hi", "Bob"),
+      ev("AGENT_ASK", 1, "group?"),
+      ev("PLAYER_DEAD"),
+      ev("PARTY_INVITE_REQUEST", "Bob"),
+      ev("AGENT_COMBAT_DONE", "0xG", "no_progress", "health has not dropped"),
+    ]) {
+      expect(held(r, e, 0)).toBe(false);
+      expect(held(r, e, 1000)).toBe(false);
+    }
+    // Events that never wake are not counted as repeats either (the evidence counts them).
+    expect(held(r, ev("AGENT_ACTION_FAILED", "progress", "grind", "x"), 0)).toBe(false);
+    expect(held(r, ev("AGENT_ACTION_FAILED", "progress", "grind", "x"), 1)).toBe(false);
+    expect(r.take()).toEqual([]);
+    const off = new Repeats(0);
+    expect(held(off, blocked, 0)).toBe(false);
+    expect(held(off, blocked, 1)).toBe(false);
+  });
 });

@@ -64,7 +64,10 @@ The launcher:
   player would notice: `AGENT_ASK` (the Lua handing a moment up), a death, a whisper, party chat,
   an invite, a trade or duel, a level-up, a blocked or finished goal, a hold that ran out, and
   `/say` that names the character. Asks, deaths, whispers and invites are urgent: they steer a
-  turn that is running. Combat, loot, walks and failures never wake it: the Lua plays, and the
+  turn that is running. A notable event that repeats one that woke the planner within
+  `WRATHPLUS_OMP_REPEAT_MINUTES` (the same goal blocked for the same reason, the same hold run out)
+  does not wake it again: the repeats are counted and shown in the next check-in's evidence.
+  Urgent events always wake it. Combat, loot, walks and failures never wake it: the Lua plays, and the
   failures are counted for the check-ins.
 - **Checks in** every `WRATHPLUS_OMP_CHECKIN_MINUTES`, whatever else woke it meanwhile: the turn for improving the controller. The check-in carries **evidence** the launcher counted since the last one (game errors from `UI_ERROR_MESSAGE`, failed goal actions and their reasons, refused pulls, how fights ended, the latest fight review), and asks the agent to take the most costly recurring failure or the weakest scorecard objective, study its cause in the Lua, and change the controller or write down why not (the `improve-the-controller` skill). The launcher only counts; it never decides what a failure means.
 - **Reflects** every `WRATHPLUS_OMP_REFLECT_HOURS`: it asks the planner to dispatch the
@@ -152,6 +155,7 @@ Read `usage.jsonl` for the real numbers.
 | `WRATHPLUS_OMP_REFLECT_HOURS` | `3` | between reflections (`0`: off) |
 | `WRATHPLUS_OMP_SESSION_HOURS` | `6` | before a fresh session (`0`: never) |
 | `WRATHPLUS_OMP_TURN_MAX_MINUTES` | `30` | a longer turn is aborted (`0`: never) |
+| `WRATHPLUS_OMP_REPEAT_MINUTES` | `15` | a notable event repeating one that woke the planner this recently (the same goal blocked for the same reason, the same hold run out) does not wake it again; repeats are counted in the next check-in (`0`: every one wakes it) |
 | `WRATHPLUS_OMP_MAX_COST` | none | USD per session, passed as `--max-cost` |
 | `WRATHPLUS_OMP_FRESH` | off | `1`: start a new session instead of continuing the last one |
 | `WRATHPLUS_JUDGE_DIR`, `WRATHPLUS_SCORECARD_SECONDS` | the MCP server's | passed through to it |
