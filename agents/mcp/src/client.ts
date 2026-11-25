@@ -28,6 +28,12 @@ export interface EventsQuery {
 
 type Query = Record<string, number | string | undefined>;
 
+/** A captured frame: the image and, from a client that reports it, its camera (`frame`). */
+export interface Screenshot {
+  png: Uint8Array;
+  frame: unknown;
+}
+
 /** Longer than the port's own 60 s game timeout, so its 504 arrives before ours. */
 const REQUEST_TIMEOUT_MS = 90_000;
 
@@ -95,14 +101,30 @@ export class AgentClient {
     return this.#json("DELETE", `/files/${encodeURIComponent(name)}`);
   }
 
-  /** `GET /screenshot[?scale=S]`: the next rendered frame as PNG bytes. */
-  async screenshot(scale?: number): Promise<Uint8Array> {
+  /** `GET /screenshot[?scale=S]`: the next rendered frame as PNG bytes, and its frame (the
+   *  `X-Agent-Frame` header: number, image size, camera and player), or null from a client
+   *  without one. */
+  async screenshot(scale?: number): Promise<Screenshot> {
     const response = await this.#request("GET", "/screenshot", { scale });
     const type = response.headers.get("content-type") ?? "";
     if (!type.startsWith("image/png")) {
       throw new AgentError(`expected a PNG, got ${type || "no content type"}: ${await response.text()}`);
     }
-    return new Uint8Array(await response.arrayBuffer());
+    const header = response.headers.get("x-agent-frame");
+    let frame: unknown = null;
+    if (header) {
+      try {
+        frame = JSON.parse(header);
+      } catch {
+        frame = null;
+      }
+    }
+    return { png: new Uint8Array(await response.arrayBuffer()), frame };
+  }
+
+  /** `GET /point?u=&v=[&frame=N]`: what is at pixel (u, v) of a screenshot. */
+  point(u: number, v: number, frame?: number): Promise<unknown> {
+    return this.#json("GET", "/point", { u, v, frame });
   }
 
   async #json(

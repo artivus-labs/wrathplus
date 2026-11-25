@@ -84,6 +84,7 @@ describe("tools", () => {
       "lua_doc",
       "lua_search",
       "modules",
+      "point",
       "save_module",
       "screenshot",
       "status",
@@ -139,6 +140,28 @@ describe("tools", () => {
     expect(result.content).toEqual([
       { type: "image", mimeType: "image/png", data: Buffer.from(PNG).toString("base64") },
     ]);
+  });
+
+  test("screenshot adds its frame as text beside the image", async () => {
+    const frame = { frame: 7, width: 640, height: 360, camera: { x: 1, yaw: 0.5 }, player: null };
+    reply = () =>
+      new Response(PNG, { headers: { "Content-Type": "image/png", "X-Agent-Frame": JSON.stringify(frame) } });
+    const result = await call("screenshot");
+    expect(result.content).toEqual([
+      { type: "image", mimeType: "image/png", data: Buffer.from(PNG).toString("base64") },
+      { type: "text", text: JSON.stringify(frame) },
+    ]);
+  });
+
+  test("point asks for the pixel of a frame and passes a refusal on", async () => {
+    reply = () => Response.json({ frame: 7, x: 1, y: 2, z: 3, hit: "wmo", distance: 12.5 });
+    const result = await call("point", { u: 100.5, v: 40, frame: 7 });
+    expect(seen[0]).toMatchObject({ method: "GET", path: "/point", query: { u: "100.5", v: "40", frame: "7" } });
+    expect(JSON.parse(textOf(result))).toMatchObject({ hit: "wmo", x: 1 });
+    reply = () => Response.json({ error: "no frame 2: only the last 16 screenshots are kept" }, { status: 404 });
+    const gone = await call("point", { u: 1, v: 1, frame: 2 });
+    expect(gone.isError).toBe(true);
+    expect(textOf(gone)).toContain("no frame 2");
   });
 
   test("screenshot passes an explicit scale and maps a JSON error", async () => {
@@ -204,7 +227,7 @@ describe("tools", () => {
 
   test("every description opens with a sentence that stands alone inside 100 characters", async () => {
     const { tools } = await (await connect()).listTools();
-    expect(tools).toHaveLength(8);
+    expect(tools).toHaveLength(9);
     for (const tool of tools) {
       const opening = (tool.description ?? "").split(/(?<=\.)\s/)[0] ?? "";
       expect(opening.length, `${tool.name}: ${opening}`).toBeGreaterThan(30);
@@ -419,7 +442,7 @@ describe("judging tools", () => {
   test("adds scorecard, propose_module and ledger, each opening with a short sentence", async () => {
     const { tools } = await (await judged(judging)).listTools();
     expect(tools.map((t) => t.name).sort()).toEqual([
-      "events", "ledger", "lua", "lua_doc", "lua_search", "modules", "propose_module", "save_module", "scorecard", "screenshot", "status",
+      "events", "ledger", "lua", "lua_doc", "lua_search", "modules", "point", "propose_module", "save_module", "scorecard", "screenshot", "status",
     ]);
     for (const tool of tools) {
       const opening = (tool.description ?? "").split(/(?<=\.)\s/)[0] ?? "";

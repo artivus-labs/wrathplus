@@ -35,10 +35,17 @@ pub(crate) enum Job {
     Globals {
         reply: Sender<Value>,
     },
+    /// The next frame, encoded, with its camera and player (`look::Frame::meta`).
     Screenshot {
         scale: f32,
         format: Format,
-        reply: Sender<Result<Vec<u8>, String>>,
+        reply: Sender<crate::look::Shot>,
+    },
+    /// What is at pixel `(u, v)` of a screenshot (`frame`, else the newest): `point::Pointed`'s
+    /// JSON, or why not.
+    Point {
+        at: (f32, f32, Option<u64>),
+        reply: Sender<Result<Value, String>>,
     },
 }
 
@@ -237,10 +244,34 @@ fn route(shared: &Port, request: &mut HttpRequest) -> Reply {
                 return json_response(503, &json!({"error": "game loop stopped"}));
             }
             match answer.recv_timeout(GAME_TIMEOUT) {
-                Ok(Ok(bytes)) => Response::from_data(bytes)
-                    .with_header(header("Content-Type", format.content_type())),
+                Ok(Ok((bytes, meta))) => Response::from_data(bytes)
+                    .with_header(header("Content-Type", format.content_type()))
+                    .with_header(header("X-Agent-Frame", &meta.to_string())),
                 Ok(Err(e)) => json_response(500, &json!({"error": e})),
                 Err(_) => json_response(504, &json!({"error": "no frame in time"})),
+            }
+        }
+        (Method::Get, "/point") => {
+            let number = |name: &str| param(name).and_then(|v| v.parse::<f32>().ok());
+            let (Some(u), Some(v)) = (number("u"), number("v")) else {
+                return json_response(
+                    400,
+                    &json!({"error": "u= and v= the pixel, from the image's top-left corner"}),
+                );
+            };
+            let frame = param("frame").and_then(|f| f.parse().ok());
+            let (reply, answer) = crossbeam_channel::bounded(1);
+            let job = Job::Point {
+                at: (u, v, frame),
+                reply,
+            };
+            if shared.jobs.send(job).is_err() {
+                return json_response(503, &json!({"error": "game loop stopped"}));
+            }
+            match answer.recv_timeout(GAME_TIMEOUT) {
+                Ok(Ok(found)) => json_response(200, &found),
+                Ok(Err(why)) => json_response(404, &json!({"error": why})),
+                Err(_) => json_response(504, &json!({"error": "the game did not answer in time"})),
             }
         }
         (Method::Get, "/events") => {
@@ -268,7 +299,7 @@ fn route(shared: &Port, request: &mut HttpRequest) -> Reply {
         }
         _ => json_response(
             404,
-            &json!({"error": "unknown route", "routes": ["GET /status", "POST /lua", "GET /screenshot", "GET /events", "GET /view", "GET|PUT|DELETE /files/<module>", "GET /lua/search", "GET /lua/doc"]}),
+            &json!({"error": "unknown route", "routes": ["GET /status", "POST /lua", "GET /screenshot", "GET /point", "GET /events", "GET /view", "GET|PUT|DELETE /files/<module>", "GET /lua/search", "GET /lua/doc"]}),
         ),
     }
 }

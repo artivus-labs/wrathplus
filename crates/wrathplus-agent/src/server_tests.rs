@@ -67,8 +67,18 @@ fn port() -> (std::net::SocketAddr, Arc<EventLog>) {
                 Job::Globals { reply } => {
                     let _ = reply.send(json!(["GetTime", "UnitName", "UnitNameUnmodified"]));
                 }
-                Job::Screenshot { reply, .. } => {
-                    let _ = reply.send(Err("no window in tests".into()));
+                Job::Screenshot { scale, reply, .. } => {
+                    let _ = reply.send(if scale < 1.0 {
+                        Ok((b"png".to_vec(), json!({"frame": 3, "width": 64})))
+                    } else {
+                        Err("no window in tests".into())
+                    });
+                }
+                Job::Point { at, reply } => {
+                    let _ = reply.send(match at {
+                        (u, v, Some(3)) => Ok(json!({"frame": 3, "u": u, "v": v})),
+                        _ => Err("no frame 9".into()),
+                    });
                 }
             }
         }
@@ -121,6 +131,34 @@ fn events_are_read_by_cursor_and_unknown_routes_list_the_real_ones() {
     assert_eq!(status, 404);
     assert!(body.contains("POST /lua"));
     assert_eq!(get(address, "/screenshot", TOKEN).0, 500);
+}
+
+/// The image goes out whole, its frame beside it in a header; `/point` takes the pixel and frame.
+#[test]
+fn a_screenshot_carries_its_frame_and_a_pixel_is_pointed_at_by_frame() {
+    let (address, _) = port();
+    let mut stream = std::net::TcpStream::connect(address).unwrap();
+    let request = format!("GET /screenshot?scale=0.5 HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {TOKEN}\r\nConnection: close\r\n\r\n");
+    stream.write_all(request.as_bytes()).unwrap();
+    let mut response = String::new();
+    stream.read_to_string(&mut response).unwrap();
+    let (head, body) = response.split_once("\r\n\r\n").unwrap();
+    assert!(head.starts_with("HTTP/1.1 200"), "{head}");
+    assert_eq!(body, "png");
+    let frame = head
+        .lines()
+        .find_map(|l| l.strip_prefix("X-Agent-Frame: "))
+        .expect("frame header");
+    assert_eq!(
+        serde_json::from_str::<Value>(frame).unwrap(),
+        json!({"frame": 3, "width": 64})
+    );
+    let (status, body) = json_get(address, "/point?u=10.5&v=20&frame=3");
+    assert_eq!(status, 200);
+    assert_eq!(body, json!({"frame": 3, "u": 10.5, "v": 20.0}));
+    let (status, body) = json_get(address, "/point?u=1&v=2&frame=9");
+    assert_eq!((status, body["error"].as_str()), (404, Some("no frame 9")));
+    assert_eq!(json_get(address, "/point?u=1").0, 400);
 }
 
 fn read_events(address: std::net::SocketAddr, query: &str) -> (Vec<String>, u64, u64) {

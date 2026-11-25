@@ -6,7 +6,8 @@
 //! |---|---|
 //! | `GET /status` | client state (login, character select, in world), `cinematic`, in world the player, and where routes come from (`nav`) |
 //! | `POST /lua[?budget=N]` | run the body in the UI's Lua; values, `print` output or the error |
-//! | `GET /screenshot[?scale=0.5][&format=jpeg[&quality=85]]` | the next rendered frame, PNG or JPEG |
+//! | `GET /screenshot[?scale=0.5][&format=jpeg[&quality=85]]` | the next rendered frame, PNG or JPEG; its camera and player in the `X-Agent-Frame` header (`look`) |
+//! | `GET /point?u=…&v=…[&frame=N]` | what is at pixel (u, v) of a screenshot: a world point, or the bearing (`point`) |
 //! | `GET /events[?since=N][&wait_ms=M][&limit=K][&names=A,B_][&exclude=C*]` | UI events after cursor `N`, long-polling, filtered by name |
 //! | `GET /view?token=…` | a read-only page for people: the live frame, the character, events and the agent's Lua |
 //! | `GET /files`, `GET|PUT|DELETE /files/<module>` | the agent's own Lua modules (see `env`) |
@@ -30,7 +31,8 @@
 //! `AgentPosition()`, `AgentTarget(guid)`, `AgentInteract(guid)`, `AgentCinematic()` (`world`),
 //! `AgentQuestPOI(quest)` (`quest_poi`), `AgentZones()` (`zones`), `AgentPath`, `AgentMoveTo`,
 //! `AgentStop`, `AgentWalk`, `AgentServices` (`nav`, over local mmaps from `WOW_NAV_MMAPS`, else
-//! routes asked of the realm; services always from the realm), and the module functions (`env`).
+//! routes asked of the realm; services always from the realm), `AgentPoint(u, v [, frame])`
+//! (`point`), and the module functions (`env`).
 //!
 //! With the port open, the UI's movement verbs run from any Lua (stock gates them on a key
 //! binding), so an agent's scripts can walk. Everything else an agent does goes through the same
@@ -44,9 +46,11 @@
 
 mod env;
 mod events;
+mod look;
 mod lua;
 mod nav;
 mod npc;
+mod point;
 mod quest_poi;
 mod search;
 mod server;
@@ -54,11 +58,10 @@ mod world;
 mod zones;
 
 use bevy::prelude::*;
-use bevy::render::view::screenshot::{Screenshot, ScreenshotCaptured};
 use crossbeam_channel::Receiver;
 use events::EventLog;
 use serde_json::{json, Value};
-use server::{Format, Job, Port};
+use server::{Job, Port};
 use std::sync::Arc;
 use std::time::Instant;
 use wrathplus_app_core::app_core::state::ClientState;
@@ -131,6 +134,7 @@ impl Plugin for AgentPlugin {
             scripts: env::scripts_dir(),
             env_session: 0,
             autoexec_due: false,
+            frames: Default::default(),
         })
         .insert_resource(world_link)
         .insert_resource(nav_link)
@@ -147,6 +151,7 @@ impl Plugin for AgentPlugin {
                 zones::load,
             ),
         );
+        look::add_stamp(app);
     }
 }
 
@@ -169,6 +174,8 @@ struct Link {
     pois: quest_poi::Handles,
     /// The zones and their levels (`zones`).
     zones: zones::Handles,
+    /// The screenshots sent, to point into (`look`, `point`).
+    frames: look::SharedFrames,
 }
 
 /// Keep the VM's agent hooks on (a relog or `ReloadUI()` builds a fresh VM) and move this
@@ -203,6 +210,9 @@ fn pump_events(
         }
         if let Err(e) = nav::install_services(script.lua(), &link.nav, &link.world, &link.zones) {
             error!("agent port: AgentServices: {e}");
+        }
+        if let Err(e) = point::install(script.lua(), &link.frames, &link.world) {
+            error!("agent port: AgentPoint: {e}");
         }
         if let Err(e) = install_signal(script.lua(), link.events.clone(), link.started) {
             error!("agent port: AgentSignal: {e}");
@@ -240,17 +250,6 @@ fn pump_events(
     );
 }
 
-/// The askers of the screenshot in flight: its scale, encoding and reply each.
-type Shots = std::sync::Arc<
-    std::sync::Mutex<
-        Vec<(
-            f32,
-            Format,
-            crossbeam_channel::Sender<Result<Vec<u8>, String>>,
-        )>,
-    >,
->;
-
 fn serve_jobs(
     mut commands: Commands,
     link: Res<Link>,
@@ -260,8 +259,8 @@ fn serve_jobs(
     time: Res<Time<bevy::time::Real>>,
     mut idle: Option<ResMut<wrathplus_app_ui::ui_chat::idle::LastInput>>,
     cinematic: Option<Res<wrathplus_app_world::cinematic::Cinematic>>,
-    shots: Local<Shots>,
-    mut shot_at: Local<Option<f64>>,
+    mut capture: Local<look::Capture>,
+    ground: point::LiveGround,
 ) {
     for job in link.queue.try_iter() {
         match job {
@@ -276,7 +275,12 @@ fn serve_jobs(
                     idle.stamp_present(time.elapsed());
                 }
                 let answer = match &script {
-                    Some(script) => lua::run(script, &code, budget.unwrap_or(DEFAULT_BUDGET)),
+                    // `AgentPoint` meets the world only here, where the loop can lend it.
+                    Some(script) => {
+                        point::with_ground(script.lua(), &link.frames, &link.world, &ground, || {
+                            lua::run(script, &code, budget.unwrap_or(DEFAULT_BUDGET))
+                        })
+                    }
                     None => {
                         json!({"ok": false, "error": "the UI is loading; try again", "output": []})
                     }
@@ -329,38 +333,20 @@ fn serve_jobs(
                 scale,
                 format,
                 reply,
-            } => {
-                // One capture at a time serves everyone who asks while it is in flight: a second
-                // capture of the same target is dropped by the renderer ("Duplicate render target
-                // for screenshot"), and its asker would wait out the port's timeout.
-                // A capture that never lands (2 s is many frames) must not hold the rest: ask again.
-                let now = link.started.elapsed().as_secs_f64();
-                let mut waiting = shots.lock().unwrap_or_else(|p| p.into_inner());
-                let in_flight = !waiting.is_empty() && shot_at.is_some_and(|at| now - at < 2.0);
-                waiting.push((scale, format, reply));
-                if in_flight {
-                    continue;
-                }
-                drop(waiting);
-                *shot_at = Some(now);
-                // A headless client draws into an image, not a window.
-                let shot = match &headless {
-                    Some(frame) => Screenshot::image(frame.0.clone()),
-                    None => Screenshot::primary_window(),
-                };
-                let shots = shots.clone();
-                commands
-                    .spawn(shot)
-                    .observe(move |captured: On<ScreenshotCaptured>| {
-                        let image = captured.image.clone();
-                        let waiting =
-                            std::mem::take(&mut *shots.lock().unwrap_or_else(|p| p.into_inner()));
-                        std::thread::spawn(move || {
-                            for (scale, format, reply) in waiting {
-                                let _ = reply.send(encode(image.clone(), scale, format));
-                            }
-                        });
-                    });
+            } => capture.ask(
+                &mut commands,
+                look::Asker {
+                    scale,
+                    format,
+                    reply,
+                },
+                link.started.elapsed().as_secs_f64(),
+                headless.as_deref(),
+                &link.frames,
+            ),
+            Job::Point { at, reply } => {
+                let answer = point::answer(&link.frames, &link.world, at, Some(&ground));
+                let _ = reply.send(answer.map(|p| p.json()));
             }
         }
     }
@@ -383,34 +369,6 @@ fn player_of(reply: Value) -> Value {
     } else {
         Value::Null
     }
-}
-
-/// A captured frame as PNG or JPEG bytes, downscaled by `scale` (0 < scale <= 1).
-fn encode(image: Image, scale: f32, format: Format) -> Result<Vec<u8>, String> {
-    let mut frame = image
-        .try_into_dynamic()
-        .map_err(|e| format!("frame conversion: {e}"))?;
-    if scale < 1.0 {
-        let width = ((frame.width() as f32) * scale).round().max(1.0) as u32;
-        let height = ((frame.height() as f32) * scale).round().max(1.0) as u32;
-        frame = frame.resize_exact(width, height, image::imageops::FilterType::Triangle);
-    }
-    let rgb = frame.to_rgb8();
-    let mut bytes = Vec::new();
-    match format {
-        Format::Png => rgb
-            .write_to(
-                &mut std::io::Cursor::new(&mut bytes),
-                image::ImageFormat::Png,
-            )
-            .map_err(|e| format!("png: {e}"))?,
-        Format::Jpeg(quality) => {
-            image::codecs::jpeg::JpegEncoder::new_with_quality(&mut bytes, quality)
-                .encode_image(&rgb)
-                .map_err(|e| format!("jpeg: {e}"))?
-        }
-    }
-    Ok(bytes)
 }
 
 /// `AgentSignal(name, ...)`: put `AGENT_<NAME>` with the arguments on the event stream, so the

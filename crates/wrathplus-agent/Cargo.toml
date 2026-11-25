@@ -13,6 +13,8 @@ bevy.workspace = true
 wrathplus-app-core = { path = "../wrathplus-app-core", default-features = false }
 wrathplus-ui = { path = "../wrathplus-ui" }
 wrathplus-world = { path = "../wrathplus-world", default-features = false }
+# The mouse pick's world trace, for `AgentPoint` (`point`).
+avian3d = "0.6"
 wrathplus-app-net = { path = "../wrathplus-app-net", default-features = false }
 wrathplus-app-world = { path = "../wrathplus-app-world", default-features = false }
 wrathplus-app-ui = { path = "../wrathplus-app-ui", default-features = false }

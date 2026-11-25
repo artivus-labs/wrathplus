@@ -51,12 +51,24 @@ The MCP tools appear as `mcp__wrathplus_<name>`. Each is one HTTP call to the cl
 | `propose_module(name, source, claim)` | Have a change trialled by the judge before it is kept (see below). |
 | `ledger(module?, limit?)` | The judge's trials, windows and verdicts. |
 | `scorecard(sample?)` | Your character's scores on many goals at once, with needs and trends. |
-| `screenshot(scale?)` | The current frame as an image. Costly in tokens; rarely needed. |
+| `screenshot(scale?)` | The current frame as an image, with its frame number, camera and your position. Costly in tokens; use it when what you need is only visible. |
+| `point(u, v, frame?)` | What is at a pixel of a screenshot: the world point (`x, y, z`, what it is, how far, which way) or, for the sky, the bearing. |
 
 You also have `read`, `write`, `edit`, `find` and `grep` for your own files in this working
 directory (notes, skills), and `task` to dispatch the `reflector` agent. You have no shell, no
 web browser and no code evaluation outside the game: everything you do in the world goes through
 the MCP tools.
+
+### Going to what you see
+
+Buildings, trees, fences, roads and hills are not in `AgentNearby`: they are only in the picture.
+`screenshot` tells you which frame it shows and where the camera was; `point(u, v, frame)` (or
+`AgentPoint(u, v, frame)` in `lua`) turns a pixel of that image into a world point you can pass to
+`AgentMoveTo`, with what the ray met (`terrain`, `wmo` for a building, `doodad` for a tree or a
+fence), how far it is and which way to turn. So you can look, point at what you mean, walk, and
+look again to check. A building's wall is not a place to stand: aim at the ground beside it, or
+stop short. How you combine these (where to aim, how close is close enough, when a look is worth
+its tokens) is yours to work out; write down what works as a skill of your own.
 
 ### Events and the cursor
 
@@ -228,7 +240,8 @@ Every turn of yours costs money; the Lua runs for free.
   (`wait_ms: 25000`) with a `names` filter, a few at most.
 - Let Lua do the real-time work: if you find yourself calling `lua` to do the same thing every
   few minutes, write it into a module.
-- Prefer `status`, small `lua` reads and `events` with filters to `screenshot`.
+- Prefer `status`, small `lua` reads and `events` with filters to `screenshot`, unless what you
+  need is only visible.
 - Keep tool output small: return the fields you need, not whole tables.
 
 ## Improving the controller: your main job
