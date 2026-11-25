@@ -5,6 +5,7 @@ use std::collections::HashMap;
 
 use bevy::prelude::*;
 use wrathplus_protocol::events::TalentGroup;
+use wrathplus_protocol::wrath_achievement::Packet;
 use wrathplus_protocol::{ObjectFields, SessionEvent, SessionEventKind};
 
 use super::{GuidIndex, NetHandlerApp, ObjectStore};
@@ -14,7 +15,11 @@ use super::{GuidIndex, NetHandlerApp, ObjectStore};
 pub struct WrathProgress {
     pub talents: HashMap<bool, (u32, u8, Vec<TalentGroup>)>,
     pub loot_owners: HashMap<u64, (u64, u64)>,
+    /// The criteria counters, from `SMSG_ALL_ACHIEVEMENT_DATA`, `SMSG_CRITERIA_UPDATE` and
+    /// `SMSG_CRITERIA_DELETED` in wire order, as 12340's one list (`[0xacfda0]`) takes them.
     pub criteria: HashMap<(u64, u32), CriteriaProgress>,
+    /// `SMSG_CRITERIA_DELETED`s that removed a counter, each a `CRITERIA_UPDATE` (`0x5b3764`).
+    pub criteria_deleted: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -24,6 +29,8 @@ pub struct CriteriaProgress {
     pub packed_time: u32,
     pub elapsed: u32,
     pub creation_elapsed: u32,
+    /// Unix seconds at arrival less `creation_elapsed` (`[node+0x4c]`, `0x5b31e1`).
+    pub dated: i64,
 }
 
 pub(super) fn register(app: &mut App) {
@@ -33,6 +40,7 @@ pub(super) fn register(app: &mut App) {
         .net_handler(K::TalentsInfo, on_progress)
         .net_handler(K::LootOwners, on_progress)
         .net_handler(K::CriteriaUpdate, on_progress)
+        .net_handler(K::WrathAchievement, on_progress)
         .net_handler(K::Connected, on_progress)
         .net_handler(K::Disconnected, on_progress);
 }
@@ -78,13 +86,30 @@ fn on_progress(In(event): In<SessionEvent>, mut state: ResMut<WrathProgress>) {
         SessionEvent::TalentsInfo { .. }
         | SessionEvent::LootOwners { .. }
         | SessionEvent::CriteriaUpdate { .. }
+        | SessionEvent::WrathAchievement { .. }
         | SessionEvent::Connected { .. }
         | SessionEvent::Disconnected { .. } => state.apply(event),
         _ => {}
     }
 }
 
+fn unix_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() as i64)
+}
+
 impl WrathProgress {
+    /// `0x5b2520`: a counter whose flags carry bit 1 (a timed criterion not yet met) drops its
+    /// node (`0x5b265f`); any other replaces it.
+    fn store(&mut self, player: u64, criteria: u32, row: CriteriaProgress) {
+        if row.flags & 1 != 0 {
+            self.criteria.remove(&(player, criteria));
+        } else {
+            self.criteria.insert((player, criteria), row);
+        }
+    }
+
     fn apply(&mut self, event: SessionEvent) {
         match event {
             SessionEvent::Connected { .. } | SessionEvent::Disconnected { .. } => {
@@ -113,18 +138,39 @@ impl WrathProgress {
                 packed_time,
                 elapsed,
                 creation_elapsed,
-            } => {
-                self.criteria.insert(
-                    (player, criteria),
-                    CriteriaProgress {
-                        counter,
-                        flags,
-                        packed_time,
-                        elapsed,
-                        creation_elapsed,
-                    },
-                );
-            }
+            } => self.store(
+                player,
+                criteria,
+                CriteriaProgress {
+                    counter,
+                    flags,
+                    packed_time,
+                    elapsed,
+                    creation_elapsed,
+                    dated: unix_now() - i64::from(creation_elapsed),
+                },
+            ),
+            SessionEvent::WrathAchievement { packet } => match packet {
+                Packet::AllData(data) => {
+                    for c in data.criteria {
+                        let row = CriteriaProgress {
+                            counter: c.counter,
+                            flags: c.raw_flags,
+                            packed_time: c.packed_time,
+                            elapsed: c.elapsed,
+                            creation_elapsed: c.creation_elapsed,
+                            dated: unix_now() - i64::from(c.creation_elapsed),
+                        };
+                        self.store(c.player, c.id, row);
+                    }
+                }
+                Packet::CriteriaDeleted { criteria } => {
+                    let before = self.criteria.len();
+                    self.criteria.retain(|(_, id), _| *id != criteria);
+                    self.criteria_deleted += usize::from(self.criteria.len() != before);
+                }
+                _ => {}
+            },
             _ => {}
         }
     }
@@ -246,18 +292,32 @@ mod tests {
         });
         assert_eq!(state.talents[&false].0, 2);
         assert_eq!(state.talents[&true].0, 3);
+        let update = |player, flags| SessionEvent::CriteriaUpdate {
+            criteria: 42,
+            player,
+            counter: player * 100,
+            flags,
+            packed_time: 2,
+            elapsed: 3,
+            creation_elapsed: 4,
+        };
         for player in [1, 2] {
-            state.apply(SessionEvent::CriteriaUpdate {
-                criteria: 42,
-                player,
-                counter: player * 100,
-                flags: 1,
-                packed_time: 2,
-                elapsed: 3,
-                creation_elapsed: 4,
-            });
+            state.apply(update(player, 0));
         }
         assert_eq!(state.criteria[&(2, 42)].counter, 200);
+        // A deletion removes the counter and counts; one sent again is live, and goes again.
+        let deleted = || SessionEvent::WrathAchievement {
+            packet: Packet::CriteriaDeleted { criteria: 42 },
+        };
+        state.apply(deleted());
+        state.apply(deleted());
+        assert!(state.criteria.is_empty() && state.criteria_deleted == 1);
+        state.apply(update(2, 0));
+        state.apply(deleted());
+        assert_eq!(state.criteria_deleted, 2);
+        state.apply(update(2, 0));
+        state.apply(update(2, 1));
+        assert!(state.criteria.is_empty(), "flags bit 1 drops the node");
         state.apply(SessionEvent::LootOwners {
             guid: 5,
             master: 6,

@@ -446,7 +446,7 @@ mod tests {
         let link = |s: &UiScript| s.eval::<String>("return GetAchievementLink(1)").unwrap();
         let progress = |earned| crate::script::WrathAchievementProgress {
             earned,
-            criteria: BTreeMap::from([(10, 5), (12, 100)]),
+            criteria: BTreeMap::from([(10, 5.into()), (12, 100.into())]),
             ..Default::default()
         };
         // Criteria 10 and 12 are the visible ones; only 12 has met its 100.

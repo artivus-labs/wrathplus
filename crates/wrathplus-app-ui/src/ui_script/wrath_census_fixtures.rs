@@ -653,7 +653,7 @@ pub(super) fn seed(s: &mut UiScript) {
     s.set_wrath_achievement_metadata(metadata);
     s.set_wrath_achievement_progress(WrathAchievementProgress {
         earned: vec![(1, 0)],
-        criteria: std::collections::BTreeMap::from([(1, 10)]),
+        criteria: std::collections::BTreeMap::from([(1, 10.into())]),
         faction: 1,
         received: true,
     });

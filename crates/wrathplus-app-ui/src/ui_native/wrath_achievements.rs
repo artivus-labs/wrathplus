@@ -1,7 +1,7 @@
 //! The achievement window's progress from native achievement traffic. `SMSG_ALL_ACHIEVEMENT_DATA`
-//! at login seeds the earned list and the criteria counters; `SMSG_CRITERIA_UPDATE` (retained by
-//! `wrath_notices`) moves the counters; the player's own `SMSG_ACHIEVEMENT_EARNED` adds an earn;
-//! `SMSG_ACHIEVEMENT_DELETED`/`SMSG_CRITERIA_DELETED` remove rows. Each packet's events fire as
+//! at login seeds the earned list; the criteria counters are `wrath_notices`'s, which takes the
+//! snapshot, `SMSG_CRITERIA_UPDATE` and `SMSG_CRITERIA_DELETED` in wire order; the player's own
+//! `SMSG_ACHIEVEMENT_EARNED` adds an earn; `SMSG_ACHIEVEMENT_DELETED` removes one. Each packet's events fire as
 //! 12340's handlers fire them. `SetAchievementComparisonUnit` sends
 //! `CMSG_QUERY_INSPECT_ACHIEVEMENTS`, and every `SMSG_RESPOND_INSPECT_ACHIEVEMENTS` reaches the VM,
 //! which keeps the asked player's. A server first (`SMSG_SERVER_FIRST_ACHIEVEMENT`) becomes an
@@ -16,7 +16,9 @@ use crate::net::{ClientCommand, NetCommands};
 use bevy::prelude::*;
 use wrathplus_protocol::wrath_achievement::{Packet, Snapshot};
 use wrathplus_protocol::wrath_chat::Message;
-use wrathplus_ui::script::{UiScript, WrathAchievementProgress, WrathAchievementRequest};
+use wrathplus_ui::script::{
+    UiScript, WrathAchievementProgress, WrathAchievementRequest, WrathCriteriaProgress,
+};
 
 pub(crate) fn register(app: &mut App) {
     app.add_systems(
@@ -89,15 +91,25 @@ fn insert_earned(list: &mut Vec<(u32, u32)>, id: u32, date: u32, order: OrderOf)
     list.insert(at, (id, date));
 }
 
-fn snapshot_progress(data: &Snapshot, faction: i32, order: OrderOf) -> WrathAchievementProgress {
+/// A compared player's progress; `now` dates its counters as `0x5b34a0` does (`0x5b3588`).
+fn snapshot_progress(data: &Snapshot, order: OrderOf, now: i64) -> WrathAchievementProgress {
     let mut earned = Vec::new();
     for &(id, date) in &data.earned {
         insert_earned(&mut earned, id, date, order);
     }
+    let criteria = data.criteria.iter().map(|c| {
+        let dated = now - i64::from(c.creation_elapsed);
+        let progress = WrathCriteriaProgress {
+            counter: c.counter,
+            player: c.player,
+            dated,
+        };
+        (c.id, progress)
+    });
     WrathAchievementProgress {
         earned,
-        criteria: data.criteria.iter().map(|c| (c.id, c.counter)).collect(),
-        faction,
+        criteria: criteria.collect(),
+        faction: -1,
         received: false,
     }
 }
@@ -109,7 +121,7 @@ fn feed_achievements(
     mut receipts: ResMut<NativeCriteriaReceipts>,
     mut state: ResMut<Achievements>,
     metadata: Option<Res<crate::ui_achievements::AchievementMetadata>>,
-    progress: Res<WrathProgress>,
+    mut progress: ResMut<WrathProgress>,
     self_guid: Res<SelfGuid>,
     self_q: Query<&ObjectStore, With<SelfPlayer>>,
     commands: Res<NetCommands>,
@@ -122,8 +134,7 @@ fn feed_achievements(
     let me = self_guid.0.unwrap_or(0);
     let faction = faction(self_q.iter().next().and_then(|s| s.0.unit_race()));
     let order = |id: u32| metadata.as_deref().and_then(|m| m.order(id));
-    let live = |id: u32| progress.criteria.contains_key(&(me, id));
-    let out = absorb(&mut packets.0, &mut state, me, &order, &live);
+    let out = absorb(&mut packets.0, &mut state, me, &order);
     let receipts: Vec<_> = receipts.0.drain(..).collect();
     state.received |= !receipts.is_empty();
     if let Some(chat) = chat.as_deref_mut() {
@@ -148,15 +159,22 @@ fn feed_achievements(
             .0
             .send(ClientCommand::NativeInspectAchievements { player: guid });
     }
-    let mut criteria = state.criteria.clone();
-    for ((player, id), row) in &progress.criteria {
-        if *player == me {
-            criteria.insert(*id, row.counter);
-        }
-    }
-    for id in &state.deleted {
-        criteria.remove(id);
-    }
+    let criteria = progress
+        .criteria
+        .iter()
+        .filter(|((player, _), _)| *player == me)
+        .map(|(&(player, id), row)| {
+            let (counter, dated) = (row.counter, row.dated);
+            (
+                id,
+                WrathCriteriaProgress {
+                    counter,
+                    player,
+                    dated,
+                },
+            )
+        })
+        .collect();
     let view = WrathAchievementProgress {
         earned: state.earned.clone(),
         criteria,
@@ -175,7 +193,7 @@ fn feed_achievements(
     for (criteria, elapsed) in receipts {
         script.wrath_criteria_updated(criteria, elapsed);
     }
-    for _ in 0..out.criteria_deleted {
+    for _ in 0..std::mem::take(&mut progress.criteria_deleted) {
         script.wrath_criteria_deleted();
     }
     for id in out.deleted {
@@ -185,7 +203,10 @@ fn feed_achievements(
         script.wrath_achievement_earned(id);
     }
     for (guid, data) in out.inspected {
-        script.set_wrath_achievement_comparison(guid, snapshot_progress(&data, -1, &order));
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs() as i64);
+        script.set_wrath_achievement_comparison(guid, snapshot_progress(&data, &order, now));
     }
 }
 
@@ -207,22 +228,18 @@ struct Absorbed {
     earned: Vec<u32>,
     /// Earns an `SMSG_ACHIEVEMENT_DELETED` removed.
     deleted: Vec<u32>,
-    /// Counters an `SMSG_CRITERIA_DELETED` removed.
-    criteria_deleted: usize,
     /// Every inspect response.
     inspected: Vec<(u64, Snapshot)>,
     firsts: Vec<ServerFirst>,
 }
 
 /// Take the player's achievement receipts, the inspect responses and the server firsts out of
-/// the capture into `state`; `live` says whether `WrathProgress` holds a counter of mine. Other
-/// players' earns stay, in order.
+/// the capture into `state`. Other players' earns stay, in order.
 fn absorb(
     packets: &mut std::collections::VecDeque<Packet>,
     state: &mut Achievements,
     me: u64,
     order: OrderOf,
-    live: &dyn Fn(u32) -> bool,
 ) -> Absorbed {
     let mut out = Absorbed::default();
     let mut kept = std::collections::VecDeque::new();
@@ -233,8 +250,6 @@ fn absorb(
                 for &(id, date) in &data.earned {
                     insert_earned(&mut state.earned, id, date, order);
                 }
-                state.criteria = data.criteria.iter().map(|c| (c.id, c.counter)).collect();
-                state.deleted.clear();
                 state.received = true;
                 out.lists
                     .push(data.criteria.iter().map(|c| (c.id, c.elapsed)).collect());
@@ -257,12 +272,7 @@ fn absorb(
                     out.deleted.push(achievement);
                 }
             }
-            Packet::CriteriaDeleted { criteria } => {
-                let held = state.criteria.remove(&criteria).is_some()
-                    || (live(criteria) && !state.deleted.contains(&criteria));
-                state.deleted.push(criteria);
-                out.criteria_deleted += usize::from(held);
-            }
+            Packet::CriteriaDeleted { .. } => {}
             Packet::Inspect { player, data } => out.inspected.push((player, data)),
             Packet::ServerFirst {
                 name,

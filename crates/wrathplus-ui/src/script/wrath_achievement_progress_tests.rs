@@ -76,7 +76,7 @@ fn script() -> UiScript {
 fn progress() -> WrathAchievementProgress {
     WrathAchievementProgress {
         earned: vec![(10, OCT_17_2009)],
-        criteria: BTreeMap::from([(400, 3), (401, 4), (100, 1)]),
+        criteria: BTreeMap::from([(400, 3.into()), (401, 4.into()), (100, 1.into())]),
         faction: 1,
         received: true,
     }
@@ -193,7 +193,7 @@ fn a_compared_player_joins_the_listing_and_answers_comparisons() {
     );
     let theirs = WrathAchievementProgress {
         earned: vec![(11, OCT_17_2009)],
-        criteria: BTreeMap::from([(400, 10)]),
+        criteria: BTreeMap::from([(400, 10.into())]),
         faction: 0,
         ..Default::default()
     };

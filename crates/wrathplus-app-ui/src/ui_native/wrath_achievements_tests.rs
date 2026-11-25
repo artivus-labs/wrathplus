@@ -60,8 +60,6 @@ fn own_receipts_leave_the_capture_and_others_keep_their_order() {
         earn(5, 200, 1),
         first.clone(),
         Packet::CriteriaDeleted { criteria: 41 },
-        Packet::CriteriaDeleted { criteria: 41 },
-        Packet::CriteriaDeleted { criteria: 50 },
         Packet::AchievementDeleted { achievement: 6 },
         Packet::AchievementDeleted { achievement: 6 },
         Packet::Inspect {
@@ -69,7 +67,7 @@ fn own_receipts_leave_the_capture_and_others_keep_their_order() {
             data: snapshot(&[(1, 1), (2, 1)], &[]),
         },
     ]);
-    let out = absorb(&mut packets, &mut state, me, &order, &|id| id == 50);
+    let out = absorb(&mut packets, &mut state, me, &order);
     assert_eq!(out.lists, [vec![(40, 0), (41, 0)]]);
     assert_eq!(
         out.earned,
@@ -77,10 +75,6 @@ fn own_receipts_leave_the_capture_and_others_keep_their_order() {
         "every earn fires; a trailing dword silences one"
     );
     assert_eq!(out.deleted, [6], "a deletion fires when it removed an earn");
-    assert_eq!(
-        out.criteria_deleted, 2,
-        "41 once, and 50 from the live counters"
-    );
     assert_eq!(out.inspected.len(), 1, "every response reaches the VM");
     assert_eq!(packets, [other_earn]);
     assert_eq!(
@@ -95,21 +89,24 @@ fn own_receipts_leave_the_capture_and_others_keep_their_order() {
     assert!(state.received);
     // Newest first; same-minute earns by `Order`, higher first, then arrival (`0x5b28d0`).
     assert_eq!(state.earned, [(9, 300), (5, 200), (3, 200), (8, 200)]);
-    assert_eq!(state.criteria.get(&40), Some(&3));
-    assert_eq!(state.deleted, [41, 41, 50]);
 
-    let view = snapshot_progress(&out.inspected[0].1, -1, &order);
+    let view = snapshot_progress(&out.inspected[0].1, &order, 0);
     assert_eq!(view.earned, [(1, 1), (2, 1)]);
     let mut packets = VecDeque::from([Packet::Inspect {
         player: 0x30,
         data: snapshot(&[(1, 1)], &[(40, 9)]),
     }]);
-    let out = absorb(&mut packets, &mut state, me, &order, &|_| false);
+    let out = absorb(&mut packets, &mut state, me, &order);
     let (guid, data) = &out.inspected[0];
     assert_eq!(*guid, 0x30);
+    let counter = WrathCriteriaProgress {
+        counter: 9,
+        player: 1,
+        dated: 1000,
+    };
     assert_eq!(
-        snapshot_progress(data, -1, &order).criteria.get(&40),
-        Some(&9)
+        snapshot_progress(data, &order, 1000).criteria.get(&40),
+        Some(&counter)
     );
     assert!(packets.is_empty());
 }

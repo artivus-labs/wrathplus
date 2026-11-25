@@ -3,7 +3,7 @@
 //! server firsts stay here.
 use super::NetHandlerApp;
 use bevy::prelude::*;
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::VecDeque;
 use wrathplus_protocol::{wrath_achievement::Packet, SessionEvent, SessionEventKind};
 
 #[derive(Resource, Default)]
@@ -17,12 +17,9 @@ pub struct NativeCriteriaReceipts(pub VecDeque<(u32, u32)>);
 /// The player's achievement progress the feed reduces the receipts into.
 #[derive(Resource, Default)]
 pub struct Achievements {
-    /// Earned achievements and their packed dates, in the client's list order.
+    /// Earned achievements and their packed dates, in the client's list order; the counters are
+    /// `WrathProgress`'s.
     pub earned: Vec<(u32, u32)>,
-    /// The login snapshot's counters; later updates come from `WrathProgress`.
-    pub criteria: BTreeMap<u32, u64>,
-    /// Criteria the server deleted since the snapshot.
-    pub deleted: Vec<u32>,
     /// An all-data or criteria-update packet has arrived (`[0xc1f454]`).
     pub received: bool,
 }

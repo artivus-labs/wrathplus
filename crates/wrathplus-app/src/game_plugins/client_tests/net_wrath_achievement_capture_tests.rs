@@ -26,15 +26,21 @@ fn captured(app: &App) -> Vec<Packet> {
 }
 
 #[test]
-fn one_owner_keeps_ordered_duplicates_and_both_boundaries_clear() {
+fn the_capture_and_the_counters_own_receipts_in_order_and_both_boundaries_clear() {
     let mut app = crate::game_plugins::schedule_tests::headless_client();
     let census = app
         .world()
         .resource::<crate::net::handlers::NetHandlers>()
         .census();
     let owners = &census[&SessionEventKind::WrathAchievement];
-    assert_eq!(owners.len(), 1, "{owners:?}");
-    assert!(owners[0].contains("wrath_achievement_capture::receive"));
+    // The counters take the snapshot and the deletions in wire order beside the capture.
+    assert_eq!(owners.len(), 2, "{owners:?}");
+    for owner in [
+        "wrath_achievement_capture::receive",
+        "wrath_notices::on_progress",
+    ] {
+        assert!(owners.iter().any(|o| o.contains(owner)), "{owners:?}");
+    }
     let mut adapter = WrathEventAdapter::new();
     let deleted = Packet::AchievementDeleted { achievement: 6 };
     for event in [

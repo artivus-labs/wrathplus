@@ -262,7 +262,9 @@ mod wrath_items;
 mod wrath_sockets;
 mod wrath_spell_range;
 mod wrath_spell_use;
-pub use wrath_achievement_progress::{WrathAchievementProgress, WrathAchievementRequest};
+pub use wrath_achievement_progress::{
+    WrathAchievementProgress, WrathAchievementRequest, WrathCriteriaProgress,
+};
 pub use wrath_equipment::{
     EquipmentSetRequest, EquipmentSetView, EQUIPMENT_SET_IGNORED_SLOT, EQUIPMENT_SET_SLOTS,
 };

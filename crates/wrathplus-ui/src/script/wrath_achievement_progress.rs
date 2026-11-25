@@ -38,12 +38,31 @@ pub struct WrathAchievementProgress {
     /// Earned achievements with their packed dates, in the client's list order (`0x5b28d0`).
     pub earned: Vec<(u32, u32)>,
     /// Criteria counters by criteria id.
-    pub criteria: BTreeMap<u32, u64>,
+    pub criteria: BTreeMap<u32, WrathCriteriaProgress>,
     /// The player's achievement faction: 0 Horde, 1 Alliance, -1 unknown.
     pub faction: i32,
     /// The player's own data has arrived this session (`[0xc1f454]`, set by the all-data and
     /// criteria-update handlers at `0x5b32fc` and `0x5b316c`).
     pub received: bool,
+}
+
+/// One criteria counter as 12340's progress node holds it (`0x5b2520`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct WrathCriteriaProgress {
+    pub counter: u64,
+    /// The guid the packet named (`[node+0x40]`).
+    pub player: u64,
+    /// Unix seconds: arrival less the packet's second timer (`[node+0x4c]`, `0x5b31e1`).
+    pub dated: i64,
+}
+
+impl From<u64> for WrathCriteriaProgress {
+    fn from(counter: u64) -> Self {
+        Self {
+            counter,
+            ..Default::default()
+        }
+    }
 }
 
 impl WrathAchievementProgress {
@@ -143,7 +162,7 @@ impl UiScript {
 pub(super) fn criterion_progress(lua: &Lua, criterion: u32, required: i32) -> (i32, bool) {
     let counter = lua
         .app_data_ref::<State>()
-        .and_then(|s| s.mine.criteria.get(&criterion).copied())
+        .and_then(|s| s.mine.criteria.get(&criterion).map(|c| c.counter))
         .unwrap_or(0);
     let quantity = i32::try_from(counter).unwrap_or(i32::MAX);
     (quantity, counter > 0 && quantity >= required)
@@ -174,7 +193,7 @@ pub(super) fn link_fields(
         let required = c.required_quantity as i32 as i64 as u64;
         if mine
             .and_then(|m| m.criteria.get(&c.id))
-            .is_some_and(|&n| n >= required)
+            .is_some_and(|n| n.counter >= required)
         {
             bits[i / 32] |= 1 << (i % 32);
         }
@@ -281,7 +300,7 @@ fn statistic(
         .flatten()
         .filter_map(|c| meta.criteria.get(c))
     {
-        let Some(&counter) = progress.criteria.get(&criterion.id) else {
+        let Some(counter) = progress.criteria.get(&criterion.id).map(|c| c.counter) else {
             continue;
         };
         sum = sum.saturating_add(counter);
