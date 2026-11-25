@@ -149,6 +149,53 @@ pub(super) fn criterion_progress(lua: &Lua, criterion: u32, required: i32) -> (i
     (quantity, counter > 0 && quantity >= required)
 }
 
+/// `GetAchievementLink`'s fields after the guid (`0x5b6110`): the earned flag, the date (`0:0:-1`
+/// unset, `0x76c190`), and a bit per visible criterion of the owner `owner` that my counter has
+/// met, in list order (`0x5b61ee`-`0x5b62fa`); all bits are set for an earn whose owner needs no
+/// count (`0x5b630f`).
+pub(super) fn link_fields(
+    lua: &Lua,
+    meta: &WrathAchievementMetadata,
+    id: u32,
+    owner: u32,
+) -> String {
+    let state = lua.app_data_ref::<State>();
+    let mine = state.as_ref().map(|s| &s.mine);
+    let mut bits = [0u32; 4];
+    let visible = meta
+        .linked_criteria
+        .get(&owner)
+        .into_iter()
+        .flatten()
+        .filter_map(|c| meta.criteria.get(c))
+        .filter(|c| c.flags & 2 == 0);
+    for (i, c) in visible.enumerate().take(128) {
+        // The required quantity is sign-extended and compared unsigned (`cdq`, `0x5b6256`).
+        let required = c.required_quantity as i32 as i64 as u64;
+        if mine
+            .and_then(|m| m.criteria.get(&c.id))
+            .is_some_and(|&n| n >= required)
+        {
+            bits[i / 32] |= 1 << (i % 32);
+        }
+    }
+    let (earned, (m, d, y)) = match mine.and_then(|m| m.earned_date(id)) {
+        Some(packed) => {
+            if meta
+                .achievements
+                .get(&owner)
+                .is_some_and(|r| r.required_criteria_count == 0)
+            {
+                bits = [u32::MAX; 4];
+            }
+            (1, date(packed))
+        }
+        None => (0, (0, 0, -1)),
+    };
+    let [b0, b1, b2, b3] = bits;
+    format!("{earned}:{m}:{d}:{y}:{b0}:{b1}:{b2}:{b3}")
+}
+
 /// The packed date's `(month, day, year)` as the bindings push them: 1-based month and day, the
 /// year since 2000 (AzerothCore `secsToTimeBitFields`).
 fn date(packed: u32) -> (i64, i64, i64) {

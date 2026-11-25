@@ -265,12 +265,12 @@ pub(super) fn install(lua: &mlua::Lua) -> mlua::Result<()> {
                     "GetAchievementLink unavailable: current player GUID absent".into(),
                 ));
             }
-            if metadata.criteria_owner(row).is_none() {
+            let Some(owner) = metadata.criteria_owner(row) else {
                 let reference = row.reference_achievement_id;
                 return Err(mlua::Error::RuntimeError(format!(
                     "GetAchievementLink unavailable: referenced achievement metadata {reference} absent"
                 )));
-            }
+            };
             // Native 0x579590 is QuestTextParser, not Lua substitution. Do not silently emit
             // a raw token-bearing title as if it were the native contextual projection.
             if row.name.len() >= 800 {
@@ -283,8 +283,10 @@ pub(super) fn install(lua: &mlua::Lua) -> mlua::Result<()> {
                     "GetAchievementLink unavailable: QuestTextParser support for token-bearing title".into(),
                 ));
             }
+            let fields =
+                super::wrath_achievement_progress::link_fields(lua, metadata, row.id, owner);
             let link = format!(
-                "|cffffff00|Hachievement:{}:{:016X}:0:0:0:-1:0:0:0:0|h[{}]|h|r",
+                "|cffffff00|Hachievement:{}:{:016X}:{fields}|h[{}]|h|r",
                 row.id, model.unit_guids.player, row.name
             );
             Ok(MultiValue::from_vec(vec![Value::String(
@@ -428,7 +430,7 @@ mod tests {
 
     #[test]
     fn plain_link_exact_native_bytes_and_missing_dependencies_named() {
-        let script = fixture();
+        let mut script = fixture();
         let error = script
             .eval::<String>("return GetAchievementLink(1)")
             .unwrap_err()
@@ -441,6 +443,35 @@ mod tests {
                 .unwrap(),
             "|cffffff00|Hachievement:1:00000000ABCD1234:0:0:0:-1:0:0:0:0|h[Plain title]|h|r"
         );
+        let link = |s: &UiScript| s.eval::<String>("return GetAchievementLink(1)").unwrap();
+        let progress = |earned| crate::script::WrathAchievementProgress {
+            earned,
+            criteria: BTreeMap::from([(10, 5), (12, 100)]),
+            ..Default::default()
+        };
+        // Criteria 10 and 12 are the visible ones; only 12 has met its 100.
+        script.set_wrath_achievement_progress(progress(vec![]));
+        assert!(link(&script).contains(":00000000ABCD1234:0:0:0:-1:2:0:0:0|h"));
+        // 2009-10-17, packed as AzerothCore `secsToTimeBitFields` does.
+        script.set_wrath_achievement_progress(progress(vec![(
+            1,
+            (9 << 24) | (9 << 20) | (16 << 14),
+        )]));
+        assert!(link(&script).contains(":00000000ABCD1234:1:10:17:9:2:0:0:0|h"));
+        let meta = |s: &UiScript, count| {
+            s.model_mut()
+                .wrath_achievements
+                .as_mut()
+                .unwrap()
+                .achievements
+                .get_mut(&1)
+                .unwrap()
+                .required_criteria_count = count;
+        };
+        meta(&script, 0);
+        let all = "4294967295:4294967295:4294967295:4294967295";
+        assert!(link(&script).contains(&format!(":1:10:17:9:{all}|h")));
+        meta(&script, 7);
         script
             .run("assert(select('#',GetAchievementLink(999))==0)")
             .unwrap();
