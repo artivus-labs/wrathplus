@@ -5,9 +5,8 @@
 //! (`0xacfddc`) joins the category listings, Feats of Strength (category 81) and flag `0x800`
 //! rows count only once earned, a series shows its first unearned step, and Statistics' children
 //! report the root as their parent. "Superseded" is a later step of the series in the player's
-//! own earned list (`0x5b37c0`), the completed-count filter is "not a statistic" (`0x5b0d50`), and
-//! `GetStatistic`'s text (`0x5b0ea0`) is the sum, maximum, met-count or last counter by the
-//! achievement's flags, money-formatted for money criteria, `--` while zero.
+//! own earned list (`0x5b37c0`), and the completed-count filter is "not a statistic" (`0x5b0d50`).
+//! The progress texts are `wrath_achievement_format`'s.
 
 use std::collections::BTreeMap;
 
@@ -20,9 +19,6 @@ use mlua::{Lua, MultiValue, Value};
 
 pub(super) const FLAG_STATISTIC: u32 = 0x1;
 pub(super) const FLAG_HIDDEN: u32 = 0x2;
-const FLAG_SUM: u32 = 0x8;
-const FLAG_MAX: u32 = 0x10;
-const FLAG_MET_COUNT: u32 = 0x20;
 /// Shown only once earned (`piVar[9] & 0x800`).
 pub(super) const FLAG_EARNED_ONLY: u32 = 0x800;
 pub(super) const FEATS_OF_STRENGTH: u32 = 81;
@@ -158,16 +154,6 @@ impl UiScript {
     }
 }
 
-/// `(quantity, completed)` for a criterion, from the player's counters.
-pub(super) fn criterion_progress(lua: &Lua, criterion: u32, required: i32) -> (i32, bool) {
-    let counter = lua
-        .app_data_ref::<State>()
-        .and_then(|s| s.mine.criteria.get(&criterion).map(|c| c.counter))
-        .unwrap_or(0);
-    let quantity = i32::try_from(counter).unwrap_or(i32::MAX);
-    (quantity, counter > 0 && quantity >= required)
-}
-
 /// `GetAchievementLink`'s fields after the guid (`0x5b6110`): the earned flag, the date (`0:0:-1`
 /// unset, `0x76c190`), and a bit per visible criterion of the owner `owner` that my counter has
 /// met, in list order (`0x5b61ee`-`0x5b62fa`); all bits are set for an earn whose owner needs no
@@ -217,7 +203,7 @@ pub(super) fn link_fields(
 
 /// The packed date's `(month, day, year)` as the bindings push them: 1-based month and day, the
 /// year since 2000 (AzerothCore `secsToTimeBitFields`).
-fn date(packed: u32) -> (i64, i64, i64) {
+pub(super) fn date(packed: u32) -> (i64, i64, i64) {
     (
         i64::from((packed >> 20) & 0xf) + 1,
         i64::from((packed >> 14) & 0x3f) + 1,
@@ -275,62 +261,6 @@ fn info(
         Value::String(lua.create_string(&row.reward)?),
     ]);
     Ok(MultiValue::from_vec(v))
-}
-
-/// `GetStatistic`/`GetComparisonStatistic` (`0x5b5620`, `0x5b5e70`).
-fn statistic(
-    lua: &Lua,
-    meta: &WrathAchievementMetadata,
-    progress: &WrathAchievementProgress,
-    id: u32,
-) -> mlua::Result<MultiValue> {
-    let Some(row) = meta.achievements.get(&id) else {
-        return Ok(MultiValue::new());
-    };
-    let owner = meta.criteria_owner(row).unwrap_or(row.id);
-    let mut sum = 0u64;
-    let mut max = 0u64;
-    let mut met = 0u64;
-    let mut last = None;
-    let mut money = false;
-    for criterion in meta
-        .linked_criteria
-        .get(&owner)
-        .into_iter()
-        .flatten()
-        .filter_map(|c| meta.criteria.get(c))
-    {
-        let Some(counter) = progress.criteria.get(&criterion.id).map(|c| c.counter) else {
-            continue;
-        };
-        sum = sum.saturating_add(counter);
-        max = max.max(counter);
-        if counter >= u64::from(criterion.required_quantity) {
-            met += 1;
-        }
-        last.get_or_insert(counter);
-        money |= criterion.flags & 0x20 != 0;
-    }
-    let value = if row.flags & FLAG_SUM != 0 {
-        sum
-    } else if row.flags & FLAG_MAX != 0 {
-        max
-    } else if row.flags & FLAG_MET_COUNT != 0 {
-        met
-    } else {
-        last.unwrap_or(0)
-    };
-    let value = i32::try_from(value).unwrap_or(i32::MAX);
-    let text = if value == 0 {
-        "--".to_string()
-    } else if money {
-        super::wrath_achievements::money(lua, value)?
-    } else {
-        value.to_string()
-    };
-    Ok(MultiValue::from_vec(vec![Value::String(
-        lua.create_string(text)?,
-    )]))
 }
 
 fn ids(lua: &Lua, ids: impl IntoIterator<Item = u32>) -> MultiValue {
@@ -658,7 +588,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                     } else {
                         &state.mine
                     };
-                    statistic(lua, meta, progress, id)
+                    super::wrath_achievement_format::statistic(lua, meta, progress, id)
                 })
                 .unwrap_or_else(|| Ok(MultiValue::new()))
             })?,

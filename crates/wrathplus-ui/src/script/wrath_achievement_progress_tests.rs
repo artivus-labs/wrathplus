@@ -34,34 +34,44 @@ fn script() -> UiScript {
         achievement(13, 92, 12, -1, 0),
         achievement(20, 92, 0, 0, 0),
         achievement(30, 81, 0, -1, 0),
-        achievement(40, 130, 0, -1, FLAG_STATISTIC | FLAG_SUM),
+        achievement(40, 130, 0, -1, FLAG_STATISTIC | 0x8),
+        // The maximum, the last counter, and a sum per day.
         WrathAchievement {
             reference_achievement_id: 40,
-            ..achievement(41, 130, 0, -1, FLAG_STATISTIC)
+            ..achievement(41, 130, 0, -1, FLAG_STATISTIC | 0x10)
         },
         achievement(42, 130, 0, -1, FLAG_STATISTIC),
-        achievement(43, 130, 0, -1, FLAG_STATISTIC),
+        achievement(43, 130, 0, -1, FLAG_STATISTIC | 0x48),
         achievement(50, 92, 0, -1, FLAG_HIDDEN),
+        // A bar over hidden criteria, summed.
+        achievement(60, 81, 0, -1, 0x88),
     ] {
         meta.achievements.insert(row.id, row);
     }
-    for (id, owner) in [(400, 40), (401, 40), (100, 10)] {
-        meta.criteria.insert(
-            id,
-            WrathAchievementCriterion {
+    for (owner, ids, required, flags) in [
+        (40, [400, 401], 0, 0),
+        (10, [100, 101], 5, 0),
+        (42, [420, 421], 0, 0),
+        (43, [430, 431], 0, 0),
+        (60, [600, 601], 10, FLAG_HIDDEN),
+    ] {
+        for id in ids {
+            meta.criteria.insert(
                 id,
-                achievement_id: owner,
-                criteria_type: 1,
-                asset_id: 0,
-                required_quantity: 0,
-                description: format!("C{id}"),
-                flags: 0,
-                time_limit: if id == 401 { 60 } else { 0 },
-            },
-        );
+                WrathAchievementCriterion {
+                    id,
+                    achievement_id: owner,
+                    criteria_type: 1,
+                    asset_id: 0,
+                    required_quantity: required,
+                    description: format!("C{id}"),
+                    flags,
+                    time_limit: if id == 401 { 60 } else { 0 },
+                },
+            );
+        }
+        meta.linked_criteria.insert(owner, ids.to_vec());
     }
-    meta.linked_criteria.insert(40, vec![400, 401]);
-    meta.linked_criteria.insert(10, vec![100]);
     for (id, parent) in [(92, -1), (1, -1), (130, 1), (81, -1)] {
         meta.categories.push(WrathAchievementCategory {
             id,
@@ -74,9 +84,22 @@ fn script() -> UiScript {
 }
 
 fn progress() -> WrathAchievementProgress {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    let dated = |counter, days: i64| WrathCriteriaProgress {
+        counter,
+        player: 0x42,
+        dated: now - days * 86400 - 60,
+    };
+    let mut criteria = BTreeMap::from([(400, 3.into()), (401, 4.into()), (100, dated(9, 0))]);
+    criteria.extend([(420, 5.into()), (421, 5_000_000_000.into())]);
+    criteria.extend([(430, dated(30, 3)), (431, dated(30, 1))]);
+    criteria.extend([(600, 3.into()), (601, 4.into())]);
     WrathAchievementProgress {
         earned: vec![(10, OCT_17_2009)],
-        criteria: BTreeMap::from([(400, 3.into()), (401, 4.into()), (100, 1.into())]),
+        criteria,
         faction: 1,
         received: true,
     }
@@ -85,6 +108,8 @@ fn progress() -> WrathAchievementProgress {
 #[test]
 fn published_progress_answers_the_achievement_window() {
     let mut ui = script();
+    ui.model_mut().unit_guids.player = 0x42;
+    ui.model_mut().player_record.name = "Me".into();
     ui.run(
         r#"
         assert(CanShowAchievementUI() == false and HasCompletedAnyAchievement() == false)
@@ -134,9 +159,16 @@ fn published_progress_answers_the_achievement_window() {
         assert(GetNextAchievement(10) == 11 and select('#', GetNextAchievement(10)) == 1)
         assert(GetPreviousAchievement(11) == 10 and select('#', GetPreviousAchievement(10)) == 0)
         assert(GetStatistic(40) == '7')
+        assert(GetStatistic(42) == '5000000000', 'the last counter, 64-bit')
+        assert(GetStatistic(43) == '20.00', GetStatistic(43))
+        assert(GetStatistic(41) == '4 (C401)', 'the maximum names its criterion')
+        local _, _, done, q, r, who, _, _, text = GetAchievementCriteriaInfo(10, 1)
+        assert(done and q == 5 and r == 5 and who == 'Me' and text == '5', 'clamped, and its player')
+        local _, _, done, q = GetAchievementCriteriaInfo(10, 2)
+        assert(done == true and q == 5, 'earned without a counter')
+        local _, _, done, q, r, _, fl, _, text = GetAchievementCriteriaInfo(60, 1)
+        assert(not done and q == 7 and r == 10 and fl == 3 and text == '7 / 10', 'a bar sums')
         assert(select('#', GetAchievementInfoFromCriteria(400)) == 7 and GetAchievementInfoFromCriteria(400) == 40)
-        local _, _, done, q = GetAchievementCriteriaInfo(10, 1)
-        assert(done == true and q == 1)
         AddTrackedAchievement(11); AddTrackedAchievement(11); AddTrackedAchievement(12)
         RemoveTrackedAchievement(12)
         assert(IsTrackedAchievement(11) and not IsTrackedAchievement(12))
