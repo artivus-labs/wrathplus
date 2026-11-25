@@ -59,6 +59,40 @@ fn our_spell_go_rune_list_spends_runes() {
         .any(|e| matches!(e, SessionEvent::WrathRunes { .. })));
 }
 
+/// A hunter's Auto Shot (75) at unit 0x05: power word, then the ammo (Rough Arrow display 5996,
+/// inventory type 24) that the client flies to the target. Spell start carries it the same way.
+#[test]
+fn ranged_shots_carry_the_ammo_display() {
+    let ammo = |op: u16, timestamp: bool| -> Option<u32> {
+        let mut body = vec![0x01, 0x10, 0x01, 0x10, 0];
+        body.extend(75u32.to_le_bytes());
+        body.extend((0x100 | CAST_FLAG_PROJECTILE | CAST_FLAG_POWER_LEFT_SELF).to_le_bytes());
+        body.extend(0u32.to_le_bytes()); // timestamp (go) or cast time (start)
+        if timestamp {
+            body.extend([1, 5, 0, 0, 0, 0, 0, 0, 0, 0]); // one hit (0x05), no misses
+        }
+        body.extend(TARGET_FLAG_UNIT.to_le_bytes());
+        body.extend([0x01, 0x05]);
+        body.extend(100u32.to_le_bytes()); // power left
+        body.extend(5996u32.to_le_bytes());
+        body.extend(24u32.to_le_bytes());
+        decode(op, &body, Some(0x10))
+            .unwrap()
+            .into_iter()
+            .find_map(|e| match e {
+                SessionEvent::SpellGo {
+                    ammo_display_id, ..
+                }
+                | SessionEvent::SpellStart {
+                    ammo_display_id, ..
+                } => Some(ammo_display_id),
+                _ => None,
+            })?
+    };
+    assert_eq!(ammo(SMSG_SPELL_GO, true), Some(5996));
+    assert_eq!(ammo(SMSG_SPELL_START, false), Some(5996));
+}
+
 #[test]
 fn our_spell_go_is_also_the_success_result() {
     // Caster 0x10 twice, count 1, Heroic Strike, flags, timestamp, one hit, no misses,
