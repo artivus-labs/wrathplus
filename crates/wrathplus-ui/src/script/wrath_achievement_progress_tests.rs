@@ -240,6 +240,9 @@ fn a_compared_player_joins_the_listing_and_answers_comparisons() {
         local done, m, d, y = GetAchievementComparisonInfo(11)
         assert(done == true and m == 10 and d == 17 and y == 9)
         assert(GetComparisonAchievementPoints() == 11)
+        local total, done = GetNumComparisonCompletedAchievements()
+        assert(total == 6 and done == 1, total)
+        assert(GetLatestCompletedComparisonAchievements() == 11)
         assert(GetComparisonCategoryNumAchievements(92) == 1)
         assert(GetComparisonStatistic(40) == '10')
         local order = {}

@@ -207,6 +207,41 @@ pub(super) fn install(lua: &mlua::Lua) -> mlua::Result<()> {
             super::wrath_achievement_format::criteria_info(lua, id, numeric_index)
         })?,
     )?;
+    // `0x5b1970`/`0x5b1a00`: one reward, the points, for a known visible row, else nil; the
+    // second's usage text names the first (`0xa17638`).
+    for (name, usage, arity) in [
+        (
+            "GetAchievementNumRewards",
+            "Usage: GetAchievementNumRewards(achievementID)",
+            1,
+        ),
+        (
+            "GetAchievementReward",
+            "Usage: GetAchievementNumRewards(achievementID, rewardIndex)",
+            2,
+        ),
+    ] {
+        lua.globals().set(
+            name,
+            lua.create_function(move |lua, (value, index): (Value, Value)| {
+                let id = number_arg(lua, value, usage)? as u32;
+                if arity == 2 && lua.coerce_number(index)?.is_none() {
+                    return Err(mlua::Error::RuntimeError(usage.into()));
+                }
+                let model = lua.app_data_ref::<super::Model>().expect("model");
+                let row = model
+                    .wrath_achievements
+                    .as_ref()
+                    .and_then(|m| m.achievements.get(&id))
+                    .filter(|row| row.flags & 2 == 0);
+                Ok(match row {
+                    Some(row) if arity == 2 => Value::Integer(row.points.into()),
+                    Some(_) => Value::Integer(1),
+                    None => Value::Nil,
+                })
+            })?,
+        )?;
+    }
     lua.globals().set(
         "GetAchievementLink",
         lua.create_function(|lua, value: Value| {
@@ -351,6 +386,7 @@ mod tests {
     fn metadata_queries_arity_redirect_hidden_and_actual_special_rows() {
         let script = fixture();
         script.run("assert(GetAchievementCategory('1.9')==42); assert(select('#',GetAchievementCategory(2))==0); assert(select('#',GetAchievementCategory(999))==0); assert(GetAchievementNumCriteria(1)==2); assert(GetAchievementNumCriteria(2)==0); assert(GetAchievementNumCriteria(3)==3); assert(GetAchievementNumCriteria(4)==0); assert(select('#',GetAchievementNumCriteria(999))==0); assert(not pcall(GetAchievementCategory,{}))").unwrap();
+        script.run("assert(GetAchievementNumRewards(1)==1 and GetAchievementNumRewards(2)==nil and select('#',GetAchievementNumRewards(999))==1); assert(GetAchievementReward(1,1)==0 and GetAchievementReward(2,1)==nil); assert(not pcall(GetAchievementReward,1))").unwrap();
         script.run("local d,t,c,q,r,n,f,a,s,id=GetAchievementCriteriaInfo(1,2); assert(d=='criterion 12' and t==20 and c==false and q==0 and r==100 and n==nil and f==1 and a==123 and s=='0 / 100' and id==12); assert(select('#',GetAchievementCriteriaInfo(1,2))==10); local d,t,c,q,r,n,f,a,s,id=GetAchievementCriteriaInfo(3,2); assert(id==11 and f==3 and r==7 and s=='0 / 7'); assert(select('#',GetAchievementCriteriaInfo(2,1))==0); assert(select('#',GetAchievementCriteriaInfo(1,0))==0); local d=GetAchievementCriteriaInfo(10,{}); assert(d=='criterion 10')").unwrap();
     }
 

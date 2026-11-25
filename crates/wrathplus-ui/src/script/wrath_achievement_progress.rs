@@ -489,76 +489,97 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             .unwrap_or_else(|| Ok(MultiValue::new()))
         })?,
     )?;
-    g.set(
-        "GetNumCompletedAchievements",
-        lua.create_function(|lua, ()| {
-            Ok(with(lua, |meta, state| {
-                let (mut total, mut completed) = (0i64, 0i64);
-                for row in meta.achievements.values() {
-                    if row.flags & (FLAG_STATISTIC | FLAG_HIDDEN) != 0
-                        || !faction_ok(row, state.mine.faction)
-                        || row.category_id == FEATS_OF_STRENGTH
-                    {
-                        continue;
-                    }
-                    if state.mine.earned_date(row.id).is_some() {
-                        completed += 1;
-                    } else if row.flags & FLAG_EARNED_ONLY != 0 {
-                        continue;
-                    }
-                    total += 1;
-                }
-                (total, completed)
-            })
-            .unwrap_or((0, 0)))
-        })?,
-    )?;
-    for (name, theirs) in [
-        ("GetTotalAchievementPoints", false),
-        ("GetComparisonAchievementPoints", true),
+    // The player's and the compared player's summaries (`0x5b3ca0`/`0x5b3dc0`,
+    // `0x5b1dc0`/`0x5b1e40`, `0x5b1c20`/`0x5b1cf0`): with no comparison theirs is an empty list.
+    for (theirs, [completed, points, latest]) in [
+        (
+            false,
+            [
+                "GetNumCompletedAchievements",
+                "GetTotalAchievementPoints",
+                "GetLatestCompletedAchievements",
+            ],
+        ),
+        (
+            true,
+            [
+                "GetNumComparisonCompletedAchievements",
+                "GetComparisonAchievementPoints",
+                "GetLatestCompletedComparisonAchievements",
+            ],
+        ),
     ] {
+        let summary = move |lua: &Lua, f: &dyn Fn(&WrathAchievementMetadata, &_, i32) -> _| {
+            let faction = if theirs { compared_faction(lua) } else { -1 };
+            with(lua, |meta, state: &State| {
+                let empty = WrathAchievementProgress::default();
+                let (progress, faction) = match theirs {
+                    true => (compared(state).unwrap_or(&empty), faction),
+                    false => (&state.mine, state.mine.faction),
+                };
+                f(meta, progress, faction)
+            })
+        };
         g.set(
-            name,
+            completed,
             lua.create_function(move |lua, ()| {
-                Ok(with(lua, |meta, state| {
-                    let progress = if theirs {
-                        compared(state)
-                    } else {
-                        Some(&state.mine)
-                    };
-                    progress.map_or(0, |p| {
-                        p.earned
-                            .iter()
-                            .filter_map(|(id, _)| meta.achievements.get(id))
-                            .map(|r| i64::from(r.points))
-                            .sum::<i64>()
+                Ok(
+                    summary(lua, &|meta, p: &WrathAchievementProgress, faction| {
+                        let (mut total, mut done) = (0i64, 0i64);
+                        for row in meta.achievements.values() {
+                            if row.flags & (FLAG_STATISTIC | FLAG_HIDDEN) != 0
+                                || !faction_ok(row, faction)
+                                || row.category_id == FEATS_OF_STRENGTH
+                            {
+                                continue;
+                            }
+                            if p.earned_date(row.id).is_some() {
+                                done += 1;
+                            } else if row.flags & FLAG_EARNED_ONLY != 0 {
+                                continue;
+                            }
+                            total += 1;
+                        }
+                        MultiValue::from_vec(vec![Value::Integer(total), Value::Integer(done)])
                     })
+                    .unwrap_or_else(|| MultiValue::from_vec(vec![Value::Integer(0); 2])),
+                )
+            })?,
+        )?;
+        g.set(
+            points,
+            lua.create_function(move |lua, ()| {
+                Ok(summary(lua, &|meta, p: &WrathAchievementProgress, _| {
+                    let points = p
+                        .earned
+                        .iter()
+                        .filter_map(|(id, _)| meta.achievements.get(id));
+                    let sum = points.map(|r| i64::from(r.points)).sum::<i64>();
+                    MultiValue::from_vec(vec![Value::Integer(sum)])
                 })
-                .unwrap_or(0))
+                .unwrap_or_else(|| MultiValue::from_vec(vec![Value::Integer(0)])))
+            })?,
+        )?;
+        g.set(
+            latest,
+            lua.create_function(move |lua, ()| {
+                Ok(summary(lua, &|meta, p: &WrathAchievementProgress, _| {
+                    let statistic = |id: &u32| {
+                        meta.achievements
+                            .get(id)
+                            .is_some_and(|r| r.flags & FLAG_STATISTIC != 0)
+                    };
+                    let ids = p
+                        .earned
+                        .iter()
+                        .map(|(id, _)| *id)
+                        .filter(|id| !statistic(id));
+                    MultiValue::from_vec(ids.take(5).map(|id| Value::Integer(id.into())).collect())
+                })
+                .unwrap_or_default())
             })?,
         )?;
     }
-    g.set(
-        "GetLatestCompletedAchievements",
-        lua.create_function(|lua, ()| {
-            let latest = with(lua, |meta, state| {
-                state
-                    .mine
-                    .earned
-                    .iter()
-                    .map(|(id, _)| *id)
-                    .filter(|id| {
-                        meta.achievements
-                            .get(id)
-                            .is_some_and(|r| r.flags & FLAG_STATISTIC == 0)
-                    })
-                    .take(5)
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-            Ok(ids(lua, latest))
-        })?,
-    )?;
     g.set(
         "GetNextAchievement",
         lua.create_function(|lua, id: Value| {
