@@ -252,6 +252,7 @@ pub use wrath_currency::{WrathCurrencyEntry, WrathCurrencySnapshot};
 pub use wrath_tutorial::WrathTutorialRequest;
 mod wrath_achievement_listing;
 mod wrath_achievement_progress;
+mod wrath_achievement_tracked;
 mod wrath_item_count;
 mod wrath_item_lookups;
 mod wrath_item_services;

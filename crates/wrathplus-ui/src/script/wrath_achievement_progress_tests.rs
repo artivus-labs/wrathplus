@@ -35,6 +35,9 @@ fn script() -> UiScript {
         achievement(20, 92, 0, 0, 0),
         achievement(30, 81, 0, -1, 0),
         achievement(40, 130, 0, -1, FLAG_STATISTIC | FLAG_SUM),
+        achievement(41, 130, 0, -1, FLAG_STATISTIC),
+        achievement(42, 130, 0, -1, FLAG_STATISTIC),
+        achievement(43, 130, 0, -1, FLAG_STATISTIC),
         achievement(50, 92, 0, -1, FLAG_HIDDEN),
     ] {
         meta.achievements.insert(row.id, row);
@@ -131,15 +134,22 @@ fn published_progress_answers_the_achievement_window() {
         assert(IsTrackedAchievement(11) and not IsTrackedAchievement(12))
         assert(GetNumTrackedAchievements() == 1 and GetTrackedAchievements() == 11)
         assert(not pcall(AddTrackedAchievement, 999))
+        for _, id in ipairs({10, 12, 13, 20, 21, 30, 40, 41, 42, 43}) do AddTrackedAchievement(id) end
+        assert(GetNumTrackedAchievements() == 10 and not IsTrackedAchievement(43), 'ten at most')
     "#,
     )
     .unwrap();
     ui.tick(0.0);
+    ui.wrath_achievement_earned(11);
+    ui.tick(0.0);
     ui.run(
         r#"
-        assert(#seen == 5, #seen)
-        assert(seen[3][1] == 'TRACKED_ACHIEVEMENT_UPDATE' and seen[3][2] == 11 and seen[3][3] == true)
-        assert(seen[5][2] == 12 and seen[5][3] == false)
+        assert(#seen == 17, #seen)
+        for i = 3, 15 do assert(seen[i][1] == 'TRACKED_ACHIEVEMENT_UPDATE' and seen[i][3] == nil) end
+        assert(seen[3][2] == 11 and seen[4][2] == 11 and seen[5][2] == 12 and seen[6][2] == 12)
+        assert(seen[16][1] == 'TRACKED_ACHIEVEMENT_UPDATE' and seen[16][2] == 11, 'earned: untracked')
+        assert(seen[17][1] == 'ACHIEVEMENT_EARNED' and seen[17][2] == 11)
+        assert(GetNumTrackedAchievements() == 9 and not IsTrackedAchievement(11))
     "#,
     )
     .unwrap();

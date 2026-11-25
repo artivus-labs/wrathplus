@@ -263,6 +263,8 @@ do
     timeMgrUseLocalTime = "0",
     timeMgrUseMilitaryTime = "0",
     toastDuration = "4",
+    -- `0x51e027`: flags `0x120`, default `""`; the tracked achievements, saved per character.
+    trackedAchievements = "",
     -- `0x51e0bc`-`0x51e0fd`: the tracker filter's three show bits (achievements, completed
     -- quests, remote zones) all set, and manual sorting. Filter "0" hid every watch off the
     -- current map's POI set, so the stock tracker counted them and drew no line.

@@ -62,7 +62,8 @@ pub(super) struct State {
     /// The list has arrived (`CanShowAchievementUI`, `0xc1f454`).
     received: bool,
     compared: Option<(u64, Option<WrathAchievementProgress>)>,
-    tracked: Vec<u32>,
+    /// Oldest first (`[0xacfde8]`).
+    pub(super) tracked: Vec<u32>,
     requests: Vec<WrathAchievementRequest>,
 }
 
@@ -83,8 +84,10 @@ impl UiScript {
         }
     }
 
-    /// `ACHIEVEMENT_EARNED(id)` for the player's own earn, after its progress is published.
+    /// The player's own earn, after its progress is published: off the tracked list, then
+    /// `ACHIEVEMENT_EARNED(id)` (`0x5b3136`, `0x5b3148`).
     pub fn wrath_achievement_earned(&mut self, id: u32) {
+        super::wrath_achievement_tracked::untrack(&self.lua, id);
         self.queue_event("ACHIEVEMENT_EARNED", vec![ScriptValue::Int(id.into())]);
     }
 
@@ -632,85 +635,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             Ok(())
         })?,
     )?;
-    g.set(
-        "AddTrackedAchievement",
-        lua.create_function(|lua, id: Value| {
-            let id = lua.coerce_number(id)?.unwrap_or(0.0) as u32;
-            let known = with(lua, |meta, _| meta.achievements.contains_key(&id)).unwrap_or(false);
-            if id == 0 || !known {
-                return Err(mlua::Error::RuntimeError(
-                    "Usage: AddTrackedAchievement(achievementID)".into(),
-                ));
-            }
-            track(lua, id, true);
-            Ok(())
-        })?,
-    )?;
-    g.set(
-        "RemoveTrackedAchievement",
-        lua.create_function(|lua, id: Value| {
-            let id = lua.coerce_number(id)?.unwrap_or(0.0) as u32;
-            if id == 0 {
-                return Err(mlua::Error::RuntimeError(
-                    "Usage: RemoveTrackedAchievement(achievementID)".into(),
-                ));
-            }
-            track(lua, id, false);
-            Ok(())
-        })?,
-    )?;
-    g.set(
-        "GetTrackedAchievements",
-        lua.create_function(|lua, ()| {
-            let tracked = lua
-                .app_data_ref::<State>()
-                .map(|s| s.tracked.clone())
-                .unwrap_or_default();
-            Ok(ids(lua, tracked))
-        })?,
-    )?;
-    g.set(
-        "GetNumTrackedAchievements",
-        lua.create_function(|lua, ()| {
-            Ok(lua.app_data_ref::<State>().map_or(0, |s| s.tracked.len()))
-        })?,
-    )?;
-    g.set(
-        "IsTrackedAchievement",
-        lua.create_function(|lua, id: Value| {
-            let id = lua.coerce_number(id)?.unwrap_or(0.0) as u32;
-            Ok(id != 0
-                && lua
-                    .app_data_ref::<State>()
-                    .is_some_and(|s| s.tracked.contains(&id)))
-        })?,
-    )?;
-    Ok(())
-}
-
-/// Add or remove a tracked achievement; a change fires `TRACKED_ACHIEVEMENT_UPDATE(id, tracked)`.
-fn track(lua: &Lua, id: u32, on: bool) {
-    let changed = lua.app_data_mut::<State>().is_some_and(|mut s| {
-        let at = s.tracked.iter().position(|&t| t == id);
-        match (on, at) {
-            (true, None) => {
-                s.tracked.push(id);
-                true
-            }
-            (false, Some(i)) => {
-                s.tracked.remove(i);
-                true
-            }
-            _ => false,
-        }
-    });
-    if changed {
-        let mut model = lua.app_data_mut::<super::Model>().expect("model");
-        model.pending_events.push((
-            "TRACKED_ACHIEVEMENT_UPDATE".into(),
-            vec![ScriptValue::Int(id.into()), ScriptValue::Bool(on)],
-        ));
-    }
+    super::wrath_achievement_tracked::install(lua)
 }
 
 #[cfg(test)]
