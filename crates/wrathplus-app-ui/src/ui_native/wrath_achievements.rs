@@ -91,7 +91,8 @@ fn insert_earned(list: &mut Vec<(u32, u32)>, id: u32, date: u32, order: OrderOf)
     list.insert(at, (id, date));
 }
 
-/// A compared player's progress; `now` dates its counters as `0x5b34a0` does (`0x5b3588`).
+/// A compared player's progress, its counters dated from `now`, when the feed reads the
+/// response; `0x5b34a0` dates them at arrival (`0x5b3588`).
 fn snapshot_progress(data: &Snapshot, order: OrderOf, now: i64) -> WrathAchievementProgress {
     let mut earned = Vec::new();
     for &(id, date) in &data.earned {

@@ -326,7 +326,7 @@ pub(super) fn compared_faction(lua: &Lua) -> i32 {
         .app_data_ref::<State>()
         .and_then(|s| s.compared.as_ref().map(|(g, _)| *g));
     let model = lua.app_data_ref::<super::Model>();
-    let race = guid.and_then(|g| model.as_ref()?.units_by_guid.get(&g)?.race_file.clone());
+    let race = guid.and_then(|g| model.as_ref()?.unit_by_guid(g)?.race_file.clone());
     match race.as_deref() {
         Some("Orc" | "Scourge" | "Tauren" | "Troll" | "BloodElf") => 0,
         Some("Human" | "Dwarf" | "NightElf" | "Gnome" | "Draenei") => 1,

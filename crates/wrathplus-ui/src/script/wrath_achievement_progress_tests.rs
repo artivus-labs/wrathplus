@@ -275,10 +275,11 @@ fn a_compared_player_joins_the_listing_and_answers_comparisons() {
     .unwrap();
     // An Alliance row does not count for a Horde compared player (`0x5b3bd7`).
     let orc = crate::script::UnitState {
+        guid: 0x42,
         race_file: Some("Orc".into()),
         ..Default::default()
     };
-    ui.model_mut().units_by_guid.insert(0x42, orc);
+    ui.set_unit("target", Some(orc));
     ui.run(
         r#"
         assert(GetComparisonCategoryNumAchievements(92) == 0)
