@@ -49,8 +49,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     // GetPlayerInfoByGUID(guid) → class, englishClass, race, englishRace, sex, name, realm. A
     // non-string, or a string that parses to 0, raises (`0x613fdf`); a guid that is not a player's
     // (`0x613ff8`-`0x614010`) or a name not cached answers nothing. Sex is `[2, 3, 1]` by gender
-    // (`0x9fe7ec`) and the realm always a string (`+0x34`). Labelled: a unit the table lacks, our
-    // own name seeded at login among them, answers from its snapshot.
+    // (`0x9fe7ec`) and the realm always a string (`+0x34`). Labelled: a unit the table lacks, by
+    // token (our own, seeded at login with no query) or by guid, answers from its snapshot.
     lua.globals().set(
         "GetPlayerInfoByGUID",
         lua.create_function(|lua, arg: Value| {
@@ -77,7 +77,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                     text(lua, "")?,
                 ]));
             }
-            let Some(u) = model.units_by_guid.get(&guid) else {
+            let tokened = model.units_by_lower.values().find(|u| u.guid == guid);
+            let Some(u) = tokened.or_else(|| model.units_by_guid.get(&guid)) else {
                 return Ok(MultiValue::new());
             };
             Ok(MultiValue::from_vec(vec![
@@ -132,6 +133,14 @@ mod tests {
             "Warrior,WARRIOR,Orc,Orc,3,Grunt,"
         );
         assert_eq!(all("0x0000000000000042"), "Mage,nil,nil,nil,3,Ivy,");
+        let me = crate::script::UnitState {
+            guid: 0x43,
+            name: Some("Me".into()),
+            sex: 2,
+            ..Default::default()
+        };
+        s.model_mut().units_by_lower.insert("player".into(), me);
+        assert_eq!(all("0x43"), "nil,nil,nil,nil,2,Me,", "our own token");
         assert_eq!(
             s.eval::<i64>(
                 "return select('#', GetPlayerInfoByGUID('0xF130000000000042')) \
