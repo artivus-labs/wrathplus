@@ -12,7 +12,7 @@ use mlua::{Lua, MultiValue, Value};
 
 use super::requests::Gate;
 use super::{Model, UiScript};
-use crate::script::binding_abi::{bool_or_default, number_arg};
+use crate::script::binding_abi::{bool_or_default, number_arg, tointeger_arg};
 
 /// `0x367`/`0x368`, as native stores them at `0xacd9a0` (player) and `0xacdac0` (party).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -382,8 +382,8 @@ fn sent_text(s: &str) -> String {
 }
 
 /// `0x559b70`: a dungeon or heroic (types 1, 5) keeps only dungeons and heroics, a raid (2) only
-/// raids and only outside a party (`0x52bd10`), any other type nothing; a clear (`0x559340`) or a new
-/// entry (`0x559c35`) marks the selection for the next join to resend.
+/// raids and only outside a party (`0x52bd10`), any other type nothing; a clear (`0x559340`) or a
+/// new entry (`0x559c35`) marks the selection for the next join to resend.
 fn select(q: &mut Queue, entry: u32, in_party: bool) {
     let all = |types: &[u32]| q.selection.iter().all(|e| types.contains(&(e >> 24)));
     let clear = match entry >> 24 {
@@ -430,8 +430,8 @@ fn send_join(lua: &Lua) {
     q.requests.push(request);
 }
 
-/// The backfill gate (`0x553170`, `0x5556d0`, `0x55a0c0`): 1..3 party members (`0xbd1998`, the count
-/// GetNumPartyMembers reads at `0x52c190`), an LFG dungeon, and the list's LFG byte without bit 2.
+/// The backfill gate (`0x553170`, `0x5556d0`, `0x55a0c0`): 1..3 party members (`0xbd1998`, the
+/// count GetNumPartyMembers reads at `0x52c190`), an LFG dungeon, and the LFG byte without bit 2.
 fn can_backfill(m: &Model) -> bool {
     let g = &m.wrath_group;
     (1..=3).contains(&m.party.members.len()) && g.lfg_dungeon_entry != 0 && g.lfg_flags & 2 == 0
@@ -610,7 +610,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             Some(name) => {
                 out.push(text(lua, name)?);
                 // Labelled: 12340 answers the name-cache record's gendered ChrClasses name
-                // (`0x72aab0` → `0x7159e0`); this reads the unit with the member's guid, "" without.
+                // (`0x72aab0` → `0x7159e0`); this reads the member's unit, "" without one.
                 let class = m.unit_by_guid(member.guid).and_then(|u| u.class.as_deref());
                 out.push(text(lua, class.unwrap_or_default())?);
             }
@@ -776,9 +776,9 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             int(c.items.len() as i64),
         ]))
     })?;
-    // GetLFGCompletionRewardItem(index) (`0x557f70`) → icon path and count.
+    // GetLFGCompletionRewardItem(index) (`0x557f70`, rounding `0x557fa0`) → icon path and count.
     set(lua, "GetLFGCompletionRewardItem", |lua, args| {
-        let i = number_arg(
+        let i = tointeger_arg(
             lua,
             arg(&args, 0),
             "Usage: GetLFGCompletionRewardItem(index)",

@@ -13,7 +13,8 @@ use mlua::{Lua, MultiValue, Value};
 
 use super::derived::{self, Node};
 use super::{dungeon_info, level_bounds, State, WrathLfgDungeon};
-use crate::script::binding_abi::number_arg;
+// Every number argument here converts through `lua_tointeger` (`0x84e070`), which rounds.
+use crate::script::binding_abi::tointeger_arg;
 use crate::script::Model;
 
 /// The native icon path when the display has no icon (`0x70a910`'s fallback under prefix 3).
@@ -163,7 +164,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     g.set(
         "IsLFGDungeonJoinable",
         lua.create_function(|lua, id: Value| {
-            let id = number_arg(lua, id, "Usage: IsLFGDungeonJoinable(dungeonID)")?;
+            let id = tointeger_arg(lua, id, "Usage: IsLFGDungeonJoinable(dungeonID)")?;
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             let state = &model.wrath_lfg;
             let Some(row) = u32::try_from(id).ok().and_then(|id| state.row(id)) else {
@@ -189,8 +190,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         "GetLFDLockInfo",
         lua.create_function(|lua, (id, index): (Value, Value)| {
             const USAGE: &str = "Usage: GetLFDLockInfo(dungeonID, playerIndex)";
-            let id = number_arg(lua, id, USAGE)?;
-            let index = number_arg(lua, index, USAGE)?;
+            let id = tointeger_arg(lua, id, USAGE)?;
+            let index = tointeger_arg(lua, index, USAGE)?;
             if id < 0 {
                 return Ok(MultiValue::new());
             }
@@ -283,7 +284,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     g.set(
         "GetLFGDungeonRewards",
         lua.create_function(|lua, id: Value| {
-            let id = number_arg(lua, id, "Usage: GetLFGDungeonRewards(dungeonID)")?;
+            let id = tointeger_arg(lua, id, "Usage: GetLFGDungeonRewards(dungeonID)")?;
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             let state = &model.wrath_lfg;
             let Some(row) = state.row(id as u32) else {
@@ -313,8 +314,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         "GetLFGDungeonRewardInfo",
         lua.create_function(|lua, (id, index): (Value, Value)| {
             const USAGE: &str = "Usage: GetLFGDungeonRewardInfo(dungeonID, lootIndex)";
-            let id = number_arg(lua, id, USAGE)?;
-            let index = number_arg(lua, index, USAGE)?;
+            let id = tointeger_arg(lua, id, USAGE)?;
+            let index = tointeger_arg(lua, index, USAGE)?;
             let (out, uncached) = {
                 let model = lua.app_data_ref::<Model>().expect("model app_data");
                 let state = &model.wrath_lfg;
@@ -354,8 +355,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         "GetLFGDungeonRewardLink",
         lua.create_function(|lua, (id, index): (Value, Value)| {
             const USAGE: &str = "Usage: GetLFGDungeonRewardLink(dungeonID, lootIndex)";
-            let id = number_arg(lua, id, USAGE)?;
-            let index = number_arg(lua, index, USAGE)?;
+            let id = tointeger_arg(lua, id, USAGE)?;
+            let index = tointeger_arg(lua, index, USAGE)?;
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             let state = &model.wrath_lfg;
             let entry = id as u32 & 0xff_ffff | 0x0600_0000;
@@ -381,7 +382,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     g.set(
         "GetLFGRandomDungeonInfo",
         lua.create_function(|lua, index: Value| {
-            let index = number_arg(lua, index, "Usage: GetLFGRandomDungeonInfo(index)")?;
+            let index = tointeger_arg(lua, index, "Usage: GetLFGRandomDungeonInfo(index)")?;
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             let state = &model.wrath_lfg;
             let Some(entry) = usize::try_from(index.wrapping_sub(1))
@@ -505,7 +506,7 @@ mod tests {
         );
         assert_eq!(s.eval::<i64>("return GetLFDLockPlayerCount()").unwrap(), 1);
         assert_eq!(
-            s.eval::<(String, i64)>("return GetLFDLockInfo(7, 1)")
+            s.eval::<(String, i64)>("return GetLFDLockInfo(7.4, 0.6)")
                 .unwrap(),
             ("Me".into(), 5)
         );
@@ -613,7 +614,7 @@ mod tests {
             },
         );
         assert_eq!(
-            s.eval::<(bool, i64, i64, i64, i64, i64)>("return GetLFGDungeonRewards(9)")
+            s.eval::<(bool, i64, i64, i64, i64, i64)>("return GetLFGDungeonRewards(8.6)")
                 .unwrap(),
             (true, 100, 10, 200, 20, 2),
             "the later duplicate overwrites scalars and appends items"
@@ -629,7 +630,7 @@ mod tests {
             0
         );
         assert_eq!(
-            s.eval::<(String, String, i64)>("return GetLFGDungeonRewardInfo(9, 1)")
+            s.eval::<(String, String, i64)>("return GetLFGDungeonRewardInfo(8.6, 1.4)")
                 .unwrap(),
             ("Sword".into(), "Interface\\Icons\\X".into(), 2)
         );
@@ -650,7 +651,7 @@ mod tests {
             0
         );
         assert_eq!(
-            s.eval::<String>("return GetLFGDungeonRewardLink(9, 1)")
+            s.eval::<String>("return GetLFGDungeonRewardLink(9, 0.6)")
                 .unwrap(),
             "|link11|"
         );
@@ -698,7 +699,7 @@ mod tests {
         );
         assert_eq!(s.eval::<i64>("return GetNumRandomDungeons()").unwrap(), 4);
         assert_eq!(
-            s.eval::<(i64, String)>("return GetLFGRandomDungeonInfo(4)")
+            s.eval::<(i64, String)>("return GetLFGRandomDungeonInfo(3.5)")
                 .unwrap(),
             (12, "D12".into()),
             "a holiday with an inactive self node joins the list"
@@ -742,7 +743,7 @@ mod tests {
             Some(2),
         );
         let joinable = |s: &UiScript, id: u32| {
-            s.eval::<Option<bool>>(&format!("return IsLFGDungeonJoinable({id})"))
+            s.eval::<Option<bool>>(&format!("return IsLFGDungeonJoinable({id} - 0.4)"))
                 .unwrap()
         };
         assert_eq!(

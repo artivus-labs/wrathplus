@@ -11,7 +11,7 @@ use std::sync::Arc;
 use mlua::{Lua, MultiValue, Value};
 
 use super::{Model, UiScript, WrathLfgEncounter};
-use crate::script::binding_abi::number_arg;
+use crate::script::binding_abi::{number_arg, tointeger_arg};
 
 /// The character block of a raid browser entry, in the native record's order (`0x5529e0`).
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -369,7 +369,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     // SearchLFGGetResults(index) (`0x555fd0`) → name, level, area, class name, comment, other
     // members, status, class file, encounters total and killed, then the 28-value tail.
     set(lua, "SearchLFGGetResults", |lua, args| {
-        let i = number_arg(lua, arg(&args, 0), "Usage: SearchLFGGetResults(index)")?;
+        // `lua_tointeger` (`0x556005`) rounds the index.
+        let i = tointeger_arg(lua, arg(&args, 0), "Usage: SearchLFGGetResults(index)")?;
         let m = lua.app_data_ref::<Model>().expect("model app_data");
         let rb = &m.wrath_lfg.raid_browser;
         if m.wrath_lfg.row(rb.view.dungeon & 0xff_ffff).is_none() {
@@ -657,7 +658,7 @@ mod tests {
         }));
         assert!(
             s.eval::<bool>(
-                "return SearchLFGGetResults(1) == 'Amy' and SearchLFGGetResults(3) == 'Lead'"
+                "return SearchLFGGetResults(0.6) == 'Amy' and SearchLFGGetResults(3) == 'Lead'"
             )
             .unwrap(),
             "players first, by level, before any sort"

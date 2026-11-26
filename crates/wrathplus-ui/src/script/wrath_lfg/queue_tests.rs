@@ -189,7 +189,7 @@ fn getters_read_the_snapshot_in_native_shapes() {
         "select(4, GetLFGBootProposal())=='Bad-Elsewhere' and select(7, GetLFGBootProposal())==40 and select(8, GetLFGBootProposal())=='afk'",
         "select('#', GetLFGCompletionReward())==9 and select(4, GetLFGCompletionReward())==100 and select(5, GetLFGCompletionReward())==10",
         "select(6, GetLFGCompletionReward())==200 and select(8, GetLFGCompletionReward())==2 and select(9, GetLFGCompletionReward())==1",
-        "select(2, GetLFGCompletionRewardItem(1))==3 and select('#', GetLFGCompletionRewardItem(2))==0",
+        "select(2, GetLFGCompletionRewardItem(0.6))==3 and select('#', GetLFGCompletionRewardItem(2))==0",
     ] {
         assert!(s.eval::<bool>(&format!("return {check}")).unwrap(), "{check}");
     }
