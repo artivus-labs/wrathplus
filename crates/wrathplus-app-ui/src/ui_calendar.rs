@@ -116,6 +116,8 @@ fn error_key(error: u32) -> Option<(&'static str, ErrorArg)> {
 pub(crate) struct CalendarCatalog {
     holidays: HolidayCatalog,
     textures: [Vec<WrathCalendarTexture>; 2],
+    /// Every `LFGDungeons` row's texture by id, a listed event's icon (`0x5c1040`).
+    dungeons: HashMap<i32, String>,
     difficulty_keys: HashMap<(i32, i32), String>,
     max_players: HashMap<(i32, i32), i32>,
 }
@@ -224,6 +226,8 @@ fn load(mut catalog: ResMut<CalendarCatalog>, assets: Option<Res<wrathplus_asset
                     .or_insert(d.max_players());
             }
             catalog.textures = textures(&lfg, &catalog.difficulty_keys);
+            let rows = lfg.dungeons.rows().iter();
+            catalog.dungeons = rows.map(|d| (d.id() as i32, d.texture.clone())).collect();
         }
         Err(error) => warn!("calendar dungeons: {error:#}"),
     }
@@ -922,10 +926,9 @@ fn name_of(names: Option<&NameCache>, guid: u64, net: &NetCommands) -> Option<St
     names?.resolve(guid, net).map(str::to_string)
 }
 
+/// A lockout or reset's title, `Map.dbc`'s name or "" (`0x5c117f`).
 fn map_name(maps: Option<&wrathplus_assets::MapCatalogRes>, map: u32) -> String {
-    maps.and_then(|m| m.0.name(map))
-        .filter(|n| !n.is_empty())
-        .map_or_else(|| map.to_string(), str::to_string)
+    maps.and_then(|m| m.0.name(map)).unwrap_or("").to_string()
 }
 
 /// The view from the reduced state.
@@ -937,16 +940,10 @@ fn build(
     maps: Option<&wrathplus_assets::MapCatalogRes>,
     me: u64,
 ) -> WrathCalendarView {
-    let texture_of = |kind: u32, dungeon: i32| -> String {
-        let list = match kind {
-            0 => &catalog.textures[0],
-            1 => &catalog.textures[1],
-            _ => return String::new(),
-        };
-        list.iter()
-            .find(|t| t.dungeon == dungeon)
-            .map(|t| t.texture.clone())
-            .unwrap_or_default()
+    // `0x5c0fb0`: a player, guild or announcement row (flags `0x543`) shows its dungeon's texture.
+    let texture_of = |flags: u32, dungeon: i32| -> String {
+        let found = (flags & 0x543 != 0).then(|| catalog.dungeons.get(&dungeon));
+        found.flatten().cloned().unwrap_or_default()
     };
     let mut entries = Vec::new();
     // Holidays first on their days, then the rest by time.
@@ -975,18 +972,17 @@ fn build(
             let days = ((end.seconds() - first) / 86_400 + 1).max(1) as u32;
             for k in 0..days {
                 let day = WrathCalendarDate::from_seconds(first + i64::from(k) * 86_400);
-                let (sequence, at) = match (days, k) {
-                    (1, _) => ("INFO", from),
-                    (_, 0) => ("START", from),
-                    (n, k) if k + 1 == n => ("END", end),
-                    _ => ("ONGOING", day),
+                let at = match k {
+                    0 => from,
+                    k if k + 1 == days => end,
+                    _ => day,
                 };
                 entries.push(WrathCalendarEntry {
                     kind: WrathCalendarKind::Holiday,
                     date: WrathCalendarDate::new(day.year, day.month, day.day, at.hour, at.minute),
                     title: name.clone(),
                     texture: texture.clone(),
-                    sequence: (k + 1, days, sequence),
+                    sequence: (k, days),
                     holiday_description: description.clone(),
                     ..Default::default()
                 });
@@ -1009,7 +1005,7 @@ fn build(
             flags: l.row.flags,
             event_type: l.row.kind as u8,
             dungeon: l.row.dungeon,
-            texture: texture_of(l.row.kind, l.row.dungeon),
+            texture: texture_of(l.row.flags, l.row.dungeon),
             invite: l.invite.map(|i| (i.1, i.2)),
             ..Default::default()
         });

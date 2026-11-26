@@ -147,25 +147,38 @@ fn mod_status(rank: u8) -> &'static str {
     }
 }
 
+/// `0x5b8040`: a holiday day's place in a holiday of more than one day, else "".
+fn sequence_type(row: &WrathCalendarEntry) -> &'static str {
+    match row.sequence {
+        (_, total) if row.kind != K::Holiday || total <= 1 => "",
+        (0, _) => "START",
+        (k, total) if k + 1 == total => "END",
+        _ => "ONGOING",
+    }
+}
+
 /// The 15 `CalendarGetDayEvent` values for a row (`0x5c1070`).
 fn day_event(lua: &Lua, row: &WrathCalendarEntry) -> Rv {
     let raid = row.raid.as_ref();
-    let holiday = row.kind == K::Holiday;
     let (status, rank) = row.invite.unwrap_or((u8::MAX, 0));
-    let invite_status = if row.invite.is_some() {
-        i(status + 1)
-    } else if row.kind == K::GuildEvent {
-        i(LUA_NOT_SIGNEDUP)
-    } else {
-        i(0)
+    // `+0xa8 + 1` for every row: 0 (INVITED) where no invite set it (`0x5c125a`).
+    let invite_status = match row.invite {
+        Some(_) => i(status + 1),
+        None if row.kind == K::GuildEvent => i(LUA_NOT_SIGNEDUP),
+        None => i(1),
+    };
+    // `+0xa0 + 1`: holiday, lockout and reset rows are built with type -1 (`0x5b784d`, `0x5c2652`).
+    let event_type = match row.kind {
+        K::Holiday | K::RaidLockout | K::RaidReset => 0,
+        _ => i64::from(row.event_type) + 1,
     };
     many(vec![
         s(lua, &row.title)?,
         i(row.date.hour),
         i(row.date.minute),
         s(lua, row.kind.token())?,
-        s(lua, if holiday { row.sequence.2 } else { "" })?,
-        i(row.event_type + 1),
+        s(lua, sequence_type(row))?,
+        i(event_type),
         s(lua, &row.texture)?,
         s(lua, mod_status(rank))?,
         invite_status,
@@ -176,8 +189,8 @@ fn day_event(lua: &Lua, row: &WrathCalendarEntry) -> Rv {
         } else {
             1
         }),
-        i(if holiday { row.sequence.0 } else { 1 }),
-        i(if holiday { row.sequence.1 } else { 0 }),
+        i(row.sequence.0 + 1),
+        i(row.sequence.1),
         s(
             lua,
             &raid.map_or(String::new(), |r| difficulty_name(lua, &r.difficulty_key)),
@@ -350,11 +363,12 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         if !has3(lua, &args) {
             return usage("Usage: CalendarGetDayEventSequenceInfo([-1.0.1], monthDay, index)");
         }
-        match row_at(lua, &args).filter(|r| r.kind == K::Holiday) {
+        // `0x5b9ca0`: the day's 0-based place `+0xc4`, the count `+0xc8` and `0x5b8040`'s type.
+        match row_at(lua, &args) {
             Some(r) => many(vec![
                 i(r.sequence.0),
                 i(r.sequence.1),
-                s(lua, r.sequence.2)?,
+                s(lua, sequence_type(&r))?,
             ]),
             None => many(vec![i(0), i(0), s(lua, "")?]),
         }

@@ -81,8 +81,8 @@ pub struct WrathCalendarEntry {
     pub texture: String,
     /// The player's invite: wire status 0..8 and rank 0..2; `None` without an invite.
     pub invite: Option<(u8, u8)>,
-    /// A holiday's day: 1-based index, day count, `START`/`ONGOING`/`END`/`INFO`.
-    pub sequence: (u32, u32, &'static str),
+    /// A holiday's day: its 0-based place and the holiday's day count (`+0xc4`, `+0xc8`).
+    pub sequence: (u32, u32),
     pub holiday_description: String,
     /// A raid row's map, instance id and difficulty, with the difficulty's string key.
     pub raid: Option<WrathCalendarRaid>,
@@ -433,12 +433,15 @@ impl State {
         self.day(slot.0, slot.1, slot.2).into_iter().nth(slot.3)
     }
 
-    /// A day addressed the reference's way: a month offset from the shown month and a 1-based day.
+    /// A day addressed the reference's way, as `0x5b91a0` accepts it: a month offset -1..1 from the
+    /// shown month and a day 1..31 of a date between 24 November 2004 and 31 December 2030.
     fn slot(&self, offset: i32, day: i64, index: i64) -> Option<Slot> {
-        let (y, m) = self.month(offset);
-        let d = u8::try_from(day).ok().filter(|&d| d >= 1)?;
+        let (y, m) = Some(offset)
+            .filter(|o| (-1..=1).contains(o))
+            .map(|o| self.month(o))?;
+        let d = u8::try_from(day).ok().filter(|d| (1..=31).contains(d))?;
         let i = usize::try_from(index - 1).ok()?;
-        Some((y, m, d, i))
+        ((2004, 11, 24) <= (y, m, d) && (y, m, d) <= (2030, 12, 31)).then_some((y, m, d, i))
     }
 
     /// The offset of `(y, m)` from the shown month.

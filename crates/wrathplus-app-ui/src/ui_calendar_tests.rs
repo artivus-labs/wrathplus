@@ -47,8 +47,8 @@ fn calendar_packet() -> Packet {
             title: "Naxx".into(),
             kind: 0,
             packed_time: packed(2010, 3, 16, 19, 0),
-            flags: 0,
-            dungeon: -1,
+            flags: 1,
+            dungeon: 160,
             creator: 9,
         }],
         server_time: NOW,
@@ -77,21 +77,32 @@ fn the_calendar_lists_events_lockouts_and_holiday_days() {
     reduce(&mut state, calendar_packet(), ME, &mut fired);
     assert_eq!(events(&fired), ["CALENDAR_UPDATE_EVENT_LIST"]);
     assert_eq!(state.zone, 7200);
-    let view = build(&state, &CalendarCatalog::default(), None, &net(), None, ME);
+    let mut catalog = CalendarCatalog::default();
+    catalog.dungeons.insert(160, "LFGIcon-Naxxramas".into());
+    let view = build(&state, &catalog, None, &net(), None, ME);
     let kinds: Vec<_> = view
         .entries
         .iter()
-        .map(|e| (e.kind, e.date.day, e.date.hour, e.sequence.2))
+        .map(|e| (e.kind, e.date.day, e.date.hour, e.sequence))
         .collect();
     assert_eq!(
         kinds,
         [
-            (WrathCalendarKind::Holiday, 14, 10, "START"),
-            (WrathCalendarKind::Holiday, 15, 0, "ONGOING"),
-            (WrathCalendarKind::Holiday, 16, 9, "END"),
-            (WrathCalendarKind::RaidLockout, 16, 14, ""),
-            (WrathCalendarKind::Player, 16, 19, ""),
+            (WrathCalendarKind::Holiday, 14, 10, (0, 3)),
+            (WrathCalendarKind::Holiday, 15, 0, (1, 3)),
+            (WrathCalendarKind::Holiday, 16, 9, (2, 3)),
+            (WrathCalendarKind::RaidLockout, 16, 14, (0, 0)),
+            (WrathCalendarKind::Player, 16, 19, (0, 0)),
         ]
+    );
+    // `0x5c0fb0`: a player row's icon is its `LFGDungeons` texture; a map with no name is "".
+    let titles = (
+        view.entries[3].title.as_str(),
+        view.raid_resets[0].name.as_str(),
+    );
+    assert_eq!(
+        (titles, view.entries[4].texture.as_str()),
+        (("", ""), "LFGIcon-Naxxramas")
     );
     let event = &view.entries[4];
     assert_eq!(

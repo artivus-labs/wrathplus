@@ -105,11 +105,18 @@ fn a_day_lists_events_holidays_and_projected_resets() {
             date: WrathCalendarDate::new(2010, 3, 15, 0, 0),
             title: "Noblegarden".into(),
             texture: "Calendar_Noblegarden".into(),
-            sequence: (2, 3, "ONGOING"),
+            sequence: (1, 3),
             holiday_description: "Eggs.".into(),
             ..Default::default()
         },
         event_row(15, 19, 0),
+        WrathCalendarEntry {
+            kind: WrathCalendarKind::Holiday,
+            date: WrathCalendarDate::new(2010, 3, 18, 0, 0),
+            title: "Fishing".into(),
+            sequence: (0, 1),
+            ..Default::default()
+        },
     ];
     // Weekly from Tuesday 2 March 2010 05:00: Tuesday the 16th.
     view.raid_resets = vec![WrathCalendarRaidReset {
@@ -178,6 +185,38 @@ fn a_day_lists_events_holidays_and_projected_resets() {
         s.eval::<i64>("return select('#', CalendarGetDayEvent(0, 17, 1))")
             .unwrap(),
         15
+    );
+    // `0x5b8040` names a holiday's day only when it lasts more than one; local rows carry type
+    // `+0xa0` -1 and status `+0xa8` 0 (`0x5b784d`), so eventType 0 and inviteStatus 1.
+    let row = |s: &UiScript, d: i64| -> (String, i64, i64, i64, i64) {
+        s.eval(&format!(
+            "local _, _, _, _, q, e, _, _, st, _, _, _, n, of = CalendarGetDayEvent(0, {d}, 1)
+             return q, e, st, n, of"
+        ))
+        .unwrap()
+    };
+    assert_eq!(row(&s, 15), ("ONGOING".into(), 0, 1, 2, 3));
+    assert_eq!(row(&s, 16), ("".into(), 0, 1, 1, 0));
+    assert_eq!(row(&s, 18), ("".into(), 0, 1, 1, 1));
+    assert_eq!(
+        s.eval::<(i64, i64, String)>("return CalendarGetDayEventSequenceInfo(0, 15, 1)")
+            .unwrap(),
+        (1, 3, "ONGOING".into())
+    );
+    // `0x5b91a0`: an offset past -1..1 or a day before 24 November 2004 lists nothing.
+    assert_eq!(
+        s.eval::<i64>("return CalendarGetNumDayEvents(2, 4)")
+            .unwrap(),
+        0
+    );
+    s.run("CalendarSetAbsMonth(11, 2005) CalendarSetMonth(-12)")
+        .unwrap();
+    assert_eq!(
+        s.eval::<(i64, i64)>(
+            "return CalendarGetNumDayEvents(0, 30), CalendarGetNumDayEvents(0, 23)"
+        )
+        .unwrap(),
+        (1, 0)
     );
 }
 
