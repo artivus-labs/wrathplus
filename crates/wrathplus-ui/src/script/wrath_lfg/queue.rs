@@ -795,18 +795,20 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         )]))
     })?;
     // CanPartyLFGBackfill() (`0x553170`) / GetPartyLFGBackfillInfo() (`0x5556d0` → name, id,
-    // type): an LFG group in status 1..3 without flag 2.
-    fn backfill(m: &Model) -> Option<&super::WrathLfgDungeon> {
+    // type): 1..3 party members (`0xbd1998`, the count GetNumPartyMembers reads at `0x52c190`), an
+    // LFG dungeon, and the list's LFG byte without bit 2.
+    fn can_backfill(m: &Model) -> bool {
         let g = &m.wrath_group;
-        (matches!(g.lfg_status, 1..=3) && g.lfg_dungeon_entry != 0 && g.lfg_flags & 2 == 0)
-            .then(|| row(m, g.lfg_dungeon_entry))
+        (1..=3).contains(&m.party.members.len()) && g.lfg_dungeon_entry != 0 && g.lfg_flags & 2 == 0
+    }
+    fn backfill(m: &Model) -> Option<&super::WrathLfgDungeon> {
+        can_backfill(m)
+            .then(|| row(m, m.wrath_group.lfg_dungeon_entry))
             .flatten()
     }
     set(lua, "CanPartyLFGBackfill", |lua, _| {
         let m = lua.app_data_ref::<Model>().expect("model app_data");
-        let g = &m.wrath_group;
-        let can = matches!(g.lfg_status, 1..=3) && g.lfg_dungeon_entry != 0 && g.lfg_flags & 2 == 0;
-        Ok(MultiValue::from_vec(vec![Value::Boolean(can)]))
+        Ok(MultiValue::from_vec(vec![Value::Boolean(can_backfill(&m))]))
     })?;
     set(lua, "GetPartyLFGBackfillInfo", |lua, _| {
         let m = lua.app_data_ref::<Model>().expect("model app_data");

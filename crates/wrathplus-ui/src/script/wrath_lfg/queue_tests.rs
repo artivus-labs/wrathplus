@@ -223,18 +223,37 @@ fn group_lfg_state_backfill_and_deserter() {
     assert!(s
         .eval::<bool>("return IsPartyLFG()==nil and select('#', IsInLFGDungeon())==0 and HasLFGRestrictions()==false and CanPartyLFGBackfill()==false")
         .unwrap());
-    s.set_wrath_group(WrathGroup {
+    let group = |lfg_flags| WrathGroup {
         lfg_dungeon_entry: 1 << 24 | 7,
-        lfg_status: 2,
+        lfg_flags,
         lfg_restricted: true,
         ..Default::default()
-    });
+    };
+    s.set_wrath_group(group(0));
     s.set_wrath_lfg_location(Some((600, 1)));
+    // Backfill needs 1..3 party members (`0xbd1998`), then the LFG byte's bit 2 clear.
+    assert!(s
+        .eval::<bool>(
+            "return CanPartyLFGBackfill()==false and select('#', GetPartyLFGBackfillInfo())==0"
+        )
+        .unwrap());
+    s.set_party(PartyState {
+        members: vec![PartyMemberInfo {
+            name: "Pal".into(),
+            guid: 2,
+        }],
+        leader_guid: 1,
+        own_guid: 1,
+        ..Default::default()
+    });
     assert!(s
         .eval::<bool>("local n, id, t = GetPartyLFGBackfillInfo() return IsPartyLFG()==1 and IsInLFGDungeon()==true and HasLFGRestrictions()==true and CanPartyLFGBackfill()==true and n=='Halls' and id==7 and t==1")
         .unwrap());
+    s.set_wrath_group(group(2));
     s.set_wrath_lfg_location(Some((601, 1)));
-    assert!(s.eval::<bool>("return IsInLFGDungeon()==false").unwrap());
+    assert!(s
+        .eval::<bool>("return IsInLFGDungeon()==false and CanPartyLFGBackfill()==false")
+        .unwrap());
     s.model_mut().player_auras = vec![crate::script::AuraState {
         spell_id: 71041,
         ..Default::default()

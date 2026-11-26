@@ -19,11 +19,9 @@ pub struct Group {
     /// The group's LFG dungeon, a full packed entry, 0 for none (`DAT_00bd19a4`): IsPartyLFG,
     /// IsInLFGDungeon and the backfill getters.
     pub lfg_dungeon_entry: u32,
-    /// The LFG status (`DAT_00bd1998`); backfill needs 1..3.
-    pub lfg_status: u8,
-    /// The LFG flags byte (`DAT_00bd1989`); backfill needs bit 2 clear.
+    /// The list's LFG-block byte (`DAT_00bd1989`, `0x6d8f9b`); backfill needs bit 2 clear.
     pub lfg_flags: u8,
-    /// HasLFGRestrictions (`DAT_00bd19a8`).
+    /// HasLFGRestrictions (`DAT_00bd19a8`): the list's group type bit `0x4` (`0x6d8da6`).
     pub lfg_restricted: bool,
 }
 impl super::super::UiScript {
