@@ -596,6 +596,7 @@ fn feed_battlefield(
         queue.active_instance_type() == 4,
         queue.active_rated(),
     );
+    script.set_battlefield_arena_faction(queue.arena_faction != 0);
     let zone_name = areas
         .as_deref()
         .and_then(|a| a.0.name(world_pvp.zone))

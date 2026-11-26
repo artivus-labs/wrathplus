@@ -29,7 +29,7 @@ fn empty_defaults() {
         local a,b = GetHonorCurrency(); assert(a == 0 and b == 75000)
         a,b = GetArenaCurrency(); assert(a == 0 and b == 10000)
         assert(select('#', GetHonorCurrency()) == 2)
-        assert(select('#', GetArenaCurrency()) == 2)
+        assert(select('#', GetArenaCurrency()) == 2 and GetMaxArenaCurrency() == 10000)
         -- `0x51f01a`-`0x51f08c`: registered at "0".
         for _, n in ipairs({'currencyTokensUnused1', 'currencyTokensUnused2',
                 'currencyTokensBackpack1', 'currencyTokensBackpack2'}) do

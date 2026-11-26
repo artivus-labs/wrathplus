@@ -124,6 +124,8 @@ pub(crate) struct QueueState {
     /// The active slot's map is an arena, and the active slot is rated (`0x549ad0`).
     pub(crate) active_arena: bool,
     pub(crate) active_rated: bool,
+    /// The last status 3's arena-faction byte is non-zero (`0xbea54a`).
+    pub(crate) arena_faction: bool,
     pub(crate) instance_expiration_ms: u32,
     pub(crate) requests: Vec<BattlefieldRequest>,
 }
@@ -258,6 +260,11 @@ impl super::UiScript {
         q.instance_expiration_ms = instance_expiration_ms;
         q.active_arena = active_arena;
         q.active_rated = active_rated;
+    }
+
+    /// The last status 3's arena-faction byte, non-zero.
+    pub fn set_battlefield_arena_faction(&mut self, nonzero: bool) {
+        self.model_mut().battlefield.arena_faction = nonzero;
     }
 
     /// Every `BattlemasterList` type. The first push adopts the battleground types' table order
@@ -567,6 +574,15 @@ pub(super) fn install_wrath(lua: &Lua) -> mlua::Result<()> {
                 flag(q.active_arena),
                 flag(q.active_rated),
             ]))
+        })?,
+    )?;
+
+    // 1/nil: the arena-faction byte is non-zero (`0x54a280`).
+    g.set(
+        "GetBattlefieldArenaFaction",
+        lua.create_function(|lua, ()| {
+            let model = lua.app_data_ref::<Model>().expect("model app_data");
+            Ok(flag(model.battlefield.arena_faction))
         })?,
     )?;
 

@@ -351,6 +351,11 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             })?,
         )?;
     }
+    // GetMaxArenaCurrency() (`0x5d6ff0`): the same fixed double (`0xa1ad58`).
+    lua.globals().set(
+        "GetMaxArenaCurrency",
+        lua.create_function(|_, ()| Ok(10_000.0f64))?,
+    )?;
     // GameTooltip:SetCurrencyToken(index) (`0x630620`), over the list's built rows, and
     // :SetBackpackToken(index) (`0x6307e0`), over the backpack walk: the token's item tooltip. A
     // header or a row out of range shows nothing. Labelled: the reference shows the carried

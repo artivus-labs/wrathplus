@@ -97,6 +97,15 @@ fn the_listed_type_drives_info_arena_and_group_answers() {
         .eval::<Option<i64>>("return IsBattlefieldArena()")
         .unwrap()
         .is_none());
+    assert!(s
+        .eval::<bool>("return GetBattlefieldArenaFaction() == nil")
+        .unwrap());
+    s.set_battlefield_arena_faction(true);
+    assert_eq!(
+        s.eval::<i64>("return GetBattlefieldArenaFaction()")
+            .unwrap(),
+        1
+    );
     s.set_battlefield_list(BattlefieldListView {
         bg_type: 4,
         instances: vec![9, 3],

@@ -36,6 +36,8 @@ pub struct ArenaMemberView {
     pub season_games: u32,
     pub season_wins: u32,
     pub rating: u32,
+    /// The two floats after the row's flag byte (`0x5a4039`-`0x5a4082`), zero without them.
+    pub gdf: [f32; 2],
 }
 
 /// `SMSG_ARENA_TEAM_QUERY_RESPONSE`'s cached record.
@@ -472,6 +474,28 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         model.wrath_arena.resort(&mut model.pending_events);
         Ok(MultiValue::new())
     })?;
+    // The row's two floats, or two nils off the slot or the roster (`0x5a3260`).
+    set("GetArenaTeamGdfInfo", |lua, args| {
+        let (Some(team), Some(row)) = (index(&arg(&args, 0)), index(&arg(&args, 1))) else {
+            return Err(mlua::Error::runtime(
+                "Usage: GetArenaTeamGdfInfo(team, index)",
+            ));
+        };
+        let model = lua.app_data_ref::<Model>().expect("model");
+        let member = slot(team).zip(usize::try_from(row).ok());
+        let member = member.and_then(|(s, r)| model.wrath_arena.rosters[s].get(r));
+        Ok(MultiValue::from_vec(match member {
+            Some(m) => m.gdf.map(|f| Value::Number(f64::from(f))).to_vec(),
+            None => vec![Value::Nil; 2],
+        }))
+    })?;
+    // 1/nil of the show-offline word (`0x5a2a00`, `0xacf834`, 1 at load).
+    set("GetArenaTeamRosterShowOffline", |lua, _| {
+        let model = lua.app_data_ref::<Model>().expect("model");
+        Ok(MultiValue::from_vec(vec![super::binding_abi::flag(
+            model.wrath_arena.show_offline,
+        )]))
+    })?;
     // A change re-sorts every roster (`0x5a2e10`).
     set("SetArenaTeamRosterShowOffline", |lua, args| {
         let show = flag(&args, 0, true);
@@ -503,6 +527,7 @@ mod tests {
             season_games: 9,
             season_wins: 4,
             rating,
+            gdf: [0.0; 2],
         }
     }
 
@@ -560,6 +585,10 @@ mod tests {
             assert(GetArenaTeam(2) == nil and select(22, GetArenaTeam(4)) == 0)
             assert(GetArenaTeam(1.9) == "Two" and GetArenaTeam(2.9) == nil)
             assert(IsArenaTeamCaptain(1) == 1 and IsArenaTeamCaptain(2) == 1 and IsArenaTeamCaptain(4) == nil)
+            local a, b = GetArenaTeamGdfInfo(1, 1)
+            assert(a == 0 and b == 0 and select("#", GetArenaTeamGdfInfo(4, 1)) == 2)
+            assert(GetArenaTeamGdfInfo(1, 9) == nil and not pcall(GetArenaTeamGdfInfo, 1))
+            assert(GetArenaTeamRosterShowOffline() == 1)
             assert(GetNumArenaTeamMembers(1) == 3 and GetNumArenaTeamMembers(2, 1) == 0)
             -- Sorted by name on arrival.
             local name, rank, level, class, online, p, w, spl, sw2, rt = GetArenaTeamRosterInfo(1, 1)

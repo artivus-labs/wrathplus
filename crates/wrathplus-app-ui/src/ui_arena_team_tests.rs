@@ -125,7 +125,13 @@ fn table_follows_descriptor_and_drops_strangers() {
                 team_id,
                 discriminator: 0,
                 team_type: 3,
-                members: vec![row(1, &[b'x'; 60], 1, 6), row(2, b"Bo", 0, 10)],
+                members: vec![
+                    Member {
+                        extra_bits: Some([1.5f32.to_bits(), (-2.0f32).to_bits()]),
+                        ..row(1, &[b'x'; 60], 1, 6)
+                    },
+                    row(2, b"Bo", 0, 10),
+                ],
             },
             &mut fx,
         );
@@ -178,6 +184,7 @@ fn table_follows_descriptor_and_drops_strangers() {
     assert_eq!(roster[0].class.as_deref(), Some("Death Knight"));
     assert!(roster[0].online && !roster[1].online && roster[1].class.is_none());
     assert_eq!(roster[1].rating, 1550);
+    assert_eq!((roster[0].gdf, roster[1].gdf), ([1.5, -2.0], [0.0; 2]));
     let teams = table.teams();
     assert_eq!(teams[1].stats.rank, 12);
     assert_eq!(teams[1].info.as_ref().unwrap().name, "Trio");
