@@ -481,9 +481,10 @@ mod tests {
         let mut s = UiScript::new().unwrap();
         s.run("JumpOrAscendStart() SitStandOrDescendStart()")
             .unwrap();
-        assert!(
-            s.take_binding_input().is_empty(),
-            "gated like the movement table"
+        assert_eq!(
+            s.take_binding_input(),
+            vec![BindingInput::Fire(FiredInput::SitOrStand)],
+            "gated like the movement table, but for the sit or stand (`0x51b1d0`)"
         );
         s.run_binding("JumpOrAscendStart() AscendStop() SitStandOrDescendStart() DescendStop()")
             .unwrap();
