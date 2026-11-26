@@ -1043,27 +1043,49 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         let k = k.map_or(0, |k| k as i64 + 1);
         many(vec![i(k)])
     })?;
-    // CalendarEventSortInvites("criteria", reverse) (`0x5b8570`): a change fires
-    // `CALENDAR_UPDATE_INVITE_LIST` (event `0x23e`); an unknown criterion sorts by status.
+    // CalendarEventSortInvites("criteria", reverse) (`0x5b8570`): the name matched without case
+    // (`_strnicmp`), else status; the flag defaults true (`0x815500(L, 2, 1)`). With an open event
+    // `0x5f1980` makes it the criterion, flips its reverse byte when the flag is set, clears the
+    // others' and fires `CALENDAR_UPDATE_INVITE_LIST` (event `0x23e`).
     set(lua, "CalendarEventSortInvites", |lua, args| {
         let Some(criterion) = text_arg(lua, &args, 0) else {
             return usage("Usage: CalendarEventSortInvites(\"criteria\", reverse)");
         };
-        let reverse = !matches!(arg(&args, 1), Value::Nil | Value::Boolean(false));
-        let index = CRITERIA.iter().position(|c| *c == criterion).unwrap_or(3);
-        let changed = write(lua, |st, _| {
-            let changed = st.open.is_some() && st.sort() != (index, reverse);
-            st.sort = Some((index, reverse));
-            changed
+        let flip = crate::script::binding_abi::bool_or_default(args.get(1), true);
+        let c = CRITERIA
+            .iter()
+            .position(|c| c.eq_ignore_ascii_case(&criterion))
+            .unwrap_or(3);
+        let group = {
+            let model = lua.app_data_ref::<Model>().expect("model app_data");
+            let party = model.party.members.iter().map(|m| m.guid);
+            party
+                .chain(model.party.raid.iter().map(|m| m.guid))
+                .collect()
+        };
+        let sorted = write(lua, |st, _| {
+            let Some(open) = st.open.as_mut() else {
+                return false;
+            };
+            let kept = open.reverse[c];
+            open.reverse = [false; 6];
+            open.reverse[c] = kept != flip;
+            (open.criterion, open.group) = (c, group);
+            true
         });
-        if changed {
+        if sorted {
             fire(lua, "CALENDAR_UPDATE_INVITE_LIST", vec![]);
         }
         many(vec![])
     })?;
+    // CalendarEventGetInviteSortCriterion (`0x5b8690`): `"", false` with no open event.
     set(lua, "CalendarEventGetInviteSortCriterion", |lua, _| {
-        let (c, r) = read(lua, State::sort);
-        many(vec![s(lua, CRITERIA[c])?, Value::Boolean(r)])
+        let (c, r) = read(lua, |st| {
+            let open = st.open.as_ref()?;
+            Some((CRITERIA[open.criterion], open.reverse[open.criterion]))
+        })
+        .unwrap_or(("", false));
+        many(vec![s(lua, c)?, Value::Boolean(r)])
     })?;
     // CalendarMassInviteGuild(minLevel, maxLevel, minRank) (`0x5bccb0` → `0x5bc160`).
     set(lua, "CalendarMassInviteGuild", |lua, args| {

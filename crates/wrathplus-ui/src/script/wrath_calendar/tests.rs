@@ -323,7 +323,7 @@ fn an_opened_event_edits_and_updates() {
     );
     assert!(s.run("CalendarEventSelectInvite()").is_err());
     // The selection is the invite's id (`+0x20`), found again after a re-sort (`0x5b8e00`).
-    s.run("CalendarEventSortInvites('level')").unwrap();
+    s.run("CalendarEventSortInvites('level', false)").unwrap();
     assert_eq!(
         s.eval::<i64>("return CalendarEventGetSelectedInvite()")
             .unwrap(),
@@ -489,23 +489,33 @@ fn invites_sort_and_status_options_need_a_moderator() {
          CalendarOpenEvent(0, 15, 1)",
     )
     .unwrap();
+    // `0x5b8690`: no open event, no criterion.
+    let criterion = |s: &UiScript| -> (String, bool) {
+        s.eval("return CalendarEventGetInviteSortCriterion()")
+            .unwrap()
+    };
+    assert_eq!(criterion(&s), ("".into(), false));
     // The reply.
     s.set_wrath_calendar(Arc::new(view));
-    s.run("CalendarEventSortInvites('name')").unwrap();
-    assert_eq!(s.eval::<i64>("return updates").unwrap(), 1);
+    // An absent flag is true and flips the reverse byte (`0x5f19a1`); a false one keeps it; the
+    // name matches without case; each sort fires the list event.
+    let first = |s: &UiScript, sort: &str| -> String {
+        s.run(sort).unwrap();
+        s.eval("return (CalendarEventGetInvite(1))").unwrap()
+    };
+    assert_eq!(first(&s, "CalendarEventSortInvites('name')"), "Zed");
+    assert_eq!(first(&s, "CalendarEventSortInvites('NAME', false)"), "Zed");
+    assert_eq!(criterion(&s), ("name".into(), true));
+    assert_eq!(first(&s, "CalendarEventSortInvites('name', true)"), "Amy");
+    // `0xad16cc` ranks an accepted invite before an unanswered one.
     assert_eq!(
-        s.eval::<(String, bool)>(
-            "local n, l, c, f, st, mod, mine = CalendarEventGetInvite(1) return n, mine"
-        )
-        .unwrap(),
-        ("Amy".into(), false)
+        first(&s, "CalendarEventSortInvites('status', false)"),
+        "Amy"
     );
-    assert_eq!(
-        s.eval::<(String, bool)>("return CalendarEventGetInviteSortCriterion()")
-            .unwrap()
-            .0,
-        "name"
-    );
+    assert_eq!(s.eval::<i64>("return updates").unwrap(), 4);
+    assert!(s
+        .eval::<bool>("return select(7, CalendarEventGetInvite(2))")
+        .unwrap());
     assert_eq!(
         s.eval::<i64>("return select('#', CalendarEventGetStatusOptions(1))")
             .unwrap(),

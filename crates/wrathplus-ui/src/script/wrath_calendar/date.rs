@@ -74,6 +74,23 @@ pub(super) fn abs_month(today_year: i32, month: i64, year: i64) -> (i32, u8) {
     (y as i32, ((month - 1) % 12).unsigned_abs() as u8 + 1)
 }
 
+/// `0x76ea40`: two strings by code point, each folded as `0x76e8d0` does (ASCII and Latin-1 to
+/// upper case, œ to Œ, Cyrillic with Ё beside Е).
+pub(super) fn fold_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+    fn fold(c: char) -> u32 {
+        match c as u32 {
+            c @ 0x61..=0x7a | c @ 0xe0..=0xfe => c - 0x20,
+            0x153 => 0x152,
+            0x401 | 0x451 => 0x415,
+            c @ 0x410..=0x415 => c - 1,
+            c @ 0x430..=0x435 => c - 0x21,
+            c @ 0x436..=0x44f => c - 0x20,
+            c => c,
+        }
+    }
+    a.chars().map(fold).cmp(b.chars().map(fold))
+}
+
 pub(super) fn to_seconds(y: i32, m: u8, d: u8, hour: u8, minute: u8) -> i64 {
     days_from_civil(y, m, d) * 86_400 + i64::from(hour) * 3600 + i64::from(minute) * 60
 }

@@ -17,6 +17,7 @@
 mod bindings;
 mod date;
 
+use std::cmp::Ordering;
 use std::sync::Arc;
 
 pub use date::WrathCalendarDate;
@@ -319,6 +320,11 @@ struct Open {
     changed: bool,
     /// The selected invite's id (`+0x20`), 0 at construction (`0x5f106a`).
     selected_invite: u64,
+    /// The sort criterion (`+0x544`, status at construction, `0x5f10fd`) and each criterion's
+    /// reverse byte (`+0x518 + 8i`), with the group as it stood at the last sort.
+    criterion: usize,
+    reverse: [bool; 6],
+    group: Vec<u64>,
 }
 
 impl Open {
@@ -329,6 +335,9 @@ impl Open {
             synced: None,
             changed: false,
             selected_invite: 0,
+            criterion: 3,
+            reverse: [false; 6],
+            group: Vec::new(),
         }
     }
 }
@@ -349,8 +358,6 @@ pub(crate) struct State {
     context: Option<Slot>,
     clipboard: Option<(u64, u64, WrathCalendarDate)>,
     open: Option<Open>,
-    /// `None` sorts by status, the criterion an unknown name also falls to.
-    sort: Option<(usize, bool)>,
     action_pending: bool,
     last_invite: Option<f64>,
     last_add: Option<f64>,
@@ -492,24 +499,42 @@ impl State {
         }
     }
 
-    /// The open event's invitees in the chosen sort.
+    /// The open event's invitees in its sort (`0x5f1720`): the criterion, negated by its reverse
+    /// byte, then the name (`0x5f18fe`). Labelled: 12340 sorts the list in place at each sort
+    /// with an unstable qsort; here it is sorted, stably, on each read.
     fn invitees(&self) -> Vec<WrathCalendarInvitee> {
-        let mut list = self.event().map(|e| e.invitees.clone()).unwrap_or_default();
-        let (criterion, reverse) = self.sort();
-        let key = |i: &WrathCalendarInvitee| -> (u32, String) {
-            match criterion {
-                0 => (0, i.name.clone().unwrap_or_default().to_lowercase()),
-                1 => (u32::from(i.level), String::new()),
-                2 => (0, i.class_file.clone().unwrap_or_default()),
-                5 => (0, i.notes.to_lowercase()),
-                // Labelled: party membership is not held here; it sorts as status.
-                _ => (u32::from(i.status), String::new()),
-            }
+        let Some(open) = self.open.as_ref() else {
+            return Vec::new();
         };
-        list.sort_by_key(|a| key(a));
-        if reverse {
-            list.reverse();
-        }
+        let mut list = self.event().map(|e| e.invitees.clone()).unwrap_or_default();
+        // `0xad16cc`: the status order, confirmed first and invited last.
+        const WEIGHT: [u8; 9] = [9, 3, 6, 1, 7, 4, 2, 8, 5];
+        let text = |a: &Option<String>, b: &Option<String>| match (a, b) {
+            (Some(a), Some(b)) => date::fold_cmp(a, b),
+            _ => Ordering::Equal,
+        };
+        let grouped = |i: &WrathCalendarInvitee| open.group.contains(&i.guid);
+        let c = open.criterion;
+        list.sort_by(|a, b| {
+            let o = match c {
+                0 => text(&a.name, &b.name),
+                1 => a.level.cmp(&b.level),
+                // Labelled: 12340 compares the class's ChrClasses name with `0x76ec80`, which also
+                // folds accents.
+                2 => text(&a.class_name, &b.class_name),
+                3 => {
+                    WEIGHT[usize::from(a.status.min(8))].cmp(&WEIGHT[usize::from(b.status.min(8))])
+                }
+                4 => grouped(b).cmp(&grouped(a)),
+                _ => date::fold_cmp(&a.notes, &b.notes),
+            };
+            let o = if open.reverse[c] { o.reverse() } else { o };
+            if o == Ordering::Equal && c != 0 {
+                text(&a.name, &b.name)
+            } else {
+                o
+            }
+        });
         list
     }
 
@@ -581,10 +606,6 @@ impl State {
                 open.synced = Some((id, revision));
             }
         }
-    }
-
-    fn sort(&self) -> (usize, bool) {
-        self.sort.unwrap_or((3, false))
     }
 
     fn push(&mut self, request: WrathCalendarRequest) {
