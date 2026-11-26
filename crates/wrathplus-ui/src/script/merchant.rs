@@ -465,49 +465,63 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // ShowMerchantSellCursor(index) (`0x4fbab0`) and ShowBuybackSellCursor(index) (`0x4fbbb0`):
+    // ShowMerchantSellCursor(index) (`0x5856d0`) and ShowBuybackSellCursor(index) (`0x585890`):
     // despite the names, the buy cursor, re-armed each frame an item is hovered
     // (`MerchantFrame.xml:726-733`). Every fail path returns without `CursorSetMode`; the
     // in-flight item lock and base-mode Point gates live app-side.
     g.set(
         "ShowMerchantSellCursor",
-        lua.create_function(|lua, index: usize| {
-            arm_vendor_cursor(lua, |m| {
-                m.items.get(index.wrapping_sub(1)).map(|it| it.price)
-            });
-            Ok(())
+        lua.create_function(|lua, index: Value| {
+            arm_vendor_cursor(
+                lua,
+                index,
+                "Usage: ShowMerchantSellCursor(index)",
+                |m, i| {
+                    let it = m.merchant.as_ref()?.items.get(i)?;
+                    Some(super::wrath_merchant::cannot_buy(m, it))
+                },
+            )
         })?,
     )?;
+    // The buyback row tests the purse alone (`0x585962`).
     g.set(
         "ShowBuybackSellCursor",
-        lua.create_function(|lua, index: usize| {
-            arm_vendor_cursor(lua, |m| {
-                m.buyback.get(index.wrapping_sub(1)).map(|it| it.price)
-            });
-            Ok(())
+        lua.create_function(|lua, index: Value| {
+            arm_vendor_cursor(lua, index, "Usage: ShowBuybackSellCursor(index)", |m, i| {
+                let it = m.merchant.as_ref()?.buyback.get(i)?;
+                Some(m.money < u64::from(it.price))
+            })
         })?,
     )?;
 
     Ok(())
 }
 
-/// Arm the vendor hover cursor from a row's price: Buy(3) if the player can afford it, else the
-/// greyed UnableBuy(23); no price leaves the cursor untouched.
-fn arm_vendor_cursor(lua: &Lua, price_of: impl FnOnce(&MerchantState) -> Option<u32>) {
-    let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-    // The family bails on `IsTargeting` first (`0x6e48a0`): an armed spell keeps its cursor.
-    if model.spell_targeting {
-        return;
+/// Arm the vendor hover cursor: Buy(3), or the greyed UnableBuy when `unable` says the row cannot
+/// be bought; no row leaves the cursor untouched.
+fn arm_vendor_cursor(
+    lua: &Lua,
+    index: Value,
+    usage: &'static str,
+    unable: impl FnOnce(&Model, usize) -> Option<bool>,
+) -> mlua::Result<()> {
+    // The family bails on `IsTargeting` (`0x7fd620`) ahead of its argument check: an armed spell
+    // keeps its cursor.
+    if lua.app_data_ref::<Model>().expect("model").spell_targeting {
+        return Ok(());
     }
-    let Some(price) = model.merchant.as_ref().and_then(price_of) else {
-        return;
+    let index = number_arg(lua, index, usage)?.wrapping_sub(1);
+    let mut model = lua.app_data_mut::<Model>().expect("model app_data");
+    let Some(unable) = usize::try_from(index).ok().and_then(|i| unable(&model, i)) else {
+        return Ok(());
     };
-    model.ui_cursor = Some(if model.money >= u64::from(price) {
-        UiCursorMode::Buy
-    } else {
+    model.ui_cursor = Some(if unable {
         UiCursorMode::UnableBuy
+    } else {
+        UiCursorMode::Buy
     });
     model.ui_cursor_dirty = true;
+    Ok(())
 }
 
 #[cfg(test)]

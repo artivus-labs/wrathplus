@@ -3,6 +3,7 @@
 //! and its `isUsable` also tests the cost's personal arena rating (`0x5a37b0`);
 //! `GetMerchantItemCostInfo` (`0x5846e0`) and `GetMerchantItemCostItem` (`0x584820`) read the
 //! row's `ItemExtendedCost.dbc` record; `GetBuybackItemLink` (`0x5852c0`) links a buyback slot.
+//! `GetRepairAllCost` (`0x585990`) and the buy cursor's cost test (`0x5856d0`) are 12340's too.
 
 use mlua::{Lua, MultiValue, Value};
 
@@ -28,6 +29,32 @@ pub struct ExtendedCostView {
     pub items: Vec<CostItemView>,
     /// `0x5a37b0`'s answer for the record's personal rating; true when it asks none.
     pub rating_ok: bool,
+}
+
+/// `ShowMerchantSellCursor`'s refusal (`0x5856d0`): the purse; then, with the template cached
+/// (`0x585783`), its reputation rank; then the extended cost's honor (`+0x11a4`), arena points
+/// (`+0x11a8`), carried items (`0x754d00`) and personal rating (`0x5a37b0`).
+pub(super) fn cannot_buy(model: &Model, it: &super::MerchantItem) -> bool {
+    if model.money < u64::from(it.price) {
+        return true;
+    }
+    let Some(t) = model.item_templates.get(&it.item_id) else {
+        return false;
+    };
+    // A faction with no reputation slot reads standing 0, Neutral (`0x5d05b0`).
+    let rank = model.player_req.rep_ranks.get(&t.required_rep_faction);
+    if t.required_rep_faction != 0 && u32::from(*rank.unwrap_or(&3)) < t.required_rep_rank {
+        return true;
+    }
+    let Some(c) = it.extended_cost.as_ref() else {
+        return false;
+    };
+    let cur = &model.wrath_currency;
+    cur.honor_current.unwrap_or(0) < c.honor
+        || cur.arena_current.unwrap_or(0) < c.arena
+        || (c.items.iter())
+            .any(|i| super::wrath_item_count::item_count(model, i.item_id, false) < i.count)
+        || !c.rating_ok
 }
 
 fn index_arg(v: &Value) -> Option<i64> {
@@ -271,6 +298,88 @@ mod tests {
             s.eval::<bool>("return select('#', GetRepairAllCost()) == 1")
                 .unwrap(),
             "a vendor that does not repair"
+        );
+    }
+
+    /// `ShowMerchantSellCursor` (`0x5856d0`) greys the cursor for the purse, then, with the template
+    /// cached, its reputation rank, then the extended cost's honor, arena points and items.
+    #[test]
+    fn the_buy_cursor_greys_for_every_short_cost() {
+        use crate::script::container::UiCursorMode::{Buy, UnableBuy};
+        let mut s = UiScript::new().unwrap();
+        s.set_money(1000);
+        let cost = ExtendedCostView {
+            honor: 100,
+            items: vec![CostItemView {
+                item_id: 29434,
+                count: 2,
+                ..Default::default()
+            }],
+            rating_ok: true,
+            ..Default::default()
+        };
+        let row = |price, extended_cost| MerchantItem {
+            item_id: 40000,
+            price,
+            extended_cost,
+            ..Default::default()
+        };
+        let cursor = |s: &mut UiScript, item: MerchantItem| {
+            s.set_merchant(Some(MerchantState {
+                items: vec![item],
+                ..Default::default()
+            }));
+            s.run("ShowMerchantSellCursor(1)").unwrap();
+            s.ui_cursor()
+        };
+        assert_eq!(
+            cursor(&mut s, row(5000, None)),
+            Some(UnableBuy),
+            "the purse"
+        );
+        assert_eq!(
+            cursor(&mut s, row(10, Some(cost.clone()))),
+            Some(Buy),
+            "uncached: Buy"
+        );
+        s.model_mut().item_templates.insert(
+            40000,
+            crate::script::item_stats::ItemTemplateView {
+                required_rep_faction: 72,
+                required_rep_rank: 5,
+                ..Default::default()
+            },
+        );
+        s.model_mut().player_req.rep_ranks.insert(72, 4);
+        assert_eq!(
+            cursor(&mut s, row(10, None)),
+            Some(UnableBuy),
+            "Friendly, not Honored"
+        );
+        s.model_mut().player_req.rep_ranks.insert(72, 5);
+        assert_eq!(cursor(&mut s, row(10, None)), Some(Buy));
+        s.model_mut().wrath_currency.honor_current = Some(99);
+        assert_eq!(
+            cursor(&mut s, row(10, Some(cost.clone()))),
+            Some(UnableBuy),
+            "honor"
+        );
+        s.model_mut().wrath_currency.honor_current = Some(100);
+        assert_eq!(
+            cursor(&mut s, row(10, Some(cost.clone()))),
+            Some(UnableBuy),
+            "no badges"
+        );
+        s.model_mut().wrath_currency.token_stacks = vec![(29434, 2)];
+        assert_eq!(
+            cursor(&mut s, row(10, Some(cost))),
+            Some(Buy),
+            "every cost met"
+        );
+        let err = s.run("ShowMerchantSellCursor()").unwrap_err().to_string();
+        assert!(
+            err.contains("Usage: ShowMerchantSellCursor(index)"),
+            "{err}"
         );
     }
 }
