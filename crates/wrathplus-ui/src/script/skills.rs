@@ -3,8 +3,10 @@
 //! sorts and folds it as the client's list build (`0x4d2cb0`, comparator `0x4d3070`) does: one
 //! header per category, by `category_order` (category id breaks a tie), and within a category the
 //! untrained lines (rank 0) after the trained ones, each by name. A push re-expands every group.
-//! Every Lua index is 1-based into the visible rows, headers plus the entries of expanded groups;
-//! the selection is held by skill id, so it survives a re-push, and selecting a header clears it.
+//! Every Lua index is 1-based into 12340's whole row array (`0xc22b0c`): the visible rows, headers
+//! plus the entries of expanded groups, then the folded groups' entries; `GetNumSkillLines` counts
+//! the visible ones. The selection is held by skill id, so it survives a re-push, and selecting a
+//! header clears it.
 //! Which lines reach the engine at all is the app's half (`feed_skills`).
 //!
 //! `numTempPoints` answers 0: the model carries no temp points, and on 1.12's data nothing a player
@@ -162,33 +164,46 @@ fn num_rows(model: &Model) -> usize {
     rows(model).len()
 }
 
-/// The entry at a 1-based visible index; `None` for a header.
-fn entry_at(model: &Model, index: usize) -> Option<&SkillEntry> {
-    let n = index.checked_sub(1)?;
-    match rows(model).get(n)? {
-        Row::Entry(ei) => model.skills.entries.get(*ei),
+/// Every row, 12340's whole array: the visible rows, then the folded groups' entries, which the
+/// comparator `0x5cd4a0` sorts last. Labelled: 12340's order among those is qsort's, as they
+/// compare equal (`0x5cd5b7`); here they keep the display order.
+fn all_rows(model: &Model) -> Vec<Row> {
+    let mut out = rows(model);
+    for g in &model.skills_groups {
+        if model.skills_collapsed.contains(&g.category_id) {
+            out.extend(g.entries.iter().map(|&ei| Row::Entry(ei)));
+        }
+    }
+    out
+}
+
+/// The row at a 1-based index, as the verbs' `index - 1 < total` unsigned test bounds it.
+fn row_at(model: &Model, index: i32) -> Option<Row> {
+    all_rows(model)
+        .get(usize::try_from(index.wrapping_sub(1)).ok()?)
+        .copied()
+}
+
+/// The entry at a 1-based index; `None` for a header.
+fn entry_at(model: &Model, index: i32) -> Option<&SkillEntry> {
+    match row_at(model, index)? {
+        Row::Entry(ei) => model.skills.entries.get(ei),
         Row::Header(_) => None,
     }
 }
 
-/// Collapse or expand the category whose header is at visible index `id`; 0 is every group, and a
-/// non-header index does nothing.
-fn set_collapsed(model: &mut Model, id: usize, collapse: bool) {
-    if id == 0 && !collapse {
-        model.skills_collapsed.clear();
-        return;
-    }
-    let targets: Vec<u32> = if id == 0 {
+/// `CollapseSkillHeader`/`ExpandSkillHeader` (`0x5ce3a0`/`0x5ce400`): an index at or below 0
+/// folds or unfolds every group (`0x5ce3de`), any other row its own category, a skill row's too
+/// (`0x5cd760` reads `[entry+4]`). Each re-sort signals `SKILL_LINES_CHANGED` (`0x5cd6fc`); a row
+/// past the array does nothing.
+fn set_collapsed(model: &mut Model, index: i32, collapse: bool) {
+    let targets: Vec<u32> = if index <= 0 {
         model.skills_groups.iter().map(|g| g.category_id).collect()
     } else {
-        match rows(model).get(id - 1) {
-            Some(Row::Header(gi)) => model
-                .skills_groups
-                .get(*gi)
-                .map(|g| g.category_id)
-                .into_iter()
-                .collect(),
-            _ => Vec::new(),
+        match row_at(model, index) {
+            Some(Row::Header(gi)) => vec![model.skills_groups[gi].category_id],
+            Some(Row::Entry(ei)) => vec![model.skills.entries[ei].category_id],
+            None => return,
         }
     };
     for c in targets {
@@ -198,6 +213,8 @@ fn set_collapsed(model: &mut Model, id: usize, collapse: bool) {
             model.skills_collapsed.remove(&c);
         }
     }
+    let changed = ("SKILL_LINES_CHANGED".to_string(), Vec::new());
+    model.pending_events.push(changed);
 }
 
 /// `GetSkillLineInfo`'s out-of-range answer, thirteen values (`0x4d3a2c`…`0x4d3a98`): the
@@ -222,8 +239,8 @@ fn out_of_range_tuple(_lua: &Lua) -> mlua::Result<MultiValue> {
     ]))
 }
 
-fn set_selected(model: &mut Model, index: u32) {
-    model.skills_selected = entry_at(model, index as usize).map(|e| e.skill_id);
+fn set_selected(model: &mut Model, index: i32) {
+    model.skills_selected = entry_at(model, index).map(|e| e.skill_id);
 }
 
 /// `GetSelectedSkill()`: the selection's current visible index, 0 when none or folded away.
@@ -275,17 +292,16 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // GetSkillLineInfo(index) → 13 values on a skill row (`0x4d3a20`), 12 on a header
-    // (`0x4d3768`); out of range, the 13-value tuple (`0x4d3a2a`), whose nil first slot drives
-    // stock `SkillFrame.lua:211`'s early return.
+    // GetSkillLineInfo(index) (`0x5cde20`, the index truncated) → 13 values on a skill row, 12 on
+    // a header (`0x5cdf83`); past the array, the 13-value tuple, whose nil first slot drives stock
+    // `SkillFrame.lua:211`'s early return.
     g.set(
         "GetSkillLineInfo",
-        lua.create_function(|lua, index: usize| {
+        lua.create_function(|lua, index: Value| {
+            let usage = "Usage: GetSkillLineInfo(index)";
+            let index = binding_abi::number_arg(lua, index, usage)?;
             let model = lua.app_data_ref::<Model>().expect("model app_data");
-            let Some(n) = index.checked_sub(1) else {
-                return out_of_range_tuple(lua);
-            };
-            let Some(row) = rows(&model).get(n).copied() else {
+            let Some(row) = row_at(&model, index) else {
                 return out_of_range_tuple(lua);
             };
             match row {
@@ -332,29 +348,37 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // Collapse/ExpandSkillHeader(id): by the header's visible index, 0 for every group.
-    g.set(
-        "CollapseSkillHeader",
-        lua.create_function(|lua, id: usize| {
-            let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-            set_collapsed(&mut model, id, true);
-            Ok(())
-        })?,
-    )?;
-    g.set(
-        "ExpandSkillHeader",
-        lua.create_function(|lua, id: usize| {
-            let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-            set_collapsed(&mut model, id, false);
-            Ok(())
-        })?,
-    )?;
+    // Collapse/ExpandSkillHeader(index): `isnumber` or the usage, then `__ftol2` (`0x5ce3d4`).
+    for (name, usage, collapse) in [
+        (
+            "CollapseSkillHeader",
+            "Usage: CollapseSkillHeader(index)",
+            true,
+        ),
+        (
+            "ExpandSkillHeader",
+            "Usage: ExpandSkillHeader(index)",
+            false,
+        ),
+    ] {
+        g.set(
+            name,
+            lua.create_function(move |lua, index: Value| {
+                let index = binding_abi::ftol_arg(lua, index, usage)?;
+                let mut model = lua.app_data_mut::<Model>().expect("model app_data");
+                set_collapsed(&mut model, index, collapse);
+                Ok(())
+            })?,
+        )?;
+    }
 
-    // SetSelectedSkill(index) / GetSelectedSkill(): visible indices, held by skill id;
-    // `GetSelectedSkill` (`0x4d4090`) always answers one number, 0 included.
+    // SetSelectedSkill(index) (`0x5cd860`, truncated) / GetSelectedSkill(): held by skill id;
+    // `GetSelectedSkill` (`0x5cd8f0`) answers its visible index, 0 when none or folded.
     g.set(
         "SetSelectedSkill",
-        lua.create_function(|lua, index: u32| {
+        lua.create_function(|lua, index: Value| {
+            let usage = "Usage: SetSelectedSkill(index)";
+            let index = binding_abi::number_arg(lua, index, usage)?;
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
             set_selected(&mut model, index);
             Ok(())
@@ -376,11 +400,13 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         lua.create_function(|_, ()| Ok(0i64))?,
     )?;
 
-    // AbandonSkill(index): queue the entry's skill id for `CMSG_UNLEARN_SKILL`, changing nothing
-    // locally: the reference waits for the skill-field update (vmangos `SetSkill(id,0,0)`).
+    // AbandonSkill(index) (`0x5ce2c0`, truncated): queue the entry's skill id for
+    // `CMSG_UNLEARN_SKILL`, changing nothing locally until the skill field moves. Labelled: a
+    // header row sends skill 0 in 12340 (`0x5ce356`), which the server ignores; here nothing.
     g.set(
         "AbandonSkill",
-        lua.create_function(|lua, index: usize| {
+        lua.create_function(|lua, index: Value| {
+            let index = binding_abi::number_arg(lua, index, "Usage: AbandonSkill(index)")?;
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
             if let Some(id) = entry_at(&model, index).map(|e| e.skill_id) {
                 model.skill_abandons.push(id);

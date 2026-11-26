@@ -131,11 +131,51 @@ fn collapse_hides_a_groups_entries_and_remaps_indices() {
     s.run("ExpandSkillHeader(1)").unwrap();
     assert_eq!(s.eval::<i64>("return GetNumSkillLines()").unwrap(), 6);
 
-    // Collapse-all (id 0), then expand-all (id 0).
-    s.run("CollapseSkillHeader(0)").unwrap();
+    // Collapse-all (id 0, or any index at or below 0), then expand-all (id 0).
+    s.run("CollapseSkillHeader(-1)").unwrap();
     assert_eq!(s.eval::<i64>("return GetNumSkillLines()").unwrap(), 2);
     s.run("ExpandSkillHeader(0)").unwrap();
     assert_eq!(s.eval::<i64>("return GetNumSkillLines()").unwrap(), 6);
+
+    // A skill row folds its own category (`0x5cd760`, `[entry+4]`); folded rows stay addressable
+    // past the visible count (`0x5cde90` bounds by the total), and selectable.
+    s.run("CollapseSkillHeader(5.9)").unwrap();
+    assert_eq!(s.eval::<i64>("return GetNumSkillLines()").unwrap(), 4);
+    assert_eq!(row_kind(&mut s, 5), ("First Aid".into(), "entry".into()));
+    assert_eq!(row_kind(&mut s, 6), ("Fishing".into(), "entry".into()));
+    assert!(s.eval::<bool>("return GetSkillLineInfo(7) == nil").unwrap());
+    s.run("SetSelectedSkill(5)").unwrap();
+    assert_eq!(
+        s.eval::<i64>("return GetSelectedSkill()").unwrap(),
+        0,
+        "folded"
+    );
+    s.run("ExpandSkillHeader(4)").unwrap();
+    assert_eq!(s.eval::<i64>("return GetSelectedSkill()").unwrap(), 5);
+
+    // Each fold re-sorts and signals `SKILL_LINES_CHANGED` (`0x5cd6fc`); a row past the array
+    // does nothing.
+    let signals = |s: &mut UiScript| {
+        let pending = std::mem::take(&mut s.model_mut().pending_events);
+        pending
+            .iter()
+            .filter(|e| e.0 == "SKILL_LINES_CHANGED")
+            .count()
+    };
+    assert_eq!(signals(&mut s), 6);
+    s.run("CollapseSkillHeader(99) ExpandSkillHeader(99)")
+        .unwrap();
+    assert_eq!(signals(&mut s), 0);
+    for verb in [
+        "GetSkillLineInfo",
+        "CollapseSkillHeader",
+        "ExpandSkillHeader",
+        "SetSelectedSkill",
+        "AbandonSkill",
+    ] {
+        let err = s.run(&format!("{verb}()")).unwrap_err().to_string();
+        assert!(err.contains(&format!("Usage: {verb}(index)")), "{err}");
+    }
 }
 
 #[test]
