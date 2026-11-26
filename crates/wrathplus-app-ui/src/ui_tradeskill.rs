@@ -119,7 +119,7 @@ pub(crate) fn own_trade_link(
     if !catalog.line(line)?.can_link {
         return None;
     }
-    let (rank, max_rank) = skill_rank(store, line);
+    let (rank, max_rank) = skill_rank(store, line, false);
     if max_rank == 0 {
         return None;
     }
@@ -255,14 +255,17 @@ fn open_trade_skill(
     }
 }
 
-/// A skill line's raw `(value, max)` off `PLAYER_SKILL_INFO`, which the rank bar shows as is,
-/// where the reference's `GetTradeSkillLine` (`0x4fdd40`) adds the permanent skill bonus to each
-/// nonzero half (`0x4fddf7`, `0x4fde6a`).
-fn skill_rank(store: &ObjectStore, skill_id: u32) -> (u32, u32) {
+/// A skill line's `(value, max)` off `PLAYER_SKILL_INFO`; `bonus` adds the permanent skill bonus to
+/// each nonzero half, as `GetTradeSkillLine` shows them (`0x51a28a`, `0x5dae00`).
+fn skill_rank(store: &ObjectStore, skill_id: u32, bonus: bool) -> (u32, u32) {
     for i in 0..PLAYER_SKILL_SLOTS {
         if let Some(s) = store.0.player_skill(i) {
             if u32::from(s.skill_id) == skill_id {
-                return (u32::from(s.value), u32::from(s.max));
+                let add = |v: u16| match (v, bonus) {
+                    (1.., true) => u32::from(v).saturating_add_signed(i32::from(s.perm_bonus)),
+                    _ => u32::from(v),
+                };
+                return (add(s.value), add(s.max));
             }
         }
     }
@@ -443,8 +446,9 @@ fn feed_trade_skill(
         // A linked book shows the link's rank (`0xc235e8`/`0xc235ec`), ours the descriptor's.
         let (rank, max_rank) = match &open.link {
             Some(l) => (l.rank, l.max_rank),
-            None => skill_rank(store, line),
+            None => skill_rank(store, line, false),
         };
+        let shown = open.link.is_none().then(|| skill_rank(store, line, true));
         let line_name = skill_lines
             .catalog
             .line(line)
@@ -520,8 +524,8 @@ fn feed_trade_skill(
         Some(TradeSkillState {
             line,
             line_name,
-            rank,
-            max_rank,
+            rank: shown.map_or(rank, |s| s.0),
+            max_rank: shown.map_or(max_rank, |s| s.1),
             recipes,
             repeat_count: repeat.remaining,
             linked: open.link.as_ref().map(|l| {
