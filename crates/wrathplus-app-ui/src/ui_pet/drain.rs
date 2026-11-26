@@ -428,11 +428,22 @@ pub(super) fn old_target_cleared(previous: Option<u64>, now: Option<u64>) -> boo
     previous.is_some() && previous != now
 }
 
-/// The old-target clear's `PetStopAttack` (`0x493910`, at `0x493a18` when `0x5ee5a0` finds a
-/// possessed unit at `0x493a0f`). It sits before the notify branch, so every selection writer runs
-/// it; a re-select runs no clear (`0x493540`).
+/// Whether a selection change calls the pet off: the old-target clear (`0x5241b0`) runs
+/// `PetStopAttack` only while we control another unit (`0x6dd060` at `0x5242bb`), so a hunter's
+/// retarget leaves the pet fighting.
+pub(super) fn old_target_stops_pet(
+    previous: Option<u64>,
+    now: Option<u64>,
+    vehicle: Option<&crate::net::wrath_vehicle::VehicleState>,
+) -> bool {
+    old_target_cleared(previous, now)
+        && vehicle.is_some_and(|v| v.possessed.is_some() || v.controlling)
+}
+
+/// The old-target clear's `PetStopAttack` (`0x5242c4`); a re-select runs no clear.
 pub(crate) fn pet_stop_on_old_target_clear(
     selection: Res<Selection>,
+    vehicle: Option<Res<crate::net::wrath_vehicle::VehicleState>>,
     mut previous: Local<Option<u64>>,
     mut bar: ResMut<PetBar>,
     commands: Res<NetCommands>,
@@ -441,10 +452,10 @@ pub(crate) fn pet_stop_on_old_target_clear(
     if *previous == now {
         return;
     }
-    let cleared = old_target_cleared(*previous, now);
+    let stops = old_target_stops_pet(*previous, now, vehicle.as_deref());
     *previous = now;
-    if cleared && stop_pet_attack(&mut bar, &commands) {
-        debug!("ui_pet: the old-target clear called the pet off (0x493a18)");
+    if stops && stop_pet_attack(&mut bar, &commands) {
+        debug!("ui_pet: the old-target clear called the pet off (0x5242c4)");
     }
 }
 

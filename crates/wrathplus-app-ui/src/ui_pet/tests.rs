@@ -536,6 +536,12 @@ fn touching_your_target_calls_the_pet_off() {
     assert!(old_target_cleared(Some(7), None));
     // A re-select never reaches the clear (`0x493540`).
     assert!(!old_target_cleared(Some(7), Some(7)));
+    // It calls the pet off only while we control another unit (`0x5242bb`): not a hunter's.
+    let mut vehicle = crate::net::wrath_vehicle::VehicleState::default();
+    assert!(!old_target_stops_pet(Some(7), Some(9), Some(&vehicle)));
+    vehicle.possessed = Some(0xF14);
+    assert!(old_target_stops_pet(Some(7), Some(9), Some(&vehicle)));
+    assert!(!old_target_stops_pet(Some(7), Some(7), Some(&vehicle)));
 
     assert!(stop_pet_attack(&mut bar, &commands));
     assert!(!bar.attacking, "the latch is down");
