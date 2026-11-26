@@ -21,8 +21,10 @@ pub enum WrathPopupRequest {
     DeclineArenaTeam,
     /// `ArenaTeamDisband(team)` (`0x516130`, CMSG `0x355`); 1-based slot, 0 for none.
     ArenaTeamDisband { team: u8 },
-    /// `AcceptLevelGrant()` (`0x523360` → `0x521b00`). Declining only clears the pending grant.
+    /// `AcceptLevelGrant()` (`0x523360` → `0x521b00`).
     AcceptLevelGrant,
+    /// `DeclineLevelGrant()` (`0x517d20`): the pending grant's proposer is forgotten, nothing sent.
+    DeclineLevelGrant,
     /// `BattlefieldMgrEntryInviteResponse(id, accept)` (`0x54e160`).
     BattlefieldMgrEntryInvite { id: i32, accept: bool },
     /// `BattlefieldMgrQueueInviteResponse(id, accept)` (`0x54e1c0`).
@@ -218,8 +220,9 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         none()
     })?;
     verb(lua, "AcceptLevelGrant", R::AcceptLevelGrant)?;
-    // DeclineLevelGrant() (`0x517d20`) only forgets the pending grant; nothing is sent.
-    set(lua, "DeclineLevelGrant", |_, _| none())?;
+    // DeclineLevelGrant() (`0x517d20`) only forgets the pending grant (`[0xbd08b8]`); nothing is
+    // sent, so a later AcceptLevelGrant answers no one (`0x521b11`).
+    verb(lua, "DeclineLevelGrant", R::DeclineLevelGrant)?;
     verb(lua, "CancelSummon", R::CancelSummon)?;
     verb(lua, "GMResponseResolve", R::GmResponseResolve)?;
     verb(lua, "ReplaceTradeEnchant", R::ReplaceTradeEnchant)?;
@@ -593,6 +596,7 @@ mod tests {
             vec![
                 R::AcceptArenaTeam,
                 R::ArenaTeamDisband { team: 2 },
+                R::DeclineLevelGrant,
                 R::CancelSummon,
                 R::RespondInstanceLock { accept: true },
                 R::SetLfgBootVote { yes: false },
