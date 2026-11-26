@@ -1,7 +1,5 @@
 //! The channel verbs the VM queued, as the `CMSG_*` each becomes.
 
-use bevy::prelude::*;
-
 use crate::net::ClientCommand;
 
 /// One queued [`wrathplus_ui::script::ChannelCommand`] as its client command, `None` when the
@@ -39,22 +37,13 @@ pub(super) fn command(
             ClientCommand::LeaveChannel { name }
         }
         C::List { name } => ClientCommand::ChannelList { name },
-        // `ListChannels()`: the joined roster, numbered as `/N` addresses it.
+        // `ListChannels()` (`0x50dae0`) sends nothing: it fires `CHAT_MSG_CHANNEL_LIST`, type 0x14
+        // through `0x509dd0`, with the list as arg1, empty or not; stock prints it whole
+        // (ChatFrame.lua:2772-2778).
         C::ListAll => {
-            let roster: Vec<String> = channels
-                .joined
-                .iter()
-                .enumerate()
-                .filter_map(|(i, c)| c.as_ref().map(|c| format!("{}. {}", i + 1, c.name)))
-                .collect();
-            let text = if roster.is_empty() {
-                "You are not in any channels.".to_string()
-            } else {
-                format!("Channels: {}", roster.join(", "))
-            };
             chat_log.push_event(super::super::event::ChatEvent::text_only(
-                super::super::event::ChatEventKind::System,
-                text,
+                super::super::event::ChatEventKind::ChannelList,
+                channels.list_text(),
             ));
             return None;
         }
@@ -72,4 +61,30 @@ pub(super) fn command(
         C::Moderate { name } => ClientCommand::ChannelModerate { name },
         C::ToggleAnnouncements { name } => ClientCommand::ChannelAnnouncements { name },
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::super::edit::{ChannelSlot, ChannelState, SlotState};
+
+    /// `0x50dae0`: `"[%d. %s] "` per record in state 0 (`0x50db1a`), the wire name and the
+    /// trailing space kept; a hole or a pending record is skipped; none joined is "".
+    #[test]
+    fn list_channels_text_is_the_confirmed_records_in_slot_order() {
+        let mut state = ChannelState::default();
+        assert_eq!(state.list_text(), "");
+        state.joined = vec![
+            Some(ChannelSlot::joined("General - Elwynn Forest")),
+            None,
+            Some(ChannelSlot {
+                name: "Renamed".into(),
+                state: SlotState::Renamed,
+            }),
+            Some(ChannelSlot::joined("MyChan")),
+        ];
+        assert_eq!(
+            state.list_text(),
+            "[1. General - Elwynn Forest] [4. MyChan] "
+        );
+    }
 }

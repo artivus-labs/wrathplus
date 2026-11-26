@@ -271,6 +271,21 @@ impl ChannelState {
             .collect()
     }
 
+    /// `ListChannels()`'s line (`0x50dae0`): `"[%d. %s] "` (`0x9fceec`) for each record in state
+    /// 0, by its wire name.
+    pub(crate) fn list_text(&self) -> String {
+        self.joined
+            .iter()
+            .enumerate()
+            .filter_map(|(i, s)| {
+                s.as_ref()
+                    .filter(|s| s.state == SlotState::Joined)
+                    .map(|s| (i, s))
+            })
+            .map(|(i, s)| format!("[{}. {}] ", i + 1, s.name))
+            .collect()
+    }
+
     /// Every joined channel's name, holes skipped.
     pub(crate) fn iter_names(&self) -> impl Iterator<Item = &str> {
         self.joined.iter().flatten().map(|s| s.name.as_str())
