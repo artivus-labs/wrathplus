@@ -12,6 +12,7 @@ fn vm() -> UiScript {
         Some(UnitState {
             guid: 1,
             exists: true,
+            class: Some("Warrior".into()),
             class_file: Some("WARRIOR".into()),
             ..Default::default()
         }),
@@ -173,7 +174,8 @@ fn getters_read_the_snapshot_in_native_shapes() {
         "select('#', GetLFGRoleUpdateSlot(2))==0",
         "select('#', GetLFGRoleUpdateMember(1))==8 and select(3, GetLFGRoleUpdateMember(1))=='Me'",
         "select(5, GetLFGRoleUpdateMember(1))==true and select(6, GetLFGRoleUpdateMember(1))==true and select(7, GetLFGRoleUpdateMember(1))==false",
-        "select(1, GetLFGRoleUpdateMember(2))==2 and select(2, GetLFGRoleUpdateMember(2))==false and select(3, GetLFGRoleUpdateMember(2))==79",
+        "select('#', GetLFGRoleUpdateMember(2))==8 and select(1, GetLFGRoleUpdateMember(2))==false and select(2, GetLFGRoleUpdateMember(2))==79",
+        "select(4, GetLFGRoleUpdateMember(1))=='Warrior' and select(3, GetLFGRoleUpdateMember(2))==nil and select(5, GetLFGRoleUpdateMember(2))==nil",
         "select('#', GetLFGProposal())==12 and select(3, GetLFGProposal())==7 and select(4, GetLFGProposal())=='Halls'",
         "select(6, GetLFGProposal())=='TANK' and select(8, GetLFGProposal())==2 and select(9, GetLFGProposal())==1",
         "select(10, GetLFGProposal())==5 and select(11, GetLFGProposal())==true",
@@ -196,6 +198,7 @@ fn getters_read_the_snapshot_in_native_shapes() {
     );
     for usage in [
         "GetLFGRoleUpdateSlot()",
+        "GetLFGRoleUpdateMember()",
         "GetLFGProposalEncounter('x')",
         "GetLFGCompletionRewardItem()",
         "GetLFGQueuedList(1)",

@@ -592,12 +592,11 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             None => MultiValue::new(),
         })
     })?;
-    // GetLFGRoleUpdateMember(index) (`0x554750`) → ready, level, name, class file ("" unknown),
-    // then leader/tank/healer/damage for a ready member. An unready member pushes three nils
-    // under a return count of 8, so native's first value is the index argument itself.
+    // GetLFGRoleUpdateMember(index) (`0x554750`) → ready, level, name and class (nil, nil when the
+    // name is not cached), then leader/tank/healer/damage for a ready member, four nils otherwise
+    // (`0x5548b5`): eight values.
     set(lua, "GetLFGRoleUpdateMember", |lua, args| {
-        let index = arg(&args, 0);
-        let i = number_arg(lua, index.clone(), "Usage: GetLFGRoleUpdateMember(index)")?;
+        let i = number_arg(lua, arg(&args, 0), "Usage: GetLFGRoleUpdateMember(index)")?;
         let m = lua.app_data_ref::<Model>().expect("model app_data");
         let Some(member) = usize::try_from(i.wrapping_sub(1)).ok().and_then(|i| {
             m.wrath_lfg
@@ -613,24 +612,15 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         match &member.name {
             Some(name) => {
                 out.push(text(lua, name)?);
-                // Labelled: `0x72aab0(0, name)` is unread; this answers the class file of the
-                // streamed unit with the member's GUID, "" otherwise.
-                let class = ["player", "party1", "party2", "party3", "party4"]
-                    .iter()
-                    .filter_map(|t| m.unit(t))
-                    .find(|u| u.exists && u.guid == member.guid)
-                    .and_then(|u| u.class_file.clone())
-                    .unwrap_or_default();
-                out.push(text(lua, &class)?);
+                // Labelled: 12340 answers the name-cache record's gendered ChrClasses name
+                // (`0x72aab0` → `0x7159e0`); this reads the unit with the member's guid, "" without.
+                let class = m.unit_by_guid(member.guid).and_then(|u| u.class.as_deref());
+                out.push(text(lua, class.unwrap_or_default())?);
             }
             None => out.extend([Value::Nil, Value::Nil]),
         }
-        if member.ready {
-            out.extend([1u8, 2, 4, 8].map(|b| Value::Boolean(member.roles & b != 0)));
-        } else {
-            out.insert(0, index);
-            out.extend([Value::Nil, Value::Nil, Value::Nil]);
-        }
+        let roles = [1u8, 2, 4, 8].map(|b| Value::Boolean(member.roles & b != 0));
+        out.extend(roles.map(|v| if member.ready { v } else { Value::Nil }));
         Ok(MultiValue::from_vec(out))
     })?;
 
