@@ -191,26 +191,26 @@ impl UiScript {
     }
 }
 
-fn flag(value: Value) -> mlua::Result<bool> {
-    // Stock TokenUI passes numeric 0/1, not Lua's truthiness (where 0 is true).
-    match value {
-        Value::Boolean(b) => Ok(b),
-        Value::Integer(n) => Ok(n != 0),
-        Value::Number(n) => Ok(n != 0.0),
-        Value::Nil => Ok(false),
-        _ => Err(mlua::Error::external(
-            "currency flag must be numeric or boolean",
-        )),
-    }
+/// A name or icon, nil while the item is unresolved (`0x5b06fe`, `0x5b08d5`).
+fn text(lua: &Lua, t: Option<&str>) -> mlua::Result<Value> {
+    t.map_or(Ok(Value::Nil), |t| lua.create_string(t).map(Value::String))
 }
 
-/// `GetCurrencyListInfo`'s nine values for a built row (`0x5b0680`).
+/// An index as the five verbs read it: `isnumber`, else their `Usage:`; `__ftol2_sse`, less one.
+fn index_arg(lua: &Lua, v: Option<&Value>, usage: &'static str) -> mlua::Result<i64> {
+    let v = v.cloned().unwrap_or(Value::Nil);
+    Ok(super::binding_abi::ftol_arg(lua, v, usage)?
+        .wrapping_sub(1)
+        .into())
+}
+
+/// `GetCurrencyListInfo`'s nine values for a built row (`0x5b0680`); nine nils off the list.
 fn list_info(lua: &Lua, model: &Model, row: Option<Row>) -> mlua::Result<MultiValue> {
     let s = &model.wrath_currency;
     let Some(row) = row else {
-        return Ok(MultiValue::from_vec(vec![Value::Nil]));
+        return Ok(MultiValue::from_vec(vec![Value::Nil; 9]));
     };
-    let text = |t: Option<&str>| lua.create_string(t.unwrap_or_default()).map(Value::String);
+    let text = |t: Option<&str>| text(lua, t);
     let out = match row {
         Row::Header(c) => {
             let last = c + 1 == s.categories.len();
@@ -247,12 +247,13 @@ fn list_info(lua: &Lua, model: &Model, row: Option<Row>) -> mlua::Result<MultiVa
     Ok(MultiValue::from_vec(out))
 }
 
-/// `GetBackpackCurrencyInfo`'s five values (`0x5b0a90`).
+/// `GetBackpackCurrencyInfo`'s five values (`0x5b0a90`); five nils off the walk or while the
+/// item is unresolved (`0x5b0b0d`).
 fn backpack_info(lua: &Lua, e: Option<&WrathCurrencyEntry>) -> mlua::Result<MultiValue> {
-    let Some(e) = e else {
-        return Ok(MultiValue::from_vec(vec![Value::Nil]));
+    let Some(e) = e.filter(|e| e.name.is_some()) else {
+        return Ok(MultiValue::from_vec(vec![Value::Nil; 5]));
     };
-    let text = |t: Option<&str>| lua.create_string(t.unwrap_or_default()).map(Value::String);
+    let text = |t: Option<&str>| text(lua, t);
     Ok(MultiValue::from_vec(vec![
         text(e.name.as_deref())?,
         Value::Integer(e.count.into()),
@@ -272,38 +273,44 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     )?;
     lua.globals().set(
         "GetCurrencyListInfo",
-        lua.create_function(|lua, index: i64| {
+        lua.create_function(|lua, args: MultiValue| {
+            let index = index_arg(lua, args.front(), "Usage: GetCurrencyListInfo(index)")?;
             let model = lua.app_data_ref::<Model>().expect("model");
-            let row = index
-                .checked_sub(1)
-                .and_then(|i| model.wrath_currency.row(i));
-            list_info(lua, &model, row)
+            list_info(lua, &model, model.wrath_currency.row(index))
         })?,
     )?;
     lua.globals().set(
         "GetBackpackCurrencyInfo",
-        lua.create_function(|lua, index: i64| {
+        lua.create_function(|lua, args: MultiValue| {
+            let index = index_arg(lua, args.front(), "Usage: GetBackpackCurrencyInfo(index)")?;
             let model = lua.app_data_ref::<Model>().expect("model");
             let backpack = marks(&model, BACKPACK);
-            let row = index
-                .checked_sub(1)
-                .and_then(|i| model.wrath_currency.backpack(backpack, i));
-            backpack_info(lua, row)
+            backpack_info(lua, model.wrath_currency.backpack(backpack, index))
         })?,
     )?;
-    for name in [
-        "ExpandCurrencyList",
-        "SetCurrencyBackpack",
-        "SetCurrencyUnused",
+    // Both arguments `isnumber`-gated and read by `__ftol2_sse`, so a boolean or nil raises.
+    for (name, usage) in [
+        (
+            "ExpandCurrencyList",
+            "Usage: ExpandCurrencyList(index,expand)",
+        ),
+        (
+            "SetCurrencyBackpack",
+            "Usage: SetCurrencyBackpack(index,backpack)",
+        ),
+        (
+            "SetCurrencyUnused",
+            "Usage: SetCurrencyUnused(index,unused)",
+        ),
     ] {
         lua.globals().set(
             name,
-            lua.create_function(move |lua, (index, value): (i64, Value)| {
-                let enabled = flag(value)?;
+            lua.create_function(move |lua, args: MultiValue| {
+                let index = index_arg(lua, args.front(), usage)?;
+                let value = args.get(1).cloned().unwrap_or(Value::Nil);
+                let enabled = super::binding_abi::ftol_arg(lua, value, usage)? != 0;
                 let mut model = lua.app_data_mut::<Model>().expect("model");
-                let row = index
-                    .checked_sub(1)
-                    .and_then(|i| model.wrath_currency.row(i));
+                let row = model.wrath_currency.row(index);
                 match (name, row) {
                     ("ExpandCurrencyList", Some(Row::Header(c))) => {
                         model.wrath_currency.categories[c].is_expanded = enabled;
@@ -354,10 +361,11 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         tooltip.set(
             method,
             lua.create_function(move |lua, (this, index): (mlua::Table, Value)| {
+                // `0x6306bb`, `0x63087b`: `fistp` under chop, so the index truncates.
                 let index = match index {
                     Value::Integer(n) => Some(n),
-                    Value::Number(n) => Some(n.round() as i64),
-                    v @ Value::String(_) => lua.coerce_number(v)?.map(|n| n.round() as i64),
+                    Value::Number(n) => Some(n as i64),
+                    v @ Value::String(_) => lua.coerce_number(v)?.map(|n| n as i64),
                     _ => None,
                 };
                 let Some(index) = index else {

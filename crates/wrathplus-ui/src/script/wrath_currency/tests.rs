@@ -10,10 +10,21 @@ fn empty_defaults() {
         .run(
             r#"
         assert(GetCurrencyListSize() == 0)
-        for _, i in ipairs({-1, 0, 1, 4}) do
-            assert(GetCurrencyListInfo(i) == nil)
-            assert(GetBackpackCurrencyInfo(i) == nil)
+        for _, i in ipairs({-1, 0, 1, 4, -2147483648}) do
+            assert(select('#', GetCurrencyListInfo(i)) == 9 and GetCurrencyListInfo(i) == nil)
+            assert(select('#', GetBackpackCurrencyInfo(i)) == 5 and GetBackpackCurrencyInfo(i) == nil)
             ExpandCurrencyList(i, 1); SetCurrencyUnused(i, 1); SetCurrencyBackpack(i, 1)
+        end
+        -- `isnumber` on each argument (`0x5b0690`, `0x5b094a`-`0x5b0a39`, `0x5b0aa0`).
+        for call, usage in pairs({
+            [function() GetCurrencyListInfo() end] = 'GetCurrencyListInfo(index)',
+            [function() GetBackpackCurrencyInfo('x') end] = 'GetBackpackCurrencyInfo(index)',
+            [function() ExpandCurrencyList(1, nil) end] = 'ExpandCurrencyList(index,expand)',
+            [function() SetCurrencyUnused(nil, 1) end] = 'SetCurrencyUnused(index,unused)',
+            [function() SetCurrencyBackpack(1, true) end] = 'SetCurrencyBackpack(index,backpack)',
+        }) do
+            local ok, err = pcall(call)
+            assert(not ok and err:find('Usage: ' .. usage, 1, true), err)
         end
         local a,b = GetHonorCurrency(); assert(a == 0 and b == 75000)
         a,b = GetArenaCurrency(); assert(a == 0 and b == 10000)
@@ -85,7 +96,10 @@ fn supplied_snapshot_shapes_and_clear() {
         assert(name == 'Test token 1' and h == false and e == false)
         assert(u == false and w == false and count == 10 and kind == 0)
         assert(icon == 'test-icon-1' and id == 101)
-        SetCurrencyBackpack(2, 1)
+        assert(GetCurrencyListInfo(2.9) == 'Test token 1', 'the index truncates')
+        local n, h, e, u, w, c, k, icon, id = GetCurrencyListInfo(1)
+        assert(n == 'Test category' and h and e and icon == nil and id == 0)
+        SetCurrencyBackpack(2.9, '1')
         assert(select('#', GetBackpackCurrencyInfo(1)) == 5)
         name,count,kind,icon,id = GetBackpackCurrencyInfo(1)
         assert(name == 'Test token 1' and count == 10 and kind == 0)
@@ -259,7 +273,7 @@ fn the_list_is_built_as_12340_builds_it() {
 }
 
 #[test]
-fn pending_metadata_sorts_last_until_query_resolves() {
+fn pending_metadata_is_nil_and_sorts_last_until_query_resolves() {
     let mut s = script();
     let mut data = snapshot();
     data.entries[0].name = None;
@@ -269,10 +283,10 @@ fn pending_metadata_sorts_last_until_query_resolves() {
     s.run(
         r#"
         local n,h,e,u,w,c,k,icon,id=GetCurrencyListInfo(5)
-        assert(n=='' and icon=='' and id==101 and c==10)
+        assert(n==nil and icon==nil and id==101 and c==10)
         assert(select('#',GetCurrencyListInfo(5))==9)
         assert(GetCurrencyListInfo(2)=='Test token 2')
-        assert(GetBackpackCurrencyInfo(1)=='')
+        assert(select('#',GetBackpackCurrencyInfo(1))==5 and GetBackpackCurrencyInfo(1)==nil)
     "#,
     )
     .unwrap();
@@ -310,7 +324,7 @@ fn the_token_tooltips_show_the_rows_item() {
         local shown = {}
         tip.SetHyperlink = function(_, link) shown[#shown + 1] = link end
         tip:SetCurrencyToken(1)   -- the header: nothing
-        tip:SetCurrencyToken(3)   -- token 2
+        tip:SetCurrencyToken(3.9) -- token 2: the index truncates
         tip:SetBackpackToken(1)   -- nothing watched yet
         for i = 2, 5 do SetCurrencyBackpack(i, 1) end
         tip:SetBackpackToken(4)   -- token 4: the walk has no cap
