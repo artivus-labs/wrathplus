@@ -331,6 +331,17 @@ fn selection_roles_and_verbs_follow_the_native_gates() {
     );
     s.run("ClearAllLFGDungeons(); JoinLFG()").unwrap();
     assert_eq!(s.take_ui_errors(), vec!["ERR_LFG_NO_SLOTS_SELECTED"]);
+    // `0x7e1830`: pipes dropped, cut at a line break (a real one or `\n`), 63 characters kept.
+    let comment = |s: &mut UiScript, code: &str| {
+        s.run(code).unwrap();
+        s.model_mut().wrath_lfg.queue.comment.clone()
+    };
+    assert_eq!(comment(&mut s, r"SetLFGComment('l|f|m\\nmore')"), "lfm");
+    assert_eq!(comment(&mut s, "SetLFGComment('a|b\\rc')"), "ab");
+    assert_eq!(
+        comment(&mut s, "SetLFGComment(('x'):rep(70))"),
+        "x".repeat(63)
+    );
     // `0x559b70`: a dungeon drops a raid and a raid a dungeon; a repeat changes nothing alone,
     // and in a party a raid clears first.
     let pick = |s: &mut UiScript, code: &str| {

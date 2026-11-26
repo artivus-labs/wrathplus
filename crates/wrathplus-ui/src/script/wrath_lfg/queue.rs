@@ -368,6 +368,19 @@ fn arg(args: &MultiValue, i: usize) -> Value {
     args.get(i).cloned().unwrap_or(Value::Nil)
 }
 
+/// `0x7e1830(text, buf, 0x40, 0x100, 1)`, the sanitiser `UninviteUnit` shares (labelled: a copy):
+/// every `|` dropped (`0x7e17f0`), the text cut at its first CR, LF or `\n` (`0x7e1640`), then at
+/// its 64th character's lead byte (`0x7e189d`-`0x7e18b0`), so 63 stay.
+fn sent_text(s: &str) -> String {
+    let s: String = s.chars().filter(|&c| c != '|').collect();
+    let end = [s.find(['\r', '\n']), s.find("\\n")]
+        .into_iter()
+        .flatten()
+        .min()
+        .unwrap_or(s.len());
+    s[..end].chars().take(63).collect()
+}
+
 /// `0x559b70`: a dungeon or heroic (types 1, 5) keeps only dungeons and heroics, a raid (2) only
 /// raids and only outside a party (`0x52bd10`), any other type nothing; a clear (`0x559340`) or a new
 /// entry (`0x559c35`) marks the selection for the next join to resend.
@@ -889,8 +902,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         fire(lua, event);
         Ok(MultiValue::new())
     })?;
-    // SetLFGComment([text]) (`0x553f50` → `0x5539a0`): stored; sent only after a join, else
-    // marked for the next join to resend.
+    // SetLFGComment([text]) (`0x553f50` → `0x5539a0`): sanitised, stored; sent only after a join,
+    // else marked for the next join to resend.
     set(lua, "SetLFGComment", |lua, args| {
         let comment = match arg(&args, 0) {
             v @ (Value::String(_) | Value::Integer(_) | Value::Number(_)) => lua
@@ -899,8 +912,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 .unwrap_or_default(),
             _ => String::new(),
         };
-        // Labelled: `0x7e1830` sanitises the text into 0x40 characters; this keeps the first 64.
-        let comment: String = comment.chars().take(64).collect();
+        let comment = sent_text(&comment);
         let t = now();
         let mut m = lua.app_data_mut::<Model>().expect("model app_data");
         let q = &mut m.wrath_lfg.queue;
