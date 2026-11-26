@@ -728,32 +728,12 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // GetCurrentMapContinent() / GetCurrentMapZone(): each cell plus one (`0x4a7ed0`, `0x4a7f00`),
-    // so an instance map answers -1 and 0.
-    g.set(
-        "GetCurrentMapContinent",
-        lua.create_function(|lua, ()| {
-            let model = lua.app_data_ref::<Model>().expect("model app_data");
-            Ok(match model.worldmap.direct_area {
-                Some(_) => -1i64,
-                None => i64::from(model.worldmap.selection.0),
-            })
-        })?,
-    )?;
+    // GetCurrentMapZone(): the zone cell plus one (`0x4a7f00`), so an instance map answers 0.
     g.set(
         "GetCurrentMapZone",
         lua.create_function(|lua, ()| {
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             Ok(i64::from(model.worldmap.selection.1))
-        })?,
-    )?;
-
-    g.set(
-        "SetMapZoom",
-        lua.create_function(|lua, (c, z): (i64, Option<i64>)| {
-            let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-            select(&mut model, c, z.unwrap_or(0));
-            Ok(())
         })?,
     )?;
 
@@ -768,37 +748,6 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             let floor = model.worldmap.player_floor;
             select_resolved(&mut model, c, z, direct, floor);
             Ok(())
-        })?,
-    )?;
-
-    // GetMapInfo() → mapFileName and two texture dimensions (`0x4a7e30`, `mov eax,3`): nil, 0, 0
-    // at world level. The name is the unlocalized art folder (`0x4a6cf0` reads `[row+0xc]`).
-    g.set(
-        "GetMapInfo",
-        lua.create_function(|lua, ()| {
-            let model = lua.app_data_ref::<Model>().expect("model app_data");
-            let wm = &model.worldmap;
-            let file = match (wm.direct_area, wm.selection) {
-                // An instance map, by id through the orphan list: `0x4a6cf0`'s `jl 0x4a6d24`
-                // sends both negative continents there, and world level's third cell is -1.
-                (Some(_), _) => direct_row(wm).map(|row| row.map_file.clone()),
-                (None, (0, _)) => None,
-                (None, (c, z)) => wm.continents.get(c as usize - 1).map(|cont| match z {
-                    0 => cont.map_file.clone(),
-                    z => cont
-                        .zones
-                        .get(z as usize - 1)
-                        .map(|zone| zone.map_file.clone())
-                        .unwrap_or_else(|| cont.map_file.clone()),
-                }),
-            };
-            // No caller reads the dimensions, 0 here on every map; the reference computes them
-            // from `WorldMapContinent.dbc` (`0x4a6d50`), which lacks an instance map's mapID.
-            let file = match file {
-                Some(f) => Value::String(lua.create_string(&f)?),
-                None => Value::Nil,
-            };
-            Ok((file, 0i64, 0i64))
         })?,
     )?;
 
@@ -930,36 +879,6 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         lua.create_function(|lua, ()| {
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             Ok(model.worldmap.landmarks.len() as i64)
-        })?,
-    )?;
-
-    // GetMapLandmarkInfo(i) → name, description, textureIndex, x, y (`0x4a8740`). textureIndex is
-    // a row's Icon, or 15 at zone level without `Flags & 0x80` (`0x4a8848`), and the guard
-    // marker's packet Icon; an empty description is nil, as `0x6f3890` pushes for a NULL string.
-    g.set(
-        "GetMapLandmarkInfo",
-        lua.create_function(|lua, i: i64| {
-            let landmark = {
-                let model = lua.app_data_ref::<Model>().expect("model app_data");
-                usize::try_from(i)
-                    .ok()
-                    .and_then(|i| i.checked_sub(1))
-                    .and_then(|i| model.worldmap.landmarks.get(i).cloned())
-            };
-            let Some(l) = landmark else {
-                return Ok(MultiValue::from_vec(vec![Value::Nil]));
-            };
-            let description = match l.description.is_empty() {
-                true => Value::Nil,
-                false => Value::String(lua.create_string(&l.description)?),
-            };
-            Ok(MultiValue::from_vec(vec![
-                Value::String(lua.create_string(&l.name)?),
-                description,
-                Value::Integer(i64::from(l.texture_index)),
-                Value::Number(f64::from(l.uv.0)),
-                Value::Number(f64::from(l.uv.1)),
-            ]))
         })?,
     )?;
 
