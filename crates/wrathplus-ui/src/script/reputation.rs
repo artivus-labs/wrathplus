@@ -114,15 +114,10 @@ impl super::UiScript {
     /// Push the reputation snapshot and rebuild the tree. The folds survive it, as 12340's rebuild
     /// saves and restores its mask (`0x5d1a20`-`0x5d1aaf`); a header new to the session opens every
     /// one (`0x5cfe70` sets the mask at `0x5cfecd`), and only the first list folds "Inactive"
-    /// (`0x5d2e0f`). The selection is kept by slot.
+    /// (`0x5d2e0f`). The selection is an id, kept as 12340 keeps it.
     pub fn set_reputation(&mut self, state: ReputationState) {
         let mut model = self.model_mut();
         let groups = build_groups(&state.entries);
-        if let Some(slot) = model.reputation_selected {
-            if !state.entries.iter().any(|e| e.rep_list_id == slot) {
-                model.reputation_selected = None;
-            }
-        }
         let keys: HashSet<i64> = groups
             .iter()
             .flat_map(|g| {
@@ -289,6 +284,22 @@ fn num_rows(model: &Model) -> usize {
     rows(model).len()
 }
 
+/// A 1-based visible row.
+fn row_at(model: &Model, index: i32) -> Option<Row> {
+    let n = usize::try_from(index).ok()?.checked_sub(1)?;
+    rows(model).get(n).copied()
+}
+
+/// A row's id, 12340's `[row+4]`: the faction's id, or a synthetic header's key.
+fn row_id(model: &Model, row: Row) -> i64 {
+    match row {
+        Row::Header(gi) => model.reputation_groups[gi].key,
+        Row::SubHeader(ei) | Row::Entry { ei, .. } => {
+            i64::from(model.reputation.entries[ei].faction_id)
+        }
+    }
+}
+
 /// The faction a visible row stands for: a bar, or a sub-header, which 3.3.5 selects, watches
 /// and toggles like a bar (`0x5d07b0` and its siblings read the row's faction).
 fn row_entry(row: Row) -> Option<usize> {
@@ -298,27 +309,24 @@ fn row_entry(row: Row) -> Option<usize> {
     }
 }
 
-fn entry_at(model: &Model, index: usize) -> Option<&FactionEntry> {
-    let ei = row_entry(*rows(model).get(index.checked_sub(1)?)?)?;
+fn entry_at(model: &Model, index: i32) -> Option<&FactionEntry> {
+    let ei = row_entry(row_at(model, index)?)?;
     model.reputation.entries.get(ei)
 }
 
-fn entry_at_mut(model: &mut Model, index: usize) -> Option<&mut FactionEntry> {
-    let ei = row_entry(*rows(model).get(index.checked_sub(1)?)?)?;
+fn entry_at_mut(model: &mut Model, index: i32) -> Option<&mut FactionEntry> {
+    let ei = row_entry(row_at(model, index)?)?;
     model.reputation.entries.get_mut(ei)
 }
 
 /// Fold or unfold by 1-based visible index; `0` or any non-header index acts on every header, the
 /// reference's own fall-through (`0x4d6a50`, `0x4d6aa0`).
-fn set_collapsed(model: &mut Model, index: usize, collapse: bool) {
-    let one = index
-        .checked_sub(1)
-        .and_then(|n| rows(model).get(n).copied())
-        .and_then(|row| match row {
-            Row::Header(gi) => model.reputation_groups.get(gi).map(|g| g.key),
-            Row::SubHeader(hi) => Some(i64::from(model.reputation.entries[hi].faction_id)),
-            Row::Entry { .. } => None,
-        });
+fn set_collapsed(model: &mut Model, index: i32, collapse: bool) {
+    let one = row_at(model, index).and_then(|row| match row {
+        Row::Header(gi) => model.reputation_groups.get(gi).map(|g| g.key),
+        Row::SubHeader(hi) => Some(i64::from(model.reputation.entries[hi].faction_id)),
+        Row::Entry { .. } => None,
+    });
     let keys: Vec<i64> = match one {
         Some(key) => vec![key],
         None => model
@@ -394,12 +402,10 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     // isWatched, isChild; thirteen wide on every path, a miss included (`0x5d1150` → `0x5d0da0`).
     g.set(
         "GetFactionInfo",
-        lua.create_function(|lua, index: usize| {
+        lua.create_function(|lua, index: Value| {
+            let index = binding_abi::number_arg(lua, index, "Usage: GetFactionInfo(index)")?;
             let model = lua.app_data_ref::<Model>().expect("model app_data");
-            let Some(row) = index
-                .checked_sub(1)
-                .and_then(|n| rows(&model).get(n).copied())
-            else {
+            let Some(row) = row_at(&model, index) else {
                 return Ok(unknown_faction());
             };
             match row {
@@ -414,13 +420,14 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                     if let Some(e) = header {
                         return faction_tuple(lua, &model, e, Some(collapsed), false);
                     }
-                    // A synthetic header ("Other", "Inactive"): 12340 pushes Neutral, 4 (`0x5d0ded`).
+                    // A synthetic header ("Other", "Inactive"): standing 1, bar 0/0/0
+                    // (`0x5d1076`-`0x5d1146`).
                     let name = synthetic_header(lua, grp.key);
                     let mut out = vec![
                         Value::String(lua.create_string(&name)?),
                         Value::String(lua.create_string("")?),
                     ];
-                    out.extend([4, 0, 3000, 0].map(Value::Integer));
+                    out.extend([1, 0, 0, 0].map(Value::Integer));
                     out.extend([
                         Value::Nil,
                         Value::Nil,
@@ -498,27 +505,27 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     )?;
 
     // GetSelectedFaction() → the selected row's visible index, or 0 for none, as
-    // `ReputationFrame.lua:146` tests; re-found each call, since the selection is held by slot.
+    // `ReputationFrame.lua:146` tests; re-found by id each call (`0x5d0820` → `0x5d01b0`).
     g.set(
         "GetSelectedFaction",
         lua.create_function(|lua, ()| {
             let model = lua.app_data_ref::<Model>().expect("model app_data");
-            let Some(slot) = model.reputation_selected else {
+            let Some(id) = model.reputation_selected else {
                 return Ok(0i64);
             };
-            let found = rows(&model).iter().position(|r| {
-                row_entry(*r).is_some_and(|ei| model.reputation.entries[ei].rep_list_id == slot)
-            });
+            let found = rows(&model).iter().position(|r| row_id(&model, *r) == id);
             Ok(found.map_or(0, |i| i as i64 + 1))
         })?,
     )?;
 
-    // SetSelectedFaction(index): a visible index; a header or an out-of-range index clears it.
+    // SetSelectedFaction(index): any visible row's id, a header's too (`0x5d07b0`); out of range
+    // clears it.
     g.set(
         "SetSelectedFaction",
-        lua.create_function(|lua, index: usize| {
+        lua.create_function(|lua, index: Value| {
+            let index = binding_abi::ftol_arg(lua, index, "Usage: SetSelectedFaction(index)")?;
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-            model.reputation_selected = entry_at(&model, index).map(|e| e.rep_list_id);
+            model.reputation_selected = row_at(&model, index).map(|r| row_id(&model, r));
             Ok(())
         })?,
     )?;
@@ -529,7 +536,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     // (`ReputationFrame.xml:9-15`), and the pane repaints on `UPDATE_FACTION` alone.
     g.set(
         "CollapseFactionHeader",
-        lua.create_function(|lua, index: usize| {
+        lua.create_function(|lua, index: Value| {
+            let index = binding_abi::ftol_arg(lua, index, "Usage: CollapseFactionHeader(index)")?;
             {
                 let mut model = lua.app_data_mut::<Model>().expect("model app_data");
                 set_collapsed(&mut model, index, true);
@@ -540,7 +548,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     )?;
     g.set(
         "ExpandFactionHeader",
-        lua.create_function(|lua, index: usize| {
+        lua.create_function(|lua, index: Value| {
+            let index = binding_abi::ftol_arg(lua, index, "Usage: ExpandFactionHeader(index)")?;
             {
                 let mut model = lua.app_data_mut::<Model>().expect("model app_data");
                 set_collapsed(&mut model, index, false);
@@ -554,7 +563,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     // first, and nothing acks it.
     g.set(
         "FactionToggleAtWar",
-        lua.create_function(|lua, index: usize| {
+        lua.create_function(|lua, index: Value| {
+            let index = binding_abi::number_arg(lua, index, "Usage: FactionToggleAtWar(index)")?;
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
             let Some(e) = entry_at_mut(&mut model, index) else {
                 return Ok(());
@@ -577,17 +587,26 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     // (`0x4d69b0` calls `0x4d5c40`); the folds survive, as only a server rebuild resets them.
     g.set(
         "IsFactionInactive",
-        lua.create_function(|lua, index: usize| {
+        lua.create_function(|lua, index: Value| {
+            let index = binding_abi::ftol_arg(lua, index, "Usage: IsFactionInactive(index)")?;
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             Ok(binding_abi::flag(
                 entry_at(&model, index).is_some_and(|e| e.inactive),
             ))
         })?,
     )?;
-    for (name, inactive) in [("SetFactionInactive", true), ("SetFactionActive", false)] {
+    for (name, usage, inactive) in [
+        (
+            "SetFactionInactive",
+            "Usage: SetFactionInactive(index)",
+            true,
+        ),
+        ("SetFactionActive", "Usage: SetFactionActive(index)", false),
+    ] {
         g.set(
             name,
-            lua.create_function(move |lua, index: usize| {
+            lua.create_function(move |lua, index: Value| {
+                let index = binding_abi::number_arg(lua, index, usage)?;
                 let mut model = lua.app_data_mut::<Model>().expect("model app_data");
                 let Some(e) = entry_at_mut(&mut model, index) else {
                     return Ok(());
@@ -640,15 +659,25 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // SetWatchedFactionIndex(index): a visible index, 0 to stop watching. Not local first
-    // (`0x4d6b60`): the watched slot is a server field with no client mirror, so the bar moves when
-    // the descriptor update returns. The app sends none as `-1`, since slot 0 is a real faction.
+    // SetWatchedFactionIndex(index): a visible index, 0 to stop watching; the row's own faction,
+    // a header's too, sent only when it differs from the watched field (`0x5d1420` → `0x5d0ba0`).
+    // Not local first: the bar moves when the descriptor update returns. The app sends none as
+    // `-1`, since slot 0 is a real faction.
     g.set(
         "SetWatchedFactionIndex",
-        lua.create_function(|lua, index: usize| {
+        lua.create_function(|lua, index: Value| {
+            let index = binding_abi::ftol_arg(lua, index, "Usage: SetWatchedFactionIndex(index)")?;
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-            let slot = entry_at(&model, index).map(|e| e.rep_list_id);
-            model.reputation_sends.push(ReputationSend::Watch(slot));
+            let slot = row_at(&model, index).and_then(|r| {
+                let id = row_id(&model, r);
+                let e = model.reputation.entries.iter();
+                e.filter(|e| i64::from(e.faction_id) == id)
+                    .map(|e| e.rep_list_id)
+                    .next()
+            });
+            if slot != model.reputation.watched {
+                model.reputation_sends.push(ReputationSend::Watch(slot));
+            }
             Ok(())
         })?,
     )?;

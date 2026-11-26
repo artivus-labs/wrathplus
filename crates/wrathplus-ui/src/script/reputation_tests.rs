@@ -155,6 +155,26 @@ fn a_bar_row_returns_the_references_thirteen_and_so_does_a_miss() {
             .unwrap();
         assert_eq!(sid, 1, "{miss}'s standingID slot is the client's 1");
     }
+    // "Other" (row 6) is synthetic: standing 1, bar 0/0/0 (`0x5d1076`-`0x5d1146`).
+    let other = "local n,_,s,a,b,v = GetFactionInfo(6.9) return n, s, a, b, v";
+    assert_eq!(
+        s.eval::<(String, i64, i64, i64, i64)>(other).unwrap(),
+        ("Other".into(), 1, 0, 0, 0)
+    );
+    for verb in [
+        "GetFactionInfo",
+        "SetSelectedFaction",
+        "CollapseFactionHeader",
+        "ExpandFactionHeader",
+        "FactionToggleAtWar",
+        "IsFactionInactive",
+        "SetFactionInactive",
+        "SetFactionActive",
+        "SetWatchedFactionIndex",
+    ] {
+        let err = s.run(&format!("{verb}()")).unwrap_err().to_string();
+        assert!(err.contains(&format!("Usage: {verb}(index)")), "{err}");
+    }
     assert!(s.errors().is_empty(), "{:#?}", s.errors());
 }
 
@@ -258,10 +278,14 @@ fn selection_follows_the_faction_not_the_row_index() {
     assert_eq!(s.eval::<i64>("return GetSelectedFaction()").unwrap(), 0);
     s.run("ExpandFactionHeader(1)").unwrap();
     assert_eq!(s.eval::<i64>("return GetSelectedFaction()").unwrap(), 3);
-    // Selecting a header clears the selection rather than selecting the group.
+    // A header is selectable, the synthetic "Other" too (`0x5d07b0` stores any row's id).
     s.run("SetSelectedFaction(1)").unwrap();
+    assert_eq!(s.eval::<i64>("return GetSelectedFaction()").unwrap(), 1);
+    s.run("SetSelectedFaction(6.9)").unwrap();
+    assert_eq!(s.eval::<i64>("return GetSelectedFaction()").unwrap(), 6);
+    s.run("SetSelectedFaction(99)").unwrap();
     assert_eq!(s.eval::<i64>("return GetSelectedFaction()").unwrap(), 0);
-    // A push that drops the faction entirely drops the selection with it.
+    // A push that drops the faction leaves nothing to answer.
     s.run("SetSelectedFaction(3)").unwrap();
     let mut without = state();
     without.entries.retain(|e| e.faction_id != 72);
@@ -350,6 +374,11 @@ fn watching_queues_a_send_but_does_not_move_the_bar_itself() {
         Value::Integer(1),
         "and the row reports itself watched"
     );
+    // The watched faction again sends nothing (`0x5d0bfb`); a header watches its own faction.
+    s.run("SetWatchedFactionIndex(3)").unwrap();
+    assert!(s.take_reputation_sends().is_empty());
+    s.run("SetWatchedFactionIndex(1)").unwrap(); // Alliance, slot 11
+    assert_eq!(s.take_reputation_sends(), [ReputationSend::Watch(Some(11))]);
 
     // Watching slot 0, then clearing: the two must stay distinct.
     s.run("SetWatchedFactionIndex(8)").unwrap(); // Bloodsail Buccaneers, rep slot 0
@@ -406,6 +435,9 @@ fn a_sub_header_with_its_own_bar_nests_its_children() {
     assert!(s
         .eval::<bool>("return select(10, GetFactionInfo(2)) == 1")
         .unwrap());
+    // The sub-header's own slot is the watched one already, so nothing goes out (`0x5d0bfb`).
     s.run("SetWatchedFactionIndex(2)").unwrap();
-    assert_eq!(s.take_reputation_sends(), [ReputationSend::Watch(Some(30))]);
+    assert!(s.take_reputation_sends().is_empty());
+    s.run("SetWatchedFactionIndex(3)").unwrap(); // Kirin Tor, with the sub-header folded
+    assert_eq!(s.take_reputation_sends(), [ReputationSend::Watch(Some(33))]);
 }

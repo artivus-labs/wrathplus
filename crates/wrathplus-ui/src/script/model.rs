@@ -971,8 +971,9 @@ pub(crate) struct Model {
     pub(crate) reputation_collapsed: HashSet<i64>,
     /// Every header key listed this session: 12340 never drops a header slot (`0xc23370`).
     pub(crate) reputation_headers_seen: HashSet<i64>,
-    /// The selection as a reputation-list slot, not a row.
-    pub(crate) reputation_selected: Option<u32>,
+    /// The selected row's id, a header's key too; `None` for none, kept apart from "Other"'s id 0,
+    /// which 12340 also uses for none (`0xc2347c` starts and resets at 0, `0x5d150b`).
+    pub(crate) reputation_selected: Option<i64>,
     /// Reputation calls queued, applied locally first because none of the three sends is acked.
     pub(crate) reputation_sends: Vec<reputation::ReputationSend>,
 
