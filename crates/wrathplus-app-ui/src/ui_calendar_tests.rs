@@ -150,8 +150,15 @@ fn invite_bits_follow_the_receipt() {
 #[test]
 fn an_asked_event_opens_then_refreshes() {
     let mut state = CalendarState::default();
+    let draft = R::NewDraft {
+        flags: 1,
+        arena_slot: None,
+    };
+    apply(&mut state, draft, ME, None);
     let sent = apply(&mut state, R::GetEvent { event_id: 100 }, ME, None);
     assert_eq!(sent, [Command::GetEvent { event_id: 100 }]);
+    // The open event (here a draft) stays until the asked one arrives.
+    assert_eq!(state.open.as_ref().map(|o| o.event_id), Some(0));
     let event = Event {
         send_type: 0,
         creator: 9,

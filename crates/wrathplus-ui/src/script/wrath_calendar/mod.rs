@@ -197,7 +197,6 @@ pub enum WrathCalendarRequest {
     GetEvent {
         event_id: u64,
     },
-    CloseEvent,
     /// `CalendarNew*`: a draft with these flags; an arena event names the team slot.
     NewDraft {
         flags: u32,
@@ -302,12 +301,11 @@ impl WrathCalendarFields {
 /// A day row's place: absolute year, month, day and 0-based index.
 type Slot = (i32, u8, u8, usize);
 
+/// The open event (`0xc207ec`), kept until another arrives or a `CalendarNew*` replaces it.
 #[derive(Clone, Debug, PartialEq)]
 enum Opened {
-    /// A server event, awaiting or holding its `SMSG_CALENDAR_SEND_EVENT`.
+    /// A server event, from its `SMSG_CALENDAR_SEND_EVENT`.
     Event { event_id: u64, invite_id: u64 },
-    /// A holiday or raid row, opened from the day list.
-    Row(Box<WrathCalendarEntry>),
     /// A `CalendarNew*` draft.
     Draft,
 }
@@ -330,7 +328,10 @@ pub(crate) struct State {
     /// The game clock (`0xd37f98`) the host pushes, as `GetGameTime`'s; `None` before the first.
     clock: Option<WrathCalendarDate>,
     shown: Option<(i32, u8)>,
+    /// The selection record (`0xc20f78`) `CalendarGetEventIndex` answers.
     selected: Option<Slot>,
+    /// The event and invite a `CalendarOpenEvent` asked for, until it arrives.
+    asked: Option<(u64, u64)>,
     context: Option<Slot>,
     clipboard: Option<(u64, u64, WrathCalendarDate)>,
     open: Option<Open>,
@@ -354,6 +355,7 @@ impl super::UiScript {
         let mut model = self.model_mut();
         let state = &mut model.wrath_calendar;
         state.view = view;
+        state.arrive();
         state.sync_open();
     }
 
@@ -516,6 +518,47 @@ impl State {
             }),
             _ => false,
         }
+    }
+
+    /// The asked-for event arrived: it is the open event, and its row the selection (`0x5bef85`).
+    fn arrive(&mut self) {
+        let Some((event_id, invite_id)) = self.asked else {
+            return;
+        };
+        if self
+            .view
+            .event
+            .as_ref()
+            .is_none_or(|e| e.event_id != event_id)
+        {
+            return;
+        }
+        let what = Opened::Event {
+            event_id,
+            invite_id,
+        };
+        let fields = WrathCalendarFields::default();
+        let (synced, changed) = (None, false);
+        self.open = Some(Open {
+            what,
+            fields,
+            synced,
+            changed,
+        });
+        (self.asked, self.selected_invite) = (None, None);
+        self.selected = self
+            .view
+            .entries
+            .iter()
+            .find(|e| e.event_id == event_id)
+            .and_then(|e| {
+                let (y, m, d) = (e.date.year, e.date.month, e.date.day);
+                let n = self
+                    .day(y, m, d)
+                    .iter()
+                    .position(|r| r.event_id == event_id)?;
+                Some((y, m, d, n))
+            });
     }
 
     /// Refresh untouched fields from a newer server copy of the open event.

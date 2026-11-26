@@ -24,6 +24,7 @@ fn event_row(day: u8, hour: u8, rank: u8) -> WrathCalendarEntry {
         title: "Naxx".into(),
         event_id: 100,
         invite_id: 200,
+        flags: 1,
         creator: if rank == 2 { ME } else { 9 },
         invited_by: Some("Arthas".into()),
         event_type: 0,
@@ -258,31 +259,69 @@ fn a_day_lists_events_holidays_and_projected_resets() {
 #[test]
 fn an_opened_event_edits_and_updates() {
     let mut view = base();
-    view.entries = vec![event_row(15, 19, 2)];
+    let holiday = WrathCalendarEntry {
+        kind: WrathCalendarKind::Holiday,
+        date: WrathCalendarDate::new(2010, 3, 16, 0, 0),
+        ..Default::default()
+    };
+    view.entries = vec![event_row(15, 19, 2), holiday];
     let mut s = vm(view.clone());
+    // `0x5b9310`: a player row asks and sets the pending bit; the selection waits for the reply.
+    let index = |s: &UiScript| {
+        s.eval::<(i64, i64, i64)>("return CalendarGetEventIndex()")
+            .unwrap()
+    };
     s.run("CalendarOpenEvent(0, 15, 1)").unwrap();
     assert_eq!(
         s.take_wrath_calendar_requests(),
         [WrathCalendarRequest::GetEvent { event_id: 100 }]
     );
+    assert!(s.eval::<bool>("return CalendarIsActionPending()").unwrap());
+    assert_eq!(index(&s), (0, 0, 0));
+    s.set_wrath_calendar_action_pending(false);
     view.event = Some(WrathCalendarEvent {
         event_id: 100,
         creator: ME,
         creator_name: Some("Me".into()),
         title: "Naxx".into(),
+        flags: 1,
         date: WrathCalendarDate::new(2010, 3, 15, 19, 0),
-        invitees: vec![WrathCalendarInvitee {
-            guid: ME,
-            name: Some("Me".into()),
-            level: 80,
-            rank: 2,
-            invite_id: 200,
-            status: 3,
-            ..Default::default()
-        }],
+        invitees: vec![
+            WrathCalendarInvitee {
+                guid: ME,
+                name: Some("Me".into()),
+                level: 80,
+                rank: 2,
+                invite_id: 200,
+                status: 3,
+                ..Default::default()
+            },
+            WrathCalendarInvitee {
+                guid: 30,
+                invite_id: 201,
+                status: 4,
+                ..Default::default()
+            },
+        ],
         ..Default::default()
     });
     s.set_wrath_calendar(Arc::new(view.clone()));
+    assert_eq!(index(&s), (0, 15, 1));
+    // `0x5ba2c4`: an uncached name is ""; `0x5b8ae0` rounds half to even and keeps a selection
+    // past the list's end out.
+    assert_eq!(
+        s.eval::<String>("return (CalendarEventGetInvite(2))")
+            .unwrap(),
+        ""
+    );
+    s.run("CalendarEventSelectInvite(2.5) CalendarEventSelectInvite(5)")
+        .unwrap();
+    assert_eq!(
+        s.eval::<i64>("return CalendarEventGetSelectedInvite()")
+            .unwrap(),
+        2
+    );
+    assert!(s.run("CalendarEventSelectInvite()").is_err());
     assert_eq!(
         s.eval::<(String, String, i64)>(
             "local t, d, c = CalendarGetEventInfo() return t, c, select(25, CalendarGetEventInfo()) and 1 or 0"
@@ -314,11 +353,35 @@ fn an_opened_event_edits_and_updates() {
         ("Naxx 25", 20, 15)
     );
     assert!(s.eval::<bool>("return CalendarIsActionPending()").unwrap());
-    // Holiday and raid rows open at once, with their type.
+    // Nothing opens while an action is pending.
+    s.run("CalendarOpenEvent(0, 15, 1)").unwrap();
+    assert_eq!(s.take_wrath_calendar_requests(), []);
+    // A holiday opens at once with its type and selection, the open event kept (`0x5b93c2`);
+    // `0x5b84a0` clears only the selection.
+    s.run(
+        "opened = nil
+         local f = CreateFrame('Frame')
+         f:RegisterEvent('CALENDAR_OPEN_EVENT')
+         f:SetScript('OnEvent', function(_, _, kind) opened = kind end)
+         CalendarOpenEvent(0, 16, 1)",
+    )
+    .unwrap();
+    s.set_wrath_calendar_action_pending(false);
+    s.run("CalendarOpenEvent(0, 16, 1)").unwrap();
+    assert_eq!(index(&s), (0, 16, 1));
     s.run("CalendarCloseEvent()").unwrap();
+    assert_eq!(s.take_wrath_calendar_requests(), []);
+    assert_eq!(index(&s), (0, 0, 0));
     assert_eq!(
-        s.take_wrath_calendar_requests(),
-        [WrathCalendarRequest::CloseEvent]
+        s.eval::<(String, String, i64)>(
+            "return opened, CalendarEventGetCalendarType(), CalendarEventGetNumInvites()"
+        )
+        .unwrap(),
+        ("HOLIDAY".into(), "PLAYER".into(), 2)
+    );
+    assert_eq!(
+        s.eval::<String>("return (CalendarGetEventInfo())").unwrap(),
+        "Naxx 25"
     );
 }
 
@@ -366,6 +429,10 @@ fn a_draft_is_added_with_its_fields() {
             .unwrap(),
         "true false"
     );
+    // `0x5b8a50`: an announcement needs the guild right, even as a draft.
+    s.run("CalendarNewGuildAnnouncement()").unwrap();
+    assert!(!s.eval::<bool>("return CalendarEventCanEdit()").unwrap());
+    s.take_wrath_calendar_requests();
     // A player draft carries 0x1 (`0x5f2abd`), which its add sends.
     s.run("CalendarNewEvent()").unwrap();
     assert_eq!(
@@ -399,7 +466,7 @@ fn invites_sort_and_status_options_need_a_moderator() {
             .collect(),
         ..Default::default()
     });
-    let s = vm(view);
+    let mut s = vm(view.clone());
     s.run(
         "updates = 0
          local f = CreateFrame('Frame')
@@ -412,10 +479,12 @@ fn invites_sort_and_status_options_need_a_moderator() {
            elseif e == 'CALENDAR_ACTION_PENDING' then cleared = cleared + (msg == false and 1 or 0)
            else updates = updates + 1 end
          end)
-         CalendarOpenEvent(0, 15, 1)
-         CalendarEventSortInvites('name')",
+         CalendarOpenEvent(0, 15, 1)",
     )
     .unwrap();
+    // The reply.
+    s.set_wrath_calendar(Arc::new(view));
+    s.run("CalendarEventSortInvites('name')").unwrap();
     assert_eq!(s.eval::<i64>("return updates").unwrap(), 1);
     assert_eq!(
         s.eval::<(String, bool)>(

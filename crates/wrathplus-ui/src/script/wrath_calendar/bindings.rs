@@ -268,14 +268,16 @@ fn has3(lua: &Lua, args: &MultiValue) -> bool {
     (0..3).all(|k| num(lua, args, k).is_some())
 }
 
-/// Edit the open event's fields; a row or nothing open ignores it.
+/// `0x5cbca0`: in a guild whose rank grants `GR_RIGHT_CREATE_GUILD_EVENT`.
+fn guild_event_right(lua: &Lua) -> bool {
+    let model = lua.app_data_ref::<Model>().expect("model app_data");
+    model.guild.in_guild && model.guild.rights & RIGHT_GUILD_EVENT != 0
+}
+
+/// Edit the open event's fields; with nothing open it is ignored.
 fn edit(lua: &Lua, change: impl FnOnce(&mut WrathCalendarFields)) {
     write(lua, |st, _| {
-        if let Some(open) = st
-            .open
-            .as_mut()
-            .filter(|o| !matches!(o.what, Opened::Row(_)))
-        {
+        if let Some(open) = st.open.as_mut() {
             change(&mut open.fields);
             open.changed = true;
         }
@@ -290,7 +292,6 @@ fn open_ids(st: &State) -> Option<(u64, u64)> {
             invite_id,
         } => Some((event_id, invite_id)),
         Opened::Draft => Some((0, 0)),
-        Opened::Row(_) => None,
     }
 }
 
@@ -473,14 +474,14 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         many(vec![])
     })?;
     set(lua, "CanEditGuildEvent", |lua, _| {
-        let model = lua.app_data_ref::<Model>().expect("model app_data");
-        let can = model.guild.in_guild && model.guild.rights & RIGHT_GUILD_EVENT != 0;
-        many(vec![b(can)])
+        many(vec![b(guild_event_right(lua))])
     })?;
 
     // ── opening, selecting and reading an event ───────────────────────────────────────────────
-    // CalendarOpenEvent (`0x5b9eb0` → `0x5b9310`): a player event asks the server; a holiday or
-    // raid row opens at once.
+    // CalendarOpenEvent (`0x5b9eb0` → `0x5b9310`): nothing while an action is pending; a player,
+    // guild or announcement row (flags `0x543`) asks the server and sets the pending bit, its event
+    // and selection arriving with `SMSG_CALENDAR_SEND_EVENT`; any other row is selected at once and
+    // opens with its type. Neither replaces the open event before the reply.
     set(lua, "CalendarOpenEvent", |lua, args| {
         if !has3(lua, &args) {
             return usage("Usage: CalendarOpenEvent([-1,0,1], monthDay, index)");
@@ -491,72 +492,50 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             int_arg(lua, &args, 2).unwrap_or(0),
         );
         let opened = write(lua, |st, _| {
+            if st.action_pending {
+                return None;
+            }
             let slot = st.slot(o as i32, d, n)?;
             let row = st.row(slot)?;
-            st.selected = Some(slot);
-            st.selected_invite = None;
-            if matches!(
-                row.kind,
-                K::Holiday | K::RaidLockout | K::RaidReset | K::System
-            ) {
-                let kind = row.kind;
-                st.open = Some(Open {
-                    what: Opened::Row(Box::new(row)),
-                    fields: WrathCalendarFields::default(),
-                    synced: None,
-                    changed: false,
-                });
-                Some(kind)
-            } else {
-                st.open = Some(Open {
-                    what: Opened::Event {
-                        event_id: row.event_id,
-                        invite_id: row.invite_id,
-                    },
-                    fields: WrathCalendarFields::default(),
-                    synced: None,
-                    changed: false,
-                });
+            if row.flags & 0x543 != 0 {
+                st.asked = Some((row.event_id, row.invite_id));
                 st.push(R::GetEvent {
                     event_id: row.event_id,
                 });
-                st.sync_open();
-                None
+                return Some(None);
             }
+            st.selected = Some(slot);
+            Some(Some(row.kind))
         });
-        if let Some(kind) = opened {
-            fire(
-                lua,
-                "CALENDAR_OPEN_EVENT",
-                vec![ScriptValue::Str(kind.token().into())],
-            );
+        match opened {
+            Some(Some(kind)) => {
+                let kind = ScriptValue::Str(kind.token().into());
+                fire(lua, "CALENDAR_OPEN_EVENT", vec![kind]);
+            }
+            Some(None) => pend_if(lua, true),
+            None => {}
         }
         many(vec![])
     })?;
+    // CalendarCloseEvent (`0x5b84a0`) only clears the selection; the open event stays.
     set(lua, "CalendarCloseEvent", |lua, _| {
-        write(lua, |st, _| {
-            if st.open.take().is_some() {
-                st.push(R::CloseEvent);
-            }
-            st.selected = None;
-            st.selected_invite = None;
-        });
+        write(lua, |st, _| st.selected = None);
         many(vec![])
     })?;
+    // CalendarGetEventIndex (`0x5b9f80` → `0x5b9000`): zeros unless the row is in the shown -1..1.
     set(lua, "CalendarGetEventIndex", |lua, _| {
-        let v = read(lua, |st| match st.selected {
-            Some((y, m, d, n)) => (st.offset_of(y, m), d as i64, n as i64 + 1),
-            None => (0, 0, 0),
+        let v = read(lua, |st| {
+            let (y, m, d, n) = st.selected.filter(|&slot| st.row(slot).is_some())?;
+            let offset = st.offset_of(y, m);
+            (-1..=1).contains(&offset).then_some((offset, d, n))
         });
-        many(vec![i(v.0), i(v.1), i(v.2)])
+        let (o, d, n) = v.map_or((0, 0, 0), |(o, d, n)| (o, i64::from(d), n as i64 + 1));
+        many(vec![i(o), i(d), i(n)])
     })?;
     // CalendarGetEventInfo (`0x5bd8a0`): 25 values of the open event.
     set(lua, "CalendarGetEventInfo", |lua, _| {
         let info = read(lua, |st| {
             let open = st.open.as_ref()?;
-            if matches!(open.what, Opened::Row(_)) {
-                return None;
-            }
             let event = st.event();
             let me = st.my_invitee();
             let fields = open.fields.clone();
@@ -609,17 +588,22 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         ])
     })?;
     set(lua, "CalendarEventGetCalendarType", |lua, _| {
-        let t = read(lua, |st| match &st.open.as_ref()?.what {
-            Opened::Row(r) => Some(r.kind.token()),
-            _ => Some(K::of_flags(st.open.as_ref()?.fields.flags).token()),
+        let t = read(lua, |st| {
+            Some(K::of_flags(st.open.as_ref()?.fields.flags).token())
         });
         match t {
             Some(t) => many(vec![s(lua, t)?]),
             None => many(vec![Value::Nil]),
         }
     })?;
+    // CalendarEventCanEdit (`0x5b8a50`): an announcement needs the guild right (`0x5cbca0`).
     set(lua, "CalendarEventCanEdit", |lua, _| {
-        many(vec![Value::Boolean(read(lua, State::can_edit))])
+        let right = guild_event_right(lua);
+        let can = read(lua, |st| match st.open.as_ref() {
+            Some(o) if o.fields.flags & ANNOUNCEMENT != 0 => right,
+            _ => st.can_edit(),
+        });
+        many(vec![Value::Boolean(can)])
     })?;
     set(lua, "CalendarEventIsModerator", |lua, _| {
         let m = read(lua, |st| {
@@ -943,10 +927,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             })
         };
         many(vec![
-            match &r.name {
-                Some(n) => s(lua, n)?,
-                None => Value::Nil,
-            },
+            // `0x5ba2c4`: a name not yet in the cache is "".
+            opt(lua, &r.name)?,
             i(r.level),
             opt(lua, &r.class_name)?,
             opt(lua, &r.class_file)?,
@@ -1035,10 +1017,18 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             many(vec![])
         })?;
     }
+    // CalendarEventSelectInvite(index) (`0x5b8ae0`): `lua_tointeger` (`0x5b8b0c`), and only an
+    // index within the open event's list (`0x5f1a00`).
     set(lua, "CalendarEventSelectInvite", |lua, args| {
-        let index = int_arg(lua, &args, 0);
+        let Some(n) = num(lua, &args, 0) else {
+            return usage("Usage: CalendarEventSelectInvite(index)");
+        };
+        let k = crate::script::item_arg::tointeger(n) as i32 as i64 - 1;
         write(lua, |st, _| {
-            st.selected_invite = index.and_then(|k| usize::try_from(k - 1).ok());
+            let count = st.event().map_or(0, |e| e.invitees.len());
+            if let Some(k) = usize::try_from(k).ok().filter(|&k| k < count) {
+                st.selected_invite = Some(k);
+            }
         });
         many(vec![])
     })?;
@@ -1333,7 +1323,8 @@ fn new_draft(lua: &Lua, flags: u32, arena_slot: Option<u8>) {
             synced: None,
             changed: false,
         });
-        st.selected_invite = None;
+        // The constructor zeroes the selection (`0x5bbede`).
+        (st.selected, st.selected_invite, st.asked) = (None, None, None);
         st.push(R::NewDraft { flags, arena_slot });
     });
 }

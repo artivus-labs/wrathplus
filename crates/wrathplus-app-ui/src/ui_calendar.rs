@@ -695,17 +695,10 @@ fn apply(
 ) -> Vec<Command> {
     match request {
         R::GetCalendar => vec![Command::GetCalendar],
+        // The open event stays until the asked one arrives, as 12340's `0xc207ec` does.
         R::GetEvent { event_id } => {
             state.asked = Some(event_id);
-            if state.open.as_ref().is_some_and(|o| o.event_id != event_id) {
-                state.open = None;
-            }
             vec![Command::GetEvent { event_id }]
-        }
-        R::CloseEvent => {
-            state.open = None;
-            state.asked = None;
-            vec![]
         }
         R::NewDraft { flags, arena_slot } => {
             state.asked = None;
