@@ -206,3 +206,37 @@ fn the_talents_packet_sets_the_group_count_and_active_group() {
     schedule.run(app.world_mut());
     assert_eq!(groups(&mut app), (2, 2));
 }
+
+/// The handler fires `ACTIVE_TALENT_GROUP_CHANGED` with (new, old) when the active group moves
+/// (`0x5c9ed7`-`0x5c9f00`), each 1-based, or 0 while there are no groups.
+#[test]
+fn a_new_active_group_fires_active_talent_group_changed() {
+    let mut app = App::new();
+    app.add_plugins(crate::net::NetPlugin { connect: false });
+    app.init_resource::<PlayerActions>();
+    let script = UiScript::new().unwrap();
+    script
+        .run(
+            "seen = {} local f = CreateFrame('Frame') \
+             f:RegisterEvent('ACTIVE_TALENT_GROUP_CHANGED') \
+             f:SetScript('OnEvent', function(_, _, new, old) seen[#seen + 1] = new .. ':' .. old end)",
+        )
+        .unwrap();
+    app.insert_non_send_resource(script);
+    let mut schedule = Schedule::default();
+    schedule.add_systems(feed_talents);
+    schedule.run(app.world_mut());
+    for active in [1, 0, 0] {
+        packet_groups(&mut app, 0, active, &[&[], &[]]);
+        schedule.run(app.world_mut());
+    }
+    let mut script = app.world_mut().non_send_resource_mut::<UiScript>();
+    script.tick(0.0);
+    assert_eq!(
+        script
+            .eval::<String>("return table.concat(seen, ' ')")
+            .unwrap(),
+        "2:0 1:2",
+        "the first packet moves from no groups; a repeat fires nothing"
+    );
+}

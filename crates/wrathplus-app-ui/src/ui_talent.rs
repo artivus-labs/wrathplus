@@ -123,80 +123,97 @@ fn feed_talents(
         return;
     }
     let groups = player_groups(progress.as_deref());
+    let mut group_change = None;
     if groups != memory.groups {
+        // `0x5c9ed7`: a packet that moves the active group fires (new, old), each 1-based or 0
+        // without groups (`0x5c9edb`-`0x5c9ef2`); a reloaded VM is seeded silently.
+        let packet = progress
+            .as_ref()
+            .is_some_and(|p| p.talents.contains_key(&false));
+        if packet && !vm_reset && groups.active != memory.groups.active {
+            let n = |g: &WrathTalentGroups| (g.count > 0).then_some(i64::from(g.active) + 1);
+            group_change = Some((n(&groups).unwrap_or(0), n(&memory.groups).unwrap_or(0)));
+        }
         script.set_talent_groups(groups.clone());
         memory.groups = groups;
     }
-    let (Some(talents), Some(spells)) = (talents.as_deref(), spells.as_deref()) else {
-        return;
-    };
-    let Ok(store) = self_q.single() else {
-        return;
-    };
-    let race = store.0.unit_race().unwrap_or(0);
-    let class = store.0.unit_class().unwrap_or(0);
-    let points = (
-        player_talent_state(progress.as_deref()).map_or_else(
-            || store.0.player_talent_points().unwrap_or(0),
-            |(unspent, _)| unspent,
-        ),
-        store.0.player_free_professions().unwrap_or(0),
-    );
-    // Scoped: the `GlobalStrings.lua` lookup borrows the VM, which the push needs mutably.
-    let fresh = {
-        let get = |key: &str| {
-            script
-                .lua()
-                .globals()
-                .get::<String>(key)
-                .ok()
-                .filter(|t| !t.is_empty())
+    'pages: {
+        let (Some(talents), Some(spells)) = (talents.as_deref(), spells.as_deref()) else {
+            break 'pages;
         };
-        build_pages_by(
-            &talents.catalog,
-            &|t| player_rank(t, &actions.spells, progress.as_deref()),
-            &|spell| actions.spells.contains(&spell),
-            &spells.catalog,
-            race,
-            class,
-            points,
-            &get,
-        )
-    };
-    if fresh != memory.pushed {
-        gate.audit("feed_talents", "the talent pages");
-        debug!(
-            "ui_talent: fed {} tab(s), {} points",
-            fresh.tabs.len(),
-            points.0
-        );
-        script.set_talents(fresh.clone());
-        memory.pushed = fresh;
-        // Build-12340 PlayerTalentFrame repaints on this event, after its getters are updated.
-        script.fire_event("PLAYER_TALENT_UPDATE", vec![]);
-        // The talent and profession point deltas, as the reference's `SignalEvent2` sends them:
-        // `ChatFrame.lua:1326` tests `arg2 > 0` unguarded, so an argless fire raises.
-        // `memory.points` still holds the previous pair here.
-        let (talent_delta, profession_delta) = match memory.points {
-            Some((old_talent, old_professions)) => (
-                i64::from(points.0) - i64::from(old_talent),
-                i64::from(points.1) - i64::from(old_professions),
+        let Ok(store) = self_q.single() else {
+            break 'pages;
+        };
+        let race = store.0.unit_race().unwrap_or(0);
+        let class = store.0.unit_class().unwrap_or(0);
+        let points = (
+            player_talent_state(progress.as_deref()).map_or_else(
+                || store.0.player_talent_points().unwrap_or(0),
+                |(unspent, _)| unspent,
             ),
-            None => (0, 0),
-        };
-        script.fire_event(
-            "CHARACTER_POINTS_CHANGED",
-            vec![
-                ScriptValue::Int(talent_delta),
-                ScriptValue::Int(profession_delta),
-            ],
+            store.0.player_free_professions().unwrap_or(0),
         );
+        // Scoped: the `GlobalStrings.lua` lookup borrows the VM, which the push needs mutably.
+        let fresh = {
+            let get = |key: &str| {
+                script
+                    .lua()
+                    .globals()
+                    .get::<String>(key)
+                    .ok()
+                    .filter(|t| !t.is_empty())
+            };
+            build_pages_by(
+                &talents.catalog,
+                &|t| player_rank(t, &actions.spells, progress.as_deref()),
+                &|spell| actions.spells.contains(&spell),
+                &spells.catalog,
+                race,
+                class,
+                points,
+                &get,
+            )
+        };
+        if fresh != memory.pushed {
+            gate.audit("feed_talents", "the talent pages");
+            debug!(
+                "ui_talent: fed {} tab(s), {} points",
+                fresh.tabs.len(),
+                points.0
+            );
+            script.set_talents(fresh.clone());
+            memory.pushed = fresh;
+            // Build-12340 PlayerTalentFrame repaints on this event, after its getters are updated.
+            script.fire_event("PLAYER_TALENT_UPDATE", vec![]);
+            // The talent and profession point deltas, as the reference's `SignalEvent2` sends them:
+            // `ChatFrame.lua:1326` tests `arg2 > 0` unguarded, so an argless fire raises.
+            // `memory.points` still holds the previous pair here.
+            let (talent_delta, profession_delta) = match memory.points {
+                Some((old_talent, old_professions)) => (
+                    i64::from(points.0) - i64::from(old_talent),
+                    i64::from(points.1) - i64::from(old_professions),
+                ),
+                None => (0, 0),
+            };
+            script.fire_event(
+                "CHARACTER_POINTS_CHANGED",
+                vec![
+                    ScriptValue::Int(talent_delta),
+                    ScriptValue::Int(profession_delta),
+                ],
+            );
+        }
+        // The free-professions line must not be composed here: the stock `ChatFrame_OnEvent` arm
+        // (`ChatFrame.lua:1324-1334`) prints `LEVEL_UP_SKILL_POINTS` itself on `arg2 > 0`.
+        if memory.points != Some(points) {
+            gate.audit("feed_talents", "the points memo");
+            memory.points = Some(points);
+        }
     }
-    // The free-professions line must not be composed here: the stock `ChatFrame_OnEvent` arm
-    // (`ChatFrame.lua:1324-1334`) prints `LEVEL_UP_SKILL_POINTS` itself on `arg2 > 0`.
-    if memory.points != Some(points) {
-        gate.audit("feed_talents", "the points memo");
-        memory.points = Some(points);
+    // After `PLAYER_TALENT_UPDATE`, as the handler signals `0x271` before `0x272`.
+    if let Some((new, old)) = group_change {
+        let args = vec![ScriptValue::Int(new), ScriptValue::Int(old)];
+        script.fire_event("ACTIVE_TALENT_GROUP_CHANGED", args);
     }
 }
 
