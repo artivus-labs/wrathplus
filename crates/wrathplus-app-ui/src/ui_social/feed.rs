@@ -231,7 +231,7 @@ fn who_lines(rows: &[WhoInfo], total: u32, get: &dyn Fn(&str) -> Option<String>)
     lines
 }
 
-/// The friend rows sorted by name, and their guids in the same order for the drain.
+/// The friend rows in 12340's order, and their guids in the same order for the drain.
 fn friend_rows(
     social: &SocialState,
     names: &NameCache,
@@ -274,12 +274,13 @@ fn friend_rows(
         })
         .collect();
 
-    // By name, unresolved rows last, so a pending name query parks no empty row on top.
+    // 12340's `0x6b3960`: online first (`0x6b3a00`), a pending name after the named, then
+    // `0x76ec80`.
     rows.sort_by(|(_, a), (_, b)| {
-        a.name
-            .is_empty()
-            .cmp(&b.name.is_empty())
-            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+        b.connected
+            .cmp(&a.connected)
+            .then_with(|| a.name.is_empty().cmp(&b.name.is_empty()))
+            .then_with(|| wrathplus_ui::strings::collate(&a.name, &b.name))
     });
     rows.into_iter().map(|(guid, row)| (row, guid)).unzip()
 }
@@ -600,6 +601,36 @@ mod tests {
             (row.class.as_str(), row.race.as_str(), row.zone.as_str()),
             ("", "", "")
         );
+    }
+
+    /// 12340's comparator `0x6b3960`: online before offline, a pending name after the named, then
+    /// `0x76ec80`, which folds `É` to `E`.
+    #[test]
+    fn friend_rows_put_online_first_then_collate_the_names() {
+        let mut social = SocialState::default();
+        let mut names = NameCache::default();
+        let (tx, _rx) = crossbeam_channel::unbounded();
+        let commands = NetCommands(tx);
+        for (guid, name, status) in [
+            (1, Some("Alpha"), friend_status::OFFLINE),
+            (2, Some("Emma"), friend_status::ONLINE),
+            (3, None, friend_status::ONLINE),
+            (4, Some("Élise"), friend_status::AFK),
+        ] {
+            if let Some(name) = name {
+                names.insert_player(guid, name.into(), None);
+            }
+            let entry = wrathplus_protocol::types::FriendEntry {
+                guid,
+                status,
+                ..Default::default()
+            };
+            social.friends.push(entry);
+        }
+        let (rows, order) = friend_rows(&social, &names, &commands, None, &|_| String::new());
+        let shown: Vec<&str> = rows.iter().map(|r| r.name.as_str()).collect();
+        assert_eq!(shown, ["Élise", "Emma", "", "Alpha"]);
+        assert_eq!(order, [4, 2, 3, 1], "the drain's order follows");
     }
 
     #[test]

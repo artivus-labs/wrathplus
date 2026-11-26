@@ -45,7 +45,7 @@ pub struct WhoInfo {
 /// The social snapshot the app pushes whole; the default is a fresh login's.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SocialState {
-    /// In display order: the app sorts, as the reference's comparator `0x5ada00` does.
+    /// In display order: the app sorts, as 12340's comparator `0x6b3960` does.
     pub friends: Vec<FriendInfo>,
     /// The selected friend, 1-based, 0 for none (`0x5ad260` returns the stored slot + 1).
     pub selected_friend: u32,
