@@ -164,7 +164,6 @@ pub struct WrathCalendarTexture {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct WrathCalendarView {
     pub me: u64,
-    pub today: Option<WrathCalendarDate>,
     /// Every listed row, each on its own day, in App's order.
     pub entries: Vec<WrathCalendarEntry>,
     pub raid_resets: Vec<WrathCalendarRaidReset>,
@@ -314,6 +313,8 @@ const CRITERIA: [&str; 6] = ["name", "level", "class", "status", "party", "notes
 #[derive(Default)]
 pub(crate) struct State {
     view: Arc<WrathCalendarView>,
+    /// The game clock (`0xd37f98`) the host pushes, as `GetGameTime`'s; `None` before the first.
+    clock: Option<WrathCalendarDate>,
     shown: Option<(i32, u8)>,
     selected: Option<Slot>,
     context: Option<Slot>,
@@ -340,6 +341,11 @@ impl super::UiScript {
         let state = &mut model.wrath_calendar;
         state.view = view;
         state.sync_open();
+    }
+
+    /// Push the game clock's date and time, what `CalendarGetDate` (`0x5b8160`) reads.
+    pub fn set_game_date(&mut self, now: WrathCalendarDate) {
+        self.model_mut().wrath_calendar.clock = Some(now);
     }
 
     /// The bit `CalendarIsActionPending` answers; App clears it on the server's reply.
@@ -370,9 +376,7 @@ impl super::UiScript {
 
 impl State {
     fn today(&self) -> WrathCalendarDate {
-        self.view
-            .today
-            .unwrap_or_else(WrathCalendarDate::system_now)
+        self.clock.unwrap_or_else(WrathCalendarDate::system_now)
     }
 
     fn shown(&self) -> (i32, u8) {

@@ -24,7 +24,7 @@
 //! Labelled: the error id → key table is AzerothCore's `CalendarError` names matched to
 //! GlobalStrings (the client's own table is not traced); the guild-filter and arena-team member
 //! lists fill a draft at level 0, their byte uninterpreted (an open server event ignores them);
-//! before the first calendar, today is the host's UTC clock; `0x0442`/`0x0460`/`0x0461` never arrive (AzerothCore sends none), so
+//! `0x0442`/`0x0460`/`0x0461` never arrive (AzerothCore sends none), so
 //! no status alert, invite note or `CALENDAR_EVENT_ALARM` exists; a holiday lasts its first
 //! duration from each start date; system events are never sent.
 
@@ -1060,7 +1060,6 @@ fn build(
     });
     WrathCalendarView {
         me,
-        today: state.clock.map(|_| state.local(state.now_unix())),
         entries,
         raid_resets,
         pending_invites: state.pending,

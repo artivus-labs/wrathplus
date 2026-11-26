@@ -100,7 +100,7 @@ impl WrathCalendarDate {
             | u32::from(self.minute)
     }
 
-    /// The host's clock as UTC, before App has a server time.
+    /// The host's clock as UTC, before the first game clock push.
     pub fn system_now() -> Self {
         let t = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

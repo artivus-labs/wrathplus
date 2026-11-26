@@ -9,6 +9,7 @@ const ME: u64 = 7;
 fn vm(view: WrathCalendarView) -> UiScript {
     let mut s = UiScript::new().unwrap();
     s.set_wrath_calendar(Arc::new(view));
+    s.set_game_date(today());
     s
 }
 
@@ -35,7 +36,6 @@ fn event_row(day: u8, hour: u8, rank: u8) -> WrathCalendarEntry {
 fn base() -> WrathCalendarView {
     WrathCalendarView {
         me: ME,
-        today: Some(today()),
         ..Default::default()
     }
 }

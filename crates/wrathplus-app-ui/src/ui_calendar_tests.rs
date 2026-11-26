@@ -98,7 +98,8 @@ fn the_calendar_lists_events_lockouts_and_holiday_days() {
         (event.event_id, event.invite_id, event.invite),
         (100, 200, Some((0, 0)))
     );
-    assert_eq!(view.today.map(|t| (t.day, t.hour)), Some((15, 14)));
+    let now = state.local(state.now_unix());
+    assert_eq!((now.day, now.hour), (15, 14));
     // The reset projects from the relation time in the server's zone.
     assert_eq!(view.raid_resets[0].first, 1_135_814_400 + 7200);
 }
