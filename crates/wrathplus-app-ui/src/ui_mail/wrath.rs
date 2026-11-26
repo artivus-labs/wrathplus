@@ -13,6 +13,7 @@ pub(super) fn snapshot(
     player_level: Option<u32>,
     // The VM's `GlobalStrings.lua`, for the auction notices' `AUCTION_*_MAIL_SUBJECT`.
     get_text: &dyn Fn(&str) -> Option<String>,
+    houses: Option<&crate::ui_auction::AuctionHouses>,
 ) -> Option<WrathMailInbox> {
     mail.mailbox?;
     let inbox = mail.wrath_inbox.as_ref()?;
@@ -44,7 +45,9 @@ pub(super) fn snapshot(
                         }
                     })
                     .collect();
-                let returned = row.checked & CHECKED_RETURNED != 0;
+                // `0x200` reads as returned too (`0x56e520`'s tenth value).
+                let returned = row.checked & (CHECKED_RETURNED | 0x200) != 0;
+                let gm = row.stationery == STATIONERY_GM;
                 // An auction notice: its subject through `AUCTION_*_MAIL_SUBJECT`, and the won,
                 // sold and sale-pending ones' invoice from the inline body.
                 let auction = (row.kind == mail_message_type::AUCTION)
@@ -63,9 +66,21 @@ pub(super) fn snapshot(
                         }
                         .into(),
                     ),
-                    sender: (row.kind == 0)
-                        .then(|| names.resolve(row.sender, commands).map(str::to_owned))
-                        .flatten(),
+                    // `0x56d960`: a player's or a made item mail's name, `GM_EMAIL_NAME` on GM
+                    // stationery; an auction notice's house name. Labelled: creature and object
+                    // senders (types 3, 4) are not cached here and stay nil.
+                    sender: match row.kind {
+                        mail_message_type::NORMAL | mail_message_type::ITEM if gm => {
+                            get_text("GM_EMAIL_NAME")
+                        }
+                        mail_message_type::NORMAL | mail_message_type::ITEM => {
+                            names.resolve(row.sender, commands).map(str::to_owned)
+                        }
+                        mail_message_type::AUCTION => houses
+                            .and_then(|h| h.0.get(row.sender as u32))
+                            .map(|h| h.name.clone()),
+                        _ => None,
+                    },
                     subject: auction_subject(
                         &row.subject,
                         auction,
@@ -79,8 +94,9 @@ pub(super) fn snapshot(
                     was_read: row.checked & CHECKED_READ != 0,
                     was_returned: returned,
                     text_created: row.checked & CHECKED_COPIED != 0,
-                    can_reply: row.kind == 0 && !returned,
-                    is_gm: row.stationery == STATIONERY_GM,
+                    // A player's mail on any stationery but the GM's, returned or not.
+                    can_reply: row.kind == mail_message_type::NORMAL && !gm,
+                    is_gm: gm,
                     body: Some(row.body.clone()),
                     has_body: !row.body.is_empty(),
                     stationery_texture: wrathplus_formats::StationeryCatalog::DEFAULT_TEXTURE
@@ -200,6 +216,7 @@ mod tests {
                 crate::items::RollCatalogs::NONE,
                 level,
                 &|_| None,
+                None,
             )
         };
         assert!(
@@ -249,6 +266,71 @@ mod tests {
         .is_none());
         mail.clear();
         assert!(view(&mail, &items, Some(80)).is_none());
+    }
+
+    /// `0x56e520`'s sender, returned and canReply: an auction notice names its house, GM stationery
+    /// names `GM_EMAIL_NAME` and cannot be answered, and a returned player's mail still can.
+    #[test]
+    fn the_inbox_header_names_houses_and_gms_and_replies_as_12340() {
+        use wrathplus_protocol::wrath_mail::{Inbox, Mail};
+        let (tx, _rx) = crossbeam_channel::unbounded();
+        let commands = NetCommands(tx);
+        let mail_of = |kind: u8, sender: u64, stationery: u32, checked: u32| Mail {
+            id: 1,
+            kind,
+            sender,
+            cod: 0,
+            unknown: 0,
+            stationery,
+            money: 0,
+            checked,
+            expire_days: 1.0,
+            template_id: 0,
+            subject: String::new(),
+            body: String::new(),
+            attachments: Vec::new(),
+        };
+        let mut mail = MailOpen {
+            mailbox: Some(42),
+            ..Default::default()
+        };
+        mail.wrath_inbox = Some(Inbox {
+            total_count: 3,
+            mails: vec![
+                mail_of(mail_message_type::AUCTION, 2, 62, 0),
+                mail_of(mail_message_type::NORMAL, 12, STATIONERY_GM, 0),
+                mail_of(mail_message_type::NORMAL, 12, 41, 0x200),
+            ],
+        });
+        let house = wrathplus_formats::AuctionHouseInfo {
+            faction: 0,
+            deposit_percent: 15,
+            cut_percent: 5,
+            name: "Alliance Auction House".into(),
+        };
+        let houses = crate::ui_auction::AuctionHouses(
+            wrathplus_formats::AuctionHouseCatalog::from_rows([(2, house)].into()),
+        );
+        let text = |key: &str| (key == "GM_EMAIL_NAME").then(|| "Game Master".into());
+        let view = snapshot(
+            &mail,
+            &Items::default(),
+            None,
+            &NameCache::default(),
+            &commands,
+            crate::items::RollCatalogs::NONE,
+            Some(80),
+            &text,
+            Some(&houses),
+        )
+        .unwrap();
+        let h = |i: usize| &view.rows[i].header;
+        assert_eq!(h(0).sender.as_deref(), Some("Alliance Auction House"));
+        assert_eq!(
+            (h(1).sender.as_deref(), h(1).can_reply),
+            (Some("Game Master"), false)
+        );
+        assert_eq!((h(2).was_returned, h(2).can_reply), (true, true));
     }
 
     #[test]
@@ -301,6 +383,7 @@ mod tests {
             crate::items::RollCatalogs::NONE,
             Some(80),
             &|_| None,
+            None,
         )
         .unwrap();
         assert_eq!(view.total_count, 70);
@@ -321,6 +404,7 @@ mod tests {
             crate::items::RollCatalogs::NONE,
             Some(80),
             &|_| None,
+            None,
         )
         .is_none());
     }
@@ -584,6 +668,7 @@ mod action_tests {
             crate::items::RollCatalogs::NONE,
             Some(80),
             &text,
+            None,
         )
         .unwrap();
         let header = &view.rows[0].header;
