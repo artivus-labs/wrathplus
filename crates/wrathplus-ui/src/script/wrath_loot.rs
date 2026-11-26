@@ -1,10 +1,12 @@
 //! Bounded build-12340 loot ABI for manual solo corpse loot.
 //!
-//! The mature Vanilla bindings remain the state store. This adapter changes only the Wrath ABI:
-//! `GetLootSlotInfo` returns `locked` as its fifth result, and `LootSlot` is the actual take verb.
+//! The mature Vanilla bindings remain the state store. This adapter carries the Wrath ABI:
+//! `GetLootSlotInfo` returns `locked` as its fifth result, `LootSlot` is the actual take verb, and
+//! the predicates, the count and `CloseLoot` follow `0x588190`-`0x5888b0`.
 
 use mlua::{Function, Lua, MultiValue, Value};
 
+use crate::script::binding_abi::{bool_or_default, flag, number_arg};
 use super::Model;
 
 pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
@@ -47,6 +49,50 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 .expect("model app_data")
                 .loot_picks
                 .push(slot);
+            Ok(())
+        })?,
+    )?;
+
+    // GetNumLootItems() (`0x588190`): the highest occupied slot, cleared slots below it included;
+    // the coin row, taken or not, is the layout's first.
+    globals.set(
+        "GetNumLootItems",
+        lua.create_function(|lua, ()| {
+            let model = lua.app_data_ref::<Model>().expect("model app_data");
+            let rows = model.loot.as_ref().map_or(&[][..], |l| &l.rows[..]);
+            Ok(rows.iter().rposition(Option::is_some).map_or(0, |i| i + 1) as i64)
+        })?,
+    )?;
+    // LootSlotIsItem(slot) / LootSlotIsCoin(slot) (`0x588750`, `0x588810`): 1 or nil.
+    for (verb, usage, coin) in [
+        ("LootSlotIsItem", "Usage: LootSlotIsItem(slot)", false),
+        ("LootSlotIsCoin", "Usage: LootSlotIsCoin(slot)", true),
+    ] {
+        globals.set(
+            verb,
+            lua.create_function(move |lua, slot: Value| {
+                let slot = number_arg(lua, slot, usage)?;
+                let model = lua.app_data_ref::<Model>().expect("model app_data");
+                Ok(flag(
+                    usize::try_from(slot.wrapping_sub(1))
+                        .ok()
+                        .and_then(|n| model.loot.as_ref()?.rows.get(n)?.as_ref())
+                        .is_some_and(|r| r.is_coin == coin),
+                ))
+            })?,
+        )?;
+    }
+    // CloseLoot([failed]) (`0x5888b0`): `failed` (`0x815500`) raises `ERR_LOOT_NO_UI` (`0x5236b3`)
+    // when loot is open; stock passes it when the frame cannot show (`LootFrame.lua:21`).
+    globals.set(
+        "CloseLoot",
+        lua.create_function(|lua, args: MultiValue| {
+            let failed = bool_or_default(args.front(), false);
+            let mut model = lua.app_data_mut::<Model>().expect("model app_data");
+            if failed && model.loot.is_some() {
+                model.ui_errors.push("ERR_LOOT_NO_UI");
+            }
+            model.loot_close = true;
             Ok(())
         })?,
     )?;
@@ -117,6 +163,56 @@ mod tests {
         script.run("LootSlot(1)").unwrap();
         assert_eq!(script.take_loot_picks(), [1]);
         assert!(script.take_loot_confirms().is_empty());
+    }
+
+    /// `LootSlotIsItem`/`LootSlotIsCoin` push the number 1 or nil (`0x5887d6`, `0x588882`) and raise
+    /// their own Usage; `GetNumLootItems` stops at the highest occupied slot (`0x588190`); a
+    /// `CloseLoot(failed)` with loot open raises `ERR_LOOT_NO_UI` (`0x5236b3`).
+    #[test]
+    fn wrath_loot_predicates_count_and_close() {
+        let mut s = UiScript::new().unwrap();
+        let coin = LootRow {
+            is_coin: true,
+            item_id: 0,
+            ..row()
+        };
+        s.set_loot(Some(LootState {
+            rows: vec![Some(coin), Some(row()), Some(row()), None],
+            ..LootState::default()
+        }));
+        let probe = "return LootSlotIsCoin(1), LootSlotIsItem(1), LootSlotIsItem(2), \
+                     LootSlotIsItem(4), GetNumLootItems()";
+        assert_eq!(
+            s.eval::<(Option<i64>, Option<i64>, Option<i64>, Option<i64>, i64)>(probe)
+                .unwrap(),
+            (Some(1), None, Some(1), None, 3),
+            "1/nil, never booleans; the trailing cleared slot drops out of the count"
+        );
+        assert!(s
+            .eval::<bool>("return type(LootSlotIsCoin(1)) == 'number'")
+            .unwrap());
+        let mut middle = LootState {
+            rows: vec![Some(row()), None, Some(row())],
+            ..LootState::default()
+        };
+        s.set_loot(Some(middle.clone()));
+        assert_eq!(s.eval::<i64>("return GetNumLootItems()").unwrap(), 3);
+        middle.rows[2] = None;
+        s.set_loot(Some(middle));
+        assert_eq!(s.eval::<i64>("return GetNumLootItems()").unwrap(), 1);
+        for verb in ["LootSlotIsItem", "LootSlotIsCoin"] {
+            let err = s.run(&format!("{verb}()")).unwrap_err().to_string();
+            assert!(err.contains(&format!("Usage: {verb}(slot)")), "{err}");
+        }
+
+        s.run("CloseLoot()").unwrap();
+        assert!(s.take_ui_errors().is_empty(), "no failure argument");
+        s.run("CloseLoot(1)").unwrap();
+        assert_eq!(s.take_ui_errors(), vec!["ERR_LOOT_NO_UI"]);
+        assert!(s.take_loot_close());
+        s.set_loot(None);
+        s.run("CloseLoot(true)").unwrap();
+        assert!(s.take_ui_errors().is_empty(), "no loot source: no error");
     }
 
     #[test]
