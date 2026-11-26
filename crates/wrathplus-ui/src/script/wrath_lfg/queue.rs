@@ -219,7 +219,7 @@ pub(crate) struct Queue {
     comment: String,
     /// `0xacd880`: a join was sent and not left.
     sent: bool,
-    /// `0xacd883`: the comment changed before a join, so the next join resends.
+    /// `0xacd883`: the selection or the comment changed, so the next join resends.
     pending: bool,
     join: Throttle,
     comment_throttle: Throttle,
@@ -373,6 +373,26 @@ fn set(
 
 fn arg(args: &MultiValue, i: usize) -> Value {
     args.get(i).cloned().unwrap_or(Value::Nil)
+}
+
+/// `0x559b70`: a dungeon or heroic (types 1, 5) keeps only dungeons and heroics, a raid (2) only
+/// raids and only outside a party (`0x52bd10`), any other type nothing; a clear (`0x559340`) or a new
+/// entry (`0x559c35`) marks the selection for the next join to resend.
+fn select(q: &mut Queue, entry: u32, in_party: bool) {
+    let all = |types: &[u32]| q.selection.iter().all(|e| types.contains(&(e >> 24)));
+    let clear = match entry >> 24 {
+        1 | 5 => !all(&[1, 5]),
+        2 => in_party || !all(&[2]),
+        _ => true,
+    };
+    if clear {
+        q.selection.clear();
+        q.pending = true;
+    }
+    if !q.selection.contains(&entry) {
+        q.selection.push(entry);
+        q.pending = true;
+    }
 }
 
 /// The native join send (`0x5572d0`), behind its throttle; nothing without a role past leader.
@@ -824,26 +844,23 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
 
     // ── L0 selection and roles ──
     // SetLFGDungeon(id) (`0x559f50` → `0x559b70`): a catalog row joins the selection as its full
-    // entry. Labelled: `0x559b70` is unread; a repeat is not added twice.
+    // entry, under `select`'s rules.
     set(lua, "SetLFGDungeon", |lua, args| {
         let id = number_arg(lua, arg(&args, 0), "Usage: SetLFGDungeon(type)")? as u32;
         let mut m = lua.app_data_mut::<Model>().expect("model app_data");
         if let Some(entry) = m.wrath_lfg.row(id).map(super::l1::full_entry) {
-            let selection = &mut m.wrath_lfg.queue.selection;
-            if !selection.contains(&entry) {
-                selection.push(entry);
-            }
+            let in_party = !m.party.members.is_empty();
+            select(&mut m.wrath_lfg.queue, entry, in_party);
         }
         Ok(MultiValue::new())
     })?;
-    // ClearAllLFGDungeons() (`0x5595d0`, labelled: unread): empties the selection.
+    // ClearAllLFGDungeons() (`0x5595d0` → `0x559340`): empties the selection and marks it for
+    // resend (`0x559388`).
     set(lua, "ClearAllLFGDungeons", |lua, _| {
-        lua.app_data_mut::<Model>()
-            .expect("model app_data")
-            .wrath_lfg
-            .queue
-            .selection
-            .clear();
+        let mut m = lua.app_data_mut::<Model>().expect("model app_data");
+        let q = &mut m.wrath_lfg.queue;
+        q.selection.clear();
+        q.pending = true;
         Ok(MultiValue::new())
     })?;
     // GetLFGRoles() (`0x552e10`) → leader, tank, healer, damage from `lfgSelectedRoles`.

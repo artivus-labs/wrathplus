@@ -278,26 +278,53 @@ fn selection_roles_and_verbs_follow_the_native_gates() {
     // A warrior cannot heal: the healer bit is masked off.
     s.run("SetLFGRoles(true, true, true, false); local l,t,h,d = GetLFGRoles(); assert(l and t and not h and not d)").unwrap();
     s.run(
-        "SetLFGComment('lfm'); JoinLFG(); JoinLFG(); SetLFGComment('new'); LeaveLFG(); LeaveLFG()",
+        "SetLFGComment('lfm'); JoinLFG(); JoinLFG(); ClearAllLFGDungeons(); SetLFGDungeon(7) \
+         JoinLFG(); SetLFGComment('new'); LeaveLFG(); LeaveLFG()",
     )
     .unwrap();
+    let join = R::Join {
+        roles: 3,
+        no_partial_clear: false,
+        achievements: false,
+        dungeons: vec![1 << 24 | 7],
+        needs: [0; 3],
+        comment: "lfm".into(),
+    };
     assert_eq!(
         s.take_wrath_lfg_queue_requests(),
         vec![
-            R::Join {
-                roles: 3,
-                no_partial_clear: false,
-                achievements: false,
-                dungeons: vec![1 << 24 | 7],
-                needs: [0; 3],
-                comment: "lfm".into(),
-            },
+            join.clone(),
+            join.clone(),
             R::SetComment { text: "new".into() },
             R::Leave,
-        ]
+        ],
+        "a selection changed after a join resends it (`0xacd883`)"
     );
     s.run("ClearAllLFGDungeons(); JoinLFG()").unwrap();
     assert_eq!(s.take_ui_errors(), vec!["ERR_LFG_NO_SLOTS_SELECTED"]);
+    // `0x559b70`: a dungeon drops a raid and a raid a dungeon; a repeat changes nothing alone,
+    // and in a party a raid clears first.
+    let pick = |s: &mut UiScript, code: &str| {
+        s.model_mut().wrath_lfg.queue.pending = false;
+        s.run(code).unwrap();
+        let q = &s.model_mut().wrath_lfg.queue;
+        (q.selection.clone(), q.pending)
+    };
+    assert_eq!(
+        pick(&mut s, "SetLFGDungeon(9) SetLFGDungeon(7)"),
+        (vec![1 << 24 | 7], true)
+    );
+    assert_eq!(pick(&mut s, "SetLFGDungeon(9)"), (vec![2 << 24 | 9], true));
+    assert_eq!(pick(&mut s, "SetLFGDungeon(9)"), (vec![2 << 24 | 9], false));
+    s.set_party(PartyState {
+        members: vec![PartyMemberInfo {
+            name: "Pal".into(),
+            guid: 2,
+        }],
+        ..Default::default()
+    });
+    assert_eq!(pick(&mut s, "SetLFGDungeon(9)"), (vec![2 << 24 | 9], true));
+    s.set_party(PartyState::default());
 
     // Role check: the third call opens a window (its stamp starts at 0); two more pass, then
     // nothing until ten seconds after that.
