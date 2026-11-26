@@ -103,7 +103,7 @@ pub(super) struct Parsed {
     /// The header's `ZONECHANNELS` word, the reference's `[0xb6e5e0]`, overwritten from the file
     /// (`0x498d83`); `None` without the line, so the loader seeds from the DBC rather than 0.
     pub(super) zone_mask: Option<u32>,
-    /// `OPTION_GUILD_RECRUITMENT_CHANNEL`, the latch `GetGuildRecruitmentMode` returns: `STANDARD`
+    /// `OPTION_GUILD_RECRUITMENT_CHANNEL`, the recruitment auto-join latch: `STANDARD`
     /// is 0 and any other word, or none, is 1 (`0x49ea70`, `ecx=0` only for `STANDARD`).
     pub(super) guild_recruitment_auto: bool,
 }
@@ -136,7 +136,7 @@ fn render(
     // The repair marker, a comment line.
     out.push_str(WRITER_GENERATION);
     out.push('\n');
-    // The latch `SetGuildRecruitmentMode` writes; this is the one place it persists.
+    // The recruitment latch; this is the one place it persists.
     let recruitment = if guild_recruitment_auto {
         "AUTO"
     } else {
@@ -584,7 +584,7 @@ fn watch_chat_looks(script: Option<NonSendMut<UiScript>>, mut file: ResMut<ChatW
     let Some(mut script) = script else { return };
     let moved = !script.take_chat_window_changes().is_empty();
     let coloured = script.take_chat_color_changes();
-    // `SetGuildRecruitmentMode` persists here too; a Lua call arms this, the login seat never.
+    // The recruitment latch persists here too; a manual join or leave arms it, the login seat never.
     let recruitment = script.take_guild_recruitment_change();
     if !(moved || coloured || recruitment) {
         return;

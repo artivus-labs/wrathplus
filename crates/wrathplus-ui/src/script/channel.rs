@@ -99,10 +99,6 @@ pub enum ChannelCommand {
         name: String,
         player: String,
     },
-    /// `ChannelModerate(name)`: toggles moderation.
-    Moderate {
-        name: String,
-    },
     /// `ChannelToggleAnnouncements(name)`.
     ToggleAnnouncements {
         name: String,
@@ -133,19 +129,13 @@ impl super::UiScript {
         model.guild_recruitment_changed = false;
     }
 
-    /// Whether Lua moved the latch since the last drain: the chat cache's dirty signal.
+    /// Whether a manual join or leave moved the latch since the last drain: the cache's dirty cue.
     pub fn take_guild_recruitment_change(&mut self) -> bool {
         std::mem::take(&mut self.model_mut().guild_recruitment_changed)
     }
 
-    /// Whether Lua called `SetGuildRecruitmentMode(1)` since the last drain: the cue for the
-    /// cascade (`0x49ea70` → `0x49ea90`).
-    pub fn take_guild_recruitment_cascade(&mut self) -> bool {
-        std::mem::take(&mut self.model_mut().guild_recruitment_cascade)
-    }
-
-    /// A manual join or leave of `GuildRecruitment` forces the latch to 0 (`0x49ed3d`, `0x49ef8f`)
-    /// and, as a player gesture, arms the save; mode 0 has no cascade, and the cascade's own join
+    /// A manual join or leave of `GuildRecruitment` forces the latch to 0 (`0x508260(0, 1)` at
+    /// `0x507be6`, `0x509513`) and, as a player gesture, arms the save; the cascade's own join
     /// passes a flag that skips this reset. Returns whether the latch moved.
     pub fn reset_guild_recruitment_mode(&mut self) -> bool {
         let mut model = self.model_mut();
@@ -285,64 +275,6 @@ pub(super) fn listed_name<'a>(model: &'a Model, name: &'a str, id: u32) -> &'a s
 pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     let g = lua.globals();
 
-    // ── The guild-recruitment auto-join pair ──────────────────────────────────
-    // `GetGuildRecruitmentMode` (`0x4a0040`) and `SetGuildRecruitmentMode` (`0x4a0060`) store the
-    // Auto-join Guild Recruitment Channel option, which has no cvar: `UIOptionsFrame.lua` binds it
-    // by special arms (`:243`, `:328`, `:647`). The state is one int, `[0x843608]`, a `.data`
-    // initialiser of 1 written only by `0x49ea70`, and the chat cache saves it at teardown
-    // (`0x499a80`), never at set time.
-    g.set(
-        "GetGuildRecruitmentMode",
-        // Always a number, never nil: `UIOptionsFrame_Load` tests it `== 1`.
-        lua.create_function(|lua, ()| {
-            let model = lua.app_data_ref::<Model>().expect("model app_data");
-            Ok(f64::from(model.guild_recruitment_mode))
-        })?,
-    )?;
-    // ── The `ecx == 1` cascade ──────────────────────────────────────────
-    // For mode 1 only, `0x49ea70` tail-jumps into `0x49ea90`, which acts on the wire (a guilded
-    // player leaves `GuildRecruitment - City`, an unguilded one in a capital joins it); that runs
-    // app-side in `ui_chat::recruitment`, and an acting cascade fires `UPDATE_CHAT_WINDOWS` again.
-    g.set(
-        "SetGuildRecruitmentMode",
-        // As `0x4a0060`: `lua_isnumber` (`0x6f34d0`, so `"1"` passes), truncation toward zero
-        // (`0x40a2b0`), then the 0..2 range gate (`0x4a0094`); success returns zero values.
-        lua.create_function(|lua, mode: Option<Value>| {
-            let n = match mode.as_ref() {
-                Some(Value::Integer(i)) => *i as f64,
-                Some(Value::Number(n)) => *n,
-                // `lua_isnumber` is true for a string `luaO_str2d` fully consumes.
-                Some(Value::String(s)) => s
-                    .to_str()
-                    .ok()
-                    .and_then(|s| s.trim().parse::<f64>().ok())
-                    .ok_or_else(|| mlua::Error::runtime("Usage: SetGuildRecruitmentMode(mode)"))?,
-                _ => return Err(mlua::Error::runtime("Usage: SetGuildRecruitmentMode(mode)")),
-            };
-            let n = n.trunc();
-            if !(0.0..2.0).contains(&n) {
-                return Err(mlua::Error::runtime(
-                    "SetGuildRecruitmentMode: invalid mode",
-                ));
-            }
-            let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-            let mode = n as u8;
-            if model.guild_recruitment_mode != mode {
-                model.guild_recruitment_mode = mode;
-                model.guild_recruitment_changed = true;
-            }
-            // `0x49ea79 jne` / `0x49ea7b jmp 0x49ea90`: the cascade, on the new value alone.
-            if mode == 1 {
-                model.guild_recruitment_cascade = true;
-            }
-            // `0x4a00a4`/`0x4a00a9`: `UPDATE_CHAT_WINDOWS`, on every successful call.
-            model
-                .pending_events
-                .push(("UPDATE_CHAT_WINDOWS".to_string(), Vec::new()));
-            Ok(())
-        })?,
-    )?;
-
     // GetChannelName(index | name) (`0x4fe850`): a `lua_isnumber` argument truncates to a
     // confirmed slot, so `"1"`, `" 1"` and `"1.0"` are slot 1; any other string is a record name,
     // a pending one included; anything else raises. Three values on every other path: the slot or
@@ -475,7 +407,6 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         ("DisplayChannelOwner", |name| ChannelCommand::DisplayOwner {
             name,
         }),
-        ("ChannelModerate", |name| ChannelCommand::Moderate { name }),
         ("ChannelToggleAnnouncements", |name| {
             ChannelCommand::ToggleAnnouncements { name }
         }),

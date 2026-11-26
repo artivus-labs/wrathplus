@@ -1,7 +1,7 @@
 //! The engine verbs stock `ChatFrame.lua`'s slash handlers call that are not sends, channels or
 //! window state: `DoEmote` (`0x500980`), `RandomRoll` (`0x516610`), `ConsoleExec` (`0x608270`),
-//! `LoggingChat` and `LoggingCombat` (`0x4fbd00`, `0x4fbd20`), and the 1.12 `AssistByName` and
-//! `UninviteByName`. Each is a queue or a flag the app drains.
+//! `LoggingChat` and `LoggingCombat` (`0x4fbd00`, `0x4fbd20`). Each is a queue or a flag the app
+//! drains.
 
 use mlua::{Lua, MultiValue, Value};
 
@@ -46,11 +46,6 @@ impl super::UiScript {
     /// `RandomRoll(min, max)` calls since the last drain, each a `CMSG_RANDOM_ROLL`.
     pub fn take_roll_requests(&mut self) -> Vec<(u32, u32)> {
         std::mem::take(&mut self.model_mut().roll_requests)
-    }
-
-    /// `UninviteByName` calls since the last drain.
-    pub fn take_uninvite_requests(&mut self) -> Vec<String> {
-        std::mem::take(&mut self.model_mut().uninvite_requests)
     }
 
     /// `ConsoleExec` lines that write no CVar: the app's console commands (`reloadui`, …).
@@ -116,32 +111,6 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    g.set(
-        "AssistByName",
-        lua.create_function(|lua, name: Option<String>| {
-            let Some(name) = name.filter(|n| !n.trim().is_empty()) else {
-                return Ok(());
-            };
-            let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-            model.script_calls.push(super::ScriptCall::Select(
-                super::SelectionRequest::AssistByName(name),
-            ));
-            Ok(())
-        })?,
-    )?;
-
-    g.set(
-        "UninviteByName",
-        lua.create_function(|lua, name: Option<String>| {
-            let Some(name) = name.filter(|n| !n.trim().is_empty()) else {
-                return Ok(());
-            };
-            let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-            model.uninvite_requests.push(name);
-            Ok(())
-        })?,
-    )?;
-
     // `ConsoleExec("name value")` (`0x608270`), a non-string raising: a registered CVar with a
     // value is written at once, as `SetCVar` writes it; anything else, a bare CVar name included
     // (the reference answers it with `CVar "%s" is "%s"`), goes to the app's command registry.
@@ -198,7 +167,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::script::{SelectionRequest, UiScript};
+    use crate::script::UiScript;
 
     #[test]
     fn do_emote_queues_the_uppercased_token_and_a_non_empty_target() {
@@ -296,18 +265,6 @@ mod tests {
             let err = s.run(call).unwrap_err().to_string();
             assert!(err.contains("Usage: RandomRoll(\"max\")"), "{call}: {err}");
         }
-    }
-
-    #[test]
-    fn assist_and_uninvite_by_name_queue_their_names() {
-        let mut s = UiScript::new().unwrap();
-        s.run("AssistByName('Alice') AssistByName('') UninviteByName('Carol') UninviteByName()")
-            .unwrap();
-        assert_eq!(
-            s.take_selection_requests(),
-            vec![SelectionRequest::AssistByName("Alice".into())]
-        );
-        assert_eq!(s.take_uninvite_requests(), vec!["Carol".to_string()]);
     }
 
     #[test]

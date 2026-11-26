@@ -196,130 +196,35 @@ fn a_dbc_channel_lists_by_its_shortcut_and_a_pending_one_by_name_only() {
     );
 }
 
-/// `GetGuildRecruitmentMode` (`0x4a0040`) always pushes its int global as a number; it boots at 1
-/// from a `.data` initialiser (`raw 0x443608`), the value `UIOptionsFrame_SetDefaults` sets.
+/// Five 1.12 names build 12340 does not register: `ChannelModerate`, `AssistByName`,
+/// `UninviteByName` and the recruitment pair, whose option is the global `0xac7a3c`, written only by
+/// the join and leave handlers and the chat cache. The latch still boots AUTO (1).
 #[test]
-fn the_guild_recruitment_mode_boots_auto_and_answers_a_number() {
+fn the_names_12340_does_not_register_are_absent() {
     let s = script();
-    assert_eq!(
-        s.eval::<f64>("return GetGuildRecruitmentMode()").unwrap(),
-        1.0,
-        "the reference's own .data initialiser, not a BSS zero"
-    );
-    assert!(s
-        .eval::<bool>("return type(GetGuildRecruitmentMode()) == 'number'")
-        .unwrap());
-    s.run("SetGuildRecruitmentMode(0)").unwrap();
-    assert_eq!(
-        s.eval::<f64>("return GetGuildRecruitmentMode()").unwrap(),
-        0.0
-    );
-}
-
-/// `0x4a0060` raises `Usage:` unless `lua_isnumber` (`0x6f34d0`), truncates through `__ftol`
-/// (`0x40a2b0`), and raises `invalid mode` outside `0 <= mode < 2`; success pushes no values.
-#[test]
-fn the_guild_recruitment_setter_gates_its_argument_the_way_the_reference_does() {
-    let s = script();
-
-    s.run(r#"SetGuildRecruitmentMode("0")"#).unwrap();
-    assert_eq!(
-        s.eval::<f64>("return GetGuildRecruitmentMode()").unwrap(),
-        0.0
-    );
-
-    // 1.7 truncates to a legal 1.
-    s.run("SetGuildRecruitmentMode(1.7)").unwrap();
-    assert_eq!(
-        s.eval::<f64>("return GetGuildRecruitmentMode()").unwrap(),
-        1.0
-    );
-
-    for bad in ["", "nil", r#""AUTO""#, "{}", "true"] {
-        let e = s
-            .run(&format!("SetGuildRecruitmentMode({bad})"))
-            .expect_err(&format!("SetGuildRecruitmentMode({bad}) must raise"));
+    for name in [
+        "ChannelModerate",
+        "AssistByName",
+        "UninviteByName",
+        "GetGuildRecruitmentMode",
+        "SetGuildRecruitmentMode",
+    ] {
         assert!(
-            e.to_string().contains("Usage: SetGuildRecruitmentMode"),
-            "{bad}: {e}"
+            s.eval::<bool>(&format!("return {name} == nil")).unwrap(),
+            "{name}"
         );
     }
-    for bad in ["-1", "2", "-1.7", "37"] {
-        let e = s
-            .run(&format!("SetGuildRecruitmentMode({bad})"))
-            .expect_err(&format!("SetGuildRecruitmentMode({bad}) must raise"));
-        assert!(e.to_string().contains("invalid mode"), "{bad}: {e}");
-    }
-
-    // None of the refused calls moved the latch.
-    assert_eq!(
-        s.eval::<f64>("return GetGuildRecruitmentMode()").unwrap(),
-        1.0
-    );
-    assert_eq!(
-        s.arity("SetGuildRecruitmentMode(0)").unwrap(),
-        0,
-        "0x4a0060 returns `xor eax,eax` — zero values, not a nil"
-    );
+    assert_eq!(s.guild_recruitment_mode(), 1);
 }
 
-/// `0x49ea70` stores the latch and jumps into the cascade `0x49ea90` whenever the new value is 1,
-/// moved or not; `0x4a00a4`/`0x4a00a9` fire `UPDATE_CHAT_WINDOWS` on every successful call.
-#[test]
-fn the_setter_asks_for_the_cascade_on_one_and_fires_update_chat_windows() {
-    let mut s = script();
-    s.run(
-        r#"
-        n = 0
-        local f = CreateFrame("Frame", "GRF")
-        f:RegisterEvent("UPDATE_CHAT_WINDOWS")
-        f:SetScript("OnEvent", function() n = n + 1 end)
-    "#,
-    )
-    .unwrap();
-    assert!(!s.take_guild_recruitment_cascade(), "nothing asked yet");
-
-    // Boots at 1; a Set(1) that moves nothing still asks for the cascade.
-    s.run("SetGuildRecruitmentMode(1)").unwrap();
-    assert!(s.take_guild_recruitment_cascade());
-    assert!(!s.take_guild_recruitment_cascade(), "drained");
-    assert!(
-        !s.take_guild_recruitment_change(),
-        "…and the file is not dirtied by a no-move"
-    );
-
-    s.run("SetGuildRecruitmentMode(0)").unwrap();
-    assert!(
-        !s.take_guild_recruitment_cascade(),
-        "mode 0 is the latch alone"
-    );
-    assert!(
-        s.take_guild_recruitment_change(),
-        "the file is dirtied by the move"
-    );
-
-    // A refused call fires nothing.
-    s.run("SetGuildRecruitmentMode(2)").unwrap_err();
-    s.tick(0.016);
-    assert_eq!(
-        s.eval::<i64>("return n").unwrap(),
-        2,
-        "one UPDATE_CHAT_WINDOWS per successful call: Set(1), Set(0); the raise fired none"
-    );
-}
-
-/// A manual join or leave of `GuildRecruitment` calls `0x49ea70(0)` (`0x49ed3d`, `0x49ef8f`): it
-/// dirties the file and, as mode 0, asks for no cascade.
+/// A manual join or leave of `GuildRecruitment` sets the option to 0 (`0x508260(0, 1)` at
+/// `0x507be6`; `0x509513`-`0x509525`), which dirties the file.
 #[test]
 fn a_manual_guild_recruitment_verb_resets_the_latch() {
     let mut s = script();
     assert!(s.reset_guild_recruitment_mode(), "1 → 0 moved");
-    assert_eq!(
-        s.eval::<f64>("return GetGuildRecruitmentMode()").unwrap(),
-        0.0
-    );
+    assert_eq!(s.guild_recruitment_mode(), 0);
     assert!(s.take_guild_recruitment_change());
-    assert!(!s.take_guild_recruitment_cascade());
     assert!(
         !s.reset_guild_recruitment_mode(),
         "already 0: nothing moved"

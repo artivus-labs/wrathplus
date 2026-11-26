@@ -17,9 +17,6 @@ pub enum SelectionRequest {
     /// `AssistUnit(unit)` (`0x489b80`): the token's own `UNIT_FIELD_TARGET`; a token with no
     /// target is a silent no-op that sends nothing.
     Assist(String),
-    /// `AssistByName(name)` (`0x489c40`), the `/assist <name>` verb: what the named player
-    /// targets, resolved by name rather than by token.
-    AssistByName(String),
     /// `TargetLastEnemy()`: the last attackable unit committed.
     LastEnemy,
 }

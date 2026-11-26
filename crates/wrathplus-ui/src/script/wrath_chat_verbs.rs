@@ -624,7 +624,6 @@ mod tests {
             ],
             "an unresolved name sends nothing; the reason stops at 64 characters"
         );
-        assert!(model.uninvite_requests.is_empty());
         assert_eq!(model.guild_requests.len(), 2);
         drop(model);
         s.model_mut()

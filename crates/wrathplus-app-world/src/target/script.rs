@@ -51,10 +51,6 @@ impl ScriptSelect<'_, '_> {
                     None => info!("assist (AssistUnit): \"{token}\" names nothing; silent no-op"),
                 }
             }
-            // `0x489c40`, `/assist <name>`: a player name, prefix-matched by the app's name scan.
-            SelectionRequest::AssistByName(name) => {
-                by_name::assist_named(&self.by_name, &mut self.commit, Some(&name), "AssistByName");
-            }
             // `0x489b45` → `0x489a40`. Empty memory is a no-op (the shim `0x489b40` tests nothing),
             // unlike `TargetLastTarget 0x489b00`, which reaches `0x493540(0,0)` and deselects.
             SelectionRequest::LastEnemy => {

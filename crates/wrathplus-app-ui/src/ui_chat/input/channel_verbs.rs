@@ -67,7 +67,6 @@ pub(super) fn command(
         C::Mute { name, player } => ClientCommand::ChannelMute { name, player },
         C::Unmute { name, player } => ClientCommand::ChannelUnmute { name, player },
         C::Unban { name, player } => ClientCommand::ChannelUnban { name, player },
-        C::Moderate { name } => ClientCommand::ChannelModerate { name },
         C::ToggleAnnouncements { name } => ClientCommand::ChannelAnnouncements { name },
     })
 }

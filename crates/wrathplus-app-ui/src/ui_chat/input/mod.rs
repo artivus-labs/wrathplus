@@ -108,7 +108,7 @@ pub(super) struct ChatOut<'w, 's> {
 }
 
 /// The verbs the stock `ChatFrame.lua` handlers call once they have parsed a line (`DoEmote`,
-/// `RandomRoll`, `UninviteByName`, `ConsoleExec`, the channel verbs), drained from the VM as
+/// `RandomRoll`, `ConsoleExec`, the channel verbs), drained from the VM as
 /// [`ParsedChat`] values, so one executor serves them and the lines the Lua never sees.
 fn engine_verbs(
     script: &mut wrathplus_ui::script::UiScript,
@@ -134,9 +134,6 @@ fn engine_verbs(
     }
     for (min, max) in script.take_roll_requests() {
         out.push((String::new(), ParsedChat::Random { min, max }));
-    }
-    for name in script.take_uninvite_requests() {
-        out.push((String::new(), ParsedChat::Uninvite { name: Some(name) }));
     }
     for line in script.take_console_lines() {
         // `ConsoleExec` already applied a valued CVar line; what reaches here is a console
