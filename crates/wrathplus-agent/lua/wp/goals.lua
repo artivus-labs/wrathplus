@@ -108,6 +108,9 @@
 --   SitStandOrDescendStart, DoEmote("sit")) holds it `stop_hold` seconds the same way. The
 --   runner's own walks are not held.
 --
+-- Noticing: the facts' scan of what is in sight is handed to wp.notice (Notice.look), which
+--   signals what the character passes that is new to it (AGENT_NOTICED); see notice.lua.
+--
 -- `Goals.state` says what the runner is doing; `Goals.log` keeps its last few lines.
 
 local G = {
@@ -318,7 +321,11 @@ end
 local pass = {}
 
 local function nearby()
-  pass.nearby = pass.nearby or seen(100)
+  if not pass.nearby then
+    pass.nearby = seen(100)
+    -- wp.notice looks at the same scan rather than reading the world again.
+    if Notice and Notice.look then Notice.look(pass.nearby, 100) end
+  end
   return pass.nearby
 end
 

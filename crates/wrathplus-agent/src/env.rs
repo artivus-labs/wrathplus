@@ -5,9 +5,9 @@
 //! door: `require(name)` reads `<scripts>/<name with dots as slashes>.lua`, or a built-in module,
 //! and nothing else. Built-ins preloaded as globals (each described in `BUILT_IN`): `Agent`,
 //! `Revive`, `Upkeep`, `Survive`, `Rotation`, `Combat`, `Move`, `Quests`, `Avoid`, `Goals`,
-//! `Services`, `Professions`; `wp.engine` and `wp.values` load on `require`. `AgentReload(name)`
-//! loads a module again; `AgentModules()` lists the agent's files; an `autoexec.lua` runs in every
-//! new in-game VM.
+//! `Notice`, `Services`, `Professions`; `wp.engine` and `wp.values` load on `require`.
+//! `AgentReload(name)` loads a module again; `AgentModules()` lists the agent's files; an
+//! `autoexec.lua` runs in every new in-game VM.
 
 use mlua::{Lua, Value};
 use std::path::{Path, PathBuf};
@@ -47,6 +47,9 @@ const BUILT_IN: &[(&str, Option<&str>, &str)] = &[
     wp!("avoid", "Avoid"),
     // Goals, the plan toward the top one, and the runner that keeps the agent busy (`Goals.on`).
     wp!("goals", "Goals"),
+    // What the character passes that is new to it (quest givers, trainers, nodes, subzones),
+    // signalled as AGENT_NOTICED, with mutes for what the planner does not want to hear of.
+    wp!("notice", "Notice"),
     // Where services are, from the realm, handed to the goal runner as known places.
     wp!("services", "Services"),
     // Cooking and First Aid learnt, made and used; it teaches `Goals` facts and actions.
@@ -205,6 +208,9 @@ mod hot_loop_tests;
 #[cfg(test)]
 #[path = "move_tests.rs"]
 mod move_tests;
+#[cfg(test)]
+#[path = "notice_tests.rs"]
+mod notice_tests;
 #[cfg(test)]
 #[path = "professions_tests.rs"]
 mod professions_tests;
