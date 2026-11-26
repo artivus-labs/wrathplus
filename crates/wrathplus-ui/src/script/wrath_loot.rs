@@ -6,8 +6,8 @@
 
 use mlua::{Function, Lua, MultiValue, Value};
 
-use crate::script::binding_abi::{bool_or_default, flag, number_arg};
 use super::Model;
+use crate::script::binding_abi::{bool_or_default, flag, number_arg};
 
 pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     let globals = lua.globals();
