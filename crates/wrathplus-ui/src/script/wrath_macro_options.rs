@@ -4,63 +4,31 @@
 //! `0xad1560` handlers).
 //!
 //! The tokenizer (`0x5f0df0`) scans a clause for `[` or `;`. Each `[...]` group, read to its `]`
-//! (so a `;` inside one does not end the clause), is evaluated until one holds, all of its
-//! comma-separated conditions true; later groups of the clause are read past unevaluated. A clause
-//! with no group holds; `;` after groups of which none held moves to the next clause. The answer
-//! is the text after the clause's last `]`, trimmed of spaces (not other whitespace), and the
-//! holding group's unit (`@unit` or `target=unit`), else nil. With no clause holding, nothing is
-//! returned.
+//! (so a `;` inside one does not end the clause), is evaluated until one holds; later groups of
+//! the clause are read past unevaluated. A clause with no group holds; `;` after groups of which
+//! none held moves to the next clause. The answer is the text after the clause's last `]`,
+//! trimmed of spaces (not other whitespace), and the holding group's unit (`@unit` or
+//! `target=unit`), else nil. With no clause holding, nothing is returned.
 //!
-//! The 32 names (`0xad14d8`, five alias pairs sharing a handler): combat, exists, help, harm,
-//! party, raid, dead, flyable, indoors, outdoors, swimming, flying, mounted, stealth, group,
-//! stance/form, pet, modifier/mod, button/btn, actionbar/bar, bonusbar, equipped/worn,
-//! channeling, spec, vehicleui, unithasvehicleui, cursor.
+//! A group is compiled once per distinct text (`0x5f0bb0`, cached by `0x617c50` in `0xc2438c`):
+//! conditions `[no]name[:arg/arg]`, the `no` prefix and the 32 names byte-exact (`0x5f0040`). An
+//! unknown name raises `ERR_UNKNOWN_MACRO_OPTION_S` as its group compiles and keeps handler 0
+//! (`0x8c8de0`, true), so it holds and its `no` form fails. The cache lives as long as the VM; the
+//! reference empties it in the world-leave teardown (`0x566530` → `0x5f03a0`).
 //!
-//! Labelled: the condition compiler (`0x5f0040`) and the handlers are not decompiled. A condition
-//! reads `[no]name[:arg/arg]`, the name matched case-insensitively. Each handler asks the native
-//! Lua reader of the same state, and a missing reader reads false. A unit-less group tests
-//! `target`, and an unknown name holds (handler 0 is not decompiled). `button` reads the last
-//! mouse button pressed.
+//! Each handler asks the Lua reader of the same state, a missing reader reading false. A
+//! unit-less group tests `target`.
+
+use std::collections::HashMap;
+use std::rc::Rc;
 
 use mlua::{Function, IntoLuaMulti, Lua, MultiValue, Value};
 
 use super::Model;
 
-/// One `[no]name[:a/b]` condition.
-struct Condition<'a> {
-    negate: bool,
-    name: String,
-    args: Vec<&'a str>,
-}
-
-fn condition(text: &str) -> Condition<'_> {
-    let (head, args) = match text.split_once(':') {
-        Some((h, a)) => (
-            h,
-            a.split('/')
-                .map(|s| s.trim_matches(' '))
-                .filter(|s| !s.is_empty())
-                .collect(),
-        ),
-        None => (text, Vec::new()),
-    };
-    let head = head.trim_matches(' ').to_ascii_lowercase();
-    let known = |n: &str| NAMES.contains(&n);
-    match head.strip_prefix("no") {
-        Some(rest) if !known(&head) && known(rest) => Condition {
-            negate: true,
-            name: rest.to_string(),
-            args,
-        },
-        _ => Condition {
-            negate: false,
-            name: head,
-            args,
-        },
-    }
-}
-
-const NAMES: [&str; 32] = [
+/// `0xad14d8`: entry 0, the empty name, is handler `0x8c8de0` (true), which an unknown name keeps.
+const NAMES: [&str; 33] = [
+    "",
     "combat",
     "exists",
     "help",
@@ -95,6 +63,96 @@ const NAMES: [&str; 32] = [
     "cursor",
 ];
 
+/// One compiled `[no]name[:a/b]` condition.
+struct Condition {
+    negate: bool,
+    name: &'static str,
+    args: Vec<String>,
+}
+
+/// One compiled group: its conditions in order and its unit, empty for none.
+#[derive(Default)]
+struct Group {
+    conditions: Vec<Condition>,
+    unit: String,
+}
+
+/// The compiled groups by their exact text (`0xc2438c`).
+#[derive(Default)]
+struct Compiled(HashMap<String, Rc<Group>>);
+
+/// `0x5f0040`: a `no` prefix on a token longer than two, the name up to `:` (spaces trimmed),
+/// then, past a `:` with text after it, the `/`-split arguments, each trimmed and an empty one
+/// kept. An unknown name raises its message (`0x5216f0(0x23e)`) and keeps handler 0 with no
+/// arguments.
+fn condition(lua: &Lua, token: &str) -> Condition {
+    let (negate, rest) = match token.strip_prefix("no") {
+        Some(rest) if token.len() > 2 => (true, rest),
+        _ => (false, token),
+    };
+    let (name, args) = match rest.split_once(':') {
+        Some((name, args)) if !args.is_empty() => (name, Some(args)),
+        Some((name, _)) => (name, None),
+        None => (rest, None),
+    };
+    let name = name.trim_matches(' ');
+    let Some(&known) = NAMES.iter().find(|n| **n == name) else {
+        let mut model = lua.app_data_mut::<Model>().expect("model app_data");
+        model
+            .ui_errors_s
+            .push(("ERR_UNKNOWN_MACRO_OPTION_S", name.to_string()));
+        return Condition {
+            negate,
+            name: NAMES[0],
+            args: Vec::new(),
+        };
+    };
+    let args = args.map_or_else(Vec::new, |a| {
+        a.split('/')
+            .map(|s| s.trim_matches(' ').to_string())
+            .collect()
+    });
+    Condition {
+        negate,
+        name: known,
+        args,
+    }
+}
+
+/// `0x5f0bb0`: the `,`-split tokens, each trimmed; `target=` or `@` names the unit (the last one
+/// wins), any other is a condition. An empty token is a nameless condition, handler 0, so it is
+/// skipped.
+fn compile(lua: &Lua, body: &str) -> Group {
+    let mut group = Group::default();
+    for token in body.split(',').map(|t| t.trim_matches(' ')) {
+        if token.is_empty() {
+            continue;
+        }
+        match token
+            .strip_prefix("target=")
+            .or_else(|| token.strip_prefix('@'))
+        {
+            Some(unit) => group.unit = unit.trim_matches(' ').to_string(),
+            None => group.conditions.push(condition(lua, token)),
+        }
+    }
+    group
+}
+
+/// The group compiled from `body`, compiling it on a miss (`0x5f0ed2`).
+fn compiled(lua: &Lua, body: &str) -> Rc<Group> {
+    let hit = lua
+        .app_data_ref::<Compiled>()
+        .and_then(|c| c.0.get(body).cloned());
+    hit.unwrap_or_else(|| {
+        let group = Rc::new(compile(lua, body));
+        if let Some(mut cache) = lua.app_data_mut::<Compiled>() {
+            cache.0.insert(body.to_string(), group.clone());
+        }
+        group
+    })
+}
+
 /// The first value of a native reader, `None` when the global is missing or raises.
 fn ask(lua: &Lua, name: &str, args: impl IntoLuaMulti) -> Option<Value> {
     let f = lua.globals().get::<Function>(name).ok()?;
@@ -121,7 +179,7 @@ fn text(lua: &Lua, v: Option<Value>) -> Option<String> {
 }
 
 /// A numeric reader against the arguments: any argument equal, else `bare` of the value.
-fn numeric(value: Option<f64>, args: &[&str], bare: impl Fn(f64) -> bool) -> bool {
+fn numeric(value: Option<f64>, args: &[String], bare: impl Fn(f64) -> bool) -> bool {
     let Some(v) = value else { return false };
     if args.is_empty() {
         return bare(v);
@@ -133,7 +191,7 @@ fn holds(lua: &Lua, c: &Condition, unit: &str) -> bool {
     let args = c.args.as_slice();
     let any_text =
         |v: Option<String>| v.is_some_and(|v| args.iter().any(|a| a.eq_ignore_ascii_case(&v)));
-    match c.name.as_str() {
+    match c.name {
         "combat" => truthy(ask(lua, "UnitAffectingCombat", "player")),
         "exists" => truthy(ask(lua, "UnitExists", unit)),
         "help" => truthy(ask(lua, "UnitCanAssist", ("player", unit))),
@@ -178,7 +236,7 @@ fn holds(lua: &Lua, c: &Condition, unit: &str) -> bool {
                     "shift" => shift,
                     "ctrl" => ctrl,
                     "alt" => alt,
-                    _ => truthy(ask(lua, "IsModifiedClick", *a)),
+                    _ => truthy(ask(lua, "IsModifiedClick", a.as_str())),
                 })
             }
         }
@@ -205,7 +263,7 @@ fn holds(lua: &Lua, c: &Condition, unit: &str) -> bool {
         }),
         "equipped" | "worn" => args
             .iter()
-            .any(|a| truthy(ask(lua, "IsEquippedItemType", *a))),
+            .any(|a| truthy(ask(lua, "IsEquippedItemType", a.as_str()))),
         "channeling" => {
             let spell = text(lua, ask(lua, "UnitChannelInfo", "player"));
             spell.is_some() && (args.is_empty() || any_text(spell))
@@ -225,34 +283,23 @@ fn holds(lua: &Lua, c: &Condition, unit: &str) -> bool {
     }
 }
 
-/// One bracket group: whether it holds, and its unit.
-fn group<'a>(lua: &Lua, body: &'a str) -> (bool, Option<&'a str>) {
-    let mut unit = None;
-    let mut conditions = Vec::new();
-    for part in body.split(',') {
-        let part = part.trim_matches(' ');
-        if part.is_empty() {
-            continue;
-        }
-        if let Some(u) = part
-            .strip_prefix('@')
-            .or_else(|| part.strip_prefix("target="))
-        {
-            unit = Some(u.trim_matches(' '));
-        } else {
-            conditions.push(condition(part));
-        }
-    }
-    let tested = unit.filter(|u| !u.is_empty()).unwrap_or("target");
-    let ok = conditions.iter().all(|c| holds(lua, c, tested) != c.negate);
-    (ok, unit.filter(|u| !u.is_empty()))
+/// `0x5ef5c0`: every condition in order, inverted under `no`, to the first false.
+fn evaluate(lua: &Lua, group: &Group) -> bool {
+    let unit = match group.unit.as_str() {
+        "" => "target",
+        unit => unit,
+    };
+    group
+        .conditions
+        .iter()
+        .all(|c| holds(lua, c, unit) != c.negate)
 }
 
-/// The answer and the holding group's unit, or `None` when no clause holds (`0x5f0df0`).
-pub(crate) fn parse<'a>(lua: &Lua, options: &'a str) -> Option<(&'a str, Option<&'a str>)> {
+/// The answer and the holding group's unit, or `None` when no clause holds.
+pub(crate) fn parse<'a>(lua: &Lua, options: &'a str) -> Option<(&'a str, Option<String>)> {
     let bytes = options.as_bytes();
     let end = bytes.len();
-    let (mut at, mut grouped, mut held) = (0, false, None);
+    let (mut at, mut grouped, mut held) = (0, false, None::<Rc<Group>>);
     loop {
         let text = at;
         let stop = (at..end)
@@ -260,15 +307,16 @@ pub(crate) fn parse<'a>(lua: &Lua, options: &'a str) -> Option<(&'a str, Option<
             .unwrap_or(end);
         if stop < end && bytes[stop] == b'[' {
             let close = (stop..end).find(|&i| bytes[i] == b']').unwrap_or(end);
+            let body = options[stop + 1..close].trim_matches(' ');
             if held.is_none() {
-                let (ok, unit) = group(lua, options[stop + 1..close].trim_matches(' '));
-                held = ok.then_some(unit);
+                held = Some(compiled(lua, body)).filter(|g| evaluate(lua, g));
             }
             (at, grouped) = ((close + 1).min(end), true);
             continue;
         }
         if !grouped || held.is_some() {
-            return Some((options[text..stop].trim_matches(' '), held.flatten()));
+            let unit = held.map(|g| g.unit.clone()).filter(|u| !u.is_empty());
+            return Some((options[text..stop].trim_matches(' '), unit));
         }
         if stop == end {
             return None;
@@ -278,6 +326,7 @@ pub(crate) fn parse<'a>(lua: &Lua, options: &'a str) -> Option<(&'a str, Option<
 }
 
 pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
+    lua.set_app_data(Compiled::default());
     lua.globals().set(
         "SecureCmdOptionParse",
         lua.create_function(|lua, options: Value| {
@@ -289,7 +338,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             )?;
             let s = |t: &str| lua.create_string(t).map(Value::String);
             Ok(MultiValue::from_vec(match parse(lua, &options) {
-                Some((value, Some(unit))) => vec![s(value)?, s(unit)?],
+                Some((value, Some(unit))) => vec![s(value)?, s(&unit)?],
                 Some((value, None)) => vec![s(value)?, Value::Nil],
                 None => Vec::new(),
             }))
@@ -346,6 +395,30 @@ mod tests {
         assert_eq!(
             s.eval::<String>("return SecureCmdOptionParse(5)").unwrap(),
             "5"
+        );
+    }
+
+    /// `0x5f0040`: the names and the `no` prefix are byte-exact; an unknown name holds (and its
+    /// `no` form fails) and is reported as its group text compiles, once per text.
+    #[test]
+    fn names_are_exact_and_an_unknown_one_holds_reported_once() {
+        let mut s = vm();
+        assert_eq!(eval(&s, "[NoForm] a; b"), "a|nil");
+        assert_eq!(
+            eval(&s, "[no form] a; b"),
+            "b|nil",
+            "`no`, then the name trimmed"
+        );
+        assert_eq!(eval(&s, "[nofoo] a; b"), "b|nil");
+        let reported = vec![
+            ("ERR_UNKNOWN_MACRO_OPTION_S", "NoForm".to_string()),
+            ("ERR_UNKNOWN_MACRO_OPTION_S", "foo".to_string()),
+        ];
+        assert_eq!(s.take_ui_errors_s(), reported);
+        assert_eq!(eval(&s, "[NoForm] a; b"), "a|nil");
+        assert!(
+            s.take_ui_errors_s().is_empty(),
+            "a compiled group is cached"
         );
     }
 }

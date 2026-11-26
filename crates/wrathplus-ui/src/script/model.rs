@@ -473,6 +473,8 @@ pub(crate) struct Model {
     /// GlobalStrings keys of refusals this crate raises, fired by the app as `UI_ERROR_MESSAGE`
     /// (the reference's `DisplayError` `0x496720`), each a literal from `0xb4b498` (stride `0x14`).
     pub(crate) ui_errors: Vec<&'static str>,
+    /// [`Self::ui_errors`] whose message takes one string, its `%s`.
+    pub(crate) ui_errors_s: Vec<(&'static str, String)>,
 
     pub(crate) spell_catalog: std::collections::HashMap<u32, super::spell_info::SpellInfoView>,
     pub(crate) spellbook: spellbook::SpellBookState,
@@ -1295,6 +1297,7 @@ impl Model {
             bonus_bar_offset: 0,
             action_sets: Vec::new(),
             ui_errors: Vec::new(),
+            ui_errors_s: Vec::new(),
             spell_catalog: Default::default(),
             spellbook: spellbook::SpellBookState::default(),
             wrath_lfg: Default::default(),

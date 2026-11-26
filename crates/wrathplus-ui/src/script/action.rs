@@ -135,6 +135,11 @@ impl super::UiScript {
     pub fn take_ui_errors(&mut self) -> Vec<&'static str> {
         std::mem::take(&mut self.model_mut().ui_errors)
     }
+
+    /// [`Self::take_ui_errors`] for the messages that carry their `%s` argument.
+    pub fn take_ui_errors_s(&mut self) -> Vec<(&'static str, String)> {
+        std::mem::take(&mut self.model_mut().ui_errors_s)
+    }
 }
 
 /// `UseAction`'s flag test: `nil`, `false` and `0` are false, unlike Lua, where `0` is true.
