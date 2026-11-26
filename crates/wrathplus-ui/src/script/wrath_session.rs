@@ -28,8 +28,8 @@ const STATIC_CONSTANTS: [&str; 7] = [
 ];
 
 /// `farclip`'s range in the in-game table (`0x9f5798`, `0x9f57d8`).
-const FARCLIP_MIN: f64 = 176.0;
-const FARCLIP_MAX: f64 = 1250.0;
+const FARCLIP_MIN: f64 = 177.0;
+const FARCLIP_MAX: f64 = 1277.0;
 
 impl UiScript {
     /// Publish the account's expansion (`SMSG_AUTH_RESPONSE`, `None` before it) and the
@@ -44,8 +44,8 @@ impl UiScript {
     }
 }
 
-/// One of the range verbs: the CVar named by a string argument (raising `usage` for anything
-/// else, and `Couldn't find CVar named` for an unknown name), answered by `pick` over its
+/// One of the range verbs: the CVar named by a string or number argument (raising `usage` for
+/// anything else, and `Couldn't find CVar named` for an unknown name), answered by `pick` over its
 /// lower-cased name.
 fn install_range(
     lua: &Lua,
@@ -56,10 +56,8 @@ fn install_range(
     lua.globals().set(
         name,
         lua.create_function(move |lua, cvar: Value| {
-            let Value::String(cvar) = cvar else {
-                return Err(mlua::Error::runtime(usage));
-            };
-            let cvar = cvar.to_str()?.to_string();
+            // `lua_isstring` (`0x514d4a`), so a number names a CVar by its text.
+            let cvar = super::binding_abi::string_arg(lua, cvar, usage)?;
             let known = lua
                 .app_data_ref::<Model>()
                 .expect("model app_data")
@@ -186,7 +184,9 @@ mod tests {
         for check in [
             "GetAccountExpansionLevel() == 2 and GetExpansionLevel() == 2",
             "select('#', GetExistingLocales()) == 1 and GetExistingLocales() == 'enUS'",
-            "GetCVarMin('farclip') == 176 and GetCVarMax('farClip') == 1250",
+            "GetCVarMin('farclip') == 177 and GetCVarMax('farClip') == 1277",
+            "GetCVarDefault('farclip') == '350'",
+            "select(2, pcall(GetCVarMin, 5)):find(\"Couldn't find CVar named '5'\") ~= nil",
             "GetCVarAbsoluteMax('extShadowQuality') == 0 and GetCVarMin('scriptErrors') == nil",
         ] {
             assert!(

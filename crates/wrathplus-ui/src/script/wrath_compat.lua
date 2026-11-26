@@ -102,7 +102,7 @@ do
     environmentDetail = "1",
     equipmentManager = "0",
     extShadowQuality = "0",
-    farclip = "1000",
+    farclip = "350",
     fctAuras = "0",
     fctCombatState = "0",
     fctComboPoints = "0",
