@@ -121,8 +121,7 @@ pub(crate) struct RaidBrowser {
     joined: u32,
     /// `0xacd660`: players listed before groups.
     players_first: bool,
-    /// `0xbea820`: the keys, most recent first, each with its descending flag. Labelled: the
-    /// initial order is unread; this starts at name, level, class, zone, then the roles.
+    /// `0xbea820`: the keys, most recent first, each with its descending flag.
     order: [(u8, bool); 7],
     requests: Vec<WrathRaidBrowserRequest>,
 }
@@ -134,8 +133,9 @@ impl Default for RaidBrowser {
             groups: Vec::new(),
             players: Vec::new(),
             joined: 0,
-            players_first: false,
-            order: [3, 1, 2, 0, 4, 5, 6].map(|k| (k, false)),
+            // World entry (`0x55d56c`-`0x55d591`): players first, keys 0..6 in order, ascending.
+            players_first: true,
+            order: [0, 1, 2, 3, 4, 5, 6].map(|k| (k, false)),
             requests: Vec::new(),
         }
     }
@@ -655,6 +655,14 @@ mod tests {
             total_groups: 4,
             total_players: 10,
         }));
+        assert!(
+            s.eval::<bool>(
+                "return SearchLFGGetResults(1) == 'Amy' and SearchLFGGetResults(3) == 'Lead'"
+            )
+            .unwrap(),
+            "players first, by level, before any sort"
+        );
+        s.run("SearchLFGSort('group')").unwrap();
         for check in [
             "select(1, SearchLFGGetNumResults()) == 3 and select(2, SearchLFGGetNumResults()) == 14",
             "select('#', SearchLFGGetResults(1)) == 38",
@@ -693,6 +701,8 @@ mod tests {
             )
             .unwrap()
         };
+        assert_eq!(order(&s), "AmyZedBob", "zone, then level, before any sort");
+        s.run("SearchLFGSort('name')").unwrap();
         assert_eq!(order(&s), "AmyBobZed");
         s.run("SearchLFGSort('name')").unwrap();
         assert_eq!(order(&s), "ZedBobAmy", "a repeat flips the direction");
