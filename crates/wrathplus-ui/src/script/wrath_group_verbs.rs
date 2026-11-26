@@ -162,7 +162,38 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             Ok(())
         })?,
     )?;
+    // SetLootThreshold(threshold) (`0x52de60`), in its order: not grouped is ERR_NOT_IN_GROUP
+    // (`0x50`) and not leading ERR_NOT_LEADER (`0x54`); then `isnumber` (the usage line's typo is
+    // 12340's, `0xa07ffc`), `ftol`, and 2 to 6 (`0xa07fc4`). The send keeps the method and master.
+    g.set(
+        "SetLootThreshold",
+        lua.create_function(|lua, n: Value| {
+            let mut m = lua.app_data_mut::<Model>().expect("model");
+            if !grouped(&m) {
+                m.ui_errors.push("ERR_NOT_IN_GROUP");
+                return Ok(());
+            }
+            if !leads(&m) {
+                m.ui_errors.push("ERR_NOT_LEADER");
+                return Ok(());
+            }
+            let usage = "Usage: SetLooThreshold(threshold)";
+            let n = crate::script::binding_abi::ftol_arg(lua, n, usage)?;
+            if !(2..=6).contains(&n) {
+                return Err(mlua::Error::runtime(
+                    "SetLootThreshold(): threshold must be between 2 and 6",
+                ));
+            }
+            m.party_requests.push(PartyRequest::LootThreshold(n as u32));
+            Ok(())
+        })?,
+    )?;
     Ok(())
+}
+
+/// In a group: a party member or a raid roster (`0x52de63`-`0x52de76`).
+fn grouped(m: &Model) -> bool {
+    !m.party.members.is_empty() || !m.party.raid.is_empty()
 }
 
 /// `DoReadyCheck`'s gate (`0x5732b0`): in a raid the leader or an officer (`0x572740`), else the

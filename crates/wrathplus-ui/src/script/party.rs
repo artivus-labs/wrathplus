@@ -54,7 +54,7 @@ pub struct RaidMemberInfo {
 
 /// The party and raid roster snapshot the app pushes whole when it changes
 /// ([`UiScript::set_party`]); the default is ungrouped.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PartyState {
     /// The other party members in `party1`..`party4` order, empty when ungrouped. The player is
     /// never in it, as in `SMSG_GROUP_LIST`; in a raid it is our own subgroup's slice.
@@ -76,8 +76,7 @@ pub struct PartyState {
     /// `GetNumRaidMembers()` is its length.
     pub raid: Vec<RaidMemberInfo>,
     /// `GetLootMethod`'s method: `"freeforall"`, `"roundrobin"`, `"master"`, `"group"` or
-    /// `"needbeforegreed"`. Empty, the default, reads as `"freeforall"`, the reference's answer
-    /// before any group.
+    /// `"needbeforegreed"`; empty reads as `"group"`, 12340's boot value (`[0xacc6c8]` = 3).
     pub loot_method: String,
     /// The master looter as a party index (`0` the player, `1..=4` a `members` slot),
     /// `GetLootMethod`'s second return.
@@ -85,8 +84,25 @@ pub struct PartyState {
     /// The master looter's guid (`0xbd1970`), `0` for none: `GetLootMethod`'s third return finds
     /// it in [`Self::raid`] and `GetRaidRosterInfo`'s eleventh compares it.
     pub master_looter_guid: u64,
-    /// `GetLootThreshold`'s item quality, `2..=4` once grouped.
+    /// `GetLootThreshold`'s item quality, 2 to 6; 2 ungrouped (`[0xacc6cc]`, re-stored at
+    /// `0x52d8b7` when a group clears).
     pub loot_threshold: u32,
+}
+
+impl Default for PartyState {
+    fn default() -> Self {
+        PartyState {
+            members: Vec::new(),
+            leader_index: 0,
+            leader_guid: 0,
+            own_guid: 0,
+            raid: Vec::new(),
+            loot_method: "group".into(),
+            master_looter: None,
+            master_looter_guid: 0,
+            loot_threshold: 2,
+        }
+    }
 }
 
 /// Outbound party and raid intents, drained by the app ([`UiScript::take_party_requests`]) into
@@ -126,7 +142,7 @@ pub enum PartyRequest {
         /// takes no threshold argument.
         threshold: Option<u32>,
     },
-    /// `SetLootThreshold(n)`.
+    /// `SetLootThreshold(n)`, 2 to 6 ([`super::wrath_group_verbs`]).
     LootThreshold(u32),
     /// `SetRaidTarget(unit, index)`: icon 1 to 8, or 0 to clear; the app resolves the token to a
     /// guid for `MSG_RAID_TARGET_UPDATE`.
@@ -309,10 +325,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         "GetLootMethod",
         lua.create_function(|lua, ()| {
             let model = lua.app_data_ref::<Model>().expect("model app_data");
-            // Never grouped, the reference reads zero-filled cells past `.data`'s end, and method
-            // 0 is `freeforall`.
             let method = if model.party.loot_method.is_empty() {
-                "freeforall"
+                "group"
             } else {
                 model.party.loot_method.as_str()
             };
@@ -334,7 +348,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // GetLootThreshold() → the loot quality threshold.
+    // GetLootThreshold() (`0x52c2a0`) → the loot quality threshold, signed.
     g.set(
         "GetLootThreshold",
         lua.create_function(|lua, ()| {
@@ -397,14 +411,6 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         lua.create_function(|lua, unit: String| {
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
             model.party_requests.push(PartyRequest::PromoteUnit(unit));
-            Ok(())
-        })?,
-    )?;
-    g.set(
-        "SetLootThreshold",
-        lua.create_function(|lua, n: u32| {
-            let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-            model.party_requests.push(PartyRequest::LootThreshold(n));
             Ok(())
         })?,
     )?;
@@ -730,9 +736,10 @@ mod tests {
         let (method, master) = s
             .eval::<(String, Option<i64>)>("return GetLootMethod()")
             .unwrap();
-        // Never grouped reads method 0, `freeforall`; the `group` above is a real party's.
-        assert_eq!(method, "freeforall");
+        // Never grouped reads 12340's boot values, `group` and 2 (`0xacc6c8`, `0xacc6cc`).
+        assert_eq!(method, "group");
         assert_eq!(master, None);
+        assert_eq!(s.eval::<i64>("return GetLootThreshold()").unwrap(), 2);
     }
 
     // ── The raid trio (`UnitInRaid`, `GetRaidRosterInfo`, `IsRaidLeader`) ────────────────────
@@ -987,10 +994,14 @@ mod tests {
     #[test]
     fn set_loot_method_checks_the_group_the_leader_and_the_master_in_order() {
         let mut s = UiScript::new().unwrap();
-        s.run(r#"SetLootMethod("freeforall")"#).unwrap();
+        s.run(r#"SetLootMethod("freeforall") SetLootThreshold()"#)
+            .unwrap();
         s.set_party(two_member_party());
-        s.run(r#"SetLootMethod("freeforall")"#).unwrap();
+        s.run(r#"SetLootMethod("freeforall") SetLootThreshold()"#)
+            .unwrap();
         assert!(s.take_party_requests().is_empty(), "solo, then not leading");
+        // `SetLootThreshold` (`0x52de60`) raises its two refusals as messages (`0x50`, `0x54`).
+        assert_eq!(s.take_ui_errors(), ["ERR_NOT_IN_GROUP", "ERR_NOT_LEADER"]);
         let mut party = two_member_party();
         (party.leader_guid, party.loot_threshold) = (party.own_guid, 3);
         s.set_party(party);
@@ -1015,6 +1026,12 @@ mod tests {
             s.take_party_requests(),
             [req("group", None), req("master", Some("bob"))]
         );
+        let err = |c: &str| s.run(c).unwrap_err().to_string();
+        assert!(err("SetLootThreshold()").contains("Usage: SetLooThreshold(threshold)"));
+        assert!(err("SetLootThreshold(1)").contains("threshold must be between 2 and 6"));
+        assert!(err("SetLootThreshold(7)").contains("between 2 and 6"));
+        s.run("SetLootThreshold(6.9)").unwrap();
+        assert_eq!(s.take_party_requests(), [PartyRequest::LootThreshold(6)]);
     }
 
     #[test]
