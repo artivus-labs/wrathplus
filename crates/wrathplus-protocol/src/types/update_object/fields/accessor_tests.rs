@@ -316,12 +316,12 @@ fn scalar_accessors_read_distinct_native_fields_in_both_dialects() {
         }
     );
     check!(
-        "player_release_timer_running",
+        "player_release_bits",
         Field::PlayerFieldBytes,
-        |fields: &ObjectFields| fields.player_release_timer_running(),
+        |fields: &ObjectFields| fields.player_release_bits(),
         |raw: Option<u32>, guid: Option<u64>| {
             let _ = (raw, guid);
-            raw.unwrap_or(0) & 0x08 != 0
+            (raw.unwrap_or(0) & 0x18) as u8
         }
     );
     check!(
@@ -929,7 +929,7 @@ fn dialect_packed_bytes_never_borrow_neighbor_meanings() {
     assert_eq!(fields.player_pvp_medal(), Some(27));
     assert_eq!(fields.player_action_bar_toggles(), Some(29));
     assert_eq!(fields.player_honor_rank(), Some(30));
-    assert!(fields.player_release_timer_running());
+    assert_eq!(fields.player_release_bits(), 0x08);
     assert!(fields.player_track_stealthed());
     assert!(fields.player_is_group_leader());
     assert!(fields.player_is_ghost());

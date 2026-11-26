@@ -23,9 +23,9 @@ use crate::net::{ClientCommand, NetCommands, Objects};
 struct DeathFeedState {
     /// World-scoped: the last `(guid, dead, ghost)` the self body showed.
     mirror: Option<(u64, bool, bool)>,
-    /// World-scoped: the death edge, anchoring the release window. The wire carries only the
-    /// timer bit; the 1.12 client arms `now + 360000 ms` at its own death edge (`0x5e9a30`).
-    died_at: Option<f64>,
+    /// World-scoped: the release timer, armed at a death edge and never cleared by a res, as
+    /// `0x6dc070` arms it. Labelled: 12340 zeroes it in its UI init (`0x52a9f6`); kept here.
+    release: Option<ReleaseTimer>,
     /// VM-scoped: the announce latches.
     vm: crate::app_core::vm_memo::VmMemo<DeathAnnounced>,
 }
@@ -55,8 +55,39 @@ enum CorpseRange {
     InInstance,
 }
 
-/// The forced-release window, vmangos `CORPSE_REPOP_TIME` (`Player.h:71`); never on the wire.
-const RELEASE_WINDOW_SECS: f64 = 360.0;
+/// 12340's release timer (`0xbd0848`, no-timer byte `0xbd084c`) once armed.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum ReleaseTimer {
+    Ends(f64),
+    NoTimer,
+}
+
+/// `0x6dc070`, read once at the death edge: `NO_RELEASE_WINDOW` (`0x10`) arms 0 ms, else
+/// `RELEASE_TIMER` (`0x08`) outside `PLAYER_FLAGS_IS_OUT_OF_BOUNDS` (`0x4000`) arms 360000 ms.
+fn arm_release(bits: u8, player_flags: u32, now: f64) -> ReleaseTimer {
+    if bits & 0x10 != 0 {
+        ReleaseTimer::Ends(now)
+    } else if bits & 0x08 != 0 && player_flags & 0x4000 == 0 {
+        ReleaseTimer::Ends(now + 360.0)
+    } else {
+        ReleaseTimer::NoTimer
+    }
+}
+
+/// `GetCorpseRecoveryDelay` (`0x516280`): whole seconds, rounded down, 0 once past.
+fn recovery_seconds(reclaim_at: Option<f64>, now: f64) -> u32 {
+    reclaim_at.map_or(0, |at| (at - now).max(0.0) as u32)
+}
+
+/// `GetReleaseTimeRemaining` (`0x516210`): whole seconds toward zero, -1 with no timer, 0 before
+/// any death.
+fn release_seconds(timer: Option<ReleaseTimer>, now: f64) -> i32 {
+    match timer {
+        None => 0,
+        Some(ReleaseTimer::NoTimer) => -1,
+        Some(ReleaseTimer::Ends(at)) => (at - now).max(0.0) as i32,
+    }
+}
 
 /// The corpse-range dialog radius, 40 yd inclusive: the 1.12 client compares d² ≤ `[0xb4e2ac]`
 /// (1600.0) against the corpse-query position. The server's reclaim gate,
@@ -104,15 +135,12 @@ fn feed_death(
     let ghost = store.0.player_is_ghost();
 
     // ── The snapshot, set before the events fire so their handlers read current values ──
-    let release_remaining = if store.0.player_release_timer_running() {
-        feed.died_at
-            .map(|t| ((t + RELEASE_WINDOW_SECS - now).max(0.0)) as f32)
-    } else {
-        None // GetReleaseTimeRemaining() == -1, the no-timer DEATH text
-    };
-    let recovery_delay = death_net
-        .reclaim_at
-        .map_or(0.0, |at| (at - now).max(0.0) as f32);
+    let prev = feed.mirror.filter(|&(g, ..)| g == guid);
+    // Alive to dead arms it (`0x6dc165`); logging in dead too, labelled: that edge is not read.
+    if matches!(prev, Some((_, false, false)) | None) && dead && !ghost {
+        let bits = store.0.player_release_bits();
+        feed.release = Some(arm_release(bits, store.0.player_flags(), now));
+    }
     let spirit_healer_in_range = death_net.spirit_healer.is_some_and(|npc| {
         objects
             .entity(npc)
@@ -131,8 +159,8 @@ fn feed_death(
             .filter(|t| !t.is_empty())
     });
     script.set_death(DeathUiState {
-        release_remaining,
-        recovery_delay,
+        release_remaining: release_seconds(feed.release, now),
+        recovery_delay: recovery_seconds(death_net.reclaim_at, now),
         resurrect_sickness: death_net.resurrect.as_ref().is_some_and(|o| o.sickness),
         resurrect_has_timer: death_net.resurrect.as_ref().is_some_and(|o| o.has_timer),
         spirit_healer_in_range,
@@ -144,24 +172,14 @@ fn feed_death(
 
     // ── The world edges: the release window and the corpse asks, which a `/reload` must not
     // repeat.
-    let prev = feed.mirror.filter(|&(g, ..)| g == guid);
     feed.mirror = Some((guid, dead, ghost));
     match (prev, dead, ghost) {
-        // Alive to dead, or logging in dead: arm the release window.
-        (Some((_, false, false)) | None, true, false) => {
-            feed.died_at = Some(now);
-        }
-        // Dead to ghost (released), or to alive (a pre-release res).
-        (Some((_, true, false)), d, g) if g || !d => {
-            feed.died_at = None;
-            if g {
-                // Now a ghost: ask where the corpse is.
-                let _ = net.0.send(ClientCommand::CorpseQuery);
-            }
+        // Dead to ghost (released): ask where the corpse is.
+        (Some((_, true, false)), _, true) => {
+            let _ = net.0.send(ClientCommand::CorpseQuery);
         }
         // Ghost to alive: reclaim, spirit healer or an accepted res.
         (Some((_, _, true)), false, false) => {
-            feed.died_at = None;
             // The not-found answer drops the map markers. The reference sends nothing on this
             // edge: its ghost-bit watcher (`0x5ee990`) clears the corpse cache, and `0x491f50`
             // queries only while a ghost. The server's own push needs a looter

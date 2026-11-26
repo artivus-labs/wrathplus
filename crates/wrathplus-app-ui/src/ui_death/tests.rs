@@ -59,7 +59,7 @@ fn the_session_edge_clears_the_world_scoped_death_memory_and_nothing_else_does()
     app.add_message::<crate::app_core::session::DisconnectedMessage>()
         .insert_resource(DeathFeedState {
             mirror: Some((0x1234, true, true)),
-            died_at: Some(12.0),
+            release: Some(ReleaseTimer::Ends(12.0)),
             vm: crate::app_core::vm_memo::VmMemo::default(),
         });
 
@@ -88,7 +88,37 @@ fn the_session_edge_clears_the_world_scoped_death_memory_and_nothing_else_does()
         "a relog must find no mirror, or the login-while-ghost arm cannot fire"
     );
     assert!(
-        feed.died_at.is_none(),
+        feed.release.is_none(),
         "the release window is the dead session's, and re-arms at the next login"
     );
+}
+
+/// `0x6dc070` reads the release bits once; `0x516210` and `0x516280` answer whole seconds.
+#[test]
+fn the_release_timer_arms_from_the_bits_and_answers_whole_seconds() {
+    let at = |bits, flags| Some(arm_release(bits, flags, 100.0));
+    assert_eq!(release_seconds(None, 100.0), 0, "before any death");
+    assert_eq!(
+        release_seconds(at(0x08, 0), 100.4),
+        359,
+        "the window, truncated"
+    );
+    assert_eq!(
+        release_seconds(at(0x18, 0), 100.0),
+        0,
+        "NO_RELEASE_WINDOW wins"
+    );
+    assert_eq!(
+        release_seconds(at(0x08, 0x4000), 100.0),
+        -1,
+        "out of bounds"
+    );
+    assert_eq!(release_seconds(at(0, 0), 100.0), -1, "no timer bit");
+    assert_eq!(
+        release_seconds(at(0x08, 0), 900.0),
+        0,
+        "expired, alive or not"
+    );
+    assert_eq!(recovery_seconds(Some(130.9), 100.0), 30, "rounded down");
+    assert_eq!(recovery_seconds(Some(99.0), 100.0), 0);
 }

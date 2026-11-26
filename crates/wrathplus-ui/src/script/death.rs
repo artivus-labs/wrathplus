@@ -11,13 +11,12 @@ use super::Model;
 /// The death snapshot the app pushes each frame.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct DeathUiState {
-    /// Seconds until the server force-releases, counted from death against the 6-minute
-    /// `CORPSE_REPOP_TIME` the wire never carries. `None` (`PLAYER_FIELD_BYTES` bit `0x08` clear,
-    /// an instanceable map) answers -1, which picks the no-timer text (`StaticPopup.lua:380-387`).
-    pub release_remaining: Option<f32>,
-    /// Seconds until the corpse is reclaimable, from `SMSG_CORPSE_RECLAIM_DELAY` at arrival; the
-    /// `StartDelay` gate of `RECOVER_CORPSE` and `RESURRECT`.
-    pub recovery_delay: f32,
+    /// `GetReleaseTimeRemaining`: whole seconds until the server force-releases, -1 for no timer,
+    /// which picks the no-timer text (`StaticPopup.lua:380-387`), 0 before any death.
+    pub release_remaining: i32,
+    /// `GetCorpseRecoveryDelay`: whole seconds until the corpse is reclaimable, from
+    /// `SMSG_CORPSE_RECLAIM_DELAY`; the `StartDelay` gate of `RECOVER_CORPSE` and `RESURRECT`.
+    pub recovery_delay: u32,
     /// The pending resurrect offer warns of resurrection sickness (`ResurrectHasSickness`).
     pub resurrect_sickness: bool,
     /// The pending offer still honors the reclaim-delay gate (`ResurrectHasTimer`).
@@ -87,10 +86,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         "GetReleaseTimeRemaining",
         lua.create_function(|lua, ()| {
             let model = lua.app_data_ref::<Model>().expect("model app_data");
-            Ok(model
-                .death
-                .release_remaining
-                .map_or(-1.0, |s| f64::from(s.max(0.0))))
+            Ok(model.death.release_remaining)
         })?,
     )?;
 
@@ -98,7 +94,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         "GetCorpseRecoveryDelay",
         lua.create_function(|lua, ()| {
             let model = lua.app_data_ref::<Model>().expect("model app_data");
-            Ok(f64::from(model.death.recovery_delay.max(0.0).ceil()))
+            Ok(model.death.recovery_delay)
         })?,
     )?;
 
