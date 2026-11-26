@@ -106,6 +106,11 @@ How places are chosen (`src/AgentNavServices.h`, tested against a fixture by the
   once, at its nearest member.
 - A spawn offering several services is one place per kind. Nearest first, at most
   `AgentNav.MaxServices`.
+- Trainers beyond the radius: for `trainer`, `trainer_cooking` and `trainer_first_aid`, the nearest
+  two of each kind on the map (filtered as above; one whose event has it `off` does not count and
+  is not told from beyond the radius) are always in the answer, however far and ahead of the cap,
+  so a mage in Loch Modan is told Ironforge's mage trainers. Those within the radius count. Not
+  `trainer_profession`: that would need the asker's professions. Same scan, no new field.
 - Spawns a game event brings out (`game_event_creature`, `game_event_gameobject` for mailboxes: Brewfest, the Lunar Festival, the generic
   "Mage Trainer"s of the Anvilmar starting area...) are not left out but marked: `on` when one of
   their events has them out now (a positive event while it is active, a negative one while it is
