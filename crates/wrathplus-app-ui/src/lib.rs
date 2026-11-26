@@ -26,6 +26,7 @@ pub mod ui_aura;
 pub mod ui_bank;
 pub mod ui_battlefield;
 pub mod ui_battlefield_arena_lines;
+pub mod ui_battlefield_leash;
 pub mod ui_battlefield_positions;
 pub mod ui_battlefield_score;
 pub mod ui_bind_confirm;

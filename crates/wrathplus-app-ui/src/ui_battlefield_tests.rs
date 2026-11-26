@@ -47,8 +47,15 @@ fn a_list_fires_by_its_shape_and_keeps_the_battlemaster() {
     assert_eq!((v.bg_type, v.instances.as_slice()), (3, &[4, 9][..]));
     assert_eq!(v.holiday.win_arena, 25);
     assert!(!v.random.has_win);
+    assert_eq!(
+        s.leashed(),
+        None,
+        "leashed once its window's event goes out"
+    );
+    assert_eq!(s.take_events().len(), 5);
+    assert_eq!(s.leashed(), Some(0x88));
     s.close();
-    assert_eq!(s.battlemaster(), None);
+    assert_eq!((s.battlemaster(), s.leashed()), (None, None));
 }
 
 #[test]
