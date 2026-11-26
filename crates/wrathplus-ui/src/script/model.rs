@@ -967,12 +967,8 @@ pub(crate) struct Model {
     /// The reputation pane's snapshot and the display tree built from it.
     pub(crate) reputation: reputation::ReputationState,
     pub(crate) reputation_groups: Vec<reputation::FactionGroup>,
-    /// Folded headers by key (a `Faction.dbc` id, 0 "Other", -1 "Inactive").
-    pub(crate) reputation_collapsed: HashSet<i64>,
-    /// Every header key listed this session: 12340 never drops a header slot (`0xc23370`).
-    pub(crate) reputation_headers_seen: HashSet<i64>,
-    /// The selected row's id, a header's key too; `None` for none, kept apart from "Other"'s id 0,
-    /// which 12340 also uses for none (`0xc2347c` starts and resets at 0, `0x5d150b`).
+    pub(crate) reputation_folds: reputation::Folds,
+    /// The selected row's id; `None` for none, apart from "Other"'s id 0 (`0xc2347c`, `0x5d150b`).
     pub(crate) reputation_selected: Option<i64>,
     /// Reputation calls queued, applied locally first because none of the three sends is acked.
     pub(crate) reputation_sends: Vec<reputation::ReputationSend>,
@@ -1592,8 +1588,7 @@ impl Model {
             skill_abandons: Vec::new(),
             reputation: reputation::ReputationState::default(),
             reputation_groups: Vec::new(),
-            reputation_collapsed: HashSet::new(),
-            reputation_headers_seen: HashSet::new(),
+            reputation_folds: reputation::Folds::default(),
             reputation_selected: None,
             reputation_sends: Vec::new(),
         }

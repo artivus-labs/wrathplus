@@ -79,6 +79,15 @@ pub enum ReputationSend {
     Watch(Option<u32>),
 }
 
+/// The fold state; `pub(crate)` only because [`super::model::Model`] stores it.
+#[derive(Default)]
+pub(crate) struct Folds {
+    /// Folded headers by key (a `Faction.dbc` id, 0 "Other", -1 "Inactive").
+    pub(crate) collapsed: HashSet<i64>,
+    /// Every header key listed this session: 12340 never drops a header slot (`0xc23370`).
+    pub(crate) seen: HashSet<i64>,
+}
+
 /// One header group; `pub(crate)` only because [`super::model::Model`] stores them.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct FactionGroup {
@@ -127,14 +136,14 @@ impl super::UiScript {
                 }))
             })
             .collect();
-        if model.reputation_headers_seen.is_empty() {
-            model.reputation_collapsed = HashSet::from([KEY_INACTIVE]);
-        } else if !keys.is_subset(&model.reputation_headers_seen) {
-            model.reputation_collapsed.clear();
+        if model.reputation_folds.seen.is_empty() {
+            model.reputation_folds.collapsed = HashSet::from([KEY_INACTIVE]);
+        } else if !keys.is_subset(&model.reputation_folds.seen) {
+            model.reputation_folds.collapsed.clear();
         }
         if !keys.is_empty() {
-            model.reputation_headers_seen.extend(keys);
-            model.reputation_headers_seen.insert(KEY_INACTIVE);
+            model.reputation_folds.seen.extend(keys);
+            model.reputation_folds.seen.insert(KEY_INACTIVE);
         }
         model.reputation_groups = groups;
         model.reputation = state;
@@ -258,7 +267,7 @@ fn rows(model: &Model) -> Vec<Row> {
     let mut out = Vec::new();
     for (gi, g) in model.reputation_groups.iter().enumerate() {
         out.push(Row::Header(gi));
-        if model.reputation_collapsed.contains(&g.key) {
+        if model.reputation_folds.collapsed.contains(&g.key) {
             continue;
         }
         for m in &g.members {
@@ -270,7 +279,7 @@ fn rows(model: &Model) -> Vec<Row> {
                 Member::Sub(hi, children) => {
                     out.push(Row::SubHeader(*hi));
                     let key = i64::from(model.reputation.entries[*hi].faction_id);
-                    if !model.reputation_collapsed.contains(&key) {
+                    if !model.reputation_folds.collapsed.contains(&key) {
                         out.extend(children.iter().map(|&ei| Row::Entry { ei, child: true }));
                     }
                 }
@@ -342,9 +351,9 @@ fn set_collapsed(model: &mut Model, index: i32, collapse: bool) {
     };
     for key in keys {
         if collapse {
-            model.reputation_collapsed.insert(key);
+            model.reputation_folds.collapsed.insert(key);
         } else {
-            model.reputation_collapsed.remove(&key);
+            model.reputation_folds.collapsed.remove(&key);
         }
     }
 }
@@ -411,7 +420,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             match row {
                 Row::Header(gi) => {
                     let grp = &model.reputation_groups[gi];
-                    let collapsed = model.reputation_collapsed.contains(&grp.key);
+                    let collapsed = model.reputation_folds.collapsed.contains(&grp.key);
                     let header = model
                         .reputation
                         .entries
@@ -442,7 +451,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 Row::SubHeader(hi) => {
                     let e = &model.reputation.entries[hi];
                     let collapsed = model
-                        .reputation_collapsed
+                        .reputation_folds
+                        .collapsed
                         .contains(&i64::from(e.faction_id));
                     faction_tuple(lua, &model, e, Some(collapsed), false)
                 }
@@ -465,7 +475,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                     let key = model.reputation_groups[gi].key;
                     (key == i64::from(id)).then_some((
                         None,
-                        Some(model.reputation_collapsed.contains(&key)),
+                        Some(model.reputation_folds.collapsed.contains(&key)),
                         false,
                     ))
                 }
@@ -474,7 +484,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 .then(|| {
                     (
                         Some(hi),
-                        Some(model.reputation_collapsed.contains(&i64::from(id))),
+                        Some(model.reputation_folds.collapsed.contains(&i64::from(id))),
                         false,
                     )
                 }),
