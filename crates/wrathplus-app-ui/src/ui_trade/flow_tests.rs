@@ -62,6 +62,11 @@ fn trade_app() -> (App, crossbeam_channel::Receiver<ClientCommand>) {
         ))
         .id();
     world.resource_mut::<GuidIndex>().0.insert(SWORD, sword);
+    // `InitiateTrade` needs the partner streamed as a player object (`0x522660`).
+    let bot = world
+        .spawn((Guid(BOT), ObjectStore(Default::default())))
+        .id();
+    world.resource_mut::<GuidIndex>().0.insert(BOT, bot);
     for (entry, name) in [(SWORD_ENTRY, "Worn Shortsword"), (LINEN, "Linen Cloth")] {
         world
             .resource_mut::<crate::items::Items>()
@@ -275,5 +280,74 @@ fn a_right_click_offers_the_bag_item_in_the_first_free_slot() {
         drained(&mut app, &rx),
         (0x011D, vec![0, 0xFF, 23]),
         "into trade slot 0"
+    );
+}
+
+/// `InitiateTrade`'s local gates (`0x522600`) and `CloseTrade`'s unconditional cancel
+/// (`0x5879c4`): a refusal raises its error and sends nothing.
+#[test]
+fn initiate_refuses_locally_and_close_always_cancels() {
+    let (mut app, rx) = trade_app();
+    let errors = |app: &mut App| {
+        let keys = std::mem::take(
+            &mut app
+                .world_mut()
+                .resource_mut::<crate::app_core::errors::UiErrorKeys>()
+                .0,
+        );
+        keys.iter().map(|e| e.key).collect::<Vec<_>>()
+    };
+    let sent = |app: &mut App, rx: &crossbeam_channel::Receiver<ClientCommand>| {
+        app.world_mut().run_system_once(drain_trade).unwrap();
+        rx.try_iter()
+            .filter(|c| !matches!(c, ClientCommand::ItemQuery { .. }))
+            .count()
+    };
+    app.insert_resource(crate::app_core::session::SelfGuid(Some(0x42)));
+    lua(&mut app, r#"InitiateTrade("player")"#);
+    assert_eq!(
+        (sent(&mut app, &rx), errors(&mut app)),
+        (0, vec!["ERR_TRADE_SELF"])
+    );
+    // The bot is selected but has not streamed: nothing at all.
+    let bot = app
+        .world_mut()
+        .resource_mut::<GuidIndex>()
+        .0
+        .remove(&BOT)
+        .unwrap();
+    lua(&mut app, r#"InitiateTrade("target")"#);
+    assert_eq!((sent(&mut app, &rx), errors(&mut app)), (0, vec![]));
+    let fields =
+        |pairs: &[(Field, u32)]| ObjectStore(wrathplus_protocol::ObjectFields::from_fields(pairs));
+    app.world_mut()
+        .resource_mut::<GuidIndex>()
+        .0
+        .insert(BOT, bot);
+    let me = app
+        .world_mut()
+        .query_filtered::<Entity, With<SelfPlayer>>()
+        .single(app.world())
+        .unwrap();
+    app.world_mut().entity_mut(me).insert(fields(&[
+        (Field::UnitMaxHealth, 50),
+        (Field::UnitHealth, 0),
+    ]));
+    lua(&mut app, r#"InitiateTrade("target")"#);
+    assert_eq!(
+        (sent(&mut app, &rx), errors(&mut app)),
+        (0, vec!["ERR_PLAYER_DEAD"])
+    );
+    app.world_mut().entity_mut(me).insert(fields(&[
+        (Field::UnitMaxHealth, 50),
+        (Field::UnitHealth, 50),
+    ]));
+    lua(&mut app, r#"InitiateTrade("target")"#);
+    assert_eq!(sent(&mut app, &rx), 1, "CMSG_INITIATE_TRADE");
+    lua(&mut app, "CloseTrade()");
+    assert_eq!(
+        drained(&mut app, &rx).0,
+        0x011C,
+        "CMSG_CANCEL_TRADE with no window open"
     );
 }
