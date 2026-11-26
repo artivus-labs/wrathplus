@@ -171,21 +171,34 @@ fn an_instance_map_shows_no_overlays() {
         .unwrap());
 }
 
-/// `SetMapToCurrentZone` lands on the app-fed player zone, and the feed surfaces through
-/// `GetPlayerMapPosition` for the player and `party1..4`. A `raid` token
-/// answers the off-map sentinel; the reference reads raid positions (`WorldMapFrame.lua:379`).
+/// `SetMapToCurrentZone` lands on the app-fed player zone, and the positions project at each call
+/// (`0x545880`): any token naming the player or a party or raid member (`0x60c1c0`), the projection
+/// reading the selection as it stands, so a `SetMapZoom` in the same handler moves the answer.
 #[test]
 fn worldmap_current_zone_and_player_feed() {
     let mut s = script();
     push_catalog(&mut s);
-
+    let pos = |x: f32, y: f32| crate::script::MapPos {
+        map: 0,
+        x,
+        y,
+        floor: None,
+    };
+    // On a zone the position is its own UV; anywhere else it is off the map.
+    s.set_world_map_projection(|sel, p| (sel.zone != 0).then_some((p.x, p.y)));
+    s.set_unit_guids(&crate::script::UnitGuids {
+        player: 1,
+        party: [2, 0, 0, 0],
+        target: 2,
+        raid: vec![1, 2],
+        ..Default::default()
+    });
     s.set_world_map_feed(
         Some((1, 2)),
-        Some((0.25, 0.75)),
+        Some(pos(0.25, 0.75)),
         1.5,
         None,
-        vec![Some((0.1, 0.2)), None],
-        Vec::new(),
+        vec![(2, pos(0.1, 0.2))],
     );
     s.run("SetMapToCurrentZone()").unwrap();
     assert_eq!(
@@ -193,28 +206,36 @@ fn worldmap_current_zone_and_player_feed() {
             .unwrap(),
         (1, 2)
     );
-    let (x, y) = s
-        .eval::<(f64, f64)>(r#"return GetPlayerMapPosition("player")"#)
-        .unwrap();
-    assert!((x - 0.25).abs() < 1e-6 && (y - 0.75).abs() < 1e-6);
-    let (px, py) = s
-        .eval::<(f64, f64)>(r#"return GetPlayerMapPosition("party1")"#)
-        .unwrap();
-    assert!(
-        (px - 0.1).abs() < 1e-6 && (py - 0.2).abs() < 1e-6,
-        "a party slot reads its own projection"
-    );
-    for token in ["party2", "party5", "party0", "raid1", "nonsense"] {
-        assert_eq!(
-            s.eval::<(f64, f64)>(&format!(r#"return GetPlayerMapPosition("{token}")"#))
-                .unwrap(),
-            (0.0, 0.0),
-            "{token} answers the off-map sentinel"
+    let near = |token: &str, want: (f64, f64)| {
+        let (x, y) = s
+            .eval::<(f64, f64)>(&format!(r#"return GetPlayerMapPosition("{token}")"#))
+            .unwrap();
+        assert!(
+            (x - want.0).abs() < 1e-6 && (y - want.1).abs() < 1e-6,
+            "{token}: {x}, {y}"
         );
+    };
+    for token in ["player", "PLAYER", "raid1"] {
+        near(token, (0.25, 0.75));
     }
+    for token in ["party1", "target", "raid2"] {
+        near(token, (0.1, 0.2));
+    }
+    for token in ["party2", "party5", "raid3", "focus", "nonsense"] {
+        near(token, (0.0, 0.0));
+    }
+    assert!(s.run("GetPlayerMapPosition()").is_err());
+    // The same handler, after the selection moved: the continent map, where nothing projects.
+    let both: (f64, f64, f64, f64) = s
+        .eval(
+            r#"local a, b = GetPlayerMapPosition("player") SetMapZoom(1)
+                 local c, d = GetPlayerMapPosition("player") return a, b, c, d"#,
+        )
+        .unwrap();
+    assert_eq!(both, (0.25, 0.75, 0.0, 0.0));
 
     // No feed → the world sheet (never an error).
-    s.set_world_map_feed(None, None, 0.0, None, Vec::new(), Vec::new());
+    s.set_world_map_feed(None, None, 0.0, None, Vec::new());
     s.run("SetMapToCurrentZone()").unwrap();
     assert_eq!(s.eval::<i64>("return GetCurrentMapContinent()").unwrap(), 0);
 }

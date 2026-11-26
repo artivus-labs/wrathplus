@@ -2,6 +2,7 @@
 //! POI pool `GetMapLandmarkInfo` feeds (the `AreaPOI.dbc` landmarks and the guard's directions
 //! marker, [`crate::poi_marker`]), the unit blips, the player arrow and the full-screen quads.
 
+use super::test_ui::{at, feed};
 use wrathplus_ui::script::{
     BattlefieldFlagView, BattlefieldPositionView, QuadContent, UiScript, WorldMapLandmarkView,
     ARROW_MODEL,
@@ -253,15 +254,9 @@ fn party_blips_sit_at_their_map_positions_and_hide_when_absent() {
         assert!(!shown(&s, i), "slot {i} hides while the party is empty");
     }
 
-    // Two members on the map and one between them off it: the app pushes None for no position.
-    s.set_world_map_feed(
-        None,
-        Some((0.5, 0.5)),
-        0.0,
-        None,
-        vec![Some((0.25, 0.75)), None, Some((0.5, 0.125))],
-        Vec::new(),
-    );
+    // Two members on the map and one between them with no position.
+    let members = vec![(11, at(0.25, 0.75).unwrap()), (13, at(0.5, 0.125).unwrap())];
+    feed(&mut s, at(0.5, 0.5), 0.0, members);
     update(&mut s);
     let diag = s
         .eval::<String>(
@@ -295,7 +290,7 @@ fn party_blips_sit_at_their_map_positions_and_hide_when_absent() {
         "v runs DOWN from the sheet's top"
     );
 
-    s.set_world_map_feed(None, Some((0.5, 0.5)), 0.0, None, Vec::new(), Vec::new());
+    feed(&mut s, at(0.5, 0.5), 0.0, Vec::new());
     update(&mut s);
     for i in 1..=4 {
         assert!(!shown(&s, i), "slot {i} hides when the party is gone");
@@ -326,7 +321,7 @@ fn the_player_arrow_is_the_stock_model_pane_seated_and_turned_by_the_update() {
     s.resolve();
     s.run("ShowUIPanel(WorldMapFrame)").unwrap();
     s.resolve();
-    s.set_world_map_feed(None, Some((0.25, 0.75)), 1.25, None, Vec::new(), Vec::new());
+    feed(&mut s, at(0.25, 0.75), 1.25, Vec::new());
     update(&mut s);
     s.resolve();
     let arrow = |s: &mut UiScript| {
@@ -374,7 +369,7 @@ fn the_player_arrow_is_the_stock_model_pane_seated_and_turned_by_the_update() {
     );
 
     // Off the displayed map: the (0, 0) sentinel hides it.
-    s.set_world_map_feed(None, None, 0.0, None, Vec::new(), Vec::new());
+    feed(&mut s, None, 0.0, Vec::new());
     update(&mut s);
     s.resolve();
     assert!(arrow(&mut s).is_none(), "off-map hides the arrow");
@@ -387,7 +382,7 @@ fn the_player_arrow_is_the_stock_model_pane_seated_and_turned_by_the_update() {
 fn battleground_teammates_and_the_flag_draw_from_the_position_family() {
     let _data = wrathplus_formats::wow_data_or_skip!();
     let mut s = harness();
-    s.set_world_map_feed(None, Some((0.5, 0.5)), 0.0, None, Vec::new(), Vec::new());
+    feed(&mut s, at(0.5, 0.5), 0.0, Vec::new());
     s.set_battlefield_positions(
         vec![
             BattlefieldPositionView {
@@ -543,7 +538,7 @@ fn hovering_the_player_blip_on_a_scaled_map_names_the_player() {
         s.eval::<f64>("return WorldMapFrame:GetScale()").unwrap() < 0.99,
         "the narrow window scales the map under 1"
     );
-    s.set_world_map_feed(None, Some((0.5, 0.5)), 0.0, None, Vec::new(), Vec::new());
+    feed(&mut s, at(0.5, 0.5), 0.0, Vec::new());
     update(&mut s);
     s.resolve();
     let (px, py, eff) = s
@@ -588,7 +583,7 @@ fn the_player_arrow_draws_over_the_zones_explored_overlays() {
     arrow_facts(&mut s);
     s.run("ShowUIPanel(WorldMapFrame)").unwrap();
     s.resolve();
-    s.set_world_map_feed(None, Some((0.5, 0.5)), 0.0, None, Vec::new(), Vec::new());
+    feed(&mut s, at(0.5, 0.5), 0.0, Vec::new());
     update(&mut s);
     // An overlay made the stock file's way, covering the whole detail frame.
     s.run(
@@ -644,7 +639,7 @@ fn a_click_over_a_blip_still_answers_the_maps_uv() {
     s.resolve();
     s.run("ShowUIPanel(WorldMapFrame)").unwrap();
     s.resolve();
-    s.set_world_map_feed(None, Some((0.4, 0.6)), 0.0, None, Vec::new(), Vec::new());
+    feed(&mut s, at(0.4, 0.6), 0.0, Vec::new());
     update(&mut s);
     s.resolve();
 

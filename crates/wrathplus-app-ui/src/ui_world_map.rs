@@ -38,7 +38,7 @@ use wrathplus_formats::{
     load_zone_map, WorldMapArea,
 };
 use wrathplus_ui::script::{
-    DungeonFloorView, MapSelection, UiScript, WorldMapAreaView, WorldMapContinentView,
+    DungeonFloorView, MapPos, MapSelection, UiScript, WorldMapAreaView, WorldMapContinentView,
     WorldMapLandmarkView, WorldMapOverlayView, WorldMapZoneView,
 };
 
@@ -792,12 +792,17 @@ fn project_on_floor(
     Some(map_proj::zone_uv(rect, x, y))
 }
 
-/// Hand the engine `GetWorldLocMapPosition`'s projection over a copy of the catalog.
+/// Hand the engine its call-time projections over one shared copy of the catalog:
+/// `GetWorldLocMapPosition`'s, and the floor-aware one the position getters take (`0x544140`).
 fn install_world_loc_projector(script: &mut UiScript, data: &WorldMapUiData) {
-    let copy = data.clone();
+    let copy = std::sync::Arc::new(data.clone());
+    let shared = copy.clone();
     script.set_world_loc_projector(Box::new(move |selection, map, x, y| {
         project_on_displayed(&copy, selection, map, x, y)
     }));
+    script.set_world_map_projection(move |sel, p| {
+        project_on_floor(&shared, sel, p.map, p.x, p.y, p.floor)
+    });
 }
 
 /// [`feed_world_map`]'s memos under one [`crate::ui_script::VmMemo`], so a new VM resets them all.
@@ -895,15 +900,18 @@ fn feed_world_map(
             floor_at(&data, pos_map, wmo_group, pz),
         )
     };
-    let uv = project_z(map.0, wx, wy, wz);
+    let player_pos = MapPos {
+        map: map.0,
+        x: wx,
+        y: wy,
+        floor: player_floor,
+    };
     // The corpse at the query answer's display position, a dungeon corpse at its entrance.
-    let corpse_uv = death_net.corpse.and_then(|cp| {
-        project_z(
-            u32::try_from(cp.display_map).unwrap_or(u32::MAX),
-            cp.position[0],
-            cp.position[1],
-            cp.position[2],
-        )
+    let corpse_pos = death_net.corpse.map(|cp| {
+        let map = u32::try_from(cp.display_map).unwrap_or(u32::MAX);
+        let [x, y, z] = cp.position;
+        let floor = floor_at(&data, map, wmo_group, z);
+        MapPos { map, x, y, floor }
     });
 
     // The landmarks (`GetNumMapLandmarks`), rebuilt only when a `LandmarkKey` input moves.
@@ -978,44 +986,39 @@ fn feed_world_map(
         script.set_world_map_landmarks(landmarks);
     }
 
-    // The `party1..4` blips: a streamed member's transform, else the `i16` position from
-    // `SMSG_PARTY_MEMBER_STATS`. That packet carries a zone, not a map, so the map is the
-    // continent owning that zone, else ours.
-    let member_uv = |m: &wrathplus_protocol::types::GroupMemberEntry| {
-        let (px, py) = crate::minimap::party_member_pos(m, &group, &guids, &unit_pos)?;
-        let member_map = group
-            .stats
-            .get(&m.guid)
-            .and_then(|st| st.zone)
-            .and_then(|zone| {
-                data.continents
-                    .iter()
-                    .find(|cont| cont.zones.iter().any(|z| z.area_id == u32::from(zone)))
-                    .map(|cont| cont.map_id)
-            })
-            .unwrap_or(map.0);
-        project(member_map, px, py).filter(|uv| *uv != (0.0, 0.0))
-    };
-    let party_uv: Vec<Option<(f32, f32)>> = group.party_slots().map(member_uv).collect();
-
-    // The `raid1..40` blips in the raid roster's order, ourselves first so `raidN` matches; the
-    // stock map skips our own slot by `UnitIsUnit` (`WorldMapFrame.lua:381`).
-    let raid_uv: Vec<Option<(f32, f32)>> =
-        if group.group_type == crate::app_core::state::GROUPTYPE_RAID {
-            std::iter::once(uv)
-                .chain(group.members.iter().map(member_uv))
-                .collect()
-        } else {
-            Vec::new()
-        };
+    // Each member's position, projected at the call: a streamed member's transform, else the
+    // `i16` position from `SMSG_PARTY_MEMBER_STATS`, whose map is the continent owning its zone,
+    // else ours.
+    let members: Vec<(u64, MapPos)> = group
+        .members
+        .iter()
+        .filter_map(|m| {
+            let (x, y) = crate::minimap::party_member_pos(m, &group, &guids, &unit_pos)?;
+            let zone = group.stats.get(&m.guid).and_then(|st| st.zone);
+            let member_map = zone
+                .and_then(|zone| {
+                    data.continents
+                        .iter()
+                        .find(|cont| cont.zones.iter().any(|z| z.area_id == u32::from(zone)))
+                        .map(|cont| cont.map_id)
+                })
+                .unwrap_or(map.0);
+            let pos = MapPos {
+                map: member_map,
+                x,
+                y,
+                floor: None,
+            };
+            Some((m.guid, pos))
+        })
+        .collect();
 
     script.set_world_map_feed(
         player_sel.zone,
-        uv,
+        Some(player_pos),
         player.facing(),
-        corpse_uv,
-        party_uv,
-        raid_uv,
+        corpse_pos,
+        members,
     );
     // The instance-map leg for `SetMapToCurrentZone`, which the battlefield minimap calls on
     // `PLAYER_ENTERING_WORLD` (`Blizzard_BattlefieldMinimap.lua:58-62`).

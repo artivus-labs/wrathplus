@@ -2,6 +2,7 @@
 //! (`ToggleBattlefieldMinimap`, `UIParent.lua:216-220`). The harness is the whole manifest: the
 //! addon reads globals from many of its files.
 
+use super::test_ui::at;
 use wrathplus_ui::script::{
     BattlefieldFlagView, BattlefieldPositionView, QuadContent, UiScript, UnitState,
     WorldMapAreaView, WorldMapContinentView, WorldMapLandmarkView, WorldMapOverlayView,
@@ -128,14 +129,12 @@ pub(super) fn open(s: &mut UiScript) {
     s.set_world_map_catalog(catalog());
     s.set_world_map_areas(areas(), Vec::new());
     s.set_world_map_explored(vec![0b110; 64]);
-    s.set_world_map_feed(
-        Some((1, 1)),
-        Some((0.5, 0.5)),
-        0.0,
-        None,
-        Vec::new(),
-        Vec::new(),
-    );
+    s.set_world_map_projection(|_, p| Some((p.x, p.y)));
+    s.set_unit_guids(&wrathplus_ui::script::UnitGuids {
+        player: 1,
+        ..Default::default()
+    });
+    s.set_world_map_feed(Some((1, 1)), at(0.5, 0.5), 0.0, None, Vec::new());
     s.set_world_state_ui(vec![WorldStateUiView {
         ui_state: 1,
         text: "Flags captured: 2".into(),
@@ -544,14 +543,13 @@ fn the_battleground_blips_and_the_flag_follow_the_position_family() {
         }),
         1.0,
     );
-    s.set_world_map_feed(
-        Some((1, 1)),
-        Some((0.5, 0.25)),
-        0.0,
-        None,
-        vec![Some((0.1, 0.2)), None],
-        Vec::new(),
-    );
+    s.set_unit_guids(&wrathplus_ui::script::UnitGuids {
+        player: 1,
+        party: [11, 12, 0, 0],
+        ..Default::default()
+    });
+    let members = vec![(11, at(0.1, 0.2).unwrap())];
+    s.set_world_map_feed(Some((1, 1)), at(0.5, 0.25), 0.0, None, members);
     update(&mut s, 0.1);
 
     assert!(
@@ -677,14 +675,7 @@ fn the_player_arrow_is_the_minis_own_singleton_seated_by_the_update() {
         "exactly one arrow pane, parented to the battle map"
     );
 
-    s.set_world_map_feed(
-        Some((1, 1)),
-        Some((0.25, 0.75)),
-        1.25,
-        None,
-        Vec::new(),
-        Vec::new(),
-    );
+    s.set_world_map_feed(Some((1, 1)), at(0.25, 0.75), 1.25, None, Vec::new());
     update(&mut s, 0.1);
 
     let seat = s
@@ -739,7 +730,7 @@ fn the_player_arrow_is_the_minis_own_singleton_seated_by_the_update() {
     );
 
     // Off the displayed map, `(0, 0)` calls `ShowMiniWorldMapArrowFrame(nil)`.
-    s.set_world_map_feed(Some((1, 1)), None, 0.0, None, Vec::new(), Vec::new());
+    s.set_world_map_feed(Some((1, 1)), None, 0.0, None, Vec::new());
     update(&mut s, 0.1);
     s.resolve();
     assert!(

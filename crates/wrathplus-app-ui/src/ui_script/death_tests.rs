@@ -459,7 +459,13 @@ fn corpse_map_position_binding() {
         .eval::<(f64, f64)>("return GetCorpseMapPosition()")
         .unwrap();
     assert_eq!((x, y), (0.0, 0.0), "no corpse ⇒ the (0,0) hide sentinel");
-    s.set_world_map_feed(None, None, 0.0, Some((0.25, 0.75)), Vec::new(), Vec::new());
+    s.set_world_map_projection(|_, p| Some((p.x, p.y)));
+    let corpse = wrathplus_ui::script::MapPos {
+        x: 0.25,
+        y: 0.75,
+        ..Default::default()
+    };
+    s.set_world_map_feed(None, None, 0.0, Some(corpse), Vec::new());
     let (x, y) = s
         .eval::<(f64, f64)>("return GetCorpseMapPosition()")
         .unwrap();

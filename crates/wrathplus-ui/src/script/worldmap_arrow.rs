@@ -181,7 +181,7 @@ fn update(lua: &Lua) -> mlua::Result<()> {
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
             (
                 model.worldmap.player_facing,
-                model.worldmap.player_uv.is_some(),
+                model.worldmap.player_pos.is_some(),
                 model.model_facts_for(ARROW_MODEL),
             )
         };
@@ -491,14 +491,20 @@ mod tests {
         s.run("ShowWorldMapArrowFrame(1)").unwrap();
         assert!(s.eval::<bool>("return arrow:IsShown()").unwrap());
 
-        s.set_world_map_feed(None, Some((0.5, 0.5)), 1.25, None, Vec::new(), Vec::new());
+        s.set_world_map_feed(
+            None,
+            Some(crate::script::MapPos::default()),
+            1.25,
+            None,
+            Vec::new(),
+        );
         s.run("UpdateWorldMapArrowFrames()").unwrap();
         let facing = s.eval::<f32>("return arrow:GetFacing()").unwrap();
         assert!(
             (facing - 1.25).abs() < 1e-6,
             "the tracked object's facing: {facing}"
         );
-        s.set_world_map_feed(None, None, 2.0, None, Vec::new(), Vec::new());
+        s.set_world_map_feed(None, None, 2.0, None, Vec::new());
         s.run("UpdateWorldMapArrowFrames()").unwrap();
         assert!(
             (s.eval::<f32>("return arrow:GetFacing()").unwrap() - 1.25).abs() < 1e-6,
