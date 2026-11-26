@@ -304,8 +304,8 @@ pub(crate) struct Model {
     pub(crate) raid_vehicle_units: HashSet<u64>,
     /// The server clock offset (`server - time()`) the host pushes; `None` until the first reply.
     pub(crate) wrath_server_time_offset: Option<i32>,
-    /// `SetRaidRosterSelection`'s raid row index, client-side only.
-    pub(crate) raid_selection: i64,
+    /// `SetRaidRosterSelection`'s member, by guid (`[0xbeb610]`), 0 for none.
+    pub(crate) raid_selection: u64,
     /// `GetTime()`'s session seconds, which only the host moves ([`super::UiScript::tick`],
     /// [`super::UiScript::set_now`]); off `_G`, as the reference's clock is the OS tick count.
     pub(crate) now: f64,

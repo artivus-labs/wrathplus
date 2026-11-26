@@ -201,6 +201,32 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             Ok(())
         })?,
     )?;
+    // SetRaidRosterSelection(index) (`0x572bc0`): truncated; the guid of raid row `index`, or 0
+    // past the roster (`0x572c3e`). GetRaidRosterSelection (`0x572c50`): that guid's row now, or 0.
+    g.set(
+        "SetRaidRosterSelection",
+        lua.create_function(|lua, index: Value| {
+            let usage = "Usage: SetRaidRosterSelection(index)";
+            let index = crate::script::binding_abi::number_arg(lua, index, usage)?;
+            let mut m = lua.app_data_mut::<Model>().expect("model");
+            let row = usize::try_from(index.wrapping_sub(1)).ok();
+            m.raid_selection = row.and_then(|i| m.party.raid.get(i)).map_or(0, |r| r.guid);
+            Ok(())
+        })?,
+    )?;
+    g.set(
+        "GetRaidRosterSelection",
+        lua.create_function(|lua, ()| {
+            let m = lua.app_data_ref::<Model>().expect("model");
+            let guid = m.raid_selection;
+            let row = m
+                .party
+                .raid
+                .iter()
+                .position(|r| guid != 0 && r.guid == guid);
+            Ok(row.map_or(0, |i| i as i64 + 1))
+        })?,
+    )?;
     Ok(())
 }
 

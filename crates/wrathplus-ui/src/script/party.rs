@@ -526,25 +526,6 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             Ok(())
         })?,
     )?;
-    // SetRaidRosterSelection(index) / GetRaidRosterSelection(): a client-side cursor; the
-    // reference's `0x4bb820` writes a global and sends nothing.
-    g.set(
-        "SetRaidRosterSelection",
-        lua.create_function(|lua, index: Value| {
-            let index = number_arg(lua, index, "Usage: SetRaidRosterSelection(index)")?;
-            let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-            model.raid_selection = i64::from(index);
-            Ok(())
-        })?,
-    )?;
-    g.set(
-        "GetRaidRosterSelection",
-        lua.create_function(|lua, ()| {
-            let model = lua.app_data_ref::<Model>().expect("model app_data");
-            Ok(model.raid_selection)
-        })?,
-    )?;
-
     Ok(())
 }
 
@@ -1281,15 +1262,24 @@ mod tests {
         assert!(s.take_party_requests().is_empty());
     }
 
+    /// `0x572bc0` keeps the row's guid and clears on a row the roster lacks (`0x572c3e`);
+    /// `0x572c50` answers where that guid sits now.
     #[test]
-    fn the_raid_roster_selection_is_a_local_cursor() {
+    fn the_raid_roster_selection_is_a_member_by_guid() {
         let mut s = UiScript::new().unwrap();
-        assert_eq!(s.eval::<i64>("return GetRaidRosterSelection()").unwrap(), 0);
+        let get = |s: &UiScript| s.eval::<i64>("return GetRaidRosterSelection()").unwrap();
+        s.run("SetRaidRosterSelection(1)").unwrap();
+        assert_eq!(get(&s), 0, "no roster, no member");
+        let mut raid = ten_player_raid();
+        s.set_party(raid.clone());
+        s.run("SetRaidRosterSelection(3.9)").unwrap();
+        assert_eq!(get(&s), 3);
+        raid.raid.remove(0);
+        s.set_party(raid.clone());
+        assert_eq!(get(&s), 2, "the member, wherever the roster puts them");
         s.run("SetRaidRosterSelection(11)").unwrap();
-        assert_eq!(
-            s.eval::<i64>("return GetRaidRosterSelection()").unwrap(),
-            11
-        );
+        assert_eq!(get(&s), 0, "a miss clears it");
+        assert!(s.run("SetRaidRosterSelection()").is_err());
         assert!(
             s.take_party_requests().is_empty(),
             "nothing about a selection goes on the wire"
