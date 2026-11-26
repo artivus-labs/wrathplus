@@ -232,10 +232,11 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         }
         none()
     })?;
-    // PartyLFGStartBackfill() (`0x55a0c0`): the group's dungeon becomes the whole selection and
-    // the ordinary join goes out (`wrath_lfg`'s queue).
+    // PartyLFGStartBackfill() (`0x55a0c0`) → true when the join send ran (`wrath_lfg`'s queue).
     set(lua, "PartyLFGStartBackfill", |lua, _| {
-        super::wrath_lfg::start_backfill(lua);
+        if super::wrath_lfg::start_backfill(lua) {
+            return one(Value::Boolean(true));
+        }
         none()
     })?;
     set(lua, "RespondInstanceLock", |lua, args| {

@@ -424,19 +424,35 @@ fn send_join(lua: &Lua) {
     q.requests.push(request);
 }
 
-/// `PartyLFGStartBackfill` (`0x55a0c0`): the selection cleared, the group's LFG dungeon selected
-/// when set, then the native join send.
-pub(crate) fn start_backfill(lua: &Lua) {
+/// The backfill gate (`0x553170`, `0x5556d0`, `0x55a0c0`): 1..3 party members (`0xbd1998`, the count
+/// GetNumPartyMembers reads at `0x52c190`), an LFG dungeon, and the list's LFG byte without bit 2.
+fn can_backfill(m: &Model) -> bool {
+    let g = &m.wrath_group;
+    (1..=3).contains(&m.party.members.len()) && g.lfg_dungeon_entry != 0 && g.lfg_flags & 2 == 0
+}
+
+/// `PartyLFGStartBackfill` (`0x55a0c0`): no role past leader raises ERR_LFG_NO_ROLES_SELECTED; past
+/// the backfill gate the selection becomes the group's dungeon and the join send runs. True when it
+/// ran, whatever the send did.
+pub(crate) fn start_backfill(lua: &Lua) -> bool {
     {
         let mut m = lua.app_data_mut::<Model>().expect("model app_data");
-        let entry = m.wrath_group.lfg_dungeon_entry;
-        let selection = &mut m.wrath_lfg.queue.selection;
-        selection.clear();
-        if entry != 0 {
-            selection.push(entry);
+        if roles_cvar(&m).is_some_and(|r| r & 0xfe != 0) {
+            if !can_backfill(&m) {
+                return false;
+            }
+            let entry = m.wrath_group.lfg_dungeon_entry;
+            let in_party = !m.party.members.is_empty();
+            let q = &mut m.wrath_lfg.queue;
+            q.selection.clear();
+            select(q, entry, in_party);
+        } else {
+            m.ui_errors.push("ERR_LFG_NO_ROLES_SELECTED");
+            return false;
         }
     }
     send_join(lua);
+    true
 }
 
 pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
@@ -815,12 +831,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         )]))
     })?;
     // CanPartyLFGBackfill() (`0x553170`) / GetPartyLFGBackfillInfo() (`0x5556d0` → name, id,
-    // type): 1..3 party members (`0xbd1998`, the count GetNumPartyMembers reads at `0x52c190`), an
-    // LFG dungeon, and the list's LFG byte without bit 2.
-    fn can_backfill(m: &Model) -> bool {
-        let g = &m.wrath_group;
-        (1..=3).contains(&m.party.members.len()) && g.lfg_dungeon_entry != 0 && g.lfg_flags & 2 == 0
-    }
+    // type), behind [`can_backfill`].
     fn backfill(m: &Model) -> Option<&super::WrathLfgDungeon> {
         can_backfill(m)
             .then(|| row(m, m.wrath_group.lfg_dungeon_entry))

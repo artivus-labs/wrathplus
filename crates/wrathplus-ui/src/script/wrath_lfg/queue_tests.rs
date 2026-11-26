@@ -412,11 +412,25 @@ fn selection_roles_and_verbs_follow_the_native_gates() {
         }),
     );
     s.set_now(200.0);
-    s.run("SetLFGDungeon(9) PartyLFGStartBackfill()").unwrap();
+    // `0x55a0c0`: nothing without a party to backfill (`0xbd1998`), else true.
+    s.run("assert(select('#', PartyLFGStartBackfill())==0)")
+        .unwrap();
+    s.set_party(PartyState {
+        members: vec![PartyMemberInfo {
+            name: "Pal".into(),
+            guid: 2,
+        }],
+        ..Default::default()
+    });
+    s.run("SetLFGDungeon(9) assert(PartyLFGStartBackfill()==true)")
+        .unwrap();
     match s.take_wrath_lfg_queue_requests().as_slice() {
         [R::Join {
             dungeons, roles, ..
         }] => assert_eq!((dungeons.clone(), *roles), (vec![1 << 24 | 7], 3)),
         other => panic!("{other:?}"),
     }
+    s.run("SetLFGRoles(true) assert(select('#', PartyLFGStartBackfill())==0)")
+        .unwrap();
+    assert_eq!(s.take_ui_errors(), vec!["ERR_LFG_NO_ROLES_SELECTED"]);
 }
