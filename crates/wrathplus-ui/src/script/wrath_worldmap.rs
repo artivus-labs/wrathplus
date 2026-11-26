@@ -286,7 +286,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             let Some(link) = number(lua, &args, 0) else {
                 return Err(mlua::Error::runtime("Usage: ClickLandmark(mapLinkID)"));
             };
-            let link = link.round_ties_even() as i64;
+            // Truncated: fistp under a chopping control word (`0x546f26`-`0x546f40`).
+            let link = link as i64;
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
             let wm = &model.worldmap;
             let target = u32::try_from(link)
@@ -401,7 +402,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             };
             let landmark = {
                 let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-                usize::try_from(i.round_ties_even() as i64 - 1)
+                // Truncated as `0x545a68`-`0x545a7d` does.
+                usize::try_from(i as i64 - 1)
                     .ok()
                     .and_then(|i| model.map_landmarks().get(i).cloned())
             };
@@ -636,7 +638,7 @@ mod tests {
 
     #[test]
     fn the_cosmic_sheet_and_landmark_clicks() {
-        let s = script();
+        let mut s = script();
         s.run("SetMapZoom(-1)").unwrap();
         assert_eq!(state(&s), (-1, 0, 0, 0));
         assert!(!s.eval::<bool>("return IsZoomOutAvailable()").unwrap());
@@ -649,6 +651,18 @@ mod tests {
         assert_eq!(state(&s), (-1, 0, 536, 2));
         s.run("ClickLandmark(12345)").unwrap();
         assert_eq!(state(&s), (-1, 0, 536, 2));
+        s.run("ClickLandmark(56.9)").unwrap();
+        assert_eq!(state(&s), (-1, 0, 536, 1), "the link truncates");
+        let named = |name: &str| super::super::WorldMapLandmarkView {
+            name: name.into(),
+            ..Default::default()
+        };
+        s.set_world_map_landmarks(vec![named("A"), named("B")]);
+        let first = s
+            .eval::<String>("return (GetMapLandmarkInfo(1.9))")
+            .unwrap();
+        assert_eq!(first, "A", "the index truncates");
+        assert!(s.run("GetMapLandmarkInfo()").is_err());
         let (file, h, pow): (String, i64, i64) = s.eval("return GetMapInfo()").unwrap();
         assert_eq!((file.as_str(), h, pow), ("Map535", 501, 512));
         assert_eq!(
