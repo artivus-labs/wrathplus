@@ -392,6 +392,13 @@ fn no_push_reports_zero_rows() {
         .unwrap());
     assert_eq!(s.eval::<i64>("return GetSelectedSkill()").unwrap(), 0);
     assert_eq!(s.eval::<i64>("return GetAdjustedSkillPoints()").unwrap(), 0);
+    s.model_mut().talents.points = (0, 2);
+    let free = "return GetAdjustedSkillPoints()";
+    assert_eq!(
+        s.eval::<i64>(free).unwrap(),
+        2,
+        "PLAYER_CHARACTER_POINTS2 (`0x5ce592`)"
+    );
     // Collapse, expand and select on an empty pane do nothing.
     s.run("CollapseSkillHeader(0) ExpandSkillHeader(1) SetSelectedSkill(1)")
         .unwrap();

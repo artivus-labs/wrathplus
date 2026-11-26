@@ -392,12 +392,14 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // GetAdjustedSkillPoints() → 0 here; the reference answers `PLAYER_CHARACTER_POINTS2` less the
-    // points `AddSkillUp` has pending (`0x4d3cb0`). The stock pane reads it only under its
-    // `stepCost` and `rankCost` branches, which 1.12 data never opens.
+    // GetAdjustedSkillPoints() (`0x5ce540`): `PLAYER_CHARACTER_POINTS2`, the free professions
+    // (`[desc+0xda4]`), less the points `AddSkillUp` holds (`0xc22b00`), none here.
     g.set(
         "GetAdjustedSkillPoints",
-        lua.create_function(|_, ()| Ok(0i64))?,
+        lua.create_function(|lua, ()| {
+            let model = lua.app_data_ref::<Model>().expect("model app_data");
+            Ok(i64::from(model.talents.points.1))
+        })?,
     )?;
 
     // AbandonSkill(index) (`0x5ce2c0`, truncated): queue the entry's skill id for
