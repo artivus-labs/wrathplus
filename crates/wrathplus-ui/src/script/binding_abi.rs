@@ -72,6 +72,19 @@ pub(crate) fn coerced_number(lua: &Lua, v: Option<Value>) -> f64 {
         .unwrap_or(0.0)
 }
 
+/// `lua_isnumber` (`0x84df20`) as a predicate: a number or a numeric string; absent is false.
+pub(crate) fn is_number(lua: &Lua, v: Option<&Value>) -> bool {
+    v.is_some_and(|v| lua.coerce_number(v.clone()).ok().flatten().is_some())
+}
+
+/// `lua_isstring` (`0x84df60`) as a predicate: a string or a number; absent is false.
+pub(crate) fn is_string(v: Option<&Value>) -> bool {
+    matches!(
+        v,
+        Some(Value::String(_) | Value::Integer(_) | Value::Number(_))
+    )
+}
+
 /// `lua_isstring` (`0x84df60`) then `lua_tolstring`, raising the binding's `Usage:` on failure: a
 /// number is stringified (`UnitAffectingCombat(5)` passes here, and the unit resolver reads `"5"`
 /// as naming nobody, `0x60abf0`), and nil, a boolean, a table or a function raises.

@@ -983,12 +983,14 @@ fn the_chat_menu_builds_its_rows_on_the_references_kit() {
     );
 }
 
-/// A glass window (chat cache `COLOR 0 0 0 0`) rests its plate at alpha 0, and `FCF_OnUpdate`
-/// fades it to `DEFAULT_CHATFRAME_ALPHA` and back on every hover (FloatingChatFrame.lua:994-1032).
+/// A glass window (alpha 0, as chat cache `COLOR 0 0 0 0` or the opacity slider leave it) rests its
+/// plate at 0, and `FCF_OnUpdate` fades it to `DEFAULT_CHATFRAME_ALPHA` and back on every hover
+/// (FloatingChatFrame.lua:994-1032).
 #[test]
 fn a_glass_windows_plate_fades_in_on_every_hover() {
     wrathplus_formats::wow_data_or_skip!();
     let mut s = chat_frame();
+    s.run("FCF_SetWindowAlpha(ChatFrame1, 0)").unwrap();
     s.mouse_move(1500.0, 850.0);
     for _ in 0..4 {
         s.tick(0.016);
@@ -1041,6 +1043,7 @@ fn a_glass_windows_plate_fades_in_on_every_hover_under_the_full_manifest() {
         s.resolve();
     }
     super::fire_chat_login(&mut s);
+    s.run("FCF_SetWindowAlpha(ChatFrame1, 0)").unwrap();
     s.resolve();
     let bg =
         |s: &mut UiScript| -> f64 { s.eval("return ChatFrame1Background:GetAlpha()").unwrap() };

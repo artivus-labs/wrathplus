@@ -101,6 +101,9 @@ fn drag_tab(s: &mut UiScript, tab: &str, dx: f32, dy: f32) {
 
 const GRIP: &str = "ChatFrame1ResizeButton";
 
+/// A window's alpha byte until a setter moves it, `0x28` (`0x501813`), as `GetChatWindowInfo` reads it.
+const STOCK_ALPHA: f64 = (40.0f32 * (1.0f32 / 255.0f32)) as f64;
+
 fn grab_grip(s: &mut UiScript, grip: &str) -> (f32, f32) {
     let (x, y) = centre(s, grip);
     s.mouse_button(x, y, "LeftButton", true);
@@ -366,8 +369,8 @@ fn the_chrome_follows_the_windows_reveal_and_tint() {
         assert_eq!(
             s.eval::<f64>(&format!("return ChatFrame1{piece}:GetAlpha()"))
                 .unwrap(),
-            0.0,
-            "{piece} is invisible at rest"
+            STOCK_ALPHA,
+            "{piece} rests at the window's alpha"
         );
     }
     reveal(&mut s);
@@ -420,7 +423,7 @@ fn a_resize_in_flight_holds_the_chrome_visible() {
     }
     let alpha: f64 = s.eval("return ChatFrame1Background:GetAlpha()").unwrap();
     assert!(
-        alpha < 1e-6,
+        (alpha - STOCK_ALPHA).abs() < 1e-6,
         "and the chrome fades once it is let go: {alpha}"
     );
 }

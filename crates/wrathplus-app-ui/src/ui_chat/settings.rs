@@ -173,7 +173,7 @@ fn render(
             l.a,
             i32::from(l.locked),
             i32::from(l.uninteractable),
-            l.docked.unwrap_or(0),
+            l.docked.map_or(0, |d| d as i32),
             i32::from(l.shown),
         ));
         for m in &l.messages {
@@ -374,8 +374,8 @@ fn apply_key<'a>(
     } else if key.eq_ignore_ascii_case("DOCKED") {
         look.docked = it
             .next()
-            .and_then(|v| v.trim().parse::<u8>().ok())
-            .filter(|p| *p > 0);
+            .and_then(|v| v.trim().parse::<i32>().ok().map(|d| d as u32))
+            .filter(|p| *p != 0);
     } else if key.eq_ignore_ascii_case("SHOWN") {
         look.shown = flag(it.next());
     } else if key.eq_ignore_ascii_case("ZONECHANNELS") {
@@ -917,7 +917,7 @@ mod tests {
             vec![
                 (0, look(1, 10, 20, 30, 40, 16)),
                 (1, w2),
-                (2, look(3, 0, 0, 0, 0, 12)),
+                (2, look(3, 0, 0, 0, 0x28, 12)),
             ]
         );
         assert!(got.looks[1].1.messages.iter().any(|m| m == "OPENING"));
@@ -1044,7 +1044,7 @@ mod tests {
             "WINDOW\nnot a window line\nWINDOW 0 SIZE 1\nWINDOW 2 SIZE 18\n",
             &rows(),
         );
-        assert_eq!(got.looks, vec![(1, look(2, 0, 0, 0, 0, 18))]);
+        assert_eq!(got.looks, vec![(1, look(2, 0, 0, 0, 0x28, 18))]);
     }
 
     /// A `MESSAGES` block replaces the init set: the loader zeroes every flag before it reads.

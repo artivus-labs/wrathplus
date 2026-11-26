@@ -22,6 +22,9 @@ fn bake_strings(s: &UiScript) {
 /// The default window's Background swatch row.
 const BACKGROUND_ROW: &str = "DropDownList1Button8";
 
+/// A window's alpha byte until a setter moves it, `0x28` (`0x501813`), as `GetChatWindowInfo` reads it.
+const STOCK_ALPHA: f64 = (40.0f32 * (1.0f32 / 255.0f32)) as f64;
+
 fn chat_with_menu() -> UiScript {
     let mut s = UiScript::new().unwrap();
     for file in [
@@ -174,12 +177,12 @@ fn the_background_row_opens_the_picker_and_its_opacity_slider_drives_the_window(
     assert_eq!(
         s.eval::<f64>("local _,_,_,_,_,a = GetChatWindowInfo(1) return a")
             .unwrap(),
-        0.0
+        STOCK_ALPHA
     );
     assert_eq!(
         s.eval::<f64>(&format!("return {BACKGROUND_ROW}.opacity"))
             .unwrap(),
-        1.0,
+        1.0 - STOCK_ALPHA,
         "info.opacity is 1 - a (FloatingChatFrame.lua:321-325: 'the slider is reversed')"
     );
     left_click(&mut s, &format!("{BACKGROUND_ROW}ColorSwatch"));
@@ -202,8 +205,8 @@ fn the_background_row_opens_the_picker_and_its_opacity_slider_drives_the_window(
     assert_eq!(
         s.eval::<f64>("return OpacitySliderFrame:GetValue()")
             .unwrap(),
-        1.0,
-        "the slider opens seeded from the window"
+        f64::from(0.84f32),
+        "the slider opens seeded from the window, `1 - a` on its 0.01 step"
     );
     s.run("OpacitySliderFrame:SetValue(1 - 0.8)").unwrap();
     let stored: f64 = s
@@ -231,7 +234,7 @@ fn the_background_row_opens_the_picker_and_its_opacity_slider_drives_the_window(
 }
 
 #[test]
-fn the_shipped_window_still_fades_zero_to_a_quarter() {
+fn the_shipped_window_fades_from_its_default_alpha_to_a_quarter() {
     let _data = wrathplus_formats::wow_data_or_skip!();
     let mut s = chat_with_menu();
     s.mouse_move(1500.0, 850.0);
@@ -242,8 +245,8 @@ fn the_shipped_window_still_fades_zero_to_a_quarter() {
     assert_eq!(
         s.eval::<f64>("return ChatFrame1Background:GetAlpha()")
             .unwrap(),
-        0.0,
-        "at rest: invisible"
+        STOCK_ALPHA,
+        "at rest: the default record's alpha"
     );
     reveal_dock(&mut s);
     let alpha: f64 = s.eval("return ChatFrame1Background:GetAlpha()").unwrap();
@@ -330,7 +333,7 @@ fn each_tabs_menu_writes_its_own_window() {
     assert_eq!(
         s.eval::<f64>("local _,_,_,_,_,a = GetChatWindowInfo(1) return a")
             .unwrap(),
-        0.0,
+        STOCK_ALPHA,
         "window 1 did not"
     );
     assert!(s.errors().is_empty(), "script errors: {:?}", s.errors());

@@ -10,28 +10,19 @@
 //! `0x50d900` with its permanent flag set), `BNLeaveConversation` `0x536030`.
 //!
 //! The registries are 12340's: 62 chat types (`chat_types`) and 46 message groups
-//! (`chat_window::MESSAGE_GROUPS`). Unresolved, labelled rather than guessed: the window helpers
-//! `0x5019d0`/`0x501800` ResetChatWindows runs per record were not audited and are taken as the
-//! stock record. The host persists `uninteractable` and colorNameByClass in `chat-cache.txt`.
+//! (`chat_window::MESSAGE_GROUPS`). Per record ResetChatWindows frees the channels (`0x5019d0`)
+//! and writes the default record (`0x501800`: name "", size 0, locked, docked 0, hidden, colour
+//! 0, 0, 0 with alpha `0x28`). The host persists `uninteractable` and colorNameByClass in
+//! `chat-cache.txt`.
 
 use mlua::{Lua, MultiValue, Value};
 
-use super::binding_abi::bool_or_default;
+use super::binding_abi::{bool_or_default, is_number};
 use super::chat_types;
-use super::chat_window::{ChatWindowLook, ENGINE_CHAT_WINDOW_SLOTS};
+use super::chat_window::{
+    checked_window, edit_look, window_index, ChatWindowLook, ENGINE_CHAT_WINDOW_SLOTS,
+};
 use super::{Model, ScriptValue};
-
-/// A window id as the 12340 bindings read it: `lua_isnumber`, then rounded (`fistp`), 1-based.
-/// `None` for a number outside the ten slots, which the bindings ignore.
-fn window_slot(lua: &Lua, v: &Value) -> Option<Option<usize>> {
-    let n = lua.coerce_number(v.clone()).ok().flatten()?;
-    let index = (n.round_ties_even() as i64).wrapping_sub(1);
-    Some(
-        usize::try_from(index)
-            .ok()
-            .filter(|i| *i < ENGINE_CHAT_WINDOW_SLOTS),
-    )
-}
 
 /// `byte · (1/255)` in f32 (`[0xa45564]`), as the colour getters push it.
 fn unit(b: u8) -> f64 {
@@ -70,7 +61,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     g.set(
         "GetChatWindowSavedDimensions",
         lua.create_function(|lua, id: Value| {
-            let Some(Some(slot)) = window_slot(lua, &id) else {
+            let Some(slot) = window_index(lua, Some(&id)) else {
                 return Ok(MultiValue::new());
             };
             let saved = lua.app_data_ref::<SavedGeometry>().expect("geometry");
@@ -86,7 +77,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     g.set(
         "SetChatWindowSavedDimensions",
         lua.create_function(|lua, (id, w, h): (Value, Value, Value)| {
-            if let Some(Some(slot)) = window_slot(lua, &id) {
+            if let Some(slot) = window_index(lua, Some(&id)) {
                 let (w, h) = (
                     lua.coerce_number(w)?.unwrap_or(0.0),
                     lua.coerce_number(h)?.unwrap_or(0.0),
@@ -100,7 +91,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     g.set(
         "GetChatWindowSavedPosition",
         lua.create_function(|lua, id: Value| {
-            let Some(Some(slot)) = window_slot(lua, &id) else {
+            let Some(slot) = window_index(lua, Some(&id)) else {
                 return Ok(MultiValue::new());
             };
             let saved = lua.app_data_ref::<SavedGeometry>().expect("geometry");
@@ -117,7 +108,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     g.set(
         "SetChatWindowSavedPosition",
         lua.create_function(|lua, (id, point, x, y): (Value, Value, Value, Value)| {
-            if let Some(Some(slot)) = window_slot(lua, &id) {
+            if let Some(slot) = window_index(lua, Some(&id)) {
                 let point = lua
                     .coerce_string(point)?
                     .map(|s| s.to_string_lossy())
@@ -133,17 +124,15 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // GetChatWindowInfo(index) → name, fontSize, r, g, b, alpha, shown, locked, docked,
-    // uninteractable. A non-number raises the usage line; an index outside 1..=10 answers nothing.
-    // shown and locked are 1 or nil, docked the dock position or nil, uninteractable the stored
-    // number or nil (`0x4fbe9a`).
+    // GetChatWindowInfo(index) (`0x4fbd90`) → name, fontSize, r, g, b, alpha, shown, locked,
+    // docked, uninteractable. shown and locked are 1 or nil, docked the dock position read unsigned
+    // or nil, uninteractable the stored number or nil (`0x4fbe9a`); FrameXML tests them bare.
     g.set(
         "GetChatWindowInfo",
-        lua.create_function(|lua, id: Value| {
-            let Some(slot) = window_slot(lua, &id) else {
-                return Err(mlua::Error::runtime("Usage: GetChatWindowInfo(index)"));
-            };
-            let Some(i) = slot else {
+        lua.create_function(|lua, args: MultiValue| {
+            let ok = is_number(lua, args.front());
+            let usage = "Usage: GetChatWindowInfo(index)";
+            let Some(i) = checked_window(lua, &args, ok, usage)? else {
                 return Ok(MultiValue::new());
             };
             let look = lua
@@ -174,20 +163,13 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     g.set(
         "SetChatWindowUninteractable",
         lua.create_function(|lua, args: MultiValue| {
-            let id = args.front().cloned().unwrap_or(Value::Nil);
-            let Some(slot) = window_slot(lua, &id) else {
-                return Err(mlua::Error::runtime(
-                    "Usage: SetChatWindowUninteractable(index, uninteractable)",
-                ));
+            let ok = is_number(lua, args.front());
+            let usage = "Usage: SetChatWindowUninteractable(index, uninteractable)";
+            let Some(i) = checked_window(lua, &args, ok, usage)? else {
+                return Ok(());
             };
             let on = bool_or_default(args.get(1), false);
-            if let Some(i) = slot {
-                let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-                if model.chat_window_looks[i].uninteractable != on {
-                    model.chat_window_looks[i].uninteractable = on;
-                    model.chat_window_changes.insert(i);
-                }
-            }
+            edit_look(lua, i, |l| l.uninteractable = on);
             Ok(())
         })?,
     )?;
