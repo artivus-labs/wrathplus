@@ -2669,8 +2669,8 @@ fn contacts_packet(command: ClientCommand) -> std::io::Result<(u32, Vec<u8>)> {
     let social = |command: S| Ok((command.opcode(), command.encode()?));
     let duel = |command: D| Ok((command.opcode(), command.encode()));
     match command {
-        // Friends, ignores and mutes: AC lists the contacts carrying any asked flag.
-        ClientCommand::FriendListRequest => social(S::ContactList { flags: 0x07 }),
+        // `ShowFriends` (`0x6b44f0`) asks for friends alone, flags 1; AC answers with them only.
+        ClientCommand::FriendListRequest => social(S::ContactList { flags: 0x01 }),
         ClientCommand::AddFriend { name, note } => social(S::AddFriend {
             name: name.into_bytes(),
             note: note.into_bytes(),
@@ -4808,6 +4808,23 @@ mod group_tests {
         ] {
             assert_eq!(route(&command), WrathRoute::NativeSession);
             assert_eq!(session_packet(command), (opcode, body));
+        }
+    }
+
+    /// `ShowFriends` (`0x6b44f0`) sends CMSG `0x66` with flags 1; `AddFriend` (`0x6b5400`) CMSG
+    /// `0x69` with the name, then the note.
+    #[test]
+    fn contact_requests_encode_12340_bodies() {
+        let add = ClientCommand::AddFriend {
+            name: "Ann".into(),
+            note: "tank".into(),
+        };
+        for (command, opcode, body) in [
+            (ClientCommand::FriendListRequest, 0x66, vec![1, 0, 0, 0]),
+            (add, 0x69, b"Ann\0tank\0".to_vec()),
+        ] {
+            assert_eq!(route(&command), WrathRoute::NativeContacts);
+            assert_eq!(contacts_packet(command).unwrap(), (opcode, body));
         }
     }
 }
