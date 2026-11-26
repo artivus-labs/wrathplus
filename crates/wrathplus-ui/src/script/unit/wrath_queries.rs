@@ -205,10 +205,9 @@ pub(crate) fn install(lua: &Lua) -> mlua::Result<()> {
     g.set(
         "UnitSelectionColor",
         lua.create_function(|lua, token: Value| {
-            let Value::String(token) = token else {
-                return Err(mlua::Error::runtime("Usage: UnitSelectionColor(\"unit\")"));
-            };
-            let token = token.to_str()?.to_string();
+            // `lua_isstring` (`0x60da0d`): a number names a unit by its text, as any token.
+            let usage = "Usage: UnitSelectionColor(\"unit\")";
+            let token = crate::script::binding_abi::string_arg(lua, token, usage)?;
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             let (r, g, b) = selection_color(model.unit(&token));
             Ok((r, g, b, 1.0))
@@ -237,7 +236,8 @@ pub(crate) fn install(lua: &Lua) -> mlua::Result<()> {
                     "Usage: FillLocalizedClassList(classTable[, isFemale])",
                 ));
             };
-            let female = !matches!(female, Value::Nil | Value::Boolean(false));
+            // `0x815500(L, 2, 0)` (`0x60a53f`): 0 and "0" are male.
+            let female = crate::script::binding_abi::bool_or_default(Some(&female), false);
             if let Some(names) = lua.app_data_ref::<ClassNames>() {
                 for (file, male_name, female_name) in &names.0 {
                     table.set(

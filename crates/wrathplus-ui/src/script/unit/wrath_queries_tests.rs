@@ -136,6 +136,11 @@ fn selection_colour_friends_and_class_names_follow_build_12340() {
         assert!(s.eval::<bool>(check).unwrap(), "{check}");
     }
     assert!(s.run("UnitSelectionColor()").is_err());
+    let number = "local r, g, b = UnitSelectionColor(5) return r == 0 and g == 0 and b == 1";
+    assert!(
+        s.eval::<bool>(number).unwrap(),
+        "a number names no unit: blue"
+    );
     let friend = |name: &str, connected| FriendInfo {
         name: name.into(),
         connected,
@@ -152,7 +157,9 @@ fn selection_colour_friends_and_class_names_follow_build_12340() {
     assert!(s
         .eval::<bool>(
             "local m, f = FillLocalizedClassList({}), FillLocalizedClassList({}, true) \
-             return m.PRIEST == 'Priest' and f.PRIEST == 'Priestess'"
+             local z, s = FillLocalizedClassList({}, 0), FillLocalizedClassList({}, '0') \
+             return m.PRIEST == 'Priest' and f.PRIEST == 'Priestess' \
+               and z.PRIEST == 'Priest' and s.PRIEST == 'Priest'"
         )
         .unwrap());
     assert!(s.run("FillLocalizedClassList(1)").is_err());
