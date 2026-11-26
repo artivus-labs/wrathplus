@@ -231,7 +231,7 @@ fn feed_zone_events(
         is_arena,
         pvp_is_subzone,
     });
-    script.set_wrath_can_hearth_and_resurrect(can_hearth_and_resurrect(zone_row));
+    script.set_wrath_can_hearth_and_resurrect(can_hearth_and_resurrect(&areas.0, leaf));
 
     if let Some(event) = event {
         script.fire_event(event, vec![]);
@@ -263,9 +263,14 @@ const AREA_FLAG_CONTESTED: u32 = 0x0004_0000;
 const AREA_FLAG_HEARTH_AND_RESURRECT: u32 = 0x0800_0000;
 
 /// Build 12340's `CanHearthAndResurrectFromArea` (`0x54c810`): the flag on the ZONE's row, the id
-/// `0xbd080c` the zone updater stores (its parent-resolved first argument, `0x78f082`).
-fn can_hearth_and_resurrect(zone: Option<&wrathplus_formats::AreaTableRow>) -> bool {
-    zone.is_some_and(|r| r.flags & AREA_FLAG_HEARTH_AND_RESURRECT != 0)
+/// `0xbd080c` the zone updater stores (the leaf's parent when it has one, `0x78f082`).
+fn can_hearth_and_resurrect(areas: &wrathplus_formats::AreaTableCatalog, leaf: u32) -> bool {
+    let zone = areas
+        .get(leaf)
+        .map_or(leaf, |r| if r.zone_id == 0 { leaf } else { r.zone_id });
+    areas
+        .get(zone)
+        .is_some_and(|r| r.flags & AREA_FLAG_HEARTH_AND_RESURRECT != 0)
 }
 
 /// Wrath `GetZonePVPInfo 0x51ba50`'s type: the leaf row's flags when it has one, else the zone's;
@@ -477,13 +482,17 @@ mod tests {
         let data = wrathplus_formats::wow_data_or_skip!();
         let mut chain = wrathplus_formats::open_chain(&data).expect("chain");
         let areas = wrathplus_formats::load_area_table_catalog(&mut chain).expect("AreaTable");
-        assert!(can_hearth_and_resurrect(areas.get(4197)), "Wintergrasp");
-        let bare = areas
-            .rows()
-            .filter(|r| r.zone_id == 4197 && !can_hearth_and_resurrect(Some(r)))
-            .count();
-        assert!(bare > 0, "a Wintergrasp subzone without the flag");
-        assert!(!can_hearth_and_resurrect(None));
+        assert!(can_hearth_and_resurrect(&areas, 4197), "Wintergrasp");
+        let bare: Vec<u32> = (1..=5000)
+            .filter(|&id| {
+                areas.get(id).is_some_and(|r| {
+                    r.zone_id == 4197 && r.flags & AREA_FLAG_HEARTH_AND_RESURRECT == 0
+                })
+            })
+            .collect();
+        assert!(!bare.is_empty(), "a Wintergrasp subzone without the flag");
+        assert!(bare.iter().all(|&id| can_hearth_and_resurrect(&areas, id)));
+        assert!(!can_hearth_and_resurrect(&areas, 0));
     }
 
     /// The `0x67e670` override skip (abbey) and fire (inn) branches on the install's data.

@@ -411,6 +411,13 @@ fn retrieve_corpse(death_net: &mut DeathNet) -> Vec<ClientCommand> {
         .collect()
 }
 
+/// `AcceptXPLoss` (`0x6db010` with no guid): only a ghost in range, with the stored healer, which
+/// stays stored (`0x6db114`).
+fn accept_xp_loss(feed: &DeathFeedState) -> Option<ClientCommand> {
+    let npc = feed.healer.filter(|_| feed.xp_loss_ready)?;
+    Some(ClientCommand::SpiritHealerActivate { npc })
+}
+
 /// `0x727860`: the `EffectMiscValue` of the first aura on the player whose spell applies aura 314
 /// (`SPELL_AURA_PREVENT_RESURRECTION`, `0x727930`), unless the self-res spell carries
 /// `AttributesEx7` `0x8000000` (`0x7278cd`).
@@ -491,9 +498,8 @@ fn drain_death(
                     None => Ok(()), // the offer timed out; nothing to answer
                 }
             }
-            // `0x6db114`: the stored healer, kept after the send.
-            DeathAction::AcceptXpLoss => match feed.healer.filter(|_| feed.xp_loss_ready) {
-                Some(npc) => net.0.send(ClientCommand::SpiritHealerActivate { npc }),
+            DeathAction::AcceptXpLoss => match accept_xp_loss(&feed) {
+                Some(cmd) => net.0.send(cmd),
                 None => Ok(()),
             },
             // Re-resolved at click time, as the reference's `OnCancel` calls `HasSoulstone()`

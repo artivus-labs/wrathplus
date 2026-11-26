@@ -137,6 +137,19 @@ fn the_spirit_healer_reaches_four_yards_past_its_reach_and_asks_only_a_ghost() {
     assert_eq!(standing_ask(Some(9), true, |_| true), Some(9));
     assert_eq!(standing_ask(Some(9), false, |_| true), None, "alive");
     assert_eq!(standing_ask(Some(9), true, |_| false), None, "out of range");
+    let mut feed = DeathFeedState {
+        healer: Some(9),
+        ..Default::default()
+    };
+    assert!(
+        accept_xp_loss(&feed).is_none(),
+        "not a ghost in range this frame"
+    );
+    feed.xp_loss_ready = true;
+    assert!(matches!(
+        accept_xp_loss(&feed),
+        Some(ClientCommand::SpiritHealerActivate { npc: 9 })
+    ));
 }
 
 /// `0x51b800` declines a pending offer before `CMSG_RECLAIM_CORPSE`.
