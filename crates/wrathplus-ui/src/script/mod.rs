@@ -227,7 +227,8 @@ pub use wrath_macro_api::{ExplicitMacroBind, RunningMacro};
 mod wrath_worldmap;
 pub use tooltip_links::{GlyphLinkCatalog, QuestLinkView, TalentLinkView};
 pub use wrath_achievements::{
-    WrathAchievement, WrathAchievementCategory, WrathAchievementCriterion, WrathAchievementMetadata,
+    WrathAchievement, WrathAchievementCategory, WrathAchievementCriterion,
+    WrathAchievementMetadata, WrathAchievementTable,
 };
 mod wrath_calendar;
 mod wrath_char_state;
@@ -249,7 +250,10 @@ mod wrath_server_time;
 mod wrath_talent_preview;
 pub use wrath_currency::{WrathCurrencyEntry, WrathCurrencySnapshot};
 pub use wrath_tutorial::WrathTutorialRequest;
+mod wrath_achievement_format;
+mod wrath_achievement_listing;
 mod wrath_achievement_progress;
+mod wrath_achievement_tracked;
 mod wrath_item_count;
 mod wrath_item_lookups;
 mod wrath_item_services;
@@ -259,7 +263,9 @@ mod wrath_items;
 mod wrath_sockets;
 mod wrath_spell_range;
 mod wrath_spell_use;
-pub use wrath_achievement_progress::{WrathAchievementProgress, WrathAchievementRequest};
+pub use wrath_achievement_progress::{
+    WrathAchievementProgress, WrathAchievementRequest, WrathCriteriaProgress,
+};
 pub use wrath_equipment::{
     EquipmentSetRequest, EquipmentSetView, EQUIPMENT_SET_IGNORED_SLOT, EQUIPMENT_SET_SLOTS,
 };

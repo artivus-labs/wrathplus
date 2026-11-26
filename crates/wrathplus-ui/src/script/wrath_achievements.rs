@@ -20,6 +20,8 @@ pub struct WrathAchievement {
     /// The `SpellIcon` texture path, empty for none.
     pub icon: String,
     pub reward: String,
+    /// The `Order` column, the earned list's same-minute tie-break (`[row+0x20]`, `0x5b29fb`).
+    pub order: u32,
 }
 
 /// An Achievement_Category.dbc row.
@@ -32,7 +34,7 @@ pub struct WrathAchievementCategory {
 }
 
 /// Actual Achievement_Criteria.dbc rows, not synthetic special-flag criteria.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct WrathAchievementCriterion {
     pub id: u32,
     pub achievement_id: u32,
@@ -41,13 +43,49 @@ pub struct WrathAchievementCriterion {
     pub required_quantity: u32,
     pub description: String,
     pub flags: u32,
+    /// Seconds, 0 for an untimed criterion (`[crit+0x34]`).
+    pub time_limit: u32,
+}
+
+/// Achievement.dbc's rows in file order, the order 12340 walks its row array (`[0xad3078]`,
+/// stride 0x38), with an id index.
+#[derive(Clone, Debug, Default)]
+pub struct WrathAchievementTable {
+    rows: Vec<WrathAchievement>,
+    index: BTreeMap<u32, usize>,
+}
+
+impl WrathAchievementTable {
+    /// Appends `row`, or replaces the row already under `id` in place.
+    pub fn insert(&mut self, id: u32, row: WrathAchievement) {
+        match self.index.get(&id) {
+            Some(&i) => self.rows[i] = row,
+            None => {
+                self.index.insert(id, self.rows.len());
+                self.rows.push(row);
+            }
+        }
+    }
+    pub fn get(&self, id: &u32) -> Option<&WrathAchievement> {
+        self.index.get(id).map(|&i| &self.rows[i])
+    }
+    pub fn get_mut(&mut self, id: &u32) -> Option<&mut WrathAchievement> {
+        self.index.get(id).map(|&i| &mut self.rows[i])
+    }
+    pub fn contains_key(&self, id: &u32) -> bool {
+        self.index.contains_key(id)
+    }
+    /// The rows in file order.
+    pub fn values(&self) -> impl Iterator<Item = &WrathAchievement> {
+        self.rows.iter()
+    }
 }
 
 /// Metadata installation is explicit: unavailable catalogs are distinct from valid empty
 /// progress. Per-owner vectors retain the catalog's raw linked-row order.
 #[derive(Clone, Debug, Default)]
 pub struct WrathAchievementMetadata {
-    pub achievements: BTreeMap<u32, WrathAchievement>,
+    pub achievements: WrathAchievementTable,
     pub criteria: BTreeMap<u32, WrathAchievementCriterion>,
     pub linked_criteria: BTreeMap<u32, Vec<u32>>,
     /// In file order, as the category lists walk them.
@@ -85,7 +123,7 @@ impl WrathAchievementMetadata {
         )
     }
 
-    fn indexed_criterion(
+    pub(super) fn indexed_criterion(
         &self,
         id: u32,
         index: i32,
@@ -166,51 +204,44 @@ pub(super) fn install(lua: &mlua::Lua) -> mlua::Result<()> {
                 "Usage: GetAchievementCrieriaInfo(achievementID, criteriaIndex)",
             )? as u32;
             let numeric_index = lua.coerce_number(index)?.map(|n| n as i64 as i32);
-            let selected = {
-                let model = lua.app_data_ref::<super::Model>().expect("model");
-                let Some(metadata) = model.wrath_achievements.as_ref() else {
-                    return Ok(MultiValue::new());
-                };
-                let pair = if let Some(index) = numeric_index {
-                    metadata.indexed_criterion(id, index)
-                } else {
-                    metadata.criteria.get(&id).and_then(|criterion| {
-                        metadata
-                            .achievements
-                            .get(&criterion.achievement_id)
-                            .map(|a| (a, criterion))
-                    })
-                };
-                pair.filter(|(a, _)| a.flags & 2 == 0)
-                    .map(|(a, c)| (a.clone(), c.clone()))
-            };
-            let Some((achievement, criterion)) = selected else {
-                return Ok(MultiValue::new());
-            };
-            let flags = criterion.flags | u32::from(achievement.flags & 0x80 != 0);
-            let required =
-                if achievement.flags & 0xa0 == 0xa0 && achievement.required_criteria_count != 0 {
-                    achievement.required_criteria_count as i32
-                } else {
-                    criterion.required_quantity as i32
-                };
-            let (quantity, completed) =
-                super::wrath_achievement_progress::criterion_progress(lua, criterion.id, required);
-            let formatted = formatted_quantity(lua, achievement.flags, flags, quantity, required)?;
-            Ok(MultiValue::from_vec(vec![
-                Value::String(lua.create_string(&criterion.description)?),
-                Value::Integer(i64::from(criterion.criteria_type)),
-                Value::Boolean(completed),
-                Value::Integer(quantity.into()),
-                Value::Integer(i64::from(required)),
-                Value::Nil,
-                Value::Integer(i64::from(flags)),
-                Value::Integer(i64::from(criterion.asset_id)),
-                Value::String(lua.create_string(formatted)?),
-                Value::Integer(i64::from(criterion.id)),
-            ]))
+            super::wrath_achievement_format::criteria_info(lua, id, numeric_index)
         })?,
     )?;
+    // `0x5b1970`/`0x5b1a00`: one reward, the points, for a known visible row, else nil; the
+    // second's usage text names the first (`0xa17638`).
+    for (name, usage, arity) in [
+        (
+            "GetAchievementNumRewards",
+            "Usage: GetAchievementNumRewards(achievementID)",
+            1,
+        ),
+        (
+            "GetAchievementReward",
+            "Usage: GetAchievementNumRewards(achievementID, rewardIndex)",
+            2,
+        ),
+    ] {
+        lua.globals().set(
+            name,
+            lua.create_function(move |lua, (value, index): (Value, Value)| {
+                let id = number_arg(lua, value, usage)? as u32;
+                if arity == 2 && lua.coerce_number(index)?.is_none() {
+                    return Err(mlua::Error::RuntimeError(usage.into()));
+                }
+                let model = lua.app_data_ref::<super::Model>().expect("model");
+                let row = model
+                    .wrath_achievements
+                    .as_ref()
+                    .and_then(|m| m.achievements.get(&id))
+                    .filter(|row| row.flags & 2 == 0);
+                Ok(match row {
+                    Some(row) if arity == 2 => Value::Integer(row.points.into()),
+                    Some(_) => Value::Integer(1),
+                    None => Value::Nil,
+                })
+            })?,
+        )?;
+    }
     lua.globals().set(
         "GetAchievementLink",
         lua.create_function(|lua, value: Value| {
@@ -227,12 +258,12 @@ pub(super) fn install(lua: &mlua::Lua) -> mlua::Result<()> {
                     "GetAchievementLink unavailable: current player GUID absent".into(),
                 ));
             }
-            if metadata.criteria_owner(row).is_none() {
+            let Some(owner) = metadata.criteria_owner(row) else {
                 let reference = row.reference_achievement_id;
                 return Err(mlua::Error::RuntimeError(format!(
                     "GetAchievementLink unavailable: referenced achievement metadata {reference} absent"
                 )));
-            }
+            };
             // Native 0x579590 is QuestTextParser, not Lua substitution. Do not silently emit
             // a raw token-bearing title as if it were the native contextual projection.
             if row.name.len() >= 800 {
@@ -245,8 +276,10 @@ pub(super) fn install(lua: &mlua::Lua) -> mlua::Result<()> {
                     "GetAchievementLink unavailable: QuestTextParser support for token-bearing title".into(),
                 ));
             }
+            let fields =
+                super::wrath_achievement_progress::link_fields(lua, metadata, row.id, owner);
             let link = format!(
-                "|cffffff00|Hachievement:{}:{:016X}:0:0:0:-1:0:0:0:0|h[{}]|h|r",
+                "|cffffff00|Hachievement:{}:{:016X}:{fields}|h[{}]|h|r",
                 row.id, model.unit_guids.player, row.name
             );
             Ok(MultiValue::from_vec(vec![Value::String(
@@ -255,38 +288,6 @@ pub(super) fn install(lua: &mlua::Lua) -> mlua::Result<()> {
         })?,
     )?;
     Ok(())
-}
-
-/// The criterion's progress text; `quantity` comes from the published progress
-/// (`wrath_achievement_progress`), 0 without any.
-pub(super) fn formatted_quantity(
-    lua: &mlua::Lua,
-    achievement: u32,
-    flags: u32,
-    quantity: i32,
-    required: i32,
-) -> mlua::Result<String> {
-    let ordinary = if achievement & 1 != 0 && quantity == 0 {
-        "--".to_owned()
-    } else {
-        quantity.to_string()
-    };
-    let money_base =
-        flags & 0x20 != 0 && (achievement & 8 != 0 || (achievement & 0x38 == 0 && flags & 1 != 0));
-    let mut result = if money_base {
-        money(lua, quantity)?
-    } else {
-        ordinary
-    };
-    if flags & 1 != 0 {
-        result.push_str(" / ");
-        result.push_str(&if flags & 0x20 != 0 {
-            money(lua, required)?
-        } else {
-            required.to_string()
-        });
-    }
-    Ok(result)
 }
 
 pub(super) fn money(lua: &mlua::Lua, quantity: i32) -> mlua::Result<String> {
@@ -372,6 +373,7 @@ mod tests {
                     required_quantity: 100,
                     description: format!("criterion {id}"),
                     flags,
+                    ..Default::default()
                 },
             );
         }
@@ -384,12 +386,13 @@ mod tests {
     fn metadata_queries_arity_redirect_hidden_and_actual_special_rows() {
         let script = fixture();
         script.run("assert(GetAchievementCategory('1.9')==42); assert(select('#',GetAchievementCategory(2))==0); assert(select('#',GetAchievementCategory(999))==0); assert(GetAchievementNumCriteria(1)==2); assert(GetAchievementNumCriteria(2)==0); assert(GetAchievementNumCriteria(3)==3); assert(GetAchievementNumCriteria(4)==0); assert(select('#',GetAchievementNumCriteria(999))==0); assert(not pcall(GetAchievementCategory,{}))").unwrap();
+        script.run("assert(GetAchievementNumRewards(1)==1 and GetAchievementNumRewards(2)==nil and select('#',GetAchievementNumRewards(999))==1); assert(GetAchievementReward(1,1)==0 and GetAchievementReward(2,1)==nil); assert(not pcall(GetAchievementReward,1))").unwrap();
         script.run("local d,t,c,q,r,n,f,a,s,id=GetAchievementCriteriaInfo(1,2); assert(d=='criterion 12' and t==20 and c==false and q==0 and r==100 and n==nil and f==1 and a==123 and s=='0 / 100' and id==12); assert(select('#',GetAchievementCriteriaInfo(1,2))==10); local d,t,c,q,r,n,f,a,s,id=GetAchievementCriteriaInfo(3,2); assert(id==11 and f==3 and r==7 and s=='0 / 7'); assert(select('#',GetAchievementCriteriaInfo(2,1))==0); assert(select('#',GetAchievementCriteriaInfo(1,0))==0); local d=GetAchievementCriteriaInfo(10,{}); assert(d=='criterion 10')").unwrap();
     }
 
     #[test]
     fn plain_link_exact_native_bytes_and_missing_dependencies_named() {
-        let script = fixture();
+        let mut script = fixture();
         let error = script
             .eval::<String>("return GetAchievementLink(1)")
             .unwrap_err()
@@ -402,6 +405,35 @@ mod tests {
                 .unwrap(),
             "|cffffff00|Hachievement:1:00000000ABCD1234:0:0:0:-1:0:0:0:0|h[Plain title]|h|r"
         );
+        let link = |s: &UiScript| s.eval::<String>("return GetAchievementLink(1)").unwrap();
+        let progress = |earned| crate::script::WrathAchievementProgress {
+            earned,
+            criteria: BTreeMap::from([(10, 5.into()), (12, 100.into())]),
+            ..Default::default()
+        };
+        // Criteria 10 and 12 are the visible ones; only 12 has met its 100.
+        script.set_wrath_achievement_progress(progress(vec![]));
+        assert!(link(&script).contains(":00000000ABCD1234:0:0:0:-1:2:0:0:0|h"));
+        // 2009-10-17, packed as AzerothCore `secsToTimeBitFields` does.
+        script.set_wrath_achievement_progress(progress(vec![(
+            1,
+            (9 << 24) | (9 << 20) | (16 << 14),
+        )]));
+        assert!(link(&script).contains(":00000000ABCD1234:1:10:17:9:2:0:0:0|h"));
+        let meta = |s: &UiScript, count| {
+            s.model_mut()
+                .wrath_achievements
+                .as_mut()
+                .unwrap()
+                .achievements
+                .get_mut(&1)
+                .unwrap()
+                .required_criteria_count = count;
+        };
+        meta(&script, 0);
+        let all = "4294967295:4294967295:4294967295:4294967295";
+        assert!(link(&script).contains(&format!(":1:10:17:9:{all}|h")));
+        meta(&script, 7);
         script
             .run("assert(select('#',GetAchievementLink(999))==0)")
             .unwrap();
@@ -451,15 +483,15 @@ mod tests {
         let script = fixture();
         script.run("COPPER_AMOUNT_TEXTURE='%d copper-icon'; SILVER_AMOUNT_TEXTURE='%d silver-icon'; GOLD_AMOUNT_TEXTURE='%d gold-icon'; COPPER_AMOUNT_SYMBOL='c'; SILVER_AMOUNT_SYMBOL='s'; GOLD_AMOUNT_SYMBOL='g'").unwrap();
         assert_eq!(
-            formatted_quantity(&script.lua, 0, 0x21, 0, -5).unwrap(),
+            super::super::wrath_achievement_format::probe::text(&script.lua, 0, 0x21, 0, -5),
             "0 copper-icon / -5 copper-icon"
         );
         assert_eq!(
-            formatted_quantity(&script.lua, 1, 1, 0, 100).unwrap(),
+            super::super::wrath_achievement_format::probe::text(&script.lua, 1, 1, 0, 100),
             "-- / 100"
         );
         assert_eq!(
-            formatted_quantity(&script.lua, 8, 0x20, 0, 100).unwrap(),
+            super::super::wrath_achievement_format::probe::text(&script.lua, 8, 0x20, 0, 100),
             "0 copper-icon"
         );
         assert_eq!(
@@ -473,7 +505,7 @@ mod tests {
             latched: false,
         }]);
         assert_eq!(
-            formatted_quantity(&script.lua, 0, 0x21, 0, 101).unwrap(),
+            super::super::wrath_achievement_format::probe::text(&script.lua, 0, 0x21, 0, 101),
             "0c / 1s 1c"
         );
         script.run("COPPER_AMOUNT_SYMBOL=nil").unwrap();

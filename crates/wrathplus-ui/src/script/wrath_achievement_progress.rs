@@ -4,44 +4,65 @@
 //! table `0xacfc70`): the earned list is walked newest first, a compared player's earned list
 //! (`0xacfddc`) joins the category listings, Feats of Strength (category 81) and flag `0x800`
 //! rows count only once earned, a series shows its first unearned step, and Statistics' children
-//! report the root as their parent. Labelled where untraced: "superseded" is a later earned step
-//! of the series (`0x5b37c0`), the completed-count filter is "not a statistic" (`0x5b0d50`), and
-//! `GetStatistic`'s text (`0x5b0ea0`) is the sum, maximum, met-count or last counter by the
-//! achievement's flags, money-formatted for money criteria, `--` while zero.
+//! report the root as their parent. "Superseded" is a later step of the series in the player's
+//! own earned list (`0x5b37c0`), and the completed-count filter is "not a statistic" (`0x5b0d50`).
+//! The progress texts are `wrath_achievement_format`'s.
 
 use std::collections::BTreeMap;
 
-use super::wrath_achievements::{WrathAchievement, WrathAchievementMetadata};
+use super::wrath_achievement_listing::{
+    category_counts, faction_ok, in_category, listing, superseded,
+};
+use super::wrath_achievements::WrathAchievementMetadata;
 use super::{binding_abi::number_arg, ScriptValue, UiScript};
 use mlua::{Lua, MultiValue, Value};
 
-const FLAG_STATISTIC: u32 = 0x1;
-const FLAG_HIDDEN: u32 = 0x2;
-const FLAG_SUM: u32 = 0x8;
-const FLAG_MAX: u32 = 0x10;
-const FLAG_MET_COUNT: u32 = 0x20;
+pub(super) const FLAG_STATISTIC: u32 = 0x1;
+pub(super) const FLAG_HIDDEN: u32 = 0x2;
 /// Shown only once earned (`piVar[9] & 0x800`).
-const FLAG_EARNED_ONLY: u32 = 0x800;
-const FEATS_OF_STRENGTH: u32 = 81;
+pub(super) const FLAG_EARNED_ONLY: u32 = 0x800;
+pub(super) const FEATS_OF_STRENGTH: u32 = 81;
 const STATISTICS_ROOT: u32 = 1;
 /// `GetCategoryNumAchievements`/`GetAchievementInfo` pseudo-categories.
-const ALL_ACHIEVEMENTS: i64 = -1;
-const ALL_STATISTICS: i64 = -2;
+pub(super) const ALL_ACHIEVEMENTS: i64 = -1;
+pub(super) const ALL_STATISTICS: i64 = -2;
 
 /// One player's progress, as `SMSG_ALL_ACHIEVEMENT_DATA` / `SMSG_RESPOND_INSPECT_ACHIEVEMENTS`
 /// and later updates leave it.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct WrathAchievementProgress {
-    /// Earned achievements with their packed dates, newest first.
+    /// Earned achievements with their packed dates, in the client's list order (`0x5b28d0`).
     pub earned: Vec<(u32, u32)>,
     /// Criteria counters by criteria id.
-    pub criteria: BTreeMap<u32, u64>,
+    pub criteria: BTreeMap<u32, WrathCriteriaProgress>,
     /// The player's achievement faction: 0 Horde, 1 Alliance, -1 unknown.
     pub faction: i32,
+    /// The player's own data has arrived this session (`[0xc1f454]`, set by the all-data and
+    /// criteria-update handlers at `0x5b32fc` and `0x5b316c`).
+    pub received: bool,
+}
+
+/// One criteria counter as 12340's progress node holds it (`0x5b2520`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct WrathCriteriaProgress {
+    pub counter: u64,
+    /// The guid the packet named (`[node+0x40]`).
+    pub player: u64,
+    /// Unix seconds: arrival less the packet's second timer (`[node+0x4c]`, `0x5b31e1`).
+    pub dated: i64,
+}
+
+impl From<u64> for WrathCriteriaProgress {
+    fn from(counter: u64) -> Self {
+        Self {
+            counter,
+            ..Default::default()
+        }
+    }
 }
 
 impl WrathAchievementProgress {
-    fn earned_date(&self, id: u32) -> Option<u32> {
+    pub(super) fn earned_date(&self, id: u32) -> Option<u32> {
         self.earned.iter().find(|(e, _)| *e == id).map(|(_, d)| *d)
     }
 }
@@ -54,56 +75,75 @@ pub enum WrathAchievementRequest {
 }
 
 #[derive(Default)]
-struct State {
-    mine: WrathAchievementProgress,
+pub(super) struct State {
+    pub(super) mine: WrathAchievementProgress,
     /// The list has arrived (`CanShowAchievementUI`, `0xc1f454`).
     received: bool,
     compared: Option<(u64, Option<WrathAchievementProgress>)>,
-    tracked: Vec<u32>,
+    /// Oldest first (`[0xacfde8]`).
+    pub(super) tracked: Vec<u32>,
     requests: Vec<WrathAchievementRequest>,
 }
 
 impl UiScript {
-    /// The player's progress, full replacement; changed criteria queue `CRITERIA_UPDATE`.
+    /// The player's progress, full replacement; the packets' events are queued on their own.
     pub fn set_wrath_achievement_progress(&mut self, progress: WrathAchievementProgress) {
-        let changed = match self.lua.app_data_mut::<State>() {
-            Some(mut state) => {
-                state.received = true;
-                let changed = state.mine.criteria != progress.criteria;
-                state.mine = progress;
-                changed
-            }
-            None => false,
-        };
-        if changed {
-            self.queue_event("CRITERIA_UPDATE", Vec::new());
+        if let Some(mut state) = self.lua.app_data_mut::<State>() {
+            state.received = progress.received;
+            state.mine = progress;
         }
     }
 
-    /// `ACHIEVEMENT_EARNED(id)` for the player's own earn, after its progress is published.
+    /// `SMSG_ALL_ACHIEVEMENT_DATA` (`0x5b32f0`), after its progress is published: each timed
+    /// criterion's `TRACKED_ACHIEVEMENT_UPDATE`, then `CRITERIA_UPDATE` and
+    /// `RECEIVED_ACHIEVEMENT_LIST` (`0x5b3471`, `0x5b347d`). `criteria` is `(id, elapsed)`.
+    pub fn wrath_achievement_list_arrived(&mut self, criteria: &[(u32, u32)]) {
+        for &(id, elapsed) in criteria {
+            super::wrath_achievement_tracked::criteria_progress(&self.lua, id, elapsed, false);
+        }
+        self.queue_event("CRITERIA_UPDATE", Vec::new());
+        self.queue_event("RECEIVED_ACHIEVEMENT_LIST", Vec::new());
+    }
+
+    /// `SMSG_CRITERIA_UPDATE` (`0x5b3160`): `CRITERIA_UPDATE` for every packet, then the tracked
+    /// update its criterion calls for.
+    pub fn wrath_criteria_updated(&mut self, criteria: u32, elapsed: u32) {
+        self.queue_event("CRITERIA_UPDATE", Vec::new());
+        super::wrath_achievement_tracked::criteria_progress(&self.lua, criteria, elapsed, true);
+    }
+
+    /// `SMSG_CRITERIA_DELETED` that removed a counter: `CRITERIA_UPDATE` (`0x5b3764`).
+    pub fn wrath_criteria_deleted(&mut self) {
+        self.queue_event("CRITERIA_UPDATE", Vec::new());
+    }
+
+    /// The player's own earn, after its progress is published: off the tracked list, then
+    /// `ACHIEVEMENT_EARNED(id)` (`0x5b3136`, `0x5b3148`).
     pub fn wrath_achievement_earned(&mut self, id: u32) {
+        super::wrath_achievement_tracked::untrack(&self.lua, id);
         self.queue_event("ACHIEVEMENT_EARNED", vec![ScriptValue::Int(id.into())]);
     }
 
-    /// A compared player's progress arrived: `INSPECT_ACHIEVEMENT_READY`.
+    /// `SMSG_ACHIEVEMENT_DELETED` that removed an earn fires `ACHIEVEMENT_EARNED(id)` too
+    /// (`0x5b3687`).
+    pub fn wrath_achievement_deleted(&mut self, id: u32) {
+        self.queue_event("ACHIEVEMENT_EARNED", vec![ScriptValue::Int(id.into())]);
+    }
+
+    /// `SMSG_RESPOND_INSPECT_ACHIEVEMENTS` (`0x5b34a0`): kept for the compared player only
+    /// (`0x5b2ab0`), and `INSPECT_ACHIEVEMENT_READY` fires for every response, with no argument
+    /// (`0x5b35e8`).
     pub fn set_wrath_achievement_comparison(
         &mut self,
         guid: u64,
         progress: WrathAchievementProgress,
     ) {
-        let ready = match self.lua.app_data_mut::<State>() {
-            Some(mut state) if state.compared.as_ref().is_some_and(|(g, _)| *g == guid) => {
+        if let Some(mut state) = self.lua.app_data_mut::<State>() {
+            if state.compared.as_ref().is_some_and(|(g, _)| *g == guid) {
                 state.compared = Some((guid, Some(progress)));
-                true
             }
-            _ => false,
-        };
-        if ready {
-            self.queue_event(
-                "INSPECT_ACHIEVEMENT_READY",
-                vec![ScriptValue::Str(format!("0x{guid:016X}"))],
-            );
         }
+        self.queue_event("INSPECT_ACHIEVEMENT_READY", Vec::new());
     }
 
     pub fn take_wrath_achievement_requests(&mut self) -> Vec<WrathAchievementRequest> {
@@ -114,19 +154,56 @@ impl UiScript {
     }
 }
 
-/// `(quantity, completed)` for a criterion, from the player's counters.
-pub(super) fn criterion_progress(lua: &Lua, criterion: u32, required: i32) -> (i32, bool) {
-    let counter = lua
-        .app_data_ref::<State>()
-        .and_then(|s| s.mine.criteria.get(&criterion).copied())
-        .unwrap_or(0);
-    let quantity = i32::try_from(counter).unwrap_or(i32::MAX);
-    (quantity, counter > 0 && quantity >= required)
+/// `GetAchievementLink`'s fields after the guid (`0x5b6110`): the earned flag, the date (`0:0:-1`
+/// unset, `0x76c190`), and a bit per visible criterion of the owner `owner` that my counter has
+/// met, in list order (`0x5b61ee`-`0x5b62fa`); all bits are set for an earn whose owner needs no
+/// count (`0x5b630f`).
+pub(super) fn link_fields(
+    lua: &Lua,
+    meta: &WrathAchievementMetadata,
+    id: u32,
+    owner: u32,
+) -> String {
+    let state = lua.app_data_ref::<State>();
+    let mine = state.as_ref().map(|s| &s.mine);
+    let mut bits = [0u32; 4];
+    let visible = meta
+        .linked_criteria
+        .get(&owner)
+        .into_iter()
+        .flatten()
+        .filter_map(|c| meta.criteria.get(c))
+        .filter(|c| c.flags & 2 == 0);
+    for (i, c) in visible.enumerate().take(128) {
+        // The required quantity is sign-extended and compared unsigned (`cdq`, `0x5b6256`).
+        let required = c.required_quantity as i32 as i64 as u64;
+        if mine
+            .and_then(|m| m.criteria.get(&c.id))
+            .is_some_and(|n| n.counter >= required)
+        {
+            bits[i / 32] |= 1 << (i % 32);
+        }
+    }
+    let (earned, (m, d, y)) = match mine.and_then(|m| m.earned_date(id)) {
+        Some(packed) => {
+            if meta
+                .achievements
+                .get(&owner)
+                .is_some_and(|r| r.required_criteria_count == 0)
+            {
+                bits = [u32::MAX; 4];
+            }
+            (1, date(packed))
+        }
+        None => (0, (0, 0, -1)),
+    };
+    let [b0, b1, b2, b3] = bits;
+    format!("{earned}:{m}:{d}:{y}:{b0}:{b1}:{b2}:{b3}")
 }
 
 /// The packed date's `(month, day, year)` as the bindings push them: 1-based month and day, the
 /// year since 2000 (AzerothCore `secsToTimeBitFields`).
-fn date(packed: u32) -> (i64, i64, i64) {
+pub(super) fn date(packed: u32) -> (i64, i64, i64) {
     (
         i64::from((packed >> 20) & 0xf) + 1,
         i64::from((packed >> 14) & 0x3f) + 1,
@@ -141,134 +218,8 @@ fn with<R>(lua: &Lua, f: impl FnOnce(&WrathAchievementMetadata, &State) -> R) ->
     Some(f(meta, &state))
 }
 
-fn compared(state: &State) -> Option<&WrathAchievementProgress> {
+pub(super) fn compared(state: &State) -> Option<&WrathAchievementProgress> {
     state.compared.as_ref().and_then(|(_, p)| p.as_ref())
-}
-
-fn in_category(row: &WrathAchievement, category: i64) -> bool {
-    match category {
-        ALL_ACHIEVEMENTS => row.flags & FLAG_STATISTIC == 0,
-        ALL_STATISTICS => row.flags & FLAG_STATISTIC != 0,
-        c => i64::from(row.category_id) == c,
-    }
-}
-
-fn faction_ok(row: &WrathAchievement, mine: &WrathAchievementProgress) -> bool {
-    row.required_faction == -1 || mine.faction == -1 || row.required_faction == mine.faction
-}
-
-/// A later step of the row's series is earned (`0x5b37c0`, untraced).
-fn superseded(
-    meta: &WrathAchievementMetadata,
-    progress: &WrathAchievementProgress,
-    id: u32,
-) -> bool {
-    meta.achievements
-        .values()
-        .any(|r| r.parent_achievement_id == id && progress.earned_date(r.id).is_some())
-}
-
-/// `GetAchievementInfo(category, index)`'s order: earned by both, by the player, by the compared
-/// player, then the rest in file order, a series by its first unearned step.
-fn listing(meta: &WrathAchievementMetadata, state: &State, category: i64) -> Vec<u32> {
-    let mine = &state.mine;
-    let theirs = compared(state);
-    let in_theirs = |id: u32| theirs.is_some_and(|p| p.earned_date(id).is_some());
-    let pseudo = category == ALL_ACHIEVEMENTS || category == ALL_STATISTICS;
-    let earned_pass = |id: u32, progress: &WrathAchievementProgress| {
-        meta.achievements.get(&id).is_some_and(|row| {
-            in_category(row, category)
-                && row.flags & FLAG_HIDDEN == 0
-                && (pseudo || !superseded(meta, progress, id))
-        })
-    };
-    let mut out = Vec::new();
-    for &(id, _) in &mine.earned {
-        if in_theirs(id) && earned_pass(id, mine) {
-            out.push(id);
-        }
-    }
-    for &(id, _) in &mine.earned {
-        if !in_theirs(id) && earned_pass(id, mine) {
-            out.push(id);
-        }
-    }
-    if let Some(theirs) = theirs {
-        for &(id, _) in &theirs.earned {
-            if mine.earned_date(id).is_none() && earned_pass(id, theirs) {
-                out.push(id);
-            }
-        }
-    }
-    let mut last = 0;
-    for row in meta.achievements.values() {
-        if mine.earned_date(row.id).is_some() || in_theirs(row.id) || !faction_ok(row, mine) {
-            continue;
-        }
-        if row.flags & FLAG_EARNED_ONLY != 0 || !in_category(row, category) {
-            continue;
-        }
-        if pseudo {
-            if row.category_id != FEATS_OF_STRENGTH && row.flags & FLAG_HIDDEN == 0 {
-                out.push(row.id);
-            }
-        } else if last == 0 || last != row.parent_achievement_id {
-            out.push(row.id);
-            last = row.id;
-        }
-    }
-    out
-}
-
-/// `GetCategoryNumAchievements` (`0x5b38e0`): `(total, completed)`.
-fn category_counts(
-    meta: &WrathAchievementMetadata,
-    state: &State,
-    category: i64,
-    all: bool,
-) -> (i64, i64) {
-    let mine = &state.mine;
-    let theirs = compared(state);
-    let all = all || category == ALL_ACHIEVEMENTS || category == ALL_STATISTICS;
-    let (mut total, mut completed, mut theirs_only, mut last) = (0, 0, 0, 0);
-    for row in meta.achievements.values() {
-        if !in_category(row, category) || row.flags & FLAG_HIDDEN != 0 {
-            continue;
-        }
-        let earned = mine.earned_date(row.id).is_some();
-        let their = theirs.is_some_and(|p| p.earned_date(row.id).is_some());
-        if !(faction_ok(row, mine) || their) {
-            continue;
-        }
-        let listed = row.category_id != FEATS_OF_STRENGTH && row.flags & FLAG_EARNED_ONLY == 0;
-        if !(listed || earned || their) {
-            continue;
-        }
-        if last == 0 || last != row.parent_achievement_id {
-            if earned {
-                if !superseded(meta, mine, row.id) || all {
-                    total += 1;
-                    completed += 1;
-                }
-            } else if their {
-                theirs_only += 1;
-            } else {
-                last = row.id;
-                total += 1;
-            }
-        } else {
-            last = row.id;
-            if all {
-                total += 1;
-            } else if their {
-                theirs_only += 1;
-            }
-        }
-    }
-    if category == i64::from(FEATS_OF_STRENGTH) {
-        total = completed;
-    }
-    (total + theirs_only, completed)
 }
 
 /// The 11 values of `GetAchievementInfo` (`0x5b3fc0`), or none for a hidden or unearned
@@ -312,62 +263,6 @@ fn info(
     Ok(MultiValue::from_vec(v))
 }
 
-/// `GetStatistic`/`GetComparisonStatistic` (`0x5b5620`, `0x5b5e70`).
-fn statistic(
-    lua: &Lua,
-    meta: &WrathAchievementMetadata,
-    progress: &WrathAchievementProgress,
-    id: u32,
-) -> mlua::Result<MultiValue> {
-    let Some(row) = meta.achievements.get(&id) else {
-        return Ok(MultiValue::new());
-    };
-    let owner = meta.criteria_owner(row).unwrap_or(row.id);
-    let mut sum = 0u64;
-    let mut max = 0u64;
-    let mut met = 0u64;
-    let mut last = None;
-    let mut money = false;
-    for criterion in meta
-        .linked_criteria
-        .get(&owner)
-        .into_iter()
-        .flatten()
-        .filter_map(|c| meta.criteria.get(c))
-    {
-        let Some(&counter) = progress.criteria.get(&criterion.id) else {
-            continue;
-        };
-        sum = sum.saturating_add(counter);
-        max = max.max(counter);
-        if counter >= u64::from(criterion.required_quantity) {
-            met += 1;
-        }
-        last.get_or_insert(counter);
-        money |= criterion.flags & 0x20 != 0;
-    }
-    let value = if row.flags & FLAG_SUM != 0 {
-        sum
-    } else if row.flags & FLAG_MAX != 0 {
-        max
-    } else if row.flags & FLAG_MET_COUNT != 0 {
-        met
-    } else {
-        last.unwrap_or(0)
-    };
-    let value = i32::try_from(value).unwrap_or(i32::MAX);
-    let text = if value == 0 {
-        "--".to_string()
-    } else if money {
-        super::wrath_achievements::money(lua, value)?
-    } else {
-        value.to_string()
-    };
-    Ok(MultiValue::from_vec(vec![Value::String(
-        lua.create_string(text)?,
-    )]))
-}
-
 fn ids(lua: &Lua, ids: impl IntoIterator<Item = u32>) -> MultiValue {
     let _ = lua;
     MultiValue::from_vec(
@@ -377,8 +272,13 @@ fn ids(lua: &Lua, ids: impl IntoIterator<Item = u32>) -> MultiValue {
     )
 }
 
-fn category_list(lua: &Lua, statistics: bool) -> mlua::Result<Value> {
-    let table = lua.create_table()?;
+/// `0x5b1390`/`0x5b14b0`: a table passed as the first argument is filled and returned
+/// (`lua_type(1) == 5`, `0x5b13ad`), through `lua_settable`; otherwise a new one is.
+fn category_list(lua: &Lua, statistics: bool, into: Value) -> mlua::Result<Value> {
+    let table = match into {
+        Value::Table(t) => t,
+        _ => lua.create_table()?,
+    };
     let list = with(lua, |meta, _| {
         let parent = |id: u32| {
             meta.categories
@@ -413,9 +313,25 @@ fn category_list(lua: &Lua, statistics: bool) -> mlua::Result<Value> {
     })
     .unwrap_or_default();
     for (i, id) in list.into_iter().enumerate() {
-        table.raw_set(i + 1, id)?;
+        table.set(i + 1, id)?;
     }
     Ok(Value::Table(table))
+}
+
+/// The compared player's achievement faction, from the unit held for its guid (`0x4d4db0`,
+/// then `0x6d6e90`), -1 with none, which filters nothing. Labelled: the race-to-faction split
+/// is `Achievement.dbc`'s, not traced through `0x6d6e90`.
+pub(super) fn compared_faction(lua: &Lua) -> i32 {
+    let guid = lua
+        .app_data_ref::<State>()
+        .and_then(|s| s.compared.as_ref().map(|(g, _)| *g));
+    let model = lua.app_data_ref::<super::Model>();
+    let race = guid.and_then(|g| model.as_ref()?.unit_by_guid(g)?.race_file.clone());
+    match race.as_deref() {
+        Some("Orc" | "Scourge" | "Tauren" | "Troll" | "BloodElf") => 0,
+        Some("Human" | "Dwarf" | "NightElf" | "Gnome" | "Draenei") => 1,
+        _ => -1,
+    }
 }
 
 fn guid_of(lua: &Lua, unit: &str) -> Option<u64> {
@@ -446,22 +362,22 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     )?;
     g.set(
         "GetCategoryList",
-        lua.create_function(|lua, ()| category_list(lua, false))?,
+        lua.create_function(|lua, into: Value| category_list(lua, false, into))?,
     )?;
     g.set(
         "GetStatisticsCategoryList",
-        lua.create_function(|lua, ()| category_list(lua, true))?,
+        lua.create_function(|lua, into: Value| category_list(lua, true, into))?,
     )?;
     g.set(
         "GetCategoryInfo",
         lua.create_function(|lua, id: Value| {
-            // Rounded, as `0x5b15c0` does.
+            // Truncated: `0x5b15c0` sets the x87 control word to chop before `fistp`.
             let id = lua
                 .coerce_number(id)?
                 .ok_or_else(|| {
                     mlua::Error::RuntimeError("Usage: GetCategoryInfo(categoryID)".into())
                 })?
-                .round() as i64;
+                .trunc() as i64;
             let row = with(lua, |meta, _| {
                 meta.categories
                     .iter()
@@ -503,15 +419,19 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 "Usage: GetComparisonCategoryNumAchievements(categoryID)",
             )? as i64;
             let all = id == ALL_ACHIEVEMENTS || id == ALL_STATISTICS;
+            let faction = compared_faction(lua);
             Ok(with(lua, |meta, state| {
                 let Some(theirs) = compared(state) else {
                     return 0;
                 };
+                // `0x5b3bd7`: the row's faction against the compared player's; a series step
+                // is superseded by a later one in MY list (`0x5b3c33`).
                 meta.achievements
                     .values()
                     .filter(|r| in_category(r, id) && r.flags & FLAG_HIDDEN == 0)
+                    .filter(|r| faction_ok(r, faction))
                     .filter(|r| theirs.earned_date(r.id).is_some())
-                    .filter(|r| all || !superseded(meta, theirs, r.id))
+                    .filter(|r| all || !superseded(meta, &state.mine, r.id))
                     .count() as i64
             })
             .unwrap_or(0))
@@ -521,10 +441,11 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         "GetAchievementInfo",
         lua.create_function(|lua, (first, index): (Value, Value)| {
             let first = number_arg(lua, first, "Usage: GetAchievementInfo(achievementID)")?;
-            let id = match index {
-                Value::Nil => Some(first as u32),
-                index => {
-                    let index = lua.coerce_number(index)?.unwrap_or(0.0) as i64;
+            // `lua_isnumber(2)` picks the `(category, index)` form (`0x5b3fe9`).
+            let id = match lua.coerce_number(index)? {
+                None => Some(first as u32),
+                Some(index) => {
+                    let index = index as i64;
                     with(lua, |meta, state| {
                         let list = listing(meta, state, first as i64);
                         usize::try_from(index - 1)
@@ -568,76 +489,97 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             .unwrap_or_else(|| Ok(MultiValue::new()))
         })?,
     )?;
-    g.set(
-        "GetNumCompletedAchievements",
-        lua.create_function(|lua, ()| {
-            Ok(with(lua, |meta, state| {
-                let (mut total, mut completed) = (0i64, 0i64);
-                for row in meta.achievements.values() {
-                    if row.flags & (FLAG_STATISTIC | FLAG_HIDDEN) != 0
-                        || !faction_ok(row, &state.mine)
-                        || row.category_id == FEATS_OF_STRENGTH
-                    {
-                        continue;
-                    }
-                    if state.mine.earned_date(row.id).is_some() {
-                        completed += 1;
-                    } else if row.flags & FLAG_EARNED_ONLY != 0 {
-                        continue;
-                    }
-                    total += 1;
-                }
-                (total, completed)
-            })
-            .unwrap_or((0, 0)))
-        })?,
-    )?;
-    for (name, theirs) in [
-        ("GetTotalAchievementPoints", false),
-        ("GetComparisonAchievementPoints", true),
+    // The player's and the compared player's summaries (`0x5b3ca0`/`0x5b3dc0`,
+    // `0x5b1dc0`/`0x5b1e40`, `0x5b1c20`/`0x5b1cf0`): with no comparison theirs is an empty list.
+    for (theirs, [completed, points, latest]) in [
+        (
+            false,
+            [
+                "GetNumCompletedAchievements",
+                "GetTotalAchievementPoints",
+                "GetLatestCompletedAchievements",
+            ],
+        ),
+        (
+            true,
+            [
+                "GetNumComparisonCompletedAchievements",
+                "GetComparisonAchievementPoints",
+                "GetLatestCompletedComparisonAchievements",
+            ],
+        ),
     ] {
+        let summary = move |lua: &Lua, f: &dyn Fn(&WrathAchievementMetadata, &_, i32) -> _| {
+            let faction = if theirs { compared_faction(lua) } else { -1 };
+            with(lua, |meta, state: &State| {
+                let empty = WrathAchievementProgress::default();
+                let (progress, faction) = match theirs {
+                    true => (compared(state).unwrap_or(&empty), faction),
+                    false => (&state.mine, state.mine.faction),
+                };
+                f(meta, progress, faction)
+            })
+        };
         g.set(
-            name,
+            completed,
             lua.create_function(move |lua, ()| {
-                Ok(with(lua, |meta, state| {
-                    let progress = if theirs {
-                        compared(state)
-                    } else {
-                        Some(&state.mine)
-                    };
-                    progress.map_or(0, |p| {
-                        p.earned
-                            .iter()
-                            .filter_map(|(id, _)| meta.achievements.get(id))
-                            .map(|r| i64::from(r.points))
-                            .sum::<i64>()
+                Ok(
+                    summary(lua, &|meta, p: &WrathAchievementProgress, faction| {
+                        let (mut total, mut done) = (0i64, 0i64);
+                        for row in meta.achievements.values() {
+                            if row.flags & (FLAG_STATISTIC | FLAG_HIDDEN) != 0
+                                || !faction_ok(row, faction)
+                                || row.category_id == FEATS_OF_STRENGTH
+                            {
+                                continue;
+                            }
+                            if p.earned_date(row.id).is_some() {
+                                done += 1;
+                            } else if row.flags & FLAG_EARNED_ONLY != 0 {
+                                continue;
+                            }
+                            total += 1;
+                        }
+                        MultiValue::from_vec(vec![Value::Integer(total), Value::Integer(done)])
                     })
+                    .unwrap_or_else(|| MultiValue::from_vec(vec![Value::Integer(0); 2])),
+                )
+            })?,
+        )?;
+        g.set(
+            points,
+            lua.create_function(move |lua, ()| {
+                Ok(summary(lua, &|meta, p: &WrathAchievementProgress, _| {
+                    let points = p
+                        .earned
+                        .iter()
+                        .filter_map(|(id, _)| meta.achievements.get(id));
+                    let sum = points.map(|r| i64::from(r.points)).sum::<i64>();
+                    MultiValue::from_vec(vec![Value::Integer(sum)])
                 })
-                .unwrap_or(0))
+                .unwrap_or_else(|| MultiValue::from_vec(vec![Value::Integer(0)])))
+            })?,
+        )?;
+        g.set(
+            latest,
+            lua.create_function(move |lua, ()| {
+                Ok(summary(lua, &|meta, p: &WrathAchievementProgress, _| {
+                    let statistic = |id: &u32| {
+                        meta.achievements
+                            .get(id)
+                            .is_some_and(|r| r.flags & FLAG_STATISTIC != 0)
+                    };
+                    let ids = p
+                        .earned
+                        .iter()
+                        .map(|(id, _)| *id)
+                        .filter(|id| !statistic(id));
+                    MultiValue::from_vec(ids.take(5).map(|id| Value::Integer(id.into())).collect())
+                })
+                .unwrap_or_default())
             })?,
         )?;
     }
-    g.set(
-        "GetLatestCompletedAchievements",
-        lua.create_function(|lua, ()| {
-            let latest = with(lua, |meta, state| {
-                state
-                    .mine
-                    .earned
-                    .iter()
-                    .map(|(id, _)| *id)
-                    .filter(|id| {
-                        meta.achievements
-                            .get(id)
-                            .is_some_and(|r| r.flags & FLAG_STATISTIC == 0)
-                    })
-                    .take(5)
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-            Ok(ids(lua, latest))
-        })?,
-    )?;
     g.set(
         "GetNextAchievement",
         lua.create_function(|lua, id: Value| {
@@ -692,7 +634,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                     } else {
                         &state.mine
                     };
-                    statistic(lua, meta, progress, id)
+                    super::wrath_achievement_format::statistic(lua, meta, progress, id)
                 })
                 .unwrap_or_else(|| Ok(MultiValue::new()))
             })?,
@@ -754,85 +696,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             Ok(())
         })?,
     )?;
-    g.set(
-        "AddTrackedAchievement",
-        lua.create_function(|lua, id: Value| {
-            let id = lua.coerce_number(id)?.unwrap_or(0.0) as u32;
-            let known = with(lua, |meta, _| meta.achievements.contains_key(&id)).unwrap_or(false);
-            if id == 0 || !known {
-                return Err(mlua::Error::RuntimeError(
-                    "Usage: AddTrackedAchievement(achievementID)".into(),
-                ));
-            }
-            track(lua, id, true);
-            Ok(())
-        })?,
-    )?;
-    g.set(
-        "RemoveTrackedAchievement",
-        lua.create_function(|lua, id: Value| {
-            let id = lua.coerce_number(id)?.unwrap_or(0.0) as u32;
-            if id == 0 {
-                return Err(mlua::Error::RuntimeError(
-                    "Usage: RemoveTrackedAchievement(achievementID)".into(),
-                ));
-            }
-            track(lua, id, false);
-            Ok(())
-        })?,
-    )?;
-    g.set(
-        "GetTrackedAchievements",
-        lua.create_function(|lua, ()| {
-            let tracked = lua
-                .app_data_ref::<State>()
-                .map(|s| s.tracked.clone())
-                .unwrap_or_default();
-            Ok(ids(lua, tracked))
-        })?,
-    )?;
-    g.set(
-        "GetNumTrackedAchievements",
-        lua.create_function(|lua, ()| {
-            Ok(lua.app_data_ref::<State>().map_or(0, |s| s.tracked.len()))
-        })?,
-    )?;
-    g.set(
-        "IsTrackedAchievement",
-        lua.create_function(|lua, id: Value| {
-            let id = lua.coerce_number(id)?.unwrap_or(0.0) as u32;
-            Ok(id != 0
-                && lua
-                    .app_data_ref::<State>()
-                    .is_some_and(|s| s.tracked.contains(&id)))
-        })?,
-    )?;
-    Ok(())
-}
-
-/// Add or remove a tracked achievement; a change fires `TRACKED_ACHIEVEMENT_UPDATE(id, tracked)`.
-fn track(lua: &Lua, id: u32, on: bool) {
-    let changed = lua.app_data_mut::<State>().is_some_and(|mut s| {
-        let at = s.tracked.iter().position(|&t| t == id);
-        match (on, at) {
-            (true, None) => {
-                s.tracked.push(id);
-                true
-            }
-            (false, Some(i)) => {
-                s.tracked.remove(i);
-                true
-            }
-            _ => false,
-        }
-    });
-    if changed {
-        let mut model = lua.app_data_mut::<super::Model>().expect("model");
-        model.pending_events.push((
-            "TRACKED_ACHIEVEMENT_UPDATE".into(),
-            vec![ScriptValue::Int(id.into()), ScriptValue::Bool(on)],
-        ));
-    }
+    super::wrath_achievement_tracked::install(lua)
 }
 
 #[cfg(test)]

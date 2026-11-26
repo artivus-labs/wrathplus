@@ -49,6 +49,7 @@ fn an_earned_achievement_demand_loads_the_ui_and_builds_the_toast_with_its_icon(
         earned: vec![(6, 0)],
         criteria: Default::default(),
         faction: 1,
+        received: true,
     });
     s.wrath_achievement_earned(6);
     s.tick(0.016);

@@ -18,6 +18,7 @@ pub(crate) mod wrath_raid_browser_feed;
 pub(crate) mod wrath_sockets;
 pub mod wrath_state_feed;
 pub(crate) mod wrath_threat;
+mod wrath_tracked_saved;
 pub mod wrath_ui_timer_capture;
 
 /// The feed halves of the native receipts the wire layer captures (`crate::net`): each publishes
@@ -33,6 +34,7 @@ impl bevy::prelude::Plugin for NativeFeedsPlugin {
         wrath_equipment_sets::register(app);
         wrath_sockets::register(app);
         wrath_achievements::register(app);
+        wrath_tracked_saved::register(app);
         wrath_appearance::register(app);
         wrath_raid_browser_feed::register(app);
         wrath_quest_pois::register(app);

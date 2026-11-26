@@ -641,7 +641,7 @@ pub(super) fn seed(s: &mut UiScript) {
             asset_id: 0,
             required_quantity: 10,
             description: "Level 10".into(),
-            flags: 0,
+            ..Default::default()
         },
     );
     metadata.linked_criteria.insert(1, vec![1]);
@@ -653,8 +653,9 @@ pub(super) fn seed(s: &mut UiScript) {
     s.set_wrath_achievement_metadata(metadata);
     s.set_wrath_achievement_progress(WrathAchievementProgress {
         earned: vec![(1, 0)],
-        criteria: std::collections::BTreeMap::from([(1, 10)]),
+        criteria: std::collections::BTreeMap::from([(1, 10.into())]),
         faction: 1,
+        received: true,
     });
 
     // An LFG party that can backfill.
@@ -805,8 +806,8 @@ pub(super) fn seed(s: &mut UiScript) {
         ME,
         WrathAchievementProgress {
             earned: vec![(1, 0x0a2b_1c00)],
-            criteria: std::collections::BTreeMap::new(),
             faction: 1,
+            ..Default::default()
         },
     );
 }

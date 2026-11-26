@@ -238,6 +238,15 @@ fn parse_achievement(payload: &str) -> Option<AchievementLink> {
     })
 }
 
+/// A player's name as the client holds it: our own record, else a unit we hold by guid.
+pub(super) fn known_name(model: &Model, guid: u64) -> Option<String> {
+    if guid != 0 && guid == model.unit_guids.player {
+        Some(model.player_record.name.clone()).filter(|n| !n.is_empty())
+    } else {
+        model.units_by_guid.get(&guid).and_then(|u| u.name.clone())
+    }
+}
+
 /// The achievement core `0x627220`: the title (white), a blank, `ACHIEVEMENT_TOOLTIP_COMPLETE` or
 /// `_IN_PROGRESS` with the linker (green), a blank, the description (white, wrapped), a blank, then
 /// the visible criteria two to a line, each gray or, when its bit in the link's masks is set,
@@ -265,15 +274,7 @@ pub(super) fn set_achievement(lua: &Lua, this: &Table, payload: &str) -> mlua::R
                 .filter(|c| c.flags & 2 == 0)
                 .map(|c| c.description.clone())
                 .collect();
-            let name = if link.guid != 0 && link.guid == model.unit_guids.player {
-                Some(model.player_record.name.clone()).filter(|n| !n.is_empty())
-            } else {
-                model
-                    .units_by_guid
-                    .get(&link.guid)
-                    .and_then(|u| u.name.clone())
-            };
-            Some((row, criteria, name))
+            Some((row, criteria, known_name(&model, link.guid)))
         })
     };
     let Some((row, criteria, name)) = found else {
@@ -551,6 +552,7 @@ mod tests {
                     required_quantity: 1,
                     description: text.into(),
                     flags,
+                    ..Default::default()
                 },
             );
         }

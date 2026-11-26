@@ -24,6 +24,18 @@ fn snapshot(earned: &[(u32, u32)], criteria: &[(u32, u64)]) -> Snapshot {
 fn own_receipts_leave_the_capture_and_others_keep_their_order() {
     let me = 0x10;
     let mut state = Achievements::default();
+    // Achievement.dbc `Order`; 99 has no row.
+    let order = |id: u32| match id {
+        99 => None,
+        5 => Some(2),
+        _ => Some(1),
+    };
+    let earn = |achievement, packed_time, raw_unknown| Packet::Earned {
+        player: me,
+        achievement,
+        packed_time,
+        raw_unknown,
+    };
     let other_earn = Packet::Earned {
         player: 0x20,
         achievement: 7,
@@ -37,36 +49,36 @@ fn own_receipts_leave_the_capture_and_others_keep_their_order() {
         raw_link: 1,
     };
     let mut packets = VecDeque::from([
-        Packet::AllData(snapshot(&[(6, 100), (9, 300)], &[(40, 3), (41, 5)])),
+        Packet::AllData(snapshot(
+            &[(6, 100), (9, 300), (99, 300)],
+            &[(40, 3), (41, 5)],
+        )),
         other_earn.clone(),
-        Packet::Earned {
-            player: me,
-            achievement: 8,
-            packed_time: 200,
-            raw_unknown: 0,
-        },
-        Packet::Earned {
-            player: me,
-            achievement: 8,
-            packed_time: 200,
-            raw_unknown: 0,
-        },
+        earn(3, 200, 0),
+        earn(8, 200, 0),
+        earn(8, 200, 0),
+        earn(5, 200, 1),
         first.clone(),
         Packet::CriteriaDeleted { criteria: 41 },
         Packet::AchievementDeleted { achievement: 6 },
+        Packet::AchievementDeleted { achievement: 6 },
         Packet::Inspect {
             player: 0x30,
-            data: snapshot(&[(1, 1)], &[]),
+            data: snapshot(&[(1, 1), (2, 1)], &[]),
         },
     ]);
-    let (earned, comparison, firsts) = absorb(&mut packets, &mut state, me);
-    assert_eq!(earned, [8], "a repeated earn fires once");
-    assert!(comparison.is_none(), "nobody asked for 0x30");
-    assert_eq!(packets.len(), 2);
-    assert_eq!(packets[0], other_earn);
-    assert!(matches!(packets[1], Packet::Inspect { player: 0x30, .. }));
+    let out = absorb(&mut packets, &mut state, me, &order);
+    assert_eq!(out.lists, [vec![(40, 0), (41, 0)]]);
     assert_eq!(
-        firsts,
+        out.earned,
+        [3, 8, 8],
+        "every earn fires; a trailing dword silences one"
+    );
+    assert_eq!(out.deleted, [6], "a deletion fires when it removed an earn");
+    assert_eq!(out.inspected.len(), 1, "every response reaches the VM");
+    assert_eq!(packets, [other_earn]);
+    assert_eq!(
+        out.firsts,
         [ServerFirst {
             name: "Guild".into(),
             player: 0x20,
@@ -74,32 +86,28 @@ fn own_receipts_leave_the_capture_and_others_keep_their_order() {
             raw_link: 1,
         }]
     );
-    assert_eq!(
-        state
-            .earned
-            .iter()
-            .map(|(&i, &d)| (i, d))
-            .collect::<Vec<_>>(),
-        [(8, 200), (9, 300)]
-    );
-    assert_eq!(state.criteria.get(&40), Some(&3));
-    assert_eq!(state.deleted, [41]);
-    assert_eq!(
-        earned_newest_first(state.earned.iter().map(|(&i, &d)| (i, d))),
-        [(9, 300), (8, 200)]
-    );
+    assert!(state.received);
+    // Newest first; same-minute earns by `Order`, higher first, then arrival (`0x5b28d0`).
+    assert_eq!(state.earned, [(9, 300), (5, 200), (3, 200), (8, 200)]);
 
-    state.compared = Some(0x30);
+    let view = snapshot_progress(&out.inspected[0].1, &order, 0);
+    assert_eq!(view.earned, [(1, 1), (2, 1)]);
     let mut packets = VecDeque::from([Packet::Inspect {
         player: 0x30,
         data: snapshot(&[(1, 1)], &[(40, 9)]),
     }]);
-    let (_, comparison, _) = absorb(&mut packets, &mut state, me);
-    let (guid, data) = comparison.expect("the asked player");
-    assert_eq!(guid, 0x30);
-    let view = snapshot_progress(&data, -1);
-    assert_eq!(view.earned, [(1, 1)]);
-    assert_eq!(view.criteria.get(&40), Some(&9));
+    let out = absorb(&mut packets, &mut state, me, &order);
+    let (guid, data) = &out.inspected[0];
+    assert_eq!(*guid, 0x30);
+    let counter = WrathCriteriaProgress {
+        counter: 9,
+        player: 1,
+        dated: 1000,
+    };
+    assert_eq!(
+        snapshot_progress(data, &order, 1000).criteria.get(&40),
+        Some(&counter)
+    );
     assert!(packets.is_empty());
 }
 

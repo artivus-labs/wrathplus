@@ -14,6 +14,11 @@ impl AchievementMetadata {
     pub(crate) fn name(&self, id: u32) -> Option<&str> {
         self.0.achievements.get(&id).map(|a| a.name.as_str())
     }
+
+    /// An `Achievement.dbc` row's `Order`, the earned list's same-minute tie-break.
+    pub(crate) fn order(&self, id: u32) -> Option<u32> {
+        self.0.achievements.get(&id).map(|a| a.order)
+    }
 }
 
 pub struct UiAchievementsPlugin;
@@ -86,6 +91,7 @@ pub(crate) fn metadata_from(
                         points: row.points,
                         icon: icons.get(&row.icon_id).cloned().unwrap_or_default(),
                         reward: row.reward.clone(),
+                        order: row.order,
                     },
                 );
                 metadata.linked_criteria.insert(
@@ -104,6 +110,7 @@ pub(crate) fn metadata_from(
                         required_quantity: row.required_quantity,
                         description: row.description.clone(),
                         flags: row.flags,
+                        time_limit: row.time_limit_seconds,
                     },
                 );
             }
@@ -157,7 +164,7 @@ mod tests {
                     asset_id: 7,
                     required_quantity: 8,
                     description: format!("criterion {id}"),
-                    flags: 0,
+                    ..Default::default()
                 },
             );
         }

@@ -62,20 +62,27 @@ pub struct AchievementCategory {
 
 macro_rules! catalog {
     ($name:ident, $row:ty) => {
+        /// Rows by id, iterated in DBC file order (the client walks the loaded array in place).
         #[derive(Debug, Default)]
-        pub struct $name(BTreeMap<u32, $row>);
+        pub struct $name(BTreeMap<u32, $row>, Vec<u32>);
         impl $name {
             pub fn get(&self, id: u32) -> Option<&$row> {
                 self.0.get(&id)
             }
             pub fn iter(&self) -> impl Iterator<Item = &$row> {
-                self.0.values()
+                self.1.iter().map(|id| &self.0[id])
             }
             pub fn len(&self) -> usize {
                 self.0.len()
             }
             pub fn is_empty(&self) -> bool {
                 self.0.is_empty()
+            }
+            fn insert(&mut self, row: $row) {
+                let id = row.id;
+                if self.0.insert(id, row).is_none() {
+                    self.1.push(id);
+                }
             }
         }
     };
@@ -153,7 +160,7 @@ fn achievements(bytes: &[u8], locale: &str) -> Result<AchievementCatalog> {
             required_criteria_count: n(60)?,
             reference_achievement_id: n(61)?,
         };
-        out.0.insert(row.id, row);
+        out.insert(row);
     }
     Ok(out)
 }
@@ -206,7 +213,7 @@ fn categories(bytes: &[u8], locale: &str) -> Result<AchievementCategoryCatalog> 
             name: str_at(&rs, r, col).unwrap_or_default(),
             order: u32_at(r, 19).context("achievement category order")?,
         };
-        out.0.insert(row.id, row);
+        out.insert(row);
     }
     Ok(out)
 }
