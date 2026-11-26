@@ -223,8 +223,16 @@ fn corpse_can_attack_and_green_range_bindings() {
     assert!(s
         .eval::<bool>(r#"return UnitIsCorpse("target") == nil"#)
         .unwrap());
-    // `GetQuestGreenRange`: the grey band for the player's level, 12 past the table.
-    for (pl, want) in [(3u32, 4i64), (46, 9), (120, 12)] {
+    // `GetQuestGreenRange`: 0 with no player (`0x5e287f`), else the band, 8 from level 40 on.
+    assert_eq!(s.eval::<i64>("return GetQuestGreenRange()").unwrap(), 0);
+    s.set_unit(
+        "player",
+        Some(UnitState {
+            exists: true,
+            ..Default::default()
+        }),
+    );
+    for (pl, want) in [(3u32, 4i64), (46, 8), (120, 8)] {
         s.set_player_req_state(PlayerReqState {
             level: pl,
             ..Default::default()

@@ -206,16 +206,9 @@ fn extra(lua: &Lua, token: &str) -> Option<WrathUnitExtra> {
     Some(s.units.get(&guid).copied().unwrap_or_default())
 }
 
-/// `0x6de130` (`UnitIsTrivial`): not a player, and more than the grey band below the player:
-/// `0xa31bb8` by player level / 5, 8 past the table.
+/// `0x6de130` (`UnitIsTrivial`): not a player (`0x6de15f`), and grey.
 fn unit_trivial(player_level: u32, unit: &UnitState) -> bool {
-    const BAND: [u32; 8] = [4, 4, 5, 5, 6, 6, 7, 7];
-    if unit.is_player {
-        return false;
-    }
-    let band = BAND.get(player_level as usize / 5).copied().unwrap_or(8);
-    let gap = i64::from(player_level) - i64::from(unit.level);
-    gap > 0 && gap > i64::from(band)
+    !unit.is_player && super::unit_is_grey(player_level, unit.level)
 }
 
 pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
