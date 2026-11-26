@@ -201,7 +201,7 @@ mod tests {
                 3 << 16,
             )])),
         ));
-        let mut script = UiScript::new().unwrap();
+        let script = UiScript::new().unwrap();
         script
             .run(
                 "OPENED = 0 local f = CreateFrame('Frame') f:RegisterEvent('BANKFRAME_OPENED') \
@@ -210,7 +210,7 @@ mod tests {
             .unwrap();
         app.world_mut().insert_non_send_resource(script);
         app.world_mut().run_system_once(feed_bank).unwrap();
-        let mut script = app.world_mut().non_send_resource_mut::<UiScript>();
+        let script = app.world_mut().non_send_resource_mut::<UiScript>();
         assert_eq!(
             script
                 .eval::<(i64, i64)>("return (GetNumBankSlots()), OPENED")
