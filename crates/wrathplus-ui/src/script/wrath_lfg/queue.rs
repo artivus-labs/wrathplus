@@ -980,28 +980,27 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             Ok(MultiValue::new())
         })?;
     }
-    // LFGTeleport(out) (`0x556bc0`) → true when sent: a player, the throttle, then not in combat
-    // (ERR_NOT_IN_COMBAT), alive (ERR_PLAYER_DEAD), not falling (ERR_NOT_WHILE_FALLING).
-    // Labelled: the locked-out (`0x54a430`) and fatigue (`0x513f20`) refusals need host state.
+    // `CombatTest::Flag` is `AcceptBattlefieldPort`'s (`0x54dafc`), not yet on these gates.
+    const _: crate::script::wrath_port_gates::CombatTest =
+        crate::script::wrath_port_gates::CombatTest::Flag;
+    // LFGTeleport(out) (`0x556bc0`) → true when sent: a player, the throttle, then the port
+    // refusals with `0x71afb0`'s combat test, each an error line and false.
     set(lua, "LFGTeleport", |lua, args| {
+        use crate::script::wrath_port_gates::{CombatTest, PortGates};
         let t = now(lua);
         let refusal = {
             let mut m = lua.app_data_mut::<Model>().expect("model app_data");
-            let Some(player) = m.unit("player").filter(|p| p.exists).cloned() else {
+            if m.unit("player").is_none_or(|p| !p.exists) {
                 return Ok(MultiValue::new());
-            };
+            }
             if !m.wrath_lfg.queue.teleport.allow(t, 10.0) {
                 return Ok(MultiValue::from_vec(vec![Value::Boolean(false)]));
             }
-            if player.in_combat {
-                Some("ERR_NOT_IN_COMBAT")
-            } else if player.dead {
-                Some("ERR_PLAYER_DEAD")
-            } else if m.wrath_popup.falling() {
-                Some("ERR_NOT_WHILE_FALLING")
-            } else {
-                None
-            }
+            let mut gates = PortGates::of(&m);
+            // Inferred: `[obj+0xa20]` is the swing target stored after CMSG_ATTACKSWING
+            // (`0x6e2818`), so Attack (6603) current stands for it.
+            gates.attacking = m.current_spells.contains(&6603);
+            gates.refusal(CombatTest::FlagOrAttacking)
         };
         if let Some(key) = refusal {
             error(lua, key);

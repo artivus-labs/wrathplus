@@ -238,6 +238,7 @@ mod wrath_gm_survey;
 mod wrath_inspect_talents;
 mod wrath_macro_options;
 mod wrath_modified_click;
+mod wrath_port_gates;
 mod wrath_quest_queries;
 mod wrath_quests_completed;
 mod wrath_ready_check;

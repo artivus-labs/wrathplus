@@ -309,22 +309,46 @@ fn selection_roles_and_verbs_follow_the_native_gates() {
         ]
     );
 
-    // Teleport: refused in combat with the native error.
+    // Teleport: `0x71afb0` tests the pet-in-combat flag `0x800` or a swing target, not the
+    // in-combat flag; then fatigue (`0x513f20(0)`), each refusal an error and false.
     s.run("assert(LFGTeleport(true)==true)").unwrap();
-    s.set_unit(
-        "player",
-        Some(UnitState {
-            guid: 1,
-            exists: true,
-            in_combat: true,
-            ..Default::default()
-        }),
-    );
+    let player = |flags| UnitState {
+        guid: 1,
+        exists: true,
+        in_combat: true,
+        flags,
+        ..Default::default()
+    };
+    s.set_unit("player", Some(player(0)));
+    s.run("assert(LFGTeleport(false)==true)").unwrap();
+    s.set_unit("player", Some(player(0x800)));
     s.run("assert(LFGTeleport(false)==false)").unwrap();
-    assert_eq!(s.take_ui_errors(), vec!["ERR_NOT_IN_COMBAT"]);
+    s.set_unit("player", Some(player(0)));
+    s.model_mut().current_spells = vec![6603];
+    s.run("assert(LFGTeleport(false)==false)").unwrap();
+    s.model_mut().current_spells.clear();
+    let drain = crate::script::WrathMirrorTimer {
+        value: 60_000,
+        max_value: 60_000,
+        scale: -1,
+        paused: false,
+        label: String::new(),
+        started: 0.0,
+    };
+    s.set_wrath_mirror_timer(0, Some(drain));
+    s.run("assert(LFGTeleport(false)==false)").unwrap();
+    s.set_wrath_mirror_timer(0, None);
+    assert_eq!(
+        s.take_ui_errors(),
+        vec![
+            "ERR_NOT_IN_COMBAT",
+            "ERR_NOT_IN_COMBAT",
+            "ERR_NOT_WHILE_FATIGUED"
+        ]
+    );
     assert_eq!(
         s.take_wrath_lfg_queue_requests(),
-        vec![R::Teleport { out: true }]
+        vec![R::Teleport { out: true }, R::Teleport { out: false }]
     );
 
     // Backfill: the group's dungeon becomes the selection and the join goes out again.
