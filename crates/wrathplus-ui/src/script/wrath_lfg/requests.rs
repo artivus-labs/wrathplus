@@ -85,6 +85,12 @@ impl Gate {
     }
 }
 
+impl Default for Gate {
+    fn default() -> Self {
+        Gate::INITIAL
+    }
+}
+
 static GATES: Mutex<[Gate; 2]> = Mutex::new([Gate::INITIAL, Gate::INITIAL]);
 
 fn clock_slot() -> &'static RwLock<Option<Clock>> {
@@ -92,7 +98,7 @@ fn clock_slot() -> &'static RwLock<Option<Clock>> {
     &CLOCK
 }
 
-fn now_ms() -> u32 {
+pub(super) fn now_ms() -> u32 {
     if let Some(clock) = clock_slot().read().ok().and_then(|c| c.clone()) {
         return clock();
     }

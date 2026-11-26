@@ -248,13 +248,12 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         );
         none()
     })?;
+    // SetLFGBootVote(vote) (`0x554a50` → `0x554960`), behind `wrath_lfg`'s boot gate.
     set(lua, "SetLFGBootVote", |lua, args| {
-        push(
-            lua,
-            R::SetLfgBootVote {
-                yes: truth(&args, 0),
-            },
-        );
+        let yes = truth(&args, 0);
+        if super::wrath_lfg::boot_vote(lua, yes) {
+            push(lua, R::SetLfgBootVote { yes });
+        }
         none()
     })?;
     for (global, entry) in [
@@ -595,7 +594,6 @@ mod tests {
                 R::ArenaTeamDisband { team: 2 },
                 R::CancelSummon,
                 R::RespondInstanceLock { accept: true },
-                R::SetLfgBootVote { yes: false },
                 R::BattlefieldMgrQueueInvite {
                     id: 7,
                     accept: true

@@ -83,7 +83,7 @@ pub use locks::{
 };
 
 mod queue;
-pub(crate) use queue::start_backfill;
+pub(crate) use queue::{boot_vote, start_backfill};
 
 /// The current map and difficulty's `index`-th DungeonEncounter row (0-based) under `mask`:
 /// name, icon, killed (`0x5538b0`, shared by the instance-lock popup).

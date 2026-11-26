@@ -215,6 +215,30 @@ fn getters_read_the_snapshot_in_native_shapes() {
     assert!(s
         .eval::<bool>("return select('#', GetLFGQueueStats())==0 and select(1, GetLFGInfoServer())==true and IsListedInLFR()==false")
         .unwrap());
+
+    // `0x554960`: a vote in progress, three votes per window from the seeded counter, our answer
+    // at once (`0xbea860`) until a boot update replaces it.
+    s.run("for i = 1, 4 do SetLFGBootVote(true) end assert(select(3, GetLFGBootProposal())==true)")
+        .unwrap();
+    assert_eq!(s.take_wrath_popup_requests().len(), 3);
+    s.set_wrath_lfg_queue(Arc::new(snapshot()));
+    assert!(s
+        .eval::<bool>("return select(3, GetLFGBootProposal())")
+        .unwrap());
+    let mut update = snapshot();
+    update.boot.as_mut().unwrap().time_left = 30;
+    s.set_wrath_lfg_queue(Arc::new(update));
+    assert!(!s
+        .eval::<bool>("return select(3, GetLFGBootProposal())")
+        .unwrap());
+    let mut over = snapshot();
+    over.boot = None;
+    s.set_wrath_lfg_queue(Arc::new(over));
+    s.run("SetLFGBootVote(true)").unwrap();
+    assert!(
+        s.take_wrath_popup_requests().is_empty(),
+        "no vote in progress"
+    );
 }
 
 #[test]

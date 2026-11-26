@@ -226,6 +226,10 @@ pub(crate) struct Queue {
     role_check: Throttle,
     answer: Throttle,
     teleport: Throttle,
+    /// `0xacdd5c`. Labelled: per VM, where 12340's counters are process globals that a reload keeps.
+    boot_gate: super::requests::Gate,
+    /// `0xbea860`, written by `SetLFGBootVote` until a boot update replaces it.
+    my_vote: Option<bool>,
     requests: Vec<WrathLfgQueueRequest>,
 }
 
@@ -247,6 +251,9 @@ impl UiScript {
         let mut model = self.model_mut();
         let queue = &mut model.wrath_lfg.queue;
         queue.proposal = snapshot.proposal.clone();
+        if queue.snapshot.boot != snapshot.boot {
+            queue.my_vote = None;
+        }
         queue.snapshot = snapshot;
     }
 
@@ -452,6 +459,20 @@ pub(crate) fn start_backfill(lua: &Lua) -> bool {
         }
     }
     send_join(lua);
+    true
+}
+
+/// `SetLFGBootVote` (`0x554960`): nothing without a vote in progress (`0xbea858`), then the 10 s
+/// throttle (`0xacdd5c`); a vote that passes is our answer at once (`0xbea860`). True sends it.
+pub(crate) fn boot_vote(lua: &Lua, yes: bool) -> bool {
+    let mut m = lua.app_data_mut::<Model>().expect("model app_data");
+    let q = &mut m.wrath_lfg.queue;
+    if !q.snapshot.boot.as_ref().is_some_and(|b| b.in_progress)
+        || !q.boot_gate.request(super::requests::now_ms())
+    {
+        return false;
+    }
+    q.my_vote = Some(yes);
     true
 }
 
@@ -719,14 +740,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     // GetLFGBootProposal() (`0x554a60`) → false alone, or 8 values for a vote in progress.
     set(lua, "GetLFGBootProposal", |lua, _| {
         let m = lua.app_data_ref::<Model>().expect("model app_data");
-        let Some(b) = m
-            .wrath_lfg
-            .queue
-            .snapshot
-            .boot
-            .as_ref()
-            .filter(|b| b.in_progress)
-        else {
+        let q = &m.wrath_lfg.queue;
+        let Some(b) = q.snapshot.boot.as_ref().filter(|b| b.in_progress) else {
             return Ok(MultiValue::from_vec(vec![Value::Boolean(false)]));
         };
         let name = match (&b.victim_name, &b.victim_realm) {
@@ -737,7 +752,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         Ok(MultiValue::from_vec(vec![
             Value::Boolean(true),
             Value::Boolean(b.did_vote),
-            Value::Boolean(b.my_vote),
+            Value::Boolean(q.my_vote.unwrap_or(b.my_vote)),
             name,
             int(b.total_votes.into()),
             int(b.boot_votes.into()),
