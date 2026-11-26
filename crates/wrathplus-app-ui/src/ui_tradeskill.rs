@@ -291,22 +291,19 @@ pub(crate) fn difficulty(rank: u32, low: u32, high: u32) -> TradeSkillDifficulty
     }
 }
 
-/// The row icon, `GetTradeSkillIcon` (`0x4fdae0`): `EffectItemType[0]` as an item id with no
-/// `Effect[0]` check, and nil on any miss (a zero id, a template in flight), never the spell's
-/// icon; the reference repaints when the item callback fires `TRADE_SKILL_UPDATE`. The trainer
-/// resolves icons by another law; the reference shares no resolver.
+/// `GetTradeSkillIcon` (`0x5db550`): an item-creating first effect (24, 157, 59) with an item shows
+/// that item's `Item.dbc` display icon (`0x5db5f4`-`0x5db633`), any other recipe the spell's own
+/// icon (`0x5db67b`); nil when the record is missing.
 fn recipe_icon(
     d: &wrathplus_formats::SpellDisplay,
     icons: Option<&ItemDisplays>,
-    items: &Items,
-    commands: &NetCommands,
+    records: Option<&crate::app_core::catalogs::ItemRecords>,
 ) -> Option<String> {
     let item = d.effect_item_type[0];
-    if item == 0 {
-        return None;
+    if matches!(d.effects[0], 24 | 157 | 59) && item != 0 {
+        return item_icon(icons, records?.0.get(item)?.display_id);
     }
-    let display = items.template(item, 0, commands)?.display_info_id;
-    item_icon(icons, display)
+    d.icon.clone()
 }
 
 /// Build one recipe row; names still in flight are `None` and resolve when the template lands.
@@ -317,6 +314,7 @@ fn resolve_recipe(
     skill_lines: &SkillLines,
     tool_names: &tools::ToolNames,
     icons: Option<&ItemDisplays>,
+    records: Option<&crate::app_core::catalogs::ItemRecords>,
     subclasses: Option<&crate::items::ItemSubClasses>,
     store: &ObjectStore,
     objects: &Objects,
@@ -363,7 +361,7 @@ fn resolve_recipe(
     } else {
         (0, 1, 1)
     };
-    let icon = recipe_icon(d, icons, items, commands);
+    let icon = recipe_icon(d, icons, records);
     // The header key (`0x4fca20`): the product's `(class, subclass)` named from
     // `ItemSubClass.dbc`, `None` while its template is in flight, as in the client. The same
     // template gives the `InventoryType` the slot filter reads and the `ItemLevel` the sort
@@ -423,7 +421,10 @@ fn feed_trade_skill(
     spells: Option<Res<Spells>>,
     skill_lines: Option<Res<SkillLines>>,
     tool_names: tools::ToolNames,
-    icons: Option<Res<ItemDisplays>>,
+    (icons, records): (
+        Option<Res<ItemDisplays>>,
+        Option<Res<crate::app_core::catalogs::ItemRecords>>,
+    ),
     subclasses: Option<Res<crate::items::ItemSubClasses>>,
     repeat: Res<TradeSkillRepeat>,
     self_store: Query<(&ObjectStore, &crate::net::Guid), With<SelfPlayer>>,
@@ -509,6 +510,7 @@ fn feed_trade_skill(
                     skill_lines,
                     &tool_names,
                     icons.as_deref(),
+                    records.as_deref(),
                     subclasses.as_deref(),
                     store,
                     &objects,
@@ -702,57 +704,45 @@ mod tests {
         )])))
     }
 
+    /// `0x5db550`: the created item's `Item.dbc` display icon, else the spell's.
     #[test]
-    fn law_c_paints_the_created_items_icon() {
+    fn the_row_icon_is_the_items_record_else_the_spells() {
         let mut deps = TestDeps::new();
         let icons = landed_item(&mut deps);
-        let d = recipe(SPELL_EFFECT_CREATE_ITEM, 777);
-        assert_eq!(
-            recipe_icon(&d, Some(&icons), &deps.items, &deps.commands),
-            Some("ITEM".into()),
+        let record = wrathplus_formats::ItemRecord {
+            class: 4,
+            subclass: 4,
+            material: 0,
+            display_id: 5,
+            inventory_type: 5,
+            sheath: 0,
+        };
+        let records = crate::app_core::catalogs::ItemRecords(
+            wrathplus_formats::ItemRecordCatalog::from_rows(HashMap::from([(777, record)])),
         );
-    }
-
-    /// `0x4fdae0` never reads `Effect[0]`.
-    #[test]
-    fn law_c_does_not_gate_on_the_effect_type() {
-        let mut deps = TestDeps::new();
-        let icons = landed_item(&mut deps);
-        let d = recipe(SPELL_EFFECT_ENCHANT_ITEM, 777);
+        let create = recipe(SPELL_EFFECT_CREATE_ITEM, 777);
         assert_eq!(
-            recipe_icon(&d, Some(&icons), &deps.items, &deps.commands),
-            Some("ITEM".into()),
+            recipe_icon(&create, Some(&icons), Some(&records)),
+            Some("ITEM".into())
         );
-    }
-
-    /// The binding's last return is a bare `lua_pushnil`.
-    #[test]
-    fn law_c_pushes_nil_on_every_miss_never_the_spells_icon() {
-        let mut deps = TestDeps::new();
-        let icons = landed_item(&mut deps);
-
-        // EffectItemType[0] == 0: 0x55ba30 short-circuits on a zero id before hashing.
-        let none = recipe(SPELL_EFFECT_ENCHANT_ITEM, 0);
         assert_eq!(
-            recipe_icon(&none, Some(&icons), &deps.items, &deps.commands),
-            None,
+            deps.queried_entries(),
+            Vec::<u32>::new(),
+            "Item.dbc, no template query"
         );
-
-        // A template that never lands: nil, asked for once.
+        let enchant = recipe(SPELL_EFFECT_ENCHANT_ITEM, 0);
+        assert_eq!(
+            recipe_icon(&enchant, Some(&icons), Some(&records)),
+            Some("SPELL".into())
+        );
+        // An enchant's item type is no product: the effect gates it (`0x5db5df`).
+        let scroll = recipe(SPELL_EFFECT_ENCHANT_ITEM, 777);
+        assert_eq!(
+            recipe_icon(&scroll, Some(&icons), Some(&records)),
+            Some("SPELL".into())
+        );
         let missing = recipe(SPELL_EFFECT_CREATE_ITEM, 999);
-        assert_eq!(
-            recipe_icon(&missing, Some(&icons), &deps.items, &deps.commands),
-            None,
-        );
-        assert_eq!(
-            recipe_icon(&missing, Some(&icons), &deps.items, &deps.commands),
-            None,
-        );
-        assert_eq!(deps.queried_entries(), vec![999], "ask-once, not ask-often");
-
-        // Template landed, `ItemDisplayInfo` missing: still nil.
-        let d = recipe(SPELL_EFFECT_CREATE_ITEM, 777);
-        assert_eq!(recipe_icon(&d, None, &deps.items, &deps.commands), None);
+        assert_eq!(recipe_icon(&missing, Some(&icons), Some(&records)), None);
     }
 
     /// Driven through the real handler registration.
