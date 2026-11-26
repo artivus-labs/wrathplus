@@ -11,7 +11,8 @@
 //! `bind <COMMAND> [key...]` replaces the command's key list; no tokens means unbound, an absent
 //! command keeps its defaults. Tokens are canonical chord strings and never contain spaces.
 //! Build 12340's modes 2-4 follow as `bindmode <mode> <KEY> <COMMAND>` lines, every key of them
-//! ([`layer_lines`]).
+//! ([`layer_lines`]), and the set's own modified clicks as 12340 writes them,
+//! `modifiedclick <CHORD> <ACTION>` ([`modified_click_lines`]).
 //! Deviation: the reference saves a full snapshot (`bindings-cache.wtf`); a diff is stored
 //! because a full snapshot would leave every command added later unbound for a saved file.
 
@@ -120,6 +121,26 @@ pub(crate) fn layers_from(text: &str) -> Vec<(u32, String, String)> {
         .collect()
 }
 
+/// A set's own modified clicks, `(chord, action)`, as `modifiedclick` lines (`0x55f32d`).
+pub(crate) fn modified_click_lines(lines: &[(String, String)]) -> String {
+    lines
+        .iter()
+        .map(|(chord, action)| format!("modifiedclick {chord} {action}\n"))
+        .collect()
+}
+
+/// The `modifiedclick <chord> <action>` lines of a bindings file as `(chord, action)`
+/// (`0x5642ae`); malformed ones skipped.
+pub(crate) fn modified_clicks_from(text: &str) -> Vec<(String, String)> {
+    text.lines()
+        .filter_map(|line| {
+            let rest = line.trim().strip_prefix("modifiedclick ")?;
+            let (chord, action) = rest.split_once(' ')?;
+            Some((chord.to_owned(), action.trim().to_owned()))
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -203,6 +224,13 @@ mod tests {
             layers_from(&(text.clone() + "bindmode 5 H JUMP\nbindmode 2 H\n")),
             lines
         );
+        assert!(from_diff(&text).is_empty());
+        // The modified clicks, chord first as 12340 writes them, beside both.
+        let clicks = vec![("CTRL".to_string(), "SELFCAST".to_string())];
+        let text = text + &modified_click_lines(&clicks);
+        assert!(text.ends_with("modifiedclick CTRL SELFCAST\n"));
+        assert_eq!(modified_clicks_from(&text), clicks);
+        assert_eq!(layers_from(&text), lines);
         assert!(from_diff(&text).is_empty());
     }
 

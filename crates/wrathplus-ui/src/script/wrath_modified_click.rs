@@ -14,6 +14,13 @@
 //! `LSHIFT` the left one) and what follows is not read; any other names an action, whose chord
 //! holds (`0x55d6b0`) when one of its keys is down and its button, read only while a click
 //! dispatches, is the click's.
+//!
+//! Each action keeps a chord per binding set (account, character, live) over its default;
+//! `LoadBindings` and `SaveBindings` copy them with the keys (`0x562b80`), and a set's own chords
+//! are saved with it as `modifiedclick <chord> <action>` lines (written at `0x55f32d`, read at
+//! `0x5642ae`).
+
+use std::collections::HashMap;
 
 use mlua::{Lua, Value};
 
@@ -28,10 +35,16 @@ struct Chord {
     button: Option<u8>,
 }
 
+/// The live set's index in [`State::sets`]; 0 and 1 are the account and character sets.
+const LIVE: usize = 2;
+
 #[derive(Default)]
 pub(crate) struct State {
-    /// `(action, chord)` in registration order (`0x108`'s list).
+    /// `(action, default chord)` in registration order (`0x108`'s list).
     actions: Vec<(String, Chord)>,
+    /// The chords the account, character and live sets hold of their own, by upper-cased action;
+    /// an action absent from one takes its default (the slot's flag bit 0, cleared at `0x55e20a`).
+    sets: [HashMap<String, Chord>; 3],
 }
 
 impl State {
@@ -39,6 +52,32 @@ impl State {
         self.actions
             .iter()
             .position(|(a, _)| a.eq_ignore_ascii_case(action))
+    }
+
+    /// Action `i`'s live chord.
+    fn chord(&self, i: usize) -> Chord {
+        let (name, default) = &self.actions[i];
+        let own = self.sets[LIVE].get(&name.to_ascii_uppercase());
+        own.copied().unwrap_or(*default)
+    }
+
+    /// `LoadBindings`' copy into the live set (`0x562b80(from, 3)`), `from` 0 the defaults.
+    pub(super) fn load(&mut self, from: usize) {
+        self.sets[LIVE] = match from {
+            1 | 2 => self.sets[from - 1].clone(),
+            _ => HashMap::new(),
+        };
+    }
+
+    /// `SaveBindings(which)`' copy out of the live set (`0x562b80(3, which)`); saving the account
+    /// set drops the character's, as the keys' save does.
+    pub(super) fn save(&mut self, which: u32) {
+        if let 1 | 2 = which {
+            self.sets[which as usize - 1] = self.sets[LIVE].clone();
+        }
+        if which == 1 {
+            self.sets[1].clear();
+        }
     }
 }
 
@@ -55,6 +94,33 @@ impl UiScript {
                 None => state.actions.push((row.action.clone(), chord)),
             }
         }
+    }
+
+    /// Seed set 1 or 2 with its bindings file's `modifiedclick` lines as `(chord, action)`; a chord
+    /// `0x55e180` refuses is dropped, as the reader (`0x5642ae`) drops it.
+    pub fn seed_modified_clicks(&mut self, set: u32, lines: &[(String, String)]) {
+        let Some(slot) = (set as usize).checked_sub(1).filter(|&s| s < LIVE) else {
+            return;
+        };
+        let own = lines
+            .iter()
+            .filter_map(|(chord, action)| Some((action.to_ascii_uppercase(), parse(Some(chord))?)));
+        self.model_mut().wrath_modified_clicks.sets[slot] = own.collect();
+    }
+
+    /// Set 1's or 2's own chords as `(chord, action)` in action order, its bindings file's
+    /// `modifiedclick %s %s` lines (`0x55f32d`); an action the set inherits has none.
+    pub fn modified_click_lines(&self, set: u32) -> Vec<(String, String)> {
+        let model = self.model_mut();
+        let state = &model.wrath_modified_clicks;
+        let Some(own) = (set as usize).checked_sub(1).filter(|&s| s < LIVE) else {
+            return Vec::new();
+        };
+        let line = |(a, _): &(String, Chord)| {
+            let chord = state.sets[own].get(&a.to_ascii_uppercase())?;
+            Some((format(*chord), a.clone()))
+        };
+        state.actions.iter().filter_map(line).collect()
     }
 }
 
@@ -163,7 +229,7 @@ pub(super) fn is_modified_click(lua: &Lua, arg: Option<&str>) -> bool {
     let model = lua.app_data_ref::<Model>().expect("model app_data");
     let click = model.last_mouse_button.as_deref();
     let state = &model.wrath_modified_clicks;
-    let holds = |i: usize| chord_holds(state.actions[i].1, keys, click);
+    let holds = |i: usize| chord_holds(state.chord(i), keys, click);
     match arg {
         None => keys != 0 || (0..state.actions.len()).any(holds),
         Some(arg) => match modifier_prefix(arg).0 {
@@ -188,7 +254,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             let action = string_arg(lua, action, "Usage: GetModifiedClick(\"action\")")?;
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             let state = &model.wrath_modified_clicks;
-            Ok(state.find(&action).map(|i| format(state.actions[i].1)))
+            Ok(state.find(&action).map(|i| format(state.chord(i))))
         })?,
     )?;
     g.set(
@@ -201,7 +267,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             let state = &mut model.wrath_modified_clicks;
             match (state.find(&action), parse(binding.as_deref())) {
                 (Some(i), Some(chord)) => {
-                    state.actions[i].1 = chord;
+                    let own = state.actions[i].0.to_ascii_uppercase();
+                    state.sets[LIVE].insert(own, chord);
                     Ok(())
                 }
                 // `luaL_error`'s `%s` of a nil binding prints `(null)`.
@@ -372,5 +439,37 @@ mod tests {
             .eval::<String>("return select(2, pcall(SetModifiedClick, 'NOPE'))")
             .unwrap()
             .ends_with("Unknown action (NOPE) or binding ((null))"));
+    }
+
+    /// `0x562b80` copies the chords with the keys; a set's own chords are its file's lines, which
+    /// seed it back.
+    #[test]
+    fn the_chords_are_saved_and_loaded_with_the_binding_sets() {
+        let s = vm();
+        let selfcast = |s: &UiScript| {
+            s.eval::<String>("return GetModifiedClick('SELFCAST')")
+                .unwrap()
+        };
+        s.run("SetModifiedClick('selfcast', 'CTRL') SaveBindings(2)")
+            .unwrap();
+        let own = vec![("CTRL".to_string(), "SELFCAST".to_string())];
+        assert_eq!(s.modified_click_lines(2), own);
+        assert!(
+            s.modified_click_lines(1).is_empty(),
+            "inherited, not its own"
+        );
+        s.run("LoadBindings(1)").unwrap();
+        assert_eq!(selfcast(&s), "ALT");
+        s.run("LoadBindings(2)").unwrap();
+        assert_eq!(selfcast(&s), "CTRL");
+
+        let mut s = vm();
+        s.seed_binding_set(1, Some(Vec::new()));
+        let lines = [("SHIFT-BUTTON2", "chatlink"), ("A", "SELFCAST")];
+        s.seed_modified_clicks(1, &lines.map(|(c, a)| (c.to_string(), a.to_string())));
+        s.load_binding_set(1);
+        let chatlink = s.eval::<String>("return GetModifiedClick('CHATLINK')");
+        assert_eq!(chatlink.unwrap(), "SHIFT-BUTTON2");
+        assert_eq!(selfcast(&s), "ALT", "a refused chord is dropped");
     }
 }
