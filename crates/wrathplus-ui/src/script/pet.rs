@@ -108,6 +108,8 @@ pub(crate) struct PetBarState {
     pub(crate) has_bar: bool,
     /// `0x5d35b0`'s refusal of the pet's object ([`super::UiScript::set_pet_bar_hidden`]).
     pub(crate) bar_hidden: bool,
+    /// The attack latch `[0xc234dc]`, `IsPetAttackActive()`'s answer.
+    pub(crate) attacking: bool,
     /// `GetPetActionsUsable()` (`0x4bcf70`): false desaturates the whole bar, and refuses the
     /// drag's bar writes with it (`0x4bc9d0`).
     pub(crate) actions_usable: bool,
@@ -174,6 +176,11 @@ impl super::UiScript {
     /// stores `OsTick() + duration` for each `SMSG_PET_SPELLS` whose duration is not 0, else 0.
     pub fn set_pet_expiry(&mut self, expiry: Option<f64>) {
         self.model_mut().pet_bar.expiry = expiry;
+    }
+
+    /// Push the attack latch `IsPetAttackActive` answers.
+    pub fn set_pet_attacking(&mut self, attacking: bool) {
+        self.model_mut().pet_bar.attacking = attacking;
     }
 
     /// Push whether `0x5d35b0` refuses the pet (dead, or a template without a pet bar), which
@@ -380,12 +387,12 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // The one pet binding that answers a real boolean (`0x6f39f0`), `false` even out of range.
+    // IsPetAttackActive() (`0x5d3160`): no argument, the latch as a real boolean.
     g.set(
         "IsPetAttackActive",
-        lua.create_function(move |lua, i: u32| {
+        lua.create_function(move |lua, _: MultiValue| {
             let model = lua.app_data_ref::<Model>().expect("model app_data");
-            Ok(slot_at(&model, i).is_some_and(|s| s.view.attack_active))
+            Ok(model.pet_bar.attacking)
         })?,
     )?;
 
@@ -587,7 +594,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{PetActionView, PetStats};
+    use super::{PetActionView, PetStats, Value};
     use crate::script::UiScript;
 
     /// A charmed or possessed unit's time left in ms, nil for none, and the unsigned wrap once
@@ -766,7 +773,7 @@ mod tests {
             assert!(e.contains(err), "{call}: {e}");
         }
         // A unit rides with the press; one the resolver rejects casts nothing.
-        s.run("CastPetAction(1, 'bogus') CastPetAction(1, 'target')")
+        s.run("CastPetAction(1, 'bogus'); CastPetAction(1, 'target')")
             .unwrap();
         assert!(matches!(
             &s.take_script_calls()[..],
@@ -780,15 +787,18 @@ mod tests {
         assert_eq!(s.take_pet_stop_attacks(), 0, "drain empties");
     }
 
+    /// `0x5d3160` takes no index: one latch for the bar, a real boolean either way.
     #[test]
-    fn attack_active_is_a_per_slot_boolean() {
+    fn attack_active_is_the_bars_one_latch() {
         let mut s = UiScript::new().unwrap();
-        s.set_pet_actions(true, true, true, slots());
-        assert!(s.eval::<bool>("return IsPetAttackActive(1)").unwrap());
-        assert!(!s.eval::<bool>("return IsPetAttackActive(2)").unwrap());
-        assert!(s
-            .eval::<bool>("return IsPetAttackActive(9) == false")
-            .unwrap());
+        let latch = |s: &UiScript| s.eval::<Value>("return IsPetAttackActive()").unwrap();
+        assert_eq!(latch(&s), Value::Boolean(false));
+        s.set_pet_attacking(true);
+        assert_eq!(latch(&s), Value::Boolean(true));
+        assert!(
+            s.eval::<bool>("return IsPetAttackActive(9)").unwrap(),
+            "an index is ignored"
+        );
     }
 
     /// The predicates are checked the way `UnitPopup.lua`'s row conditions read them.

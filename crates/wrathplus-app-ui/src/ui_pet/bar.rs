@@ -18,11 +18,14 @@ use crate::target::UNIT_FLAG_POSSESSED;
 
 use super::{PetBar, PetUnit};
 
+/// `(bar_signals, has_bar, hidden, attacking, usable, pickup_allowed, slots)` as last pushed.
+type BarKey = (u32, bool, bool, bool, bool, bool, Vec<PetActionView>);
+
 /// What the feed last pushed, so `PET_BAR_UPDATE` fires on a change; the key's leading `u32` is
 /// [`PetBar::bar_signals`], so a press that changes nothing still repaints.
 #[derive(Default)]
 pub struct PetBarMemory {
-    pushed: Option<(u32, bool, bool, bool, bool, Vec<PetActionView>)>,
+    pushed: Option<BarKey>,
     /// The ten cooldown triples as last pushed, so a cooldown alone is pushed with no event: its
     /// events are [`fire_pet_cooldown_events`]'s.
     cooldowns: Vec<Option<(i64, u32, bool)>>,
@@ -290,6 +293,7 @@ pub fn feed_pet_bar(
         bar.bar_signals,
         has_bar,
         hidden,
+        pet_attacking,
         usable,
         pickup_allowed,
         content,
@@ -299,15 +303,16 @@ pub fn feed_pet_bar(
     if bar_changed || cooldowns_changed {
         script.set_pet_actions(has_bar, usable, pickup_allowed, fresh);
         script.set_pet_bar_hidden(hidden);
+        script.set_pet_attacking(pet_attacking);
         memory.cooldowns = cooldowns;
     }
     if bar_changed {
         debug!(
             "ui_pet: bar {} ({} occupied slot(s), {}{})",
             if key.1 && !key.2 { "shown" } else { "hidden" },
-            key.5.iter().filter(|s| s.name.is_some()).count(),
-            if key.3 { "usable" } else { "disabled" },
-            if key.4 { "" } else { ", possessed" },
+            key.6.iter().filter(|s| s.name.is_some()).count(),
+            if key.4 { "usable" } else { "disabled" },
+            if key.5 { "" } else { ", possessed" },
         );
         memory.pushed = Some(key);
         script.fire_event("PET_BAR_UPDATE", vec![]);
