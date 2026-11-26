@@ -41,7 +41,6 @@ fn receive(
                 return;
             };
             net::list_stabled_pets(npc, purchased_slots, rows, &mut open, &mut names);
-            open.native = true;
             crate::ui_gossip::end_interaction(&mut gossip, &mut quest);
         }
         Packet::Result { result } => {
@@ -92,7 +91,7 @@ fn ui_rows(
                 creature_entry: pet.creature_entry,
                 level: pet.level,
                 name: String::from_utf8_lossy(&pet.name).into_owned(),
-                // Storage compatibility only: native snapshots explicitly bypass loyalty lookup.
+                // 12340's list has no loyalty byte.
                 loyalty: 0,
                 slot,
             })

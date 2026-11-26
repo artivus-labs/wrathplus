@@ -10,8 +10,10 @@
 //! `UnitExists("pet")` is false (`PetStable.lua:138`).
 //!
 //! `PickupStablePet` puts the pet on the global cursor as payload mode 10
-//! ([`super::cursor::CursorPayload::StablePet`]): `[0xb4d900] = 10` is written at one site,
-//! `0x4950ae`, in the stabled-pet grab `0x495010`.
+//! ([`super::cursor::CursorPayload::StablePet`]), written by `0x520c60` at `0x520d08`.
+//!
+//! Unresolved, labelled: `ClosePetStables` (`0x5a1950`) clears only the master's guid, so 12340
+//! keeps answering the read verbs from the last list; a closed stable here answers as none.
 
 use mlua::{Lua, MultiValue, Value};
 
@@ -34,8 +36,9 @@ pub struct StablePetSlot {
     pub level: u32,
     /// The localized `CreatureFamily.dbc` word ("Wolf"), `None` until the creature query lands.
     pub family: Option<String>,
-    /// The localized `PetLoyalty.dbc` name for the wire's loyalty level.
-    pub loyalty: Option<String>,
+    /// The family's pet talent tree, `GetStablePetInfo`'s fifth return (`0x5a1447`); `None` for
+    /// a family with none, which answers four values.
+    pub talent: Option<String>,
     /// The localized food names the pet's family eats: `GetStablePetFoodTypes`'s returns.
     pub diet: Vec<String>,
 }
@@ -58,9 +61,10 @@ pub struct StableState {
 }
 
 impl StableState {
-    /// `GetNumStablePets()`: how many of the five slots hold a pet.
+    /// `GetNumStablePets()`: the stabled pets, `[0xc0f6c8]`, which the list handler decrements for
+    /// the current pet's row (`0x5a12d8`).
     fn num_pets(&self) -> u32 {
-        self.slots.iter().filter(|s| s.is_some()).count() as u32
+        self.slots.iter().skip(1).filter(|s| s.is_some()).count() as u32
     }
 }
 
@@ -190,40 +194,37 @@ fn drag_verb(from: u8, to: u8, state: &StableState) -> Option<StableIntent> {
 pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     let g = lua.globals();
 
-    // GetStablePetInfo(i) → icon, name, level, family, loyalty: five values on every exit
-    // (`0x4cb280`), a miss answering nil, nil, 0, nil, nil.
+    // GetStablePetInfo(index) (`0x5a1330`): an index below 1 is the current pet (`js` at
+    // `0x5a1388`). A row whose creature record or family row is missing misses (`0x5a13da`,
+    // `0x5a140a`) as nil, nil, 0; a hit is icon, name, level, family, then the talent tree if any.
     g.set(
         "GetStablePetInfo",
-        lua.create_function(|lua, i: i64| {
+        lua.create_function(|lua, i: Value| {
+            let i = super::binding_abi::number_arg(lua, i, "Usage: GetStablePetInfo(index)")?;
+            let slot = if i.wrapping_sub(1) < 0 { 0 } else { i as usize };
             let pet = {
                 let model = lua.app_data_ref::<Model>().expect("model app_data");
-                slot_index(i).and_then(|i| model.stable.state.as_ref()?.slots[i].clone())
+                let state = model.stable.state.as_ref();
+                state.and_then(|s| s.slots.get(slot)?.clone())
             };
-            let Some(pet) = pet else {
+            let Some((pet, family)) = pet.and_then(|p| Some((p.clone(), p.family?))) else {
                 return Ok(MultiValue::from_vec(vec![
                     Value::Nil,
                     Value::Nil,
                     Value::Number(0.0),
-                    Value::Nil,
-                    Value::Nil,
                 ]));
             };
-            Ok(MultiValue::from_vec(vec![
-                match &pet.icon {
-                    Some(t) => Value::String(lua.create_string(t)?),
-                    None => Value::Nil,
-                },
-                Value::String(lua.create_string(&pet.name)?),
+            let text = |s: &str| lua.create_string(s).map(Value::String);
+            let mut out = vec![
+                pet.icon.as_deref().map_or(Ok(Value::Nil), text)?,
+                text(&pet.name)?,
                 Value::Number(f64::from(pet.level)),
-                match &pet.family {
-                    Some(f) => Value::String(lua.create_string(f)?),
-                    None => Value::Nil,
-                },
-                match &pet.loyalty {
-                    Some(l) => Value::String(lua.create_string(l)?),
-                    None => Value::Nil,
-                },
-            ]))
+                text(&family)?,
+            ];
+            if let Some(talent) = &pet.talent {
+                out.push(text(talent)?);
+            }
+            Ok(MultiValue::from_vec(out))
         })?,
     )?;
 
@@ -263,7 +264,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // GetNumStablePets() → how many of the five slots hold a pet.
+    // GetNumStablePets() (`0x5a0f60`): the stabled pets, the current one excluded.
     g.set(
         "GetNumStablePets",
         lua.create_function(|lua, ()| {
