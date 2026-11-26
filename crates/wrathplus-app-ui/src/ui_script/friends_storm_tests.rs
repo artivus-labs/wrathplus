@@ -9,9 +9,9 @@ use wrathplus_ui::script::UiScript;
 
 use crate::net::{ClientCommand, NetCommands};
 
-/// AzerothCore's `SendSocialList` answer to `CMSG_CONTACT_LIST{flags 7}`: the flags, then an
-/// empty list.
-const EMPTY_CONTACT_LIST: [u8; 8] = [7, 0, 0, 0, 0, 0, 0, 0];
+/// AzerothCore's `SendSocialList` answer to `ShowFriends`' `CMSG_CONTACT_LIST{flags 1}`: the
+/// flags, then an empty list.
+const EMPTY_CONTACT_LIST: [u8; 8] = [1, 0, 0, 0, 0, 0, 0, 0];
 
 /// MultiBot Chatless's roster listener (`UI/MultiBotUnitsRootUI.lua:2121-2166`), with no
 /// `MultiBot.TimerAfter`, so it takes the addon's own synchronous branch: a rebuild from the

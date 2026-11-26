@@ -2669,7 +2669,7 @@ fn contacts_packet(command: ClientCommand) -> std::io::Result<(u32, Vec<u8>)> {
     let social = |command: S| Ok((command.opcode(), command.encode()?));
     let duel = |command: D| Ok((command.opcode(), command.encode()));
     match command {
-        // `ShowFriends` (`0x6b44f0`) asks for friends alone, flags 1; AC answers with them only.
+        // `ShowFriends` (`0x6b44f0`) asks for friends alone, flags 1.
         ClientCommand::FriendListRequest => social(S::ContactList { flags: 0x01 }),
         ClientCommand::AddFriend { name, note } => social(S::AddFriend {
             name: name.into_bytes(),
