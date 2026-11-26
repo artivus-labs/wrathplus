@@ -2,9 +2,9 @@
 //! guid `[0xbd1968]`, the party slots at `0xbd1948` and the raid roster (`0xbeb568`, rank at
 //! `+0xc`), compared with the active player's guid (`0x4d3790`).
 
-use mlua::{Lua, Value};
+use mlua::{Lua, MultiValue, Value};
 
-use crate::script::binding_abi::flag;
+use crate::script::binding_abi::{bool_or_default, flag};
 use crate::script::{Model, PartyRequest};
 
 /// The local player leads: `[0xbd1968]` is non-zero and equals our guid (`0x52cce3`), no raid
@@ -185,6 +185,19 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 ));
             }
             m.party_requests.push(PartyRequest::LootThreshold(n as u32));
+            Ok(())
+        })?,
+    )?;
+    // ConfirmReadyCheck([ready]) (`0x5740c0`): only grouped with the check's deadline `[0xbeb61c]`
+    // still ahead; the flag by `0x815500` with default false, so 0 and "0" are not ready.
+    g.set(
+        "ConfirmReadyCheck",
+        lua.create_function(|lua, args: MultiValue| {
+            let mut m = lua.app_data_mut::<Model>().expect("model");
+            if grouped(&m) && m.wrath_ready_check.ends_at.is_some_and(|end| end > m.now) {
+                let ready = bool_or_default(args.front(), false);
+                m.party_requests.push(PartyRequest::ReadyCheckAnswer(ready));
+            }
             Ok(())
         })?,
     )?;

@@ -526,19 +526,6 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             Ok(())
         })?,
     )?;
-    // ConfirmReadyCheck(ready) reads its argument as truth: the reference's No button passes no
-    // argument, Yes passes `1`.
-    g.set(
-        "ConfirmReadyCheck",
-        lua.create_function(|lua, ready: Value| {
-            let ready = !matches!(ready, Value::Nil | Value::Boolean(false));
-            let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-            model
-                .party_requests
-                .push(PartyRequest::ReadyCheckAnswer(ready));
-            Ok(())
-        })?,
-    )?;
     // SetRaidRosterSelection(index) / GetRaidRosterSelection(): a client-side cursor; the
     // reference's `0x4bb820` writes a global and sends nothing.
     g.set(
@@ -1292,24 +1279,6 @@ mod tests {
         s.model_mut().player_req.level = 9;
         s.run("ConvertToRaid()").unwrap();
         assert!(s.take_party_requests().is_empty());
-    }
-
-    /// The reference's No button passes no argument, Yes passes `1`.
-    #[test]
-    fn confirm_ready_check_treats_an_absent_argument_as_not_ready() {
-        let mut s = UiScript::new().unwrap();
-        s.run("ConfirmReadyCheck(1) ConfirmReadyCheck() ConfirmReadyCheck(false) ConfirmReadyCheck(0)")
-            .unwrap();
-        assert_eq!(
-            s.take_party_requests(),
-            vec![
-                PartyRequest::ReadyCheckAnswer(true),
-                PartyRequest::ReadyCheckAnswer(false),
-                PartyRequest::ReadyCheckAnswer(false),
-                // `0` is true in Lua.
-                PartyRequest::ReadyCheckAnswer(true),
-            ]
-        );
     }
 
     #[test]
