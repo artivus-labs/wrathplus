@@ -533,7 +533,6 @@ pub(crate) mod token;
 pub(crate) mod wrath_queries;
 pub(crate) mod wrath_verbs;
 
-pub(crate) use resolve::token_recognised;
 pub use resolve::{parse_unit_token, UnitBase, UnitGuids, UnitTokenParse};
 
 pub(in crate::script) use bindings::feign_masked;
