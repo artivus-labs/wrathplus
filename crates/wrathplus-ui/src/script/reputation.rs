@@ -8,7 +8,7 @@
 //! name (`0x4d5e70`). The at-war toggle also refuses in combat and applies the -3000 floor only
 //! toward peace (`0x4d5fd0`); only `canToggleAtWar`, what the pane reports, lives here.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use mlua::{Lua, MultiValue, Value};
 
@@ -111,9 +111,10 @@ enum Row {
 }
 
 impl super::UiScript {
-    /// Push the reputation snapshot and rebuild the tree: as in the reference, whose fold mask
-    /// (`0x84a0a4`) holds expanded bits, every header expands and then "Inactive" collapses, so a
-    /// fold does not survive a standing tick. The selection is kept by slot.
+    /// Push the reputation snapshot and rebuild the tree. The folds survive it, as 12340's rebuild
+    /// saves and restores its mask (`0x5d1a20`-`0x5d1aaf`); a header new to the session opens every
+    /// one (`0x5cfe70` sets the mask at `0x5cfecd`), and only the first list folds "Inactive"
+    /// (`0x5d2e0f`). The selection is kept by slot.
     pub fn set_reputation(&mut self, state: ReputationState) {
         let mut model = self.model_mut();
         let groups = build_groups(&state.entries);
@@ -122,8 +123,24 @@ impl super::UiScript {
                 model.reputation_selected = None;
             }
         }
-        model.reputation_collapsed.clear();
-        model.reputation_collapsed.insert(KEY_INACTIVE);
+        let keys: HashSet<i64> = groups
+            .iter()
+            .flat_map(|g| {
+                std::iter::once(g.key).chain(g.members.iter().filter_map(|m| match m {
+                    Member::Sub(hi, _) => Some(i64::from(state.entries[*hi].faction_id)),
+                    Member::Entry(_) => None,
+                }))
+            })
+            .collect();
+        if model.reputation_headers_seen.is_empty() {
+            model.reputation_collapsed = HashSet::from([KEY_INACTIVE]);
+        } else if !keys.is_subset(&model.reputation_headers_seen) {
+            model.reputation_collapsed.clear();
+        }
+        if !keys.is_empty() {
+            model.reputation_headers_seen.extend(keys);
+            model.reputation_headers_seen.insert(KEY_INACTIVE);
+        }
         model.reputation_groups = groups;
         model.reputation = state;
     }

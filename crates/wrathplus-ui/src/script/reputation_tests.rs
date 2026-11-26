@@ -197,15 +197,27 @@ fn folding_shrinks_the_list_and_index_zero_folds_everything() {
     assert!(s.errors().is_empty(), "{:#?}", s.errors());
 }
 
+/// 12340's rebuild keeps its fold mask (`0x5d1a20`-`0x5d1aaf`); only a header new to the session
+/// resets it to all open (`0x5cfecd`), "Inactive" included, which only the first list folds.
 #[test]
-fn a_push_resets_the_folds() {
-    let mut s = seated();
+fn a_standing_tick_keeps_the_folds_and_a_new_header_opens_them() {
+    let mut s = UiScript::new().expect("VM");
+    let mut st = state();
+    st.entries[1].inactive = true; // Argent Dawn
+    s.set_reputation(st.clone());
     s.run("CollapseFactionHeader(1)").unwrap();
-    assert_eq!(names(&s).len(), 6, "folded");
-    let mut ticked = state();
-    ticked.entries[0].standing = 12345;
-    s.set_reputation(ticked);
-    assert_eq!(names(&s).len(), 8, "the rebuild unfolded it again");
+    assert_eq!(
+        names(&s).len(),
+        6,
+        "Alliance folded, Inactive folded from the start"
+    );
+    st.entries[0].standing = 12345;
+    s.set_reputation(st.clone());
+    assert_eq!(names(&s).len(), 6, "a standing tick keeps both folds");
+    st.entries.push(header(1118, 50, "Classic"));
+    st.entries.push(entry(1119, 51, 1118, "New Friends"));
+    s.set_reputation(st);
+    assert_eq!(names(&s).len(), 11, "a new header opens every fold");
     assert!(s.errors().is_empty(), "{:#?}", s.errors());
 }
 

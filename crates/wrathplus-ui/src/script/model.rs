@@ -967,9 +967,10 @@ pub(crate) struct Model {
     /// The reputation pane's snapshot and the display tree built from it.
     pub(crate) reputation: reputation::ReputationState,
     pub(crate) reputation_groups: Vec<reputation::FactionGroup>,
-    /// Folded headers by key (a `Faction.dbc` id, 0 "Other", -1 "Inactive"), reset on every push
-    /// to all open but Inactive, as the client's rebuild does.
+    /// Folded headers by key (a `Faction.dbc` id, 0 "Other", -1 "Inactive").
     pub(crate) reputation_collapsed: HashSet<i64>,
+    /// Every header key listed this session: 12340 never drops a header slot (`0xc23370`).
+    pub(crate) reputation_headers_seen: HashSet<i64>,
     /// The selection as a reputation-list slot, not a row.
     pub(crate) reputation_selected: Option<u32>,
     /// Reputation calls queued, applied locally first because none of the three sends is acked.
@@ -1591,6 +1592,7 @@ impl Model {
             reputation: reputation::ReputationState::default(),
             reputation_groups: Vec::new(),
             reputation_collapsed: HashSet::new(),
+            reputation_headers_seen: HashSet::new(),
             reputation_selected: None,
             reputation_sends: Vec::new(),
         }
