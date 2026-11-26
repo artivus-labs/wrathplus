@@ -124,12 +124,12 @@ pub struct AuctionListState {
 }
 
 impl AuctionListState {
-    /// This list's remembered direction for `key`, or `false` for a key it has never sorted by.
-    fn reversed(&self, key: &str) -> bool {
+    /// This list's remembered direction for `key`, or `None` for a key it has never sorted by.
+    pub(super) fn reversed(&self, key: &str) -> Option<bool> {
         self.sort
             .iter()
             .find(|(k, _)| k == key)
-            .is_some_and(|(_, rev)| *rev)
+            .map(|&(_, rev)| rev)
     }
 }
 
@@ -341,14 +341,6 @@ fn sell_item_info(model: &Model) -> Option<(String, Option<String>, u32, i64, bo
     ))
 }
 
-/// The reference client's deposit, `floor(rate × stackValue / 100) × floor(minutes / 120)`: the
-/// inner floor zeroes a cheap stack the server still charges a few copper for.
-fn deposit_for(rate: u32, stack_value: u32, minutes: u32) -> u32 {
-    let per_unit = u64::from(rate).saturating_mul(u64::from(stack_value)) / 100;
-    let units = u64::from(minutes) / 120;
-    u32::try_from(per_unit.saturating_mul(units)).unwrap_or(u32::MAX)
-}
-
 pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     let g = lua.globals();
 
@@ -533,27 +525,6 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // IsAuctionSortReversed(type, key) → 1/nil, for any key the stack remembers.
-    g.set(
-        "IsAuctionSortReversed",
-        lua.create_function(|lua, (kind, key): (String, String)| {
-            let model = lua.app_data_ref::<Model>().expect("model app_data");
-            let rev = list_index(&kind)
-                .zip(model.auction.as_ref())
-                .is_some_and(|(i, a)| a.lists[i].reversed(&key));
-            Ok(flag(rev))
-        })?,
-    )?;
-
-    // CanSendAuctionQuery() → 1/nil; a throttled query is dropped silently.
-    g.set(
-        "CanSendAuctionQuery",
-        lua.create_function(|lua, ()| {
-            let model = lua.app_data_ref::<Model>().expect("model app_data");
-            Ok(flag(model.auction_can_query))
-        })?,
-    )?;
-
     // GetAuctionItemClasses() → the ten auctionable class names in the reference's menu order, off
     // the player's ItemClass.dbc; pushed at login, no session needed.
     g.set(
@@ -721,23 +692,6 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // PlaceAuctionBid(type, index, bidAmount); a buyout is a bid of exactly the buyout price.
-    g.set(
-        "PlaceAuctionBid",
-        lua.create_function(|lua, (kind, index, amount): (String, u32, u32)| {
-            let Some(list) = list_index(&kind) else {
-                return Ok(());
-            };
-            let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-            model.auction_bids.push(AuctionBid {
-                list,
-                index,
-                amount,
-            });
-            Ok(())
-        })?,
-    )?;
-
     // StartAuction(minBid, buyoutPrice, runTime), runTime in minutes.
     g.set(
         "StartAuction",
@@ -772,17 +726,6 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 .auction
                 .as_ref()
                 .map_or(0, |a| i64::from(a.deposit_percent)))
-        })?,
-    )?;
-
-    // CalculateAuctionDeposit(runTime) → copper, by the client's arithmetic (`deposit_for`).
-    g.set(
-        "CalculateAuctionDeposit",
-        lua.create_function(|lua, minutes: u32| {
-            let model = lua.app_data_ref::<Model>().expect("model app_data");
-            let rate = model.auction.as_ref().map_or(0, |a| a.deposit_percent);
-            let stack_value = sell_item_info(&model).map_or(0, |(_, _, _, _, _, v)| v);
-            Ok(i64::from(deposit_for(rate, stack_value, minutes)))
         })?,
     )?;
 
@@ -1059,20 +1002,6 @@ mod tests {
         assert_eq!(eleventh(3), Value::Nil);
     }
 
-    /// A 9-copper stack at 5% over 24 h deposits 0 here, where vmangos charges 5.
-    #[test]
-    fn the_deposit_is_the_clients_arithmetic_truncation_and_all() {
-        assert_eq!(deposit_for(5, 9, 1440), 0);
-        // Once the inner floor clears, the duration scales it 1 / 4 / 12.
-        assert_eq!(deposit_for(5, 10_000, 120), 500);
-        assert_eq!(deposit_for(5, 10_000, 480), 2_000);
-        assert_eq!(deposit_for(5, 10_000, 1440), 6_000);
-        // Blackwater's 25% on the same stack.
-        assert_eq!(deposit_for(25, 10_000, 120), 2_500);
-        // Under the two-hour unit it floors to 0; the reference never sends such a duration.
-        assert_eq!(deposit_for(5, 10_000, 60), 0);
-    }
-
     /// Weapon and Armor, then Consumable (flag 0: no subclass rows, but the query scans them).
     fn tree() -> Vec<AuctionCategory> {
         let sub = |sub_id: u32, name: &str, has_inv_types: bool| AuctionSubCategory {
@@ -1203,10 +1132,18 @@ mod tests {
             ],
             ..Default::default()
         };
-        assert!(!list.reversed("bid"), "the primary, not reversed");
-        assert!(list.reversed("quality"), "remembered, and reversed");
-        assert!(!list.reversed("level"));
-        assert!(!list.reversed("seller"), "never sorted by: not reversed");
+        assert_eq!(
+            list.reversed("bid"),
+            Some(false),
+            "the primary, not reversed"
+        );
+        assert_eq!(
+            list.reversed("quality"),
+            Some(true),
+            "remembered, and reversed"
+        );
+        assert_eq!(list.reversed("level"), Some(false));
+        assert_eq!(list.reversed("seller"), None, "never sorted by");
     }
 
     /// Build 12340's widths: `saleStatus` thirteenth, and the sell slot's three extras.
