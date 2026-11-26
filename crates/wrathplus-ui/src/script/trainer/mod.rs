@@ -441,7 +441,7 @@ pub(super) fn install_wrath(lua: &Lua) -> mlua::Result<()> {
             };
             let link = {
                 let model = lua.app_data_ref::<Model>().expect("model app_data");
-                usize::try_from(index.round() as i64)
+                usize::try_from(binding_abi::ftol(index))
                     .ok()
                     .and_then(|i| service(&model, i))
                     .and_then(|s| s.item_link.clone())

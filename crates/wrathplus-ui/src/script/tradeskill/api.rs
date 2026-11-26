@@ -130,7 +130,7 @@ pub(in crate::script) fn install(lua: &Lua) -> mlua::Result<()> {
                     Value::Nil,
                 ])
             };
-            let row = (index.round_ties_even() as i64)
+            let row = i64::from(binding_abi::ftol(index))
                 .checked_sub(1)
                 .and_then(|n| usize::try_from(n).ok())
                 .and_then(|n| rows(&model).get(n).cloned());
@@ -522,7 +522,7 @@ pub(in crate::script) fn install_wrath(lua: &Lua) -> mlua::Result<()> {
     let g = lua.globals();
     let index_arg = |lua: &Lua, args: &MultiValue| -> Option<usize> {
         let n = lua.coerce_number(args.front()?.clone()).ok().flatten()?;
-        usize::try_from(n.round() as i64).ok()
+        usize::try_from(binding_abi::ftol(n)).ok()
     };
     g.set(
         "GetTradeSkillDescription",
@@ -708,6 +708,9 @@ mod wrath_tests {
             vec![(2963, 5), (2963, 2), (2963, 0), (2963, 1)]
         );
         assert!(err(&s, "DoTradeSkill()").contains("Usage: DoTradeSkill(index [, repeat])"));
+        // The index truncates (`0x5db2e8`): 2.7 is row 2, Simple Robe, not row 3.
+        let name = s.eval::<String>("return (GetTradeSkillInfo(2.7))").unwrap();
+        assert_eq!(name, "Simple Robe");
     }
 
     /// The verbs that clear, miss in shape, or raise (`0x5da900`, `0x5db6e0`, `0x5de400`,

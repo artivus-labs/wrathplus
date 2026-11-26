@@ -636,6 +636,7 @@ fn service_rows_folds_and_the_skill_line_follow_12340() {
     let mut s = UiScript::new().unwrap();
     let mut t = trainer();
     t.services[0].skill_line = Some("Alchemy".into());
+    t.services[0].item_link = Some("robe".into());
     s.set_trainer(Some(t));
     assert_eq!(
         s.eval::<Option<i64>>("return select(4, GetTrainerServiceInfo(2))")
@@ -652,6 +653,12 @@ fn service_rows_folds_and_the_skill_line_follow_12340() {
         "the spell's line, not the header"
     );
     assert_eq!(line(&s, 3), None, "no line resolved: nil");
+    assert_eq!(
+        s.eval::<String>("return GetTrainerServiceItemLink(2.7)")
+            .unwrap(),
+        "robe",
+        "the index truncates"
+    );
     for (verb, text) in [
         (
             "CollapseTrainerSkillLine",
