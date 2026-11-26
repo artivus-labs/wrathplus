@@ -60,7 +60,8 @@ fn the_session_edge_clears_the_world_scoped_death_memory_and_nothing_else_does()
         .insert_resource(DeathFeedState {
             mirror: Some((0x1234, true, true)),
             release: Some(ReleaseTimer::Ends(12.0)),
-            vm: crate::app_core::vm_memo::VmMemo::default(),
+            healer: Some(0x5678),
+            ..Default::default()
         });
 
     // No session edge: the memory stands.
@@ -88,7 +89,7 @@ fn the_session_edge_clears_the_world_scoped_death_memory_and_nothing_else_does()
         "a relog must find no mirror, or the login-while-ghost arm cannot fire"
     );
     assert!(
-        feed.release.is_none(),
+        feed.release.is_none() && feed.healer.is_none(),
         "the release window is the dead session's, and re-arms at the next login"
     );
 }
@@ -121,4 +122,19 @@ fn the_release_timer_arms_from_the_bits_and_answers_whole_seconds() {
     );
     assert_eq!(recovery_seconds(Some(130.9), 100.0), 30, "rounded down");
     assert_eq!(recovery_seconds(Some(99.0), 100.0), 0);
+}
+
+/// `0x6d1fc0`: within reach + 4 yd, inclusive; `0x6db010` keeps only a ghost's ask in range.
+#[test]
+fn the_spirit_healer_reaches_four_yards_past_its_reach_and_asks_only_a_ghost() {
+    let me = Vec3::ZERO;
+    assert!(healer_in_range(me, Vec3::new(5.5, 0.0, 0.0), 1.5));
+    assert!(!healer_in_range(me, Vec3::new(5.6, 0.0, 0.0), 1.5));
+    assert!(
+        healer_in_range(me, Vec3::new(0.0, 7.0, 0.0), 3.0),
+        "a bigger reach"
+    );
+    assert_eq!(standing_ask(Some(9), true, |_| true), Some(9));
+    assert_eq!(standing_ask(Some(9), false, |_| true), None, "alive");
+    assert_eq!(standing_ask(Some(9), true, |_| false), None, "out of range");
 }

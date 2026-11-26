@@ -26,6 +26,10 @@ struct DeathFeedState {
     /// World-scoped: the release timer, armed at a death edge and never cleared by a res, as
     /// `0x6dc070` arms it. Labelled: 12340 zeroes it in its UI init (`0x52a9f6`); kept here.
     release: Option<ReleaseTimer>,
+    /// World-scoped: the healer whose ask stood (`0xc9eb10`), which 12340 never clears.
+    healer: Option<u64>,
+    /// This frame: a ghost within [`healer_in_range`] of [`Self::healer`], `AcceptXPLoss`'s gate.
+    xp_loss_ready: bool,
     /// VM-scoped: the announce latches.
     vm: crate::app_core::vm_memo::VmMemo<DeathAnnounced>,
 }
@@ -94,8 +98,17 @@ fn release_seconds(timer: Option<ReleaseTimer>, now: f64) -> i32 {
 /// `CORPSE_RECLAIM_RADIUS` 39 (`Corpse.h:40`), sits 1 yd inside it.
 const CORPSE_RANGE_SQ: f32 = 40.0 * 40.0;
 
-/// The spirit-healer dialog range: `CheckSpiritHealerDist` compares d² ≤ `[0xc4c28c]` (30.864).
-const SPIRIT_HEALER_RANGE_SQ: f32 = 5.5556 * 5.5556;
+/// `CheckSpiritHealerDist`'s range (`0x6d1fc0`): d² ≤ (the healer's `UNIT_FIELD_COMBATREACH` +
+/// 4 yd, `0x9e8d2c`)², `AcceptXPLoss`'s and the ask's too (`0x6db09e`).
+fn healer_in_range(me: Vec3, healer: Vec3, reach: f32) -> bool {
+    me.distance_squared(healer) <= (reach + 4.0).powi(2)
+}
+
+/// The ask that stands (`0x6db010` with a guid, from the click `0x6dde7c` or
+/// `SMSG_SPIRIT_HEALER_CONFIRM` `0x6e3a20`): only a ghost's, within range.
+fn standing_ask(ask: Option<u64>, ghost: bool, in_range: impl Fn(u64) -> bool) -> Option<u64> {
+    ask.filter(|&npc| ghost && in_range(npc))
+}
 
 /// Derive the death state from the self descriptor, push the snapshot, and fire the death events
 /// on its edges.
@@ -141,14 +154,19 @@ fn feed_death(
         let bits = store.0.player_release_bits();
         feed.release = Some(arm_release(bits, store.0.player_flags(), now));
     }
-    let spirit_healer_in_range = death_net.spirit_healer.is_some_and(|npc| {
-        objects
-            .entity(npc)
-            .and_then(|e| transforms.get(e).ok())
-            .is_some_and(|t| {
-                t.translation.distance_squared(self_t.translation) <= SPIRIT_HEALER_RANGE_SQ
-            })
-    });
+    let in_range = |npc: u64| {
+        let reach = objects.object(npc).map(|o| o.unit_combat_reach());
+        let at = objects.entity(npc).and_then(|e| transforms.get(e).ok());
+        at.zip(reach)
+            .is_some_and(|(t, r)| healer_in_range(self_t.translation, t.translation, r))
+    };
+    let memo = feed.vm.get(&script);
+    let asked = memo.confirm_generation != death_net.confirm_generation;
+    memo.confirm_generation = death_net.confirm_generation;
+    let confirmed = standing_ask(death_net.spirit_healer.filter(|_| asked), ghost, in_range);
+    feed.healer = confirmed.or(feed.healer);
+    let spirit_healer_in_range = feed.healer.is_some_and(in_range);
+    feed.xp_loss_ready = ghost && spirit_healer_in_range;
     // Resolved first: the lookup borrows the VM that `set_death` needs mutably.
     let sickness = sickness_duration(store.0.unit_level().unwrap_or(0), &|key: &str| {
         script
@@ -221,11 +239,9 @@ fn feed_death(
     }) {
         script.fire_event("RESURRECT_REQUEST", vec![ScriptValue::Str(name)]);
     }
-    if death_net.spirit_healer.is_some() && memo.confirm_generation != death_net.confirm_generation
-    {
-        memo.confirm_generation = death_net.confirm_generation;
-        // `arg1` is the XP the res costs: `PLAYER_NEXT_LEVEL_XP` × 0.05, truncated (`0x5df837`),
-        // and 0 without the field, as `0x5df806` pushes 0 for a non-local object. No stock
+    if confirmed.is_some() {
+        // `arg1` is the XP the res costs: `PLAYER_NEXT_LEVEL_XP` (`0x60a600`) × 0.05, truncated
+        // (`0x6db0e2`-`0x6db0f3`), and 0 without the field. No stock
         // FrameXML reads it; `UIParent.lua:399` asks `GetResSicknessDuration()`.
         let xp_cost = store
             .0
@@ -381,6 +397,7 @@ fn sickness_duration(level: u32, get: &dyn Fn(&str) -> Option<String>) -> Option
 fn drain_death(
     script: Option<NonSendMut<UiScript>>,
     mut death_net: ResMut<DeathNet>,
+    feed: Res<DeathFeedState>,
     net: Res<NetCommands>,
     targeting: crate::spell::cast_target::CastTargeting,
     mut ladder: crate::spell::CastLadder,
@@ -409,7 +426,8 @@ fn drain_death(
                     None => Ok(()), // the offer timed out; nothing to answer
                 }
             }
-            DeathAction::AcceptXpLoss => match death_net.spirit_healer.take() {
+            // `0x6db114`: the stored healer, kept after the send.
+            DeathAction::AcceptXpLoss => match feed.healer.filter(|_| feed.xp_loss_ready) {
                 Some(npc) => net.0.send(ClientCommand::SpiritHealerActivate { npc }),
                 None => Ok(()),
             },

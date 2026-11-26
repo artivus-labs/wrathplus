@@ -48,7 +48,7 @@ pub struct DeathNet {
     pub resurrect_generation: u32,
     /// Our streamed corpse object's guid, which `CMSG_RECLAIM_CORPSE` carries like the 1.12 client.
     pub corpse_guid: Option<u64>,
-    /// The spirit healer awaiting the XP-loss answer; Accept sends `CMSG_SPIRIT_HEALER_ACTIVATE`.
+    /// The last spirit healer to ask; the UI feed keeps it only for a ghost in range (`0x6db010`).
     pub spirit_healer: Option<u64>,
     /// Bumped per ask: a Cancel clears nothing, so only a fresh ask re-shows the dialog.
     pub confirm_generation: u32,
@@ -56,7 +56,7 @@ pub struct DeathNet {
 
 impl DeathNet {
     /// Arm the spirit healer's XP-loss question. The reference raises it on the click with no
-    /// packet (`0x5df730`), and vmangos also pushes `SMSG_SPIRIT_HEALER_CONFIRM`; both come here.
+    /// packet (`0x6dde7c`), and the server also pushes `SMSG_SPIRIT_HEALER_CONFIRM`; both come here.
     pub fn ask_spirit_healer(&mut self, npc: u64) {
         self.spirit_healer = Some(npc);
         self.confirm_generation = self.confirm_generation.wrapping_add(1);
