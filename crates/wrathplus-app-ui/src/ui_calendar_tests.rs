@@ -227,7 +227,7 @@ fn a_draft_adds_with_its_invites() {
     apply(
         &mut state,
         R::NewDraft {
-            flags: 0,
+            flags: 1,
             arena_slot: None,
         },
         ME,

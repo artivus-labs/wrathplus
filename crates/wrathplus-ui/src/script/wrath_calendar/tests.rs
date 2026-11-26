@@ -52,6 +52,20 @@ fn dates_pack_and_count_like_the_wire() {
     assert_eq!(add_months(2010, 1, -1), (2009, 12));
     let t = d.seconds();
     assert_eq!(WrathCalendarDate::from_seconds(t), d);
+    // `0x5b7fd0`: 0x1 is tested first, and flags naming nothing are "".
+    let token = |flags| WrathCalendarKind::of_flags(flags).token();
+    assert_eq!(
+        [0x401, 0x400, 0x41, 0x40, 0x100, 0x10, 0].map(token),
+        [
+            "PLAYER",
+            "GUILD_EVENT",
+            "PLAYER",
+            "GUILD_ANNOUNCEMENT",
+            "PLAYER",
+            "",
+            ""
+        ]
+    );
 }
 
 /// `CalendarGetMonth` and the two setters move the shown month off today.
@@ -343,6 +357,15 @@ fn a_draft_is_added_with_its_fields() {
     assert!(!s.eval::<bool>("return CalendarCanAddEvent()").unwrap());
     s.set_wrath_calendar_action_pending(false);
     assert!(!s.eval::<bool>("return CalendarCanAddEvent()").unwrap());
+    // A player draft carries 0x1 (`0x5f2abd`), which its add sends.
+    s.run("CalendarNewEvent()").unwrap();
+    assert_eq!(
+        s.take_wrath_calendar_requests(),
+        [WrathCalendarRequest::NewDraft {
+            flags: 1,
+            arena_slot: None
+        }]
+    );
 }
 
 /// The invite list sorts locally and fires its update; a non-moderator is refused the status

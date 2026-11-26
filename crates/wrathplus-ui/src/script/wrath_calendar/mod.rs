@@ -33,6 +33,8 @@ pub enum WrathCalendarKind {
     Holiday,
     RaidLockout,
     RaidReset,
+    /// "": an event whose flags `0x5b7fd0` names nothing (an event created with flags 0).
+    Blank,
 }
 
 impl WrathCalendarKind {
@@ -45,18 +47,28 @@ impl WrathCalendarKind {
             Self::Holiday => "HOLIDAY",
             Self::RaidLockout => "RAID_LOCKOUT",
             Self::RaidReset => "RAID_RESET",
+            Self::Blank => "",
         }
     }
 
-    /// An event's type by its flags: `CALENDAR_FLAG_WITHOUT_INVITES` 0x40, `_GUILD_EVENT` 0x400.
+    /// An event's type by its flags, `0x5b7fd0`'s tests in its order: the player-allowed bit 0x1
+    /// first, so a guild flag on a player event still reads PLAYER.
     pub fn of_flags(flags: u32) -> Self {
-        if flags & 0x40 != 0 {
-            Self::GuildAnnouncement
-        } else if flags & 0x400 != 0 {
-            Self::GuildEvent
-        } else {
-            Self::Player
-        }
+        const ORDER: [(u32, WrathCalendarKind); 9] = [
+            (0x1, WrathCalendarKind::Player),
+            (0x40, WrathCalendarKind::GuildAnnouncement),
+            (0x400, WrathCalendarKind::GuildEvent),
+            (0x4, WrathCalendarKind::System),
+            (0x8, WrathCalendarKind::Holiday),
+            (0x80, WrathCalendarKind::RaidLockout),
+            (0x200, WrathCalendarKind::RaidReset),
+            (0x2, WrathCalendarKind::Player),
+            (0x100, WrathCalendarKind::Player),
+        ];
+        ORDER
+            .iter()
+            .find(|(bit, _)| flags & bit != 0)
+            .map_or(Self::Blank, |&(_, kind)| kind)
     }
 }
 

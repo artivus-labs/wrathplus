@@ -52,6 +52,8 @@ const LUA_SIGNUP: i64 = 2;
 const LOCKED: u32 = 0x10;
 const AUTO_APPROVE: u32 = 0x20;
 const GUILD_EVENT: u32 = 0x400;
+/// `CALENDAR_FLAG_ALL_ALLOWED`, a player event's flag.
+const PLAYER: u32 = 0x1;
 const ANNOUNCEMENT: u32 = 0x40;
 /// `GR_RIGHT_CREATE_GUILD_EVENT`.
 const RIGHT_GUILD_EVENT: u32 = 0x10_0000;
@@ -631,8 +633,9 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     })?;
 
     // ── new events and their fields ───────────────────────────────────────────────────────────
+    // The draft constructor (`0x5f2a56`) sets 0x1 for a player event, 0x40 or 0x400 for the others.
     for (name, flags) in [
-        ("CalendarNewEvent", 0),
+        ("CalendarNewEvent", PLAYER),
         ("CalendarNewGuildEvent", GUILD_EVENT),
         ("CalendarNewGuildAnnouncement", ANNOUNCEMENT),
     ] {
@@ -645,7 +648,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         let Some(slot) = int_arg(lua, &args, 0) else {
             return usage("Usage: CalendarNewArenaTeamEvent(index)");
         };
-        new_draft(lua, 0, u8::try_from(slot).ok());
+        new_draft(lua, PLAYER, u8::try_from(slot).ok());
         many(vec![])
     })?;
     set(lua, "CalendarEventSetTitle", |lua, args| {
