@@ -317,6 +317,20 @@ struct Open {
     /// The view's revision the fields came from.
     synced: Option<(u64, u32)>,
     changed: bool,
+    /// The selected invite's id (`+0x20`), 0 at construction (`0x5f106a`).
+    selected_invite: u64,
+}
+
+impl Open {
+    fn new(what: Opened, fields: WrathCalendarFields) -> Self {
+        Self {
+            what,
+            fields,
+            synced: None,
+            changed: false,
+            selected_invite: 0,
+        }
+    }
 }
 
 /// `CalendarEventSortInvites`' criteria, `0x5b8570` order.
@@ -337,7 +351,6 @@ pub(crate) struct State {
     open: Option<Open>,
     /// `None` sorts by status, the criterion an unknown name also falls to.
     sort: Option<(usize, bool)>,
-    selected_invite: Option<usize>,
     action_pending: bool,
     last_invite: Option<f64>,
     last_add: Option<f64>,
@@ -537,15 +550,8 @@ impl State {
             event_id,
             invite_id,
         };
-        let fields = WrathCalendarFields::default();
-        let (synced, changed) = (None, false);
-        self.open = Some(Open {
-            what,
-            fields,
-            synced,
-            changed,
-        });
-        (self.asked, self.selected_invite) = (None, None);
+        self.open = Some(Open::new(what, WrathCalendarFields::default()));
+        self.asked = None;
         self.selected = self
             .view
             .entries

@@ -1017,23 +1017,30 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             many(vec![])
         })?;
     }
-    // CalendarEventSelectInvite(index) (`0x5b8ae0`): `lua_tointeger` (`0x5b8b0c`), and only an
-    // index within the open event's list (`0x5f1a00`).
+    // CalendarEventSelectInvite(index) (`0x5b8ae0`): `lua_tointeger` (`0x5b8b0c`); an index within
+    // the open event's list stores that invite's id (`0x5f1a00`).
     set(lua, "CalendarEventSelectInvite", |lua, args| {
         let Some(n) = num(lua, &args, 0) else {
             return usage("Usage: CalendarEventSelectInvite(index)");
         };
         let k = crate::script::item_arg::tointeger(n) as i32 as i64 - 1;
         write(lua, |st, _| {
-            let count = st.event().map_or(0, |e| e.invitees.len());
-            if let Some(k) = usize::try_from(k).ok().filter(|&k| k < count) {
-                st.selected_invite = Some(k);
+            let id = usize::try_from(k)
+                .ok()
+                .and_then(|k| st.invitees().get(k).map(|i| i.invite_id));
+            if let (Some(open), Some(id)) = (st.open.as_mut(), id) {
+                open.selected_invite = id;
             }
         });
         many(vec![])
     })?;
     set(lua, "CalendarEventGetSelectedInvite", |lua, _| {
-        let k = read(lua, |st| st.selected_invite.map_or(0, |k| k as i64 + 1));
+        // `0x5bbb00` → `0x5b8e00`: the first invite in the list with that id, 0 for none.
+        let k = read(lua, |st| {
+            let id = st.open.as_ref()?.selected_invite;
+            st.invitees().iter().position(|i| i.invite_id == id)
+        });
+        let k = k.map_or(0, |k| k as i64 + 1);
         many(vec![i(k)])
     })?;
     // CalendarEventSortInvites("criteria", reverse) (`0x5b8570`): a change fires
@@ -1310,21 +1317,17 @@ fn new_draft(lua: &Lua, flags: u32, arena_slot: Option<u8>) {
     write(lua, |st, _| {
         let today = st.today();
         let date = WrathCalendarDate::new(today.year, today.month, today.day, today.hour, 0);
-        st.open = Some(Open {
-            what: Opened::Draft,
-            fields: WrathCalendarFields {
-                event_type: 4,
-                dungeon: -1,
-                date,
-                lockout: date,
-                flags,
-                ..Default::default()
-            },
-            synced: None,
-            changed: false,
-        });
+        let fields = WrathCalendarFields {
+            event_type: 4,
+            dungeon: -1,
+            date,
+            lockout: date,
+            flags,
+            ..Default::default()
+        };
+        st.open = Some(Open::new(Opened::Draft, fields));
         // The constructor zeroes the selection (`0x5bbede`).
-        (st.selected, st.selected_invite, st.asked) = (None, None, None);
+        (st.selected, st.asked) = (None, None);
         st.push(R::NewDraft { flags, arena_slot });
     });
 }

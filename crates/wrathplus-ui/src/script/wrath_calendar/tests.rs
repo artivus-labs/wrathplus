@@ -322,6 +322,13 @@ fn an_opened_event_edits_and_updates() {
         2
     );
     assert!(s.run("CalendarEventSelectInvite()").is_err());
+    // The selection is the invite's id (`+0x20`), found again after a re-sort (`0x5b8e00`).
+    s.run("CalendarEventSortInvites('level')").unwrap();
+    assert_eq!(
+        s.eval::<i64>("return CalendarEventGetSelectedInvite()")
+            .unwrap(),
+        1
+    );
     assert_eq!(
         s.eval::<(String, String, i64)>(
             "local t, d, c = CalendarGetEventInfo() return t, c, select(25, CalendarGetEventInfo()) and 1 or 0"
