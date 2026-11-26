@@ -496,10 +496,10 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     )?;
 
     // AcceptBattlefieldPort(index, accept): nil off slots 1-2, else 1 and the app sends
-    // `CMSG_BATTLEFIELD_PORT` with the slot's queue id. A decline of the listed type also closes
-    // the list window (`0x54dc3e`). Unresolved, labelled: the accept-side refusals (`0x54da10`:
-    // a unit flag, the death check, a movement flag, `0x54a430`, the group check), each a
-    // game-error line and nil, are not modelled.
+    // `CMSG_BATTLEFIELD_PORT` with the slot's queue id. An accept with a player outside a
+    // battleground (`0x54a700`: the map's `InstanceType` 3) first runs the port refusals, each a
+    // catalog error and nil with nothing sent. A decline of the listed type also closes the list
+    // window (`0x54dc3e`).
     g.set(
         "AcceptBattlefieldPort",
         lua.create_function(|lua, args: MultiValue| {
@@ -514,6 +514,14 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             let accept = bool_or_default(args.get(1), false);
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
             let model = &mut *model;
+            let in_bg = (model.wrath_state.instance.as_ref()).is_some_and(|i| i.instance_type == 3);
+            if accept && player_exists(model) && !in_bg {
+                let gates = super::wrath_port_gates::PortGates::of(model);
+                if let Some(key) = gates.refusal(super::wrath_port_gates::CombatTest::Flag) {
+                    model.ui_errors.push(key);
+                    return Ok(Value::Nil);
+                }
+            }
             model
                 .battlefield
                 .requests

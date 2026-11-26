@@ -202,6 +202,55 @@ fn status_answers_seven_values_and_the_port_closes_the_listed_window() {
         .collect();
     assert_eq!(events, ["BATTLEFIELDS_CLOSED"]);
     assert!(s.run("GetBattlefieldStatus('x')").is_err());
+    // `0x54daf0`: an accept refused, a catalog error and nil, nothing sent; not inside a
+    // battleground (`0x54a700`), nor for a decline.
+    let mut player = s.model_ref().unit("player").cloned().unwrap();
+    player.flags = 0x800;
+    s.set_unit("player", Some(player.clone()));
+    s.set_wrath_mirror_timer(0, Some(fatigue()));
+    s.take_ui_errors();
+    assert!(s
+        .eval::<Option<i64>>("return AcceptBattlefieldPort(1, 1)")
+        .unwrap()
+        .is_none());
+    assert_eq!(s.take_ui_errors(), ["ERR_NOT_IN_COMBAT"]);
+    player.flags = 0;
+    s.set_unit("player", Some(player));
+    assert!(s
+        .eval::<Option<i64>>("return AcceptBattlefieldPort(1, 1)")
+        .unwrap()
+        .is_none());
+    assert_eq!(s.take_ui_errors(), ["ERR_NOT_WHILE_FATIGUED"]);
+    assert_eq!(
+        s.eval::<i64>("return AcceptBattlefieldPort(1, 0)").unwrap(),
+        1
+    );
+    s.set_wrath_instance_info(Some(crate::script::WrathInstanceInfo {
+        instance_type: 3,
+        ..Default::default()
+    }));
+    assert_eq!(
+        s.eval::<i64>("return AcceptBattlefieldPort(1, 1)").unwrap(),
+        1
+    );
+    let ports: Vec<_> = s.take_battlefield_requests();
+    assert_eq!(
+        ports.len(),
+        2,
+        "the decline and the accept inside a battleground"
+    );
+    assert!(s.take_ui_errors().is_empty());
+}
+
+fn fatigue() -> crate::script::WrathMirrorTimer {
+    crate::script::WrathMirrorTimer {
+        value: 60_000,
+        max_value: 60_000,
+        scale: -1,
+        paused: false,
+        label: String::new(),
+        started: 0.0,
+    }
 }
 
 #[test]

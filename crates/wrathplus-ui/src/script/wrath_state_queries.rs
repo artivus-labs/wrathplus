@@ -61,6 +61,13 @@ pub(crate) struct State {
     force_gossip: bool,
 }
 
+impl State {
+    /// The fatigue slot (`0xbd0b80`) running down: its scale (`+0xc`) below 0.
+    pub(crate) fn fatigue_draining(&self) -> bool {
+        self.mirror[0].as_ref().is_some_and(|t| t.scale < 0)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 struct PvpTimer {
     /// `PLAYER_FLAGS_PVP_TIMER` (`0x40000`).
