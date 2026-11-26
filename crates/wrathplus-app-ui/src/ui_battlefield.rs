@@ -706,6 +706,7 @@ fn drain_battlefield(
                 let flags = store.and_then(|s| s.0.get(Field::PlayerFlags)).unwrap_or(0);
                 let can_gain_xp = u8::from(level < cap && flags >> 25 & 1 != 0);
                 state.bg_type = bg_type;
+                state.list.iter_mut().for_each(|l| l.instances.clear()); // `0x54e6a8`
                 send(Bg::List {
                     bg_type,
                     from_where: 1,

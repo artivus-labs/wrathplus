@@ -56,7 +56,7 @@ fn the_type_list_sorts_random_first_then_holiday_then_level() {
         .unwrap()
     };
     assert_eq!(names(&s), "32,2,3,1,7");
-    s.run("SortBGList()").unwrap();
+    assert!(s.eval::<bool>("return SortBGList()").unwrap());
     assert_eq!(names(&s), "32,7,2,3,1");
     let (n, enter, holiday, random, id): (String, Option<i64>, Option<i64>, Option<i64>, i64) =
         s.eval("return GetBattlegroundInfo(2.9)").unwrap();
@@ -76,7 +76,14 @@ fn the_listed_type_drives_info_arena_and_group_answers() {
         0,
         "no listed type"
     );
+    s.set_battlefield_list(BattlefieldListView {
+        bg_type: 3,
+        instances: vec![5, 6],
+        ..Default::default()
+    });
     s.run("RequestBattlegroundInstanceInfo(4)").unwrap();
+    // `0x54e6a8`: the old type's instances are gone until the reply.
+    assert_eq!(s.eval::<i64>("return GetNumBattlefields()").unwrap(), 0);
     assert_eq!(
         s.take_battlefield_requests(),
         [BattlefieldRequest::List { bg_type: 1 }]
@@ -266,8 +273,10 @@ fn fatigue() -> crate::script::WrathMirrorTimer {
 fn world_pvp_reads_the_pushed_queue_and_states() {
     let mut s = vm();
     assert_eq!(s.arity("GetWintergraspWaitTime()").unwrap(), 0);
-    s.set_wrath_server_time_offset(Some(0));
-    let now = s.wrath_server_now().unwrap() as i32;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i32;
     s.set_world_pvp(WorldPvpView {
         status: 1,
         zone_name: Some("Wintergrasp".into()),
@@ -280,6 +289,10 @@ fn world_pvp_reads_the_pushed_queue_and_states() {
         previous_arena_season: 7,
         subzone_pvp_poi: true,
     });
+    // `0x548700` before any time reply: the local clock with a zero offset, not 0.
+    let wait = s.eval::<i64>("return GetWintergraspWaitTime()").unwrap();
+    assert!((598..=600).contains(&wait), "{wait}");
+    s.set_wrath_server_time_offset(Some(0));
     let got = s
         .eval::<String>(
             "local st, z, id, left = GetWorldPVPQueueStatus(1) \

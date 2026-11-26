@@ -420,7 +420,9 @@ pub(super) fn install_wrath(lua: &Lua) -> mlua::Result<()> {
                 Some(t) => Value::String(lua.create_string(&t.name)?),
                 None => Value::Nil,
             }];
-            out.extend((0..3).map(|k| Value::Integer(team.map_or(0, |t| i64::from(t.ratings[k])))));
+            // Signed (`fild`, `0x54a20b`-`0x54a25f`).
+            let word = |k: usize| team.map_or(0, |t| i64::from(t.ratings[k] as i32));
+            out.extend((0..3).map(|k| Value::Integer(word(k))));
             Ok(MultiValue::from_vec(out))
         })?,
     )?;
@@ -565,6 +567,10 @@ mod tests {
         );
         assert!(s
             .eval::<bool>("return GetBattlefieldTeamInfo(2) == nil")
+            .unwrap());
+        s.model_mut().battlefield_board.scores.teams[1].ratings[0] = u32::MAX;
+        assert!(s
+            .eval::<bool>("return select(2, GetBattlefieldTeamInfo(1)) == -1")
             .unwrap());
         assert_eq!(
             s.eval::<i64>("return GetBattlefieldStatData(1, 1)")

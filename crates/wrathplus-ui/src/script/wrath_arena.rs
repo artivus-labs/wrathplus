@@ -221,21 +221,20 @@ fn arg(args: &MultiValue, i: usize) -> Value {
     args.get(i).cloned().unwrap_or(Value::Nil)
 }
 
-/// `0x815500`'s boolean read: an absent argument takes `default`, else Lua truth.
+/// `0x815500`'s boolean read (`0x5a35e6`, `0x5a297e`): a number 0 or `"0"` is false.
 fn flag(args: &MultiValue, i: usize, default: bool) -> bool {
-    match args.get(i) {
-        None => default,
-        Some(v) => !matches!(v, Value::Nil | Value::Boolean(false)),
-    }
+    super::binding_abi::bool_or_default(args.get(i), default)
 }
 
 fn int(n: u32) -> Value {
     Value::Integer(i64::from(n))
 }
 
-/// An ARGB colour's red, green and blue over 255 (`0xa45564`).
+/// An ARGB colour's red, green and blue times `f32(1/255)` (`fmul [0xa45564]`), so 255 is
+/// 1.0000000591389835, not 1.
 fn rgb(colour: u32) -> [Value; 3] {
-    [16, 8, 0].map(|shift| Value::Number(f64::from(((colour >> shift) & 0xff) as f32 / 255.0)))
+    [16, 8, 0]
+        .map(|shift| Value::Number(f64::from((colour >> shift) & 0xff) * f64::from(1.0f32 / 255.0)))
 }
 
 pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
@@ -580,7 +579,7 @@ mod tests {
             local n, size, rating, wp, ww, sp, sw, pp, psp, rank, pr, r, g, b, e, er, eg, eb, bo, br, bg, bb = GetArenaTeam(1)
             assert(n == "Two" and size == 2 and rating == 1600 and wp == 4 and ww == 3)
             assert(sp == 20 and sw == 11 and pp == 3 and psp == 8 and rank == 42 and pr == 1500)
-            assert(r == 1 and g == 0 and b == 0 and e == 7 and eg == 1 and bo == 3 and bb == 1)
+            assert(r == 255 * 0.003921568859368563 and g == 0 and b == 0 and e == 7 and eg > 1 and bo == 3)
             assert(select("#", GetArenaTeam(1)) == 22 and select("#", GetArenaTeam(2)) == 22)
             assert(GetArenaTeam(2) == nil and select(22, GetArenaTeam(4)) == 0)
             assert(GetArenaTeam(1.9) == "Two" and GetArenaTeam(2.9) == nil)
@@ -628,7 +627,7 @@ mod tests {
                  return table.concat({n, z, r, p, w, pp, pr, bb, e}, '|')",
             )
             .unwrap();
-        assert_eq!(got, "Trio|3|1800|40|22|30|1750|1|4");
+        assert_eq!(got, "Trio|3|1800|40|22|30|1750|1.000000059139|4");
         assert!(s.run("GetInspectArenaTeamData()").is_err());
     }
 
@@ -650,7 +649,11 @@ mod tests {
             s.model_mut().wrath_arena.sort[..4],
             [(2, false), (6, true), (0, false), (1, false)]
         );
-        s.run("SetArenaTeamRosterShowOffline(false)").unwrap();
+        // `0x815500`: a number 0 is false, where Lua truth would keep it shown.
+        s.run("SetArenaTeamRosterShowOffline(0)").unwrap();
+        assert!(s
+            .eval::<bool>("return GetArenaTeamRosterShowOffline() == nil")
+            .unwrap());
         assert_eq!(first(&s), "Bo");
         assert_eq!(
             s.eval::<i64>("return GetNumArenaTeamMembers(1)").unwrap(),

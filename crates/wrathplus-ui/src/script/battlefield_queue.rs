@@ -317,9 +317,12 @@ impl super::UiScript {
     }
 }
 
-/// The confirm countdown's server clock, `0x548700`; `None` until the first time reply.
-fn server_now(model: &Model) -> Option<i64> {
-    super::wrath_server_time::server_now(model)
+/// The server clock `0x548700`: `time(0)` plus the offset, which is 0 before the first time reply.
+fn server_now(model: &Model) -> i64 {
+    super::wrath_server_time::server_now(model).unwrap_or_else(|| {
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH);
+        now.map_or(0, |d| d.as_secs() as i64)
+    })
 }
 
 pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
@@ -652,19 +655,20 @@ pub(super) fn install_wrath(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // Re-sort the type list with the current holiday states; a numeric argument is read and
-    // ignored (`0x54c9f0`).
+    // Re-sort the type list with the current holiday states; no argument is read, and the answer
+    // is `true` (`0x54c9f9`).
     g.set(
         "SortBGList",
         lua.create_function(|lua, _: MultiValue| {
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
             model.battlefield.sort_order();
-            Ok(())
+            Ok(true)
         })?,
     )?;
 
     // `CMSG_BATTLEFIELD_LIST` for the type at that position, which becomes the listed type at
-    // once (`0x54e5b0`); nothing without a player or out of range.
+    // once, its instances emptied until the reply (`0x54e6a8`); nothing without a player or out
+    // of range.
     g.set(
         "RequestBattlegroundInstanceInfo",
         lua.create_function(|lua, index: Value| {
@@ -678,6 +682,7 @@ pub(super) fn install_wrath(lua: &Lua) -> mlua::Result<()> {
             if let Some(&bg_type) = slot_index(index, q.order.len()).map(|i| &q.order[i]) {
                 if q.ty(bg_type).is_some() {
                     q.list.bg_type = bg_type;
+                    q.list.instances.clear();
                     q.requests.push(BattlefieldRequest::List { bg_type });
                 }
             }
@@ -697,7 +702,7 @@ pub(super) fn install_wrath(lua: &Lua) -> mlua::Result<()> {
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             let w = &model.battlefield.world_pvp;
             let left = if w.status == 2 {
-                i64::from(w.deadline) - server_now(&model).unwrap_or(0)
+                i64::from(w.deadline) - server_now(&model)
             } else {
                 0
             };
@@ -727,7 +732,7 @@ pub(super) fn install_wrath(lua: &Lua) -> mlua::Result<()> {
             if !w.wintergrasp_waiting {
                 return Ok(MultiValue::new());
             }
-            let left = (i64::from(w.wintergrasp_next) - server_now(&model).unwrap_or(0)).max(0);
+            let left = (i64::from(w.wintergrasp_next) - server_now(&model)).max(0);
             Ok(MultiValue::from_vec(vec![Value::Integer(left)]))
         })?,
     )?;
