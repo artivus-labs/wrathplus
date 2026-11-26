@@ -384,7 +384,7 @@ fn repair_costs(
                 .insert((crate::inventory::BANK_CONTAINER, u32::from(i) + 1), c);
         }
     }
-    // Bags 1-4 are inventory slots 19-22, bank bags 5-10 the bank bag slots.
+    // Bags 1-4 are inventory slots 19-22, bank bags 5-11 the bank bag slots.
     let bags = (1..=4u8)
         .map(|b| (i64::from(b), store.player_inv_slot(18 + b)))
         .chain((0..crate::inventory::BANK_BAGS).map(|i| {
@@ -1004,6 +1004,11 @@ pub mod purse_fixture {
             },
         );
         script.set_container(0, Some(bag.clone()));
+        // The vault's last slot too, past the 1.12 vault's 24.
+        (bag.num_slots, bag.slots) = (
+            28,
+            [(1, bag.slots[&1].clone()), (28, bag.slots[&1].clone())].into(),
+        );
         script.set_container(crate::inventory::BANK_CONTAINER, Some(bag));
         script
             .run(
@@ -1315,8 +1320,8 @@ mod tests {
         const ITEM_DURABILITY: u16 = Field::ItemDurability.index();
         let main_hand = FIELD_PLAYER_INV_SLOT_HEAD + 2 * 15;
         let backpack_1 = FIELD_PLAYER_INV_SLOT_HEAD + 2 * 23;
-        // `PLAYER_FIELD_BANK_SLOT_1`, inventory slot 39.
-        let bank_1 = FIELD_PLAYER_INV_SLOT_HEAD + 2 * 39;
+        // The 28th bank slot, inventory slot 66: past the 1.12 vault's 24.
+        let bank_28 = FIELD_PLAYER_INV_SLOT_HEAD + 2 * 66;
 
         let (mut app, me) = repair_app(main_hand);
         app.add_systems(Update, feed_repair_costs);
@@ -1342,7 +1347,7 @@ mod tests {
                 .eval::<(i64, i64, i64, i64)>(
                     r#"local _, _, worn = TT:SetInventoryItem("player", 16)
                        local _, carried = TT:SetBagItem(0, 1)
-                       local _, banked = TT:SetBagItem(-1, 1)
+                       local _, banked = TT:SetBagItem(-1, 28)
                        return worn, carried, banked, (GetRepairAllCost())"#,
                 )
                 .unwrap()
@@ -1369,13 +1374,13 @@ mod tests {
             (19, 0, 0, 19),
             "a repair's write: 20 points"
         );
-        write(&mut app, me, &moved(main_hand, bank_1));
+        write(&mut app, me, &moved(main_hand, bank_28));
         assert_eq!(
             frame(&mut app),
             (0, 0, 19, 0),
             "banked: priced, not in the total"
         );
-        write(&mut app, me, &moved(bank_1, backpack_1));
+        write(&mut app, me, &moved(bank_28, backpack_1));
         assert_eq!(frame(&mut app), (0, 19, 0, 19), "the sword in the backpack");
         write(&mut app, vendor, &[(FIELD_UNIT_FACTIONTEMPLATE, 0)]);
         assert_eq!(
