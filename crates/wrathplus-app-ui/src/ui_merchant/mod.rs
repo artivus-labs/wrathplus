@@ -465,7 +465,7 @@ pub fn feed_repair_costs(
     });
     // Both only with a repairer open (`0x5859cf`).
     let total = (
-        repairer.then(|| repair_all_cost(&costs)).unwrap_or(0),
+        if repairer { repair_all_cost(&costs) } else { 0 },
         repairer && damaged,
     );
     if memo
