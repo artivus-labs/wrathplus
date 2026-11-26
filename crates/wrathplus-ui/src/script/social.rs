@@ -160,13 +160,14 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // SetSelectedFriend(index): set now, since `FriendsList_Update` reads it back in the same
-    // call, and queue it for the app.
+    // SetSelectedFriend(index) (`0x6b4400`): set now, since `FriendsList_Update` reads it back in
+    // the same call, and queue it for the app.
     g.set(
         "SetSelectedFriend",
-        lua.create_function(|lua, index: i64| {
+        lua.create_function(|lua, index: Value| {
+            let index = number_arg(lua, index, "Usage: SetSelectedFriend(index)")?;
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-            let index = clamp_index(index, model.social.friends.len());
+            let index = clamp_index(index.into(), model.social.friends.len());
             model.social.selected_friend = index;
             model
                 .social_requests
@@ -198,18 +199,23 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // RemoveFriend(indexOrName): the friends frame passes a row, `/removefriend` a name.
+    // RemoveFriend(indexOrName) (`0x6b7bd0`): the friends frame passes a row, `/removefriend` a
+    // name. A number or numeric string is a row, truncated; another type raises.
     g.set(
         "RemoveFriend",
         lua.create_function(|lua, who: Value| {
-            let request = match who {
-                Value::Integer(i) if i >= 1 => Some(SocialRequest::RemoveFriendIndex(i as u32)),
-                Value::Number(n) if n >= 1.0 => Some(SocialRequest::RemoveFriendIndex(n as u32)),
-                Value::String(s) => {
-                    let name = s.to_str()?.to_string();
-                    (!name.trim().is_empty()).then_some(SocialRequest::RemoveFriendName(name))
-                }
-                _ => None,
+            const USAGE: &str = r#"Usage: RemoveFriend(["name"] or [index])"#;
+            let request = if is_number(lua, Some(&who)) {
+                let row = number_arg(lua, who, USAGE)?;
+                u32::try_from(row)
+                    .ok()
+                    .filter(|&r| r >= 1)
+                    .map(SocialRequest::RemoveFriendIndex)
+            } else if is_string(Some(&who)) {
+                let name = string_arg(lua, who, USAGE)?;
+                (!name.trim().is_empty()).then_some(SocialRequest::RemoveFriendName(name))
+            } else {
+                return Err(mlua::Error::runtime(USAGE));
             };
             if let Some(request) = request {
                 let mut model = lua.app_data_mut::<Model>().expect("model app_data");
@@ -253,9 +259,10 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     )?;
     g.set(
         "SetSelectedIgnore",
-        lua.create_function(|lua, index: i64| {
+        lua.create_function(|lua, index: Value| {
+            let index = number_arg(lua, index, "Usage: SetSelectedIgnore(index)")?;
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-            let index = clamp_index(index, model.social.ignores.len());
+            let index = clamp_index(index.into(), model.social.ignores.len());
             model.social.selected_ignore = index;
             model
                 .social_requests
@@ -333,11 +340,11 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
 
     g.set(
         "SendWho",
-        lua.create_function(|lua, filter: Option<String>| {
+        lua.create_function(|lua, filter: Value| {
+            // `0x6b6b50`: a non-string raises.
+            let filter = string_arg(lua, filter, "Usage: SendWho(\"filter\")")?;
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-            model
-                .social_requests
-                .push(SocialRequest::Who(filter.unwrap_or_default()));
+            model.social_requests.push(SocialRequest::Who(filter));
             Ok(())
         })?,
     )?;
@@ -364,16 +371,12 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // SetWhoToUI(flag): the Who frame passes 1 on show and 0 on hide; nil, false and 0 are off.
+    // SetWhoToUI(flag) (`0x6b3430`): the Who frame passes 1 on show and 0 on hide, read through
+    // `0x815500` with a false default, so `"0"` and `"off"` are off too.
     g.set(
         "SetWhoToUI",
-        lua.create_function(|lua, flag: Value| {
-            let on = match flag {
-                Value::Nil | Value::Boolean(false) => false,
-                Value::Integer(0) => false,
-                Value::Number(n) => n != 0.0,
-                _ => true,
-            };
+        lua.create_function(|lua, args: MultiValue| {
+            let on = super::binding_abi::bool_or_default(args.front(), false);
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
             model.social_requests.push(SocialRequest::SetWhoToUi(on));
             Ok(())
@@ -543,6 +546,56 @@ mod tests {
             let err = s.run(call).unwrap_err().to_string();
             assert!(err.contains(usage), "{err}");
         }
+    }
+
+    /// 12340's argument forms: a number or numeric string is an index, truncated (`fistp`, RC=11),
+    /// and a wrong type raises the verb's usage line (`SetSelectedFriend` `0x6b4400`,
+    /// `SetSelectedIgnore` `0x6b48a0`, `RemoveFriend` `0x6b7bd0`, `SendWho` `0x6b6b50`);
+    /// `SetWhoToUI` (`0x6b3430`) reads its flag through `0x815500`.
+    #[test]
+    fn the_list_verbs_take_12340_argument_forms() {
+        let mut s = UiScript::new().unwrap();
+        s.set_social(SocialState {
+            friends: vec![super::FriendInfo::default(); 2],
+            ignores: vec!["Spammer".into()],
+            ..SocialState::default()
+        });
+        s.run("SetSelectedFriend('2.7') SetSelectedIgnore(1.9) RemoveFriend('2')")
+            .unwrap();
+        s.run("SetWhoToUI('0') SetWhoToUI('off') SetWhoToUI(1)")
+            .unwrap();
+        assert_eq!(
+            s.eval::<(i64, i64)>("return GetSelectedFriend(), GetSelectedIgnore()")
+                .unwrap(),
+            (2, 1)
+        );
+        assert_eq!(
+            s.take_social_requests(),
+            vec![
+                SocialRequest::SelectFriend(2),
+                SocialRequest::SelectIgnore(1),
+                SocialRequest::RemoveFriendIndex(2),
+                SocialRequest::SetWhoToUi(false),
+                SocialRequest::SetWhoToUi(false),
+                SocialRequest::SetWhoToUi(true),
+            ]
+        );
+        for (call, usage) in [
+            ("SetSelectedFriend()", "Usage: SetSelectedFriend(index)"),
+            ("SetSelectedIgnore()", "Usage: SetSelectedIgnore(index)"),
+            (
+                "RemoveFriend()",
+                r#"Usage: RemoveFriend(["name"] or [index])"#,
+            ),
+            ("SendWho()", r#"Usage: SendWho("filter")"#),
+        ] {
+            let err = s.run(call).unwrap_err().to_string();
+            assert!(err.contains(usage), "{call}: {err}");
+        }
+        assert!(
+            s.take_social_requests().is_empty(),
+            "a raised call queues nothing"
+        );
     }
 
     /// Two `/who` hits and a `WHO_LIST_UPDATE` handler that records the order it sees.

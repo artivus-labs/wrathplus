@@ -371,10 +371,10 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         };
         let first = arg(&args, 0);
         let request = match &first {
-            Value::Integer(_) | Value::Number(_) => {
-                let i = number(lua, &first).unwrap_or(0.0).round_ties_even() as i64;
-                // 100 friend rows (`0x6b7c90`).
-                if !(1..=100).contains(&i) {
+            // `0x6b7cbd`: a number or numeric string is a row, truncated, of the 100 (`0x6b7cef`).
+            _ if super::binding_abi::is_number(lua, Some(&first)) => {
+                let i = number(lua, &first).unwrap_or(0.0).trunc();
+                if !(1.0..=100.0).contains(&i) {
                     return none();
                 }
                 R::SetFriendNotes {
@@ -581,7 +581,7 @@ mod tests {
         s.run(
             "AcceptArenaTeam() ArenaTeamDisband(2) DeclineLevelGrant() CancelSummon() \
              RespondInstanceLock(1) SetLFGBootVote() BattlefieldMgrQueueInviteResponse(7, true) \
-             ComplainChat(42) ComplainChat('Bob', 'spam') SetFriendNotes(3, 'n') \
+             ComplainChat(42) ComplainChat('Bob', 'spam') SetFriendNotes('3.9', 'n') \
              SetFriendNotes(200, 'x') ContainerRefundItemPurchase(0, 4) EndRefund(2) EndRefund(5) \
              PlaceGlyphInSocket(1) RemoveGlyphFromSocket(2) AddMute('x') BNRemoveFriend(1) \
              DeclineInvite('Trade') DeclineInvite('')",
@@ -629,6 +629,10 @@ mod tests {
         );
         assert!(s.run("ComplainChat()").is_err());
         assert!(s.run("ArenaTeamDisband()").is_err());
+        assert!(
+            s.run("SetFriendNotes()").is_err(),
+            "a numeric string is an index, truncated"
+        );
     }
 
     use WrathPopupRequest as R;
