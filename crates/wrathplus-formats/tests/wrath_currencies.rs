@@ -33,6 +33,9 @@ fn installed_wrath_currency_metadata() {
     let categories = load_currency_categories(&mut chain).unwrap();
     assert_eq!(types.len(), 26);
     assert_eq!(categories.len(), 8);
+    // The installed table is not in id order, and its order is the backpack's.
+    let ids: Vec<u32> = types.iter().map(|row| row.id).take(8).collect();
+    assert_eq!(ids, [1, 2, 42, 61, 81, 241, 103, 104]);
     // Emblem of Frost: item identity is not the currency DBC id or the known bit.
     let frost = types.get_by_item(49426).unwrap();
     assert_eq!(
