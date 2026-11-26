@@ -600,7 +600,9 @@ pub(super) fn install_wrath_engine_cvars(lua: &Lua) -> mlua::Result<()> {
     register.call::<()>(("timeMgrAlarmMessage", ""))?;
     // ShowAllSpellRanks: registered with the game's CVars at `0x51f1e1` (flags 0x10, category 4)
     // with default "1", every rank shown.
-    register.call::<()>(("ShowAllSpellRanks", "1"))
+    register.call::<()>(("ShowAllSpellRanks", "1"))?;
+    // combatLogRetentionTime: `0x51eff2` (flags 0x10, category 4), the combat log's seconds.
+    register.call::<()>(("combatLogRetentionTime", "300"))
 }
 
 fn install_video_verbs(lua: &Lua) -> mlua::Result<()> {
