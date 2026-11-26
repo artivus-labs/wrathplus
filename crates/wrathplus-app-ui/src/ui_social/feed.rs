@@ -717,23 +717,25 @@ mod tests {
             (12, area(0, "Elwynn Forest")),
             (87, area(12, "Goldshire")),
         ]);
-        let mut social = SocialState::default();
-        social.friends = vec![
-            wrathplus_protocol::types::FriendEntry {
-                guid: 7,
-                status: friend_status::OFFLINE,
-                area: 87,
-                level: 60,
-                class: 4,
-            },
-            wrathplus_protocol::types::FriendEntry {
-                guid: 8,
-                status: friend_status::AFK | FRIEND_STATUS_RAF,
-                area: 999,
-                level: 1,
-                class: 0,
-            },
-        ];
+        let social = SocialState {
+            friends: vec![
+                wrathplus_protocol::types::FriendEntry {
+                    guid: 7,
+                    status: friend_status::OFFLINE,
+                    area: 87,
+                    level: 60,
+                    class: 4,
+                },
+                wrathplus_protocol::types::FriendEntry {
+                    guid: 8,
+                    status: friend_status::AFK | FRIEND_STATUS_RAF,
+                    area: 999,
+                    level: 1,
+                    class: 0,
+                },
+            ],
+            ..Default::default()
+        };
         let (tx, _rx) = crossbeam_channel::unbounded();
         let away = |s: u8| status_flag_key(s).unwrap_or_default().to_string();
         let names = NameCache::default();
