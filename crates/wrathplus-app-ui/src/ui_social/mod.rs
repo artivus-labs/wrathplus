@@ -16,6 +16,7 @@ use crate::app_core::schedule::UiInput;
 
 pub mod feed;
 pub mod native_who;
+pub mod player_names;
 mod query;
 
 pub(crate) use crate::app_core::interaction::SocialState;
@@ -173,6 +174,7 @@ impl Plugin for UiSocialPlugin {
                     .after(wrathplus_world::schedule::WorldStage::Net)
                     .before(UiFeed),
                 feed::feed_social.in_set(UiFeed),
+                player_names::feed_player_names.in_set(UiFeed),
                 feed::drain_social.after(UiInput),
             ),
         );

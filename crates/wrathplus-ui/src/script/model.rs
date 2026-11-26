@@ -297,6 +297,7 @@ pub(crate) struct Model {
     pub(crate) wrath_quests: super::wrath_quest_queries::State,
     pub(crate) wrath_inspect_talents: Option<super::WrathInspectTalents>,
     pub(crate) talent_groups: super::WrathTalentGroups,
+    pub(crate) player_names: std::sync::Arc<HashMap<u64, super::PlayerNameInfo>>,
     /// The player's talent preview ranks and queued `LearnPreviewTalents` lists.
     pub(crate) talent_preview: super::wrath_talent_preview::TalentPreview,
     /// The six glyph sockets the app pushes, the active group's and the other's; `None` without.
@@ -1218,6 +1219,7 @@ impl Model {
             wrath_quests: Default::default(),
             wrath_inspect_talents: None,
             talent_groups: Default::default(),
+            player_names: Default::default(),
             talent_preview: Default::default(),
             glyph_sockets: None,
             inactive_glyph_sockets: None,

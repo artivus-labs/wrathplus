@@ -48,6 +48,7 @@ mod wrath_friends_frame;
 mod wrath_guild_bank;
 mod wrath_macro_icons;
 mod wrath_override_bindings;
+mod wrath_player_names;
 mod wrath_session;
 mod wrath_static_popup;
 mod wrath_unit_casts;
@@ -79,6 +80,7 @@ pub use wrath_friends_frame::{
 };
 pub use wrath_guild_bank::{WrathGuildBankItemLog, WrathGuildBankMoneyLog, WrathGuildBankSlot};
 pub use wrath_petition_vendor::{WrathPetitionItem, WrathPetitionVendorRequest};
+pub use wrath_player_names::PlayerNameInfo;
 pub use wrath_quest_poi::{blob::QuestBlobDraw, WrathQuestPoi, WrathQuestPoiBlob};
 pub use wrath_static_popup::{WrathInstanceLock, WrathPopupRequest, WrathPopupState};
 pub use wrath_titles::WrathCharTitle;
@@ -838,6 +840,7 @@ impl UiScript {
             wrath_unit_casts::install(&lua)?;
             wrath_combat_log::install(&lua)?;
             wrath_chat_verbs::install(&lua)?;
+            wrath_player_names::install(&lua)?;
             wrath_inspect_talents::install(&lua)?;
             wrath_talent_preview::install(&lua)?;
             wrath_static_popup::install(&lua)?;

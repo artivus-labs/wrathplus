@@ -473,40 +473,6 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             _ => Value::Nil,
         }]))
     })?;
-    // GetPlayerInfoByGUID(guid) (`0x613f90`) → class, englishClass, race, englishRace, sex,
-    // name, realm for a player GUID whose unit is known; nothing otherwise. Labelled: native also
-    // answers from its name cache for players never seen as units.
-    set(lua, "GetPlayerInfoByGUID", |lua, args| {
-        let Some(text) = text(lua, &arg(&args, 0))? else {
-            return Err(mlua::Error::runtime(
-                r#"Usage: GetPlayerInfoByGUID("playerGUID")"#,
-            ));
-        };
-        let guid = parse_guid(&text);
-        if guid == 0 || guid >> 60 != 0 {
-            return none();
-        }
-        let model = lua.app_data_ref::<Model>().expect("model app_data");
-        let Some(u) = model.units_by_guid.get(&guid) else {
-            return none();
-        };
-        let s = |v: &Option<String>| -> mlua::Result<Value> {
-            Ok(match v {
-                Some(v) => Value::String(lua.create_string(v)?),
-                None => Value::Nil,
-            })
-        };
-        Ok(MultiValue::from_vec(vec![
-            s(&u.class)?,
-            s(&u.class_file)?,
-            s(&u.race)?,
-            s(&u.race_file)?,
-            // UnitSex's scale; the unfilled 0 answers 2, as UnitSex does.
-            Value::Integer(i64::from(if u.sex == 0 { 2 } else { u.sex })),
-            s(&u.name)?,
-            Value::String(lua.create_string("")?),
-        ]))
-    })?;
     // GetAutoCompleteResults(text, include, exclude, numReturns [, cursorPosition
     // [, allowFullMatch]]) (`0x57b3a0`) → up to numReturns names starting with the text: group
     // members (flag 0x1), guild members (0x2) and friends (0x4), online ones adding 0x20 (3.3.5
@@ -565,18 +531,6 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         Ok(out)
     })?;
     Ok(())
-}
-
-/// A GUID string: an optional `0x`, then up to 16 hex digits.
-fn parse_guid(s: &str) -> u64 {
-    let s = s
-        .strip_prefix("0x")
-        .or_else(|| s.strip_prefix("0X"))
-        .unwrap_or(s);
-    s.chars()
-        .take(16)
-        .map_while(|c| c.to_digit(16))
-        .fold(0u64, |acc, d| acc << 4 | u64::from(d))
 }
 
 #[cfg(test)]
@@ -740,31 +694,6 @@ mod tests {
             s.eval::<i64>("return select('#', BNIsFriend(1)) + select('#', BNSendWhisper())")
                 .unwrap(),
             0
-        );
-        s.model_mut().units_by_guid.insert(
-            0x42,
-            crate::script::UnitState {
-                name: Some("Ivy".into()),
-                class: Some("Mage".into()),
-                class_file: Some("MAGE".into()),
-                race: Some("Gnome".into()),
-                race_file: Some("Gnome".into()),
-                sex: 3,
-                ..Default::default()
-            },
-        );
-        assert_eq!(
-            s.eval::<(String, String, i64, String)>(
-                "local c, cf, _, _, sex, n = GetPlayerInfoByGUID('0x0000000000000042') return c, cf, sex, n"
-            )
-            .unwrap(),
-            ("Mage".into(), "MAGE".into(), 3, "Ivy".into())
-        );
-        assert_eq!(
-            s.eval::<i64>("return select('#', GetPlayerInfoByGUID('0xF130000000000042'))")
-                .unwrap(),
-            0,
-            "not a player GUID"
         );
         s.run(
             "SEEN = nil local f = CreateFrame('Frame') f:RegisterEvent('CHAT_MSG_SYSTEM') \
