@@ -243,24 +243,20 @@ pub(crate) struct Model {
     /// Each unit token's state as pushed this frame, keyed lowercased because 12340's base compares
     /// fold ASCII case (`0x76e780`): read it only through `unit`, where the fold lives.
     pub(crate) units_by_lower: HashMap<String, UnitState>,
-    /// The snapshot of each unit a `target` chain can end on, by guid, which the app pushes for
-    /// [`super::UnitGuids::chain_ends`]: a token with a hop that no push names reads its
-    /// resolved guid's entry here.
+    /// The snapshot of each unit a `target` chain can end on, by guid, pushed for
+    /// [`super::UnitGuids::chain_ends`]: a token with a hop no push names reads its guid's entry.
     pub(crate) units_by_guid: HashMap<u64, UnitState>,
-    /// The player's auras in the reference cache's insertion order (`0xbc6040`), durations joined:
-    /// the `GetPlayerBuff` family's list, and any token naming the player's.
+    /// Our own auras in 12340's cache order (`0xbc6040`), durations joined, whatever token is ours.
     pub(crate) player_auras: Vec<AuraState>,
     /// The last `FocusUnit`/`ClearFocus` this frame, a guid (0 clears) for the host to take.
     pub(crate) focus_request: Option<u64>,
     /// `CombatTextSetActiveUnit`'s guid (`0xca1380`), 0 for none.
     pub(crate) combat_text_unit: u64,
-    /// Every other unit's auras by guid, ascending aura slot: one list per unit, whatever token
-    /// names it.
+    /// Every other unit's auras by guid, ascending aura slot: one list per unit, any token.
     pub(crate) unit_auras: HashMap<u64, Vec<AuraState>>,
     /// The unit-token resolver's inputs (`0x60abf0`), which the aura bindings resolve through.
     pub(crate) unit_guids: super::UnitGuids,
-    /// Spell ids the cancel verbs queued (`CancelPlayerBuff`, `CancelTrackingBuff`, …), one
-    /// `CMSG_CANCEL_AURA` each.
+    /// Spell ids the cancel verbs queued, one `CMSG_CANCEL_AURA` each.
     pub(crate) cancel_aura_requests: Vec<u32>,
     /// The player's active tracking aura, behind `GetTrackingTexture`.
     pub(crate) tracking: Option<super::aura::TrackingState>,
@@ -326,7 +322,6 @@ pub(crate) struct Model {
     pub(crate) social: social::SocialState,
     /// Social calls (`AddFriend`, `RemoveFriend`, `SendWho`, …) queued.
     pub(crate) social_requests: Vec<social::SocialRequest>,
-    /// The client-local LFG slot words (`[0xbc70a0]`) and comment (`[0xbc6e98]`, 0x80 bytes) that
     /// Guild roster, ranks, MOTD and info, sorted and filtered by the app, which holds the toggles.
     pub(crate) guild: guild::GuildState,
     /// The rank editor's unsaved edits, apart from `guild` so a push cannot discard them.
@@ -354,8 +349,7 @@ pub(crate) struct Model {
     pub(crate) language_table: Vec<(u32, String)>,
     pub(crate) zone_channel_catalog: Vec<super::channel::ZoneChannelRow>,
     pub(crate) channel_commands: Vec<super::channel::ChannelCommand>,
-    /// The recruitment auto-join latch, 12340's `[0xac7a3c]`: 0 `STANDARD`, 1 `AUTO`. Boots at 1,
-    /// as the reference writes `AUTO` for an untouched option; no Lua binding reads or sets it.
+    /// 12340's recruitment auto-join latch `[0xac7a3c]`: 0 `STANDARD`, 1 `AUTO`, the boot value.
     pub(crate) guild_recruitment_mode: u8,
     /// A manual join or leave changed the recruitment mode: the chat cache's dirty signal.
     pub(crate) guild_recruitment_changed: bool,
