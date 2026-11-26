@@ -178,12 +178,12 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             })
         })?,
     )?;
-    // `[0xac80a8]`, then the refresh `0x513cf0`. Unresolved, labelled: what the refresh hides
-    // (world-attached UI) is not wired; the flag is kept for the host.
+    // `[0xac80a8]` from `0x815500(L, 1, 1)`, default true (`0x517c26`), then the refresh
+    // `0x513cf0`. Labelled: what the refresh hides (world-attached UI) is not wired.
     g.set(
         "SetUIVisibility",
-        lua.create_function(|lua, v: Value| {
-            let visible = !matches!(v, Value::Nil | Value::Boolean(false));
+        lua.create_function(|lua, args: MultiValue| {
+            let visible = super::binding_abi::bool_or_default(args.front(), true);
             lua.app_data_mut::<Model>()
                 .expect("model app_data")
                 .ui_hidden = !visible;
@@ -252,5 +252,9 @@ mod tests {
         assert!(!s.ui_visible());
         s.run("SetUIVisibility(true)").unwrap();
         assert!(s.ui_visible());
+        s.run("SetUIVisibility(0)").unwrap();
+        assert!(!s.ui_visible(), "0 is false to `0x815500`");
+        s.run("SetUIVisibility()").unwrap();
+        assert!(s.ui_visible(), "absent is the default, true");
     }
 }
