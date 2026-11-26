@@ -14,6 +14,19 @@ use crate::types::LevelUpInfo;
 use crate::SessionEvent;
 use std::io::{self, Cursor, Read};
 
+/// The shared events speak the 1.12 weather types (1 rain, 2 snow, 3 sand, 0 clear), but 3.3.5's
+/// `SMSG_WEATHER` carries a `WeatherState` (AzerothCore `Weather.h`, picked by `Weather::GetWeatherState`
+/// from type and grade): 3/4/5 light/medium/heavy rain, 6/7/8 snow, 22/41/42 sandstorm, 86 thunders and
+/// 90 black rain (rain), 106 black snow, 1 fog (no precipitation). Anything else is clear.
+pub(crate) fn weather_kind(state: u32) -> u32 {
+    match state {
+        3..=5 | 86 | 90 => 1,
+        6..=8 | 106 => 2,
+        22 | 41 | 42 => 3,
+        _ => 0,
+    }
+}
+
 pub const OPCODES: [u16; 8] = [
     0x00fa, 0x00fd, 0x01cd, 0x01d4, 0x0209, 0x020c, 0x02f4, 0x0463,
 ];
@@ -104,7 +117,7 @@ pub fn decode(opcode: u16, body: &[u8]) -> io::Result<SessionEvent> {
             })
         }
         0x02f4 => SessionEvent::Weather {
-            weather_type: u32_(r)?,
+            weather_type: weather_kind(u32_(r)?),
             grade: f32::from_bits(u32_(r)?),
             sound_id: 0,
             instant: u8_(r)? != 0,
