@@ -5,13 +5,14 @@
 //! through `GlyphSlot.dbc`, `GlyphProperties.dbc` and `SpellIcon.dbc`. Evidence: one headless
 //! Ghidra round (`/tmp/azb-wire-ghidra/census2`).
 //!
-//! - The getters take a 1-based socket and an optional 1-based talent group. A socket outside
-//!   1..=6, or a group the client does not hold, answers nothing.
+//! - The getters take a 1-based socket, truncated, and an optional 1-based talent group, the
+//!   active one without it (`0x5c57d0`). A socket outside 1..=6, or a group at or past the talents
+//!   packet's count (`0x5c6080` → `0x5c5fc0`), answers nothing; the glyph is the group's own
+//!   (`0x5c5770`, the record's `+0x3c`).
 //! - `GlyphMatchesSocket` (`0x5b7410`) reads the pending glyph cast. The first `APPLY_GLYPH` effect
 //!   whose glyph row and socket row both exist answers 1 when their type flags agree; otherwise it
 //!   answers nothing. With no player it answers nil.
 //!
-//! Labelled: the glyphs of a second talent group are not carried, so only group 1 answers.
 
 use mlua::{Lua, MultiValue, Table, Value};
 
@@ -51,28 +52,42 @@ impl super::UiScript {
     pub fn set_glyph_sockets(&mut self, sockets: Option<[GlyphSocketView; 6]>) {
         self.model_mut().glyph_sockets = sockets;
     }
+
+    /// Replace the other talent group's six sockets, its glyphs from the talents packet.
+    pub fn set_inactive_glyph_sockets(&mut self, sockets: Option<[GlyphSocketView; 6]>) {
+        self.model_mut().inactive_glyph_sockets = sockets;
+    }
 }
 
-/// The socket behind a 1-based index in group 1.
-fn socket(model: &Model, index: i64, group: i64) -> Option<&GlyphSocketView> {
-    if group != 1 || !(1..=6).contains(&index) {
+/// The socket behind a 1-based index in a 0-based group the talents packet holds.
+fn socket(model: &Model, index: i64, group: Option<i64>) -> Option<&GlyphSocketView> {
+    let groups = &model.talent_groups;
+    let group = group.map_or(Some(groups.active), |g| u32::try_from(g - 1).ok())?;
+    if group >= groups.count || !(1..=6).contains(&index) {
         return None;
     }
-    model
-        .glyph_sockets
-        .as_ref()
-        .map(|s| &s[(index - 1) as usize])
+    let sockets = if group == groups.active {
+        &model.glyph_sockets
+    } else {
+        &model.inactive_glyph_sockets
+    };
+    sockets.as_ref().map(|s| &s[(index - 1) as usize])
 }
 
+/// The socket index, truncated (`fistp` under RC=11, `0x5b72ad`).
 fn arg_int(lua: &Lua, args: &MultiValue, i: usize) -> Option<i64> {
     args.get(i)
         .cloned()
         .and_then(|v| lua.coerce_number(v).ok().flatten())
-        .map(|n| n.round_ties_even() as i64)
+        .map(|n| n.trunc() as i64)
 }
 
-fn group(lua: &Lua, args: &MultiValue, i: usize) -> i64 {
-    arg_int(lua, args, i).unwrap_or(1)
+/// The group argument as `lua_tointeger` reads it (`0x5c57d0`), which rounds; `None` without one.
+fn group(lua: &Lua, args: &MultiValue, i: usize) -> Option<i64> {
+    args.get(i)
+        .cloned()
+        .and_then(|v| lua.coerce_number(v).ok().flatten())
+        .map(|n| n.round_ties_even() as i64)
 }
 
 pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
@@ -291,6 +306,7 @@ mod tests {
             ..Default::default()
         };
         s.set_glyph_sockets(Some(sockets));
+        s.set_talent_groups(crate::script::WrathTalentGroups::single());
         s
     }
 
@@ -336,6 +352,40 @@ mod tests {
             0
         );
         assert!(s.run("GetGlyphLink()").is_err());
+        assert_eq!(
+            s.eval::<i64>("return (select(3, GetGlyphSocketInfo(1.9)))")
+                .unwrap(),
+            54815
+        );
+
+        // Two groups, the second active: no group reads it; group 1 is the other's sockets.
+        let mut other: [GlyphSocketView; 6] = Default::default();
+        other[0].glyph = Some(GlyphView {
+            spell_id: 54810,
+            ..Default::default()
+        });
+        let mut s = s;
+        s.set_inactive_glyph_sockets(Some(other));
+        s.set_talent_groups(crate::script::WrathTalentGroups {
+            count: 2,
+            active: 1,
+            inactive: None,
+        });
+        assert_eq!(
+            s.eval::<(i64, i64, i64)>(
+                "return select(3, GetGlyphSocketInfo(1)), select(3, GetGlyphSocketInfo(1, 2)), \
+                 select(3, GetGlyphSocketInfo(1, 1))"
+            )
+            .unwrap(),
+            (54815, 54815, 54810)
+        );
+        s.set_talent_groups(Default::default());
+        assert_eq!(
+            s.eval::<i64>("return select('#', GetGlyphSocketInfo(1))")
+                .unwrap(),
+            0,
+            "no talents packet yet, no group (`0x5c5fc0`)"
+        );
     }
 
     #[test]

@@ -36,6 +36,16 @@ pub struct WrathTalentGroups {
     pub inactive: Option<(u32, super::TalentUiState)>,
 }
 
+impl WrathTalentGroups {
+    /// One group, active: a single-spec character's talents packet.
+    pub fn single() -> Self {
+        Self {
+            count: 1,
+            ..Self::default()
+        }
+    }
+}
+
 impl super::UiScript {
     /// Replace the player's talent group count and active group.
     pub fn set_talent_groups(&mut self, groups: WrathTalentGroups) {

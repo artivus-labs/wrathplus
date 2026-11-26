@@ -299,8 +299,9 @@ pub(crate) struct Model {
     pub(crate) talent_groups: super::WrathTalentGroups,
     /// The player's talent preview ranks and queued `LearnPreviewTalents` lists.
     pub(crate) talent_preview: super::wrath_talent_preview::TalentPreview,
-    /// The six glyph sockets the app pushes; `None` without a player.
+    /// The six glyph sockets the app pushes, the active group's and the other's; `None` without.
     pub(crate) glyph_sockets: Option<[super::GlyphSocketView; 6]>,
+    pub(crate) inactive_glyph_sockets: Option<[super::GlyphSocketView; 6]>,
     /// The units whose vehicle seat has `VehicleSeat.dbc` `flagsB & 0x8` (`UnitTargetsVehicleInRaidUI`).
     pub(crate) raid_vehicle_units: HashSet<u64>,
     /// The server clock offset (`server - time()`) the host pushes; `None` until the first reply.
@@ -1219,6 +1220,7 @@ impl Model {
             talent_groups: Default::default(),
             talent_preview: Default::default(),
             glyph_sockets: None,
+            inactive_glyph_sockets: None,
             raid_vehicle_units: HashSet::new(),
             wrath_server_time_offset: None,
             raid_selection: 0,
