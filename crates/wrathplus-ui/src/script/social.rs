@@ -342,15 +342,14 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // SortWho(sortType) (`0x5ad890`): promotes the key in the seven-slot chain, reversing it if
+    // SortWho(sortType) (`0x6b4eb0`): promotes the key in the seven-slot chain, reversing it if
     // it is already in front, sorts the list, and fires `WHO_LIST_UPDATE` synchronously
-    // (`0x5ad9ed`, `SignalEvent` `0x703e50`), so the list redraws before the click's sound. The
-    // app gets the same click for its own chain. Returns nothing; an argument neither string nor
-    // number raises with the client's own typo (`0x85db88`, `0x5ad898`'s `0x6f3510` guard).
+    // (`0x6b5017`, `0x81b530`), so the list redraws before the click's sound. The app gets the
+    // same click for its own chain. Returns nothing; a non-string raises (`0x6b4eba`, `0xa31114`).
     g.set(
         "SortWho",
         lua.create_function(|lua, sort_type: Value| {
-            let sort_type = string_arg(lua, sort_type, "Usgae: SortWho(\"type\")")?;
+            let sort_type = string_arg(lua, sort_type, "Usage: SortWho(\"type\")")?;
             {
                 let mut model = lua.app_data_mut::<Model>().expect("model app_data");
                 let model = &mut *model;
@@ -594,7 +593,7 @@ mod tests {
             vec![SocialRequest::SortWho("name".into())],
             "and the app hears the same click, so its copy of the chain follows"
         );
-        // Returns nothing (`0x5ad9f8`, `xor eax,eax; ret`).
+        // Returns nothing (`0x6b5020`, `xor eax,eax; ret`).
         assert_eq!(s.arity(r#"SortWho("name")"#).unwrap(), 0);
         assert!(s.errors().is_empty(), "{:?}", s.errors());
     }
@@ -630,8 +629,8 @@ mod tests {
         );
     }
 
-    /// A number is stringified and falls to the name key; anything else raises with the client's
-    /// misspelt usage string (`0x85db88`).
+    /// A number is stringified and falls to the name key; anything else raises 12340's usage line
+    /// (`0xa31114`, spelt right: the `Usgae` typo is other `Sort*` verbs').
     #[test]
     fn sort_who_takes_the_reference_argument_abi() {
         let mut s = seated();
@@ -643,11 +642,10 @@ mod tests {
         );
         let _ = s.take_social_requests();
 
-        let err = s.run("SortWho({})").unwrap_err().to_string();
-        assert!(
-            err.contains(r#"Usgae: SortWho("type")"#),
-            "the reference's own typo, verbatim: {err}"
-        );
+        for call in ["SortWho({})", "SortWho()"] {
+            let err = s.run(call).unwrap_err().to_string();
+            assert!(err.contains(r#"Usage: SortWho("type")"#), "{err}");
+        }
         assert_eq!(
             s.eval::<i64>("return fired").unwrap(),
             1,
