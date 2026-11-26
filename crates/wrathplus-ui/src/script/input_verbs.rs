@@ -171,7 +171,7 @@ fn inert(lua: &Lua, names: &[&str]) -> mlua::Result<()> {
     Ok(())
 }
 
-/// Register the 49 functions: the three tables' 48 and `TargetNearestFriend`.
+/// Register the 48 functions: the three tables' 47 and `TargetNearestFriend`.
 pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     let g = lua.globals();
 
@@ -296,10 +296,9 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             Ok(())
         })?,
     )?;
-    // Not built: the `MoveView*` pairs (`0x50b4a0`-`0x50b590`, `0x50fd40(direction, time, 0)` and
-    // `0x50fd90(direction, time)` for In, Out, Right, Left, Up, Down = 0..5), whose effect on the
-    // camera is not established; 1.12's own `MOVEVIEW*` bindings are commented out. And
-    // `ToggleMouseMove` (`0x50b5a0` → `0x50f910`), which toggles freelook with no button held.
+    // Not built: the `MoveView*` pairs (build 12340 `0x5ff080`-`0x5ff230`, through `0x5ff000` for
+    // In, Out, Right, Left, Up, Down = 0..5), the camera's move-view state; the stock
+    // `Bindings.xml` binds none of them.
     inert(
         lua,
         &[
@@ -315,7 +314,6 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             "MoveViewUpStop",
             "MoveViewDownStart",
             "MoveViewDownStop",
-            "ToggleMouseMove",
         ],
     )?;
 
@@ -374,9 +372,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
 mod tests {
     use super::*;
 
-    /// The three reference tables' 48 names (`0x8500b8`, `0x84f7a0`, and the main table's seven
-    /// at `0x83de68`), each a callable global that answers without raising.
-    const NAMES: [&str; 48] = [
+    /// The 47 names of the three tables, each a callable global that answers without raising.
+    const NAMES: [&str; 47] = [
         "Jump",
         "ToggleRun",
         "ToggleAutoRun",
@@ -417,7 +414,6 @@ mod tests {
         "MoveViewUpStop",
         "MoveViewDownStart",
         "MoveViewDownStop",
-        "ToggleMouseMove",
         "TargetNearestEnemy",
         "TargetNearestPartyMember",
         "TargetNearestRaidMember",
@@ -438,6 +434,8 @@ mod tests {
             s.run_binding(&format!("{name}(1)"))
                 .unwrap_or_else(|e| panic!("{name}(1) in a binding raised: {e}"));
         }
+        // Build 12340 registers no `ToggleMouseMove` (no such string in the image).
+        assert!(s.eval::<bool>("return ToggleMouseMove == nil").unwrap());
     }
 
     /// The gate `0x494a50(0)`: a movement call queues only from inside a binding body, while the
