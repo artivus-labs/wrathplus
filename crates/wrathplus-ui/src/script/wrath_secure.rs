@@ -82,8 +82,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
     // RunMacro(index or name[, button]): the macro's lines, as `UseAction` runs a macro slot; the
-    // button, argument 2 as a string (`0x566e80`), is what `GetRunningMacroButton` answers.
-    // Unresolved, labelled: the `button` argument's conditional is not modelled.
+    // button, argument 2 as a string (`0x566e80`), is what `GetRunningMacroButton` and the macro
+    // `[button]` option read.
     g.set(
         "RunMacro",
         lua.create_function(|lua, (m, button): (Value, Value)| {

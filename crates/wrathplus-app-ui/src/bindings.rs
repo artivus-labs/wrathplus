@@ -170,14 +170,17 @@ fn clear_native_world_input(native: Res<NativeBindingRoute>, mut state: ResMut<B
     }
 }
 
-/// Drain the VM's binding requests: `SaveBindings` writes the set's diff; saving the account set
-/// deletes the character file.
+/// Drain the VM's binding requests: `SaveBindings` writes the set's diff and its own modified
+/// clicks; saving the account set deletes the character file.
 fn drain_binding_requests(script: Option<NonSendMut<UiScript>>, files: Res<BindingFiles>) {
     let Some(mut script) = script else { return };
     for req in script.take_keybind_requests() {
         let KeybindRequest::Save(which) = req;
         let mut text = store::to_diff(&script.keybind_snapshot(), &script.default_bindings());
         text.push_str(&store::layer_lines(&script.binding_layer_lines()));
+        text.push_str(&store::modified_click_lines(
+            &script.modified_click_lines(which),
+        ));
         let path = match which {
             1 => &files.account,
             2 => &files.character,

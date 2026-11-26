@@ -60,6 +60,11 @@ pub(super) fn fold(lua: &Lua, (shift, ctrl, alt): (bool, bool, bool)) {
     }
 }
 
+/// The six side bits, `0x512d20(0..5)`, which the modified clicks read.
+pub(super) fn sides(lua: &Lua) -> u8 {
+    lua.app_data_ref::<Sides>().map_or(0, |s| s.0)
+}
+
 impl super::UiScript {
     /// Push the six modifier keys: the sides behind `IsLeftShiftKeyDown` and its kin, and the
     /// pairs behind `IsShiftKeyDown`/`IsControlKeyDown`/`IsAltKeyDown`. Call it where
@@ -79,7 +84,7 @@ impl super::UiScript {
 /// `GetMouseButtonName(n)`'s table: the index to the button's bit (`0x5eec20`: 1 left, 2 right,
 /// 3 middle, then 4..=31 one bit each), the bit to its name (`0x96f530`), `"UNKNOWN"` for an
 /// index outside 1..=31 (bit 0).
-fn button_name(n: i64) -> String {
+pub(super) fn button_name(n: i64) -> String {
     match n {
         1 => "LeftButton".into(),
         2 => "RightButton".into(),

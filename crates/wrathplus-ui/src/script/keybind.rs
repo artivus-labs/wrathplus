@@ -321,14 +321,14 @@ impl KeybindState {
     /// set (the reference's starts as a copy), each falling back to the defaults. Loading defaults
     /// keeps the current set, as the window's Reset To Default does.
     /// The copy reads the first stored set at or below `set` (`0x562b80` walks down past an empty
-    /// one), all four modes of it.
-    pub(super) fn load(&mut self, set: u32) {
+    /// one), all four modes of it; that set is answered, `None` for no such set.
+    pub(super) fn load(&mut self, set: u32) -> Option<usize> {
         let from = match set {
             0 => 0,
             1 => usize::from(self.stored[0].is_some()),
             2 if self.stored[1].is_some() => 2,
             2 => usize::from(self.stored[0].is_some()),
-            _ => return,
+            _ => return None,
         };
         self.live = match from {
             0 => self.defaults.clone(),
@@ -339,6 +339,7 @@ impl KeybindState {
             self.current_set = set;
         }
         self.generation += 1;
+        Some(from)
     }
 
     /// `SaveBindings(which)`: store the live table as set `which` and make it current. Saving the
@@ -441,7 +442,10 @@ impl super::UiScript {
     /// Host-side `LoadBindings` (world entry `0x562d60`: character set if it exists, else
     /// account). Its `UPDATE_BINDINGS` is the app's, fired once the interface is up to hear it.
     pub fn load_binding_set(&mut self, set: u32) {
-        self.model_mut().keybinds.load(set);
+        let mut model = self.model_mut();
+        if let Some(from) = model.keybinds.load(set) {
+            model.wrath_modified_clicks.load(from);
+        }
     }
 
     /// The keys dispatch reads (`0x563150` passes mode 4): each key's command in the highest
@@ -597,7 +601,9 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             }
             if set >= 0.0 {
                 let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-                model.keybinds.load(set as u32);
+                if let Some(from) = model.keybinds.load(set as u32) {
+                    model.wrath_modified_clicks.load(from);
+                }
             }
             super::event::fire_global(lua, "UPDATE_BINDINGS", &[]);
             Ok(())
@@ -614,6 +620,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             }
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
             model.keybinds.save(which as u32);
+            model.wrath_modified_clicks.save(which as u32);
             Ok(())
         })?,
     )?;

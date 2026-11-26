@@ -213,15 +213,21 @@ pub(super) fn feed_actions(
         .collect();
     show_messages(&mut script, &mut sink, "ui_action", resolved);
 
-    // The engine's own by-key refusals (`ERR_PASSIVE_ABILITY`): `wrathplus_ui` cannot reach
-    // [`UiErrorKeys`], so it queues keys that show here, one frame late.
-    let engine_keys = script.take_ui_errors();
-    let engine_lines: Vec<Shown> = engine_keys
+    // The engine's own by-key messages (`ERR_PASSIVE_ABILITY`, the macro compiler's
+    // `ERR_UNKNOWN_MACRO_OPTION_S` with its `%s`): `wrathplus_ui` cannot reach [`UiErrorKeys`], so
+    // it queues keys that show here, one frame late.
+    let engine_keys = script.take_ui_errors().into_iter().map(UiError::key);
+    let engine_errors: Vec<UiError> = engine_keys
+        .chain(
+            script
+                .take_ui_errors_s()
+                .into_iter()
+                .map(|(k, s)| UiError::s(k, s)),
+        )
+        .collect();
+    let engine_lines: Vec<Shown> = engine_errors
         .into_iter()
-        .filter_map(|key| {
-            let e = UiError::key(key);
-            ui_error_text_for_script(&e, &script).map(|t| Shown::keyed(e.key, t))
-        })
+        .filter_map(|e| ui_error_text_for_script(&e, &script).map(|t| Shown::keyed(e.key, t)))
         .collect();
     show_messages(&mut script, &mut sink, "ui_action", engine_lines);
 

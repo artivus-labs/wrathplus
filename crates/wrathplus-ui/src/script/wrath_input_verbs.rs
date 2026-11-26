@@ -13,8 +13,9 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     // The 3.x flying-era names the stock `JUMP` and `SITORSTAND` bodies call. Each Start fires the
     // ground verb and raises the held key; the engine picks one by the mover's state: on foot the
     // jump or the sit, flying the ascend or descend (the jump `0x9883f0` refuses a flier). Each
-    // Stop releases the key. The same gate as the movement table.
-    let flying_era: [(&str, &[BindingInput]); 4] = [
+    // Stop releases the key. The same gate as the movement table, but `SitStandOrDescendStart`
+    // (`0x51b1d0`) gates only its descend (`0x5fc0f0`): the sit or stand is ungated.
+    let flying_era: [(&str, &[BindingInput]); 3] = [
         (
             "JumpOrAscendStart",
             &[
@@ -23,13 +24,6 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             ],
         ),
         ("AscendStop", &[BindingInput::Stop(HeldInput::Ascend)]),
-        (
-            "SitStandOrDescendStart",
-            &[
-                BindingInput::Fire(FiredInput::SitOrStand),
-                BindingInput::Start(HeldInput::Descend),
-            ],
-        ),
         ("DescendStop", &[BindingInput::Stop(HeldInput::Descend)]),
     ];
     for (name, inputs) in flying_era {
@@ -45,6 +39,16 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             })?,
         )?;
     }
+    g.set(
+        "SitStandOrDescendStart",
+        lua.create_function(|lua, _: MultiValue| {
+            push(lua, BindingInput::Fire(FiredInput::SitOrStand));
+            if in_binding(lua) {
+                push(lua, BindingInput::Start(HeldInput::Descend));
+            }
+            Ok(())
+        })?,
+    )?;
     // `MoveAndSteerStart` (`0x5fc780`, table `0xad19d0`) is `CameraOrSelectOrMoveStart`'s leg
     // (`0x5fa170(2)`, the left button's bit) then `TurnOrActionStart`'s (`0x5fa170(1)`), behind
     // the same gate `0x5191c0(0)`; `MoveAndSteerStop` (`0x5fc830`) clears 2 (sticky 0) then 1. So

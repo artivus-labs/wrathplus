@@ -25,6 +25,8 @@ pub(crate) fn seed_bindings_for_vm(world: &mut World, script: &mut UiScript) {
     script.seed_binding_set(1, Some(store::resolve(&overrides, &defaults)));
     let layers = text.as_deref().map(store::layers_from).unwrap_or_default();
     script.seed_binding_layers(1, layers);
+    let clicks = text.as_deref().map(store::modified_clicks_from);
+    script.seed_modified_clicks(1, &clicks.unwrap_or_default());
     script.load_binding_set(1);
 
     // The character's own set: its file existing makes it the active set, the reference's rule.
@@ -40,6 +42,7 @@ pub(crate) fn seed_bindings_for_vm(world: &mut World, script: &mut UiScript) {
             let overrides = store::from_diff(&text);
             script.seed_binding_set(2, Some(store::resolve(&overrides, &defaults)));
             script.seed_binding_layers(2, store::layers_from(&text));
+            script.seed_modified_clicks(2, &store::modified_clicks_from(&text));
             script.load_binding_set(2);
             info!("bindings: character-specific set loaded");
         }

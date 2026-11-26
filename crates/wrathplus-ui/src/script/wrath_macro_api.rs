@@ -57,6 +57,12 @@ pub(super) fn swap_running_button(lua: &Lua, button: Option<String>) -> Option<S
     std::mem::replace(&mut state(lua).running.button, button)
 }
 
+/// The running macro's button (`[0xbeaf48]`), what `GetRunningMacroButton` answers.
+pub(super) fn running_button(lua: &Lua) -> Option<String> {
+    lua.app_data_ref::<State>()
+        .and_then(|s| s.running.button.clone())
+}
+
 /// Drop macro `id`'s explicit pair: its body changed or it was deleted.
 pub(super) fn forget_explicit(lua: &Lua, id: u32) {
     state(lua).explicit.remove(&id);

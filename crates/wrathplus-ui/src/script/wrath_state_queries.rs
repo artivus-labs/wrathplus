@@ -202,6 +202,11 @@ fn carried_item(model: &Model, query: &ItemQuery) -> Option<(i64, u32)> {
 #[derive(Default)]
 struct ActionBarPage(u32);
 
+/// The page itself, 0-based, which the macro `[bar]` option reads past `GetActionBarPage`.
+pub(super) fn action_bar_page(lua: &Lua) -> u32 {
+    lua.app_data_ref::<ActionBarPage>().map_or(0, |p| p.0)
+}
+
 pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     let g = lua.globals();
     lua.set_app_data(ActionBarPage::default());

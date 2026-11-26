@@ -307,6 +307,15 @@ impl Model {
                 || self.in_raid_or_raid_pet(guid))
     }
 
+    /// `0x52c8c0`: a guid in the four party slots, or a slot member's pet (`CHARM`, else `SUMMON`,
+    /// else the stored pet). The slots hold the other members only, so not we or our own pet.
+    pub(crate) fn in_party_or_party_pet(&self, guid: u64) -> bool {
+        let pet = |i: usize| self.unit_guid(&format!("partypet{}", i + 1)) == Some(guid);
+        guid != 0
+            && (self.party.members.iter().any(|p| p.guid == guid)
+                || (0..self.party.members.len().min(4)).any(pet))
+    }
+
     /// `0x573200`: a raid row, or a raid member's pet: the held member's `CHARM`/`SUMMON`
     /// (`0x573255`), else the row's stored pet while the row is online (`[row+0x18] & 1`,
     /// `0x573273`). `raidpetN` (`0x518ce0`) reads the stored pet with no online test.
