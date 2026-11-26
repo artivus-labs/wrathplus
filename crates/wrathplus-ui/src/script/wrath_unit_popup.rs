@@ -209,11 +209,20 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     use WrathUnitPopupRequest as R;
 
     // ── difficulty, PvP, loot ──
-    // CanChangePlayerDifficulty() (`0x52d000`) → two booleans: may change (labelled: `0x52cbc0`
-    // unread, taken as ungrouped or leader, the gate SetDungeonDifficulty applies) and not locked.
+    // CanChangePlayerDifficulty() (`0x52d000`) → two booleans: may change, and not locked. May
+    // change (`0x52cbc0`) is a raid map (`Map.dbc` `InstanceType` 2, `0x52cbe6`) with the dynamic
+    // flag `0x100` (`0x519640`), a raid roster (`[0xbeb608]`, the count `0x520190` walks it by) and
+    // the leader's guid ours (`[0xbd1968]`, `0x52cc00`-`0x52cc1b`). Labelled: that `[0xbd1968]` is
+    // the leader guid is inferred from SetDungeonDifficulty's `ERR_NOT_LEADER` gate on it.
     set(lua, "CanChangePlayerDifficulty", |lua, _| {
         let m = lua.app_data_ref::<Model>().expect("model app_data");
-        let may = !grouped(&m) || m.party.leader_guid == player_guid(&m);
+        let raid_map = m
+            .wrath_state
+            .instance
+            .as_ref()
+            .is_some_and(|i| i.instance_type == 2 && i.is_dynamic);
+        let leader = m.party.leader_guid;
+        let may = raid_map && !m.party.raid.is_empty() && leader != 0 && leader == player_guid(&m);
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_secs() as i64);
@@ -550,8 +559,33 @@ mod tests {
         let mut s = script();
         s.run("assert(GetPVPDesired()==1); SetPVP(1); SetPVP(nil); SetDungeonDifficulty(2); SetDungeonDifficulty(3); SetRaidDifficulty(4)").unwrap();
         assert!(s
-            .eval::<bool>("local a,b=CanChangePlayerDifficulty(); return a==true and b==true and GetDungeonDifficulty()==2 and GetRaidDifficulty()==4")
+            .eval::<bool>("local a,b=CanChangePlayerDifficulty(); return a==false and b==true and GetDungeonDifficulty()==2 and GetRaidDifficulty()==4")
+            .unwrap(), "ungrouped off a dynamic raid map, no change (`0x52cbc0`)");
+        // A dynamic raid map, in a raid, as its leader: the one case that may change.
+        s.set_wrath_instance_info(Some(crate::script::WrathInstanceInfo {
+            instance_type: 2,
+            is_dynamic: true,
+            ..Default::default()
+        }));
+        let raid = vec![crate::script::party::RaidMemberInfo {
+            guid: 1,
+            ..Default::default()
+        }];
+        let party = |leader_guid| PartyState {
+            raid: raid.clone(),
+            leader_guid,
+            own_guid: 1,
+            ..Default::default()
+        };
+        s.set_party(party(1));
+        assert!(s
+            .eval::<bool>("return (CanChangePlayerDifficulty())")
             .unwrap());
+        s.set_party(party(2));
+        assert!(!s
+            .eval::<bool>("return (CanChangePlayerDifficulty())")
+            .unwrap());
+        s.set_party(PartyState::default());
         assert!(s.run("SetDungeonDifficulty('x')").is_err());
         s.run("SEEN=nil local f=CreateFrame('Frame') f:RegisterEvent('CHAT_MSG_SYSTEM') f:SetScript('OnEvent', function(_, _, msg) SEEN=msg end) assert(f:IsEventRegistered('CHAT_MSG_SYSTEM')==1 and f:IsEventRegistered('BAG_UPDATE')==nil) SetOptOutOfLoot(1)").unwrap();
         assert!(s
