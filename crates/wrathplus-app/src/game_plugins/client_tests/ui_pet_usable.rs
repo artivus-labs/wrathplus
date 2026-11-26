@@ -683,4 +683,8 @@ fn a_native_press_aims_at_the_unit_it_names_else_the_selection() {
         });
         assert_eq!(aimed, Some(want), "{unit:?}: {sent:?}");
     }
+    // An Attack order raises the latch for an ordinary pet too (`0x5d4509`), which the bar pushes.
+    rig.order(ATTACK);
+    rig.frame();
+    assert!(ui(&mut rig, |s| s.eval::<bool>("return IsPetAttackActive()")).unwrap());
 }

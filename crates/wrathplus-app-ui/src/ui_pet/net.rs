@@ -50,9 +50,12 @@ fn on_native_spells(
     In(ev): In<SessionEvent>,
     catalog: Option<Res<Spells>>,
     mut bar: ResMut<PetBar>,
+    pet: super::PetUnit,
 ) {
     if let SessionEvent::WrathPetSpells { spells } = ev {
         native_pet_spells(*spells, &mut bar);
+        let flags = pet.store(bar.guid()).map(|s| s.0.unit_flags());
+        reseed_attack_latch(&mut bar, flags);
         let now = Instant::now();
         if let Some(native) = &bar.native {
             let duration = native.duration_ms;
@@ -66,6 +69,15 @@ fn on_native_spells(
             }
             bar.bar_signals = bar.bar_signals.wrapping_add(1);
         }
+    }
+}
+
+/// Each pet-spells packet reseeds the attack latch from the pet (`0x5d6a42`, `0x5d6a80`): its
+/// in-combat flag `0x800` (`0x71afb0`). Labelled: that test's swing-target leg (`[pet+0xa20]`)
+/// is not held here.
+pub(super) fn reseed_attack_latch(bar: &mut PetBar, pet_flags: Option<u32>) {
+    if bar.native.is_some() {
+        bar.attacking = pet_flags.is_some_and(|f| f & super::unit::UNIT_FLAG_PET_IN_COMBAT != 0);
     }
 }
 
@@ -326,6 +338,28 @@ fn pet_cast_failed(spell_id: u32, reason: Option<u8>) {
 mod tests {
     use super::*;
     use wrathplus_protocol::types::{PetActionEntry, PET_ACT_COMMAND, PET_COMMAND_ATTACK};
+
+    /// `0x5d6a80`: each native packet reseeds the latch from the pet's flag `0x800`.
+    #[test]
+    fn a_native_packet_reseeds_the_attack_latch_from_the_pet() {
+        let mut bar = PetBar {
+            native: Some(Default::default()),
+            attacking: true,
+            ..Default::default()
+        };
+        reseed_attack_latch(&mut bar, Some(0x1000));
+        assert!(!bar.attacking, "a pet out of combat lowers it");
+        reseed_attack_latch(&mut bar, Some(0x0800));
+        assert!(bar.attacking, "a fighting pet raises it");
+        reseed_attack_latch(&mut bar, None);
+        assert!(!bar.attacking, "an unresolved pet lowers it");
+        let mut legacy = PetBar {
+            attacking: true,
+            ..Default::default()
+        };
+        reseed_attack_latch(&mut legacy, None);
+        assert!(legacy.attacking, "the 1.12 bar is left alone");
+    }
 
     #[test]
     fn native_capture_is_lossless_replacement_and_session_scoped() {

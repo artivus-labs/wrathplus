@@ -147,7 +147,8 @@ impl PetPress<'_, '_> {
         if kind == 6 || (kind == 7 && id <= PET_COMMAND_FOLLOW) {
             self.bar.bar_signals = self.bar.bar_signals.wrapping_add(1);
         }
-        if kind == 7 && id == PET_COMMAND_ATTACK && possessing {
+        // An Attack order the pet may carry out raises the latch for any pet (`0x5d4509`).
+        if kind == 7 && id == PET_COMMAND_ATTACK {
             self.bar.attacking = true;
         }
         if let Some(display) = display.filter(|_| is_spell) {
