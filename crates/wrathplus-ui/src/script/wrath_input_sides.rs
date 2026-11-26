@@ -79,7 +79,7 @@ impl super::UiScript {
 /// `GetMouseButtonName(n)`'s table: the index to the button's bit (`0x5eec20`: 1 left, 2 right,
 /// 3 middle, then 4..=31 one bit each), the bit to its name (`0x96f530`), `"UNKNOWN"` for an
 /// index outside 1..=31 (bit 0).
-fn button_name(n: i64) -> String {
+pub(super) fn button_name(n: i64) -> String {
     match n {
         1 => "LeftButton".into(),
         2 => "RightButton".into(),

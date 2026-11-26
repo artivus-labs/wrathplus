@@ -51,18 +51,12 @@ pub(crate) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // UnitPlayerOrPetInParty(unit) (`0x60c9a0`): no gate; `0x52c8c0` scans the party slots for the
-    // member or its pet (`CHARM`, else `SUMMON`, else the stored pet). The slots hold the other
-    // members only, so we and our own pet answer nil.
+    // UnitPlayerOrPetInParty(unit) (`0x60c9a0`): no gate; `0x52c8c0` on the resolved guid.
     g.set(
         "UnitPlayerOrPetInParty",
         lua.create_function(|lua, token: Value| {
             let m = lua.app_data_ref::<Model>().expect("model");
-            let guid = guid_arg(lua, &m, &token);
-            let slots = m.party.members.len().min(4);
-            let pet = |i: usize| m.unit_guid(&format!("partypet{}", i + 1)) == Some(guid);
-            let hit = m.party.members.iter().any(|p| p.guid == guid) || (0..slots).any(pet);
-            Ok(flag(guid != 0 && hit))
+            Ok(flag(m.in_party_or_party_pet(guid_arg(lua, &m, &token))))
         })?,
     )?;
 
