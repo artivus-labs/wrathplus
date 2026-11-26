@@ -101,6 +101,7 @@ fn feed_bank(
     mut errors: ResMut<BankErrors>,
     mut last: Local<crate::app_core::vm_memo::VmMemo<Option<BankState>>>,
     mut last_banker: Local<crate::app_core::vm_memo::VmMemo<Option<u64>>>,
+    mut last_row: Local<crate::app_core::vm_memo::VmMemo<Option<BankState>>>,
     mut sink: crate::ui_action::MessageSink,
 ) {
     let Some(mut script) = script else {
@@ -108,6 +109,7 @@ fn feed_bank(
     };
     let last = last.get(&script);
     let last_banker = last_banker.get(&script);
+    let last_row = last_row.get(&script);
     // Refusals show, and speak, as their message rows say: insufficient funds is speech `0x16`.
     let lines: Vec<_> = errors
         .0
@@ -119,13 +121,19 @@ fn feed_bank(
     let purchased = store
         .and_then(|s| s.0.player_bank_bag_slots_purchased())
         .unwrap_or(0);
-    let fresh = open.banker.map(|_| BankState {
+    let row = BankState {
         num_purchased: u32::from(purchased),
         next_cost: prices
             .as_ref()
             .and_then(|p| p.0.next_slot_price(purchased))
             .unwrap_or(0),
-    });
+    };
+    // `GetNumBankSlots` reads the player with no banker (`0x57bab0`): the row goes up regardless.
+    if last_row.as_ref() != Some(&row) {
+        script.set_bank_slots(row.clone());
+        *last_row = Some(row.clone());
+    }
+    let fresh = open.banker.map(|_| row);
     // A new banker while open is a close then an open; the close intent OnHide queues is
     // consumed so the drain keeps the new session.
     let switched = npc_switched(*last_banker, open.banker);
@@ -174,6 +182,42 @@ fn drain_bank(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The purchase row reaches the VM with no banker open, so `GetNumBankSlots()` answers as
+    /// 12340's, which reads the player (`0x57bab0`); `BANKFRAME_OPENED` stays unfired.
+    #[test]
+    fn the_purchase_row_goes_up_with_the_bank_closed() {
+        use bevy::ecs::system::RunSystemOnce;
+        use wrathplus_protocol::types::Field;
+        let mut app = App::new();
+        app.init_resource::<BankOpen>()
+            .init_resource::<BankErrors>()
+            .init_resource::<crate::app_core::chat::ChatLog>()
+            .init_resource::<crate::sound::MessageSounds>();
+        app.world_mut().spawn((
+            SelfPlayer,
+            ObjectStore(wrathplus_protocol::ObjectFields::from_fields(&[(
+                Field::PlayerBytes2,
+                3 << 16,
+            )])),
+        ));
+        let mut script = UiScript::new().unwrap();
+        script
+            .run(
+                "OPENED = 0 local f = CreateFrame('Frame') f:RegisterEvent('BANKFRAME_OPENED') \
+                  f:SetScript('OnEvent', function() OPENED = OPENED + 1 end)",
+            )
+            .unwrap();
+        app.world_mut().insert_non_send_resource(script);
+        app.world_mut().run_system_once(feed_bank).unwrap();
+        let mut script = app.world_mut().non_send_resource_mut::<UiScript>();
+        assert_eq!(
+            script
+                .eval::<(i64, i64)>("return (GetNumBankSlots()), OPENED")
+                .unwrap(),
+            (3, 0)
+        );
+    }
 
     #[test]
     fn bank_slot_error_keys() {

@@ -670,8 +670,10 @@ pub(crate) struct Model {
     /// The stable window: snapshot, selection, drag and queued calls, reset together on close.
     pub(crate) stable: stable::StableModel,
 
-    /// The open bank's slot-purchase row and calls; its contents are bags -1 and 5..=10.
+    /// The open bank and its calls, and the purchase row, which outlives the window (`0x57bab0`);
+    /// its contents are bags -1 and 5..=11.
     pub(crate) bank: Option<bank::BankState>,
+    pub(crate) bank_slots: bank::BankState,
     pub(crate) bank_purchase: bool,
     pub(crate) bank_close: bool,
 
@@ -1393,6 +1395,7 @@ impl Model {
             repair_mode: false,
             stable: Default::default(),
             bank: None,
+            bank_slots: bank::BankState::default(),
             bank_purchase: false,
             bank_close: false,
             trainer: None,
