@@ -717,6 +717,7 @@ mod tests {
         s.set_talent_groups(crate::script::WrathTalentGroups {
             count: 2,
             active: 0,
+            inactive: None,
         });
         s.model_mut().script_calls.clear();
         s.run("SetActiveTalentGroup(1) SetActiveTalentGroup(3) SetActiveTalentGroup(2.9)")

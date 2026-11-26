@@ -27,8 +27,8 @@ fn packet_groups(app: &mut App, unspent: u32, active: u8, groups: &[&[(u32, u8)]
     crate::net::handlers::dispatch(app.world_mut(), events);
 }
 
-#[test]
-fn talent_packet_repaints_open_page_and_learns_next_rank_without_tab_switch() {
+/// A warrior with one three-rank Arms talent (id 10), the offline net plugin and a VM.
+fn talent_app() -> App {
     let mut app = App::new();
     // Offline net plugin registers the production TalentsInfo handler; it opens no socket.
     app.add_plugins(crate::net::NetPlugin { connect: false });
@@ -67,9 +67,15 @@ fn talent_packet_repaints_open_page_and_learns_next_rank_without_tab_switch() {
             (Field::PlayerCharacterPoints1, 0, 99),
         ])),
     ));
-    let script = UiScript::new().unwrap();
+    app.insert_non_send_resource(UiScript::new().unwrap());
+    app
+}
+
+#[test]
+fn talent_packet_repaints_open_page_and_learns_next_rank_without_tab_switch() {
+    let mut app = talent_app();
+    let script = app.world_mut().non_send_resource_mut::<UiScript>();
     script.run("paints=0; local f=CreateFrame('Frame'); f:RegisterEvent('PLAYER_TALENT_UPDATE'); f:SetScript('OnEvent', function() paints=paints+1; local _,_,_,_,rank=GetTalentInfo(1,1); paintedRank=rank; paintedPoints=GetUnspentTalentPoints() end)").unwrap();
-    app.insert_non_send_resource(script);
     // Keep the real feed's Local memo/change ticks between runs without running the net ladder.
     let mut schedule = Schedule::default();
     schedule.add_systems(feed_talents);
@@ -238,5 +244,47 @@ fn a_new_active_group_fires_active_talent_group_changed() {
             .unwrap(),
         "2:0 1:2",
         "the first packet moves from no groups; a repeat fires nothing"
+    );
+}
+
+/// The other group reads its own packet record, its unspent points the active group's spent
+/// and unspent less its own spent (`0x5c9ca0`), and a switch swaps the two.
+#[test]
+fn the_inactive_group_answers_its_own_ranks_and_points() {
+    let mut app = talent_app();
+    let mut schedule = Schedule::default();
+    schedule.add_systems(feed_talents);
+    let read = |app: &mut App| {
+        let script = app.world_mut().non_send_resource_mut::<UiScript>();
+        script
+            .eval::<(u32, u32, u32, u32)>(
+                "local _,_,_,_,a = GetTalentInfo(1, 1) local _,_,_,_,o = GetTalentInfo(1, 1, false, \
+                 false, 2) return a, o, GetUnspentTalentPoints(), GetUnspentTalentPoints(false, false, 2)",
+            )
+            .unwrap()
+    };
+    packet_groups(&mut app, 4, 0, &[&[(10, 0)], &[(10, 2)]]);
+    schedule.run(app.world_mut());
+    assert_eq!(
+        read(&mut app),
+        (1, 3, 4, 2),
+        "1 + 4 points, 3 spent in group 2"
+    );
+    packet_groups(&mut app, 2, 1, &[&[(10, 0)], &[(10, 2)]]);
+    schedule.run(app.world_mut());
+    assert_eq!(
+        read(&mut app),
+        (3, 3, 2, 2),
+        "group 2 active: the default reads it"
+    );
+    let script = app.world_mut().non_send_resource_mut::<UiScript>();
+    assert_eq!(
+        script
+            .eval::<(u32, u32)>(
+                "local _,_,_,_,r = GetTalentInfo(1, 1, false, false, 1) \
+                 return r, GetUnspentTalentPoints(false, false, 1)"
+            )
+            .unwrap(),
+        (1, 4)
     );
 }
