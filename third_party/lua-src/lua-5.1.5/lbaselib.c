@@ -374,9 +374,15 @@ static int luaB_select (lua_State *L) {
 static int luaB_pcall (lua_State *L) {
   int status;
   luaL_checkany(L, 1);
-  status = lua_pcall(L, lua_gettop(L) - 1, LUA_MULTRET, 0);
-  lua_pushboolean(L, (status == 0));
+  /* WrathPlus: the status takes its slot before the call. After LUA_MULTRET the
+  ** results may fill the frame (`adjustresults'), leaving no slot to push to. */
+  lua_pushboolean(L, 1);
   lua_insert(L, 1);
+  status = lua_pcall(L, lua_gettop(L) - 2, LUA_MULTRET, 0);
+  if (status != 0) {  /* only the error message is above the status */
+    lua_pushboolean(L, 0);
+    lua_replace(L, 1);
+  }
   return lua_gettop(L);  /* return status + all results */
 }
 
@@ -386,9 +392,14 @@ static int luaB_xpcall (lua_State *L) {
   luaL_checkany(L, 2);
   lua_settop(L, 2);
   lua_insert(L, 1);  /* put error function under function to be called */
-  status = lua_pcall(L, 0, LUA_MULTRET, 1);
-  lua_pushboolean(L, (status == 0));
-  lua_replace(L, 1);
+  lua_pushboolean(L, 1);  /* WrathPlus: as in `luaB_pcall' */
+  lua_insert(L, 1);
+  status = lua_pcall(L, 0, LUA_MULTRET, 2);
+  if (status != 0) {
+    lua_pushboolean(L, 0);
+    lua_replace(L, 1);
+  }
+  lua_remove(L, 2);  /* the error function */
   return lua_gettop(L);  /* return status + all results */
 }
 
