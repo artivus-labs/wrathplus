@@ -370,6 +370,23 @@ fn the_ghost_predicates() {
             .unwrap(),
         1
     );
+    // So do the resurrect and spirit-healer ones (`0x5159c0`, `0x515a00`, `0x51b6e0`).
+    let both = "return ResurrectHasSickness() == nil and ResurrectHasTimer() == nil \
+                and CheckSpiritHealerDist() == nil";
+    assert!(s.eval::<bool>(both).unwrap());
+    s.set_death(DeathUiState {
+        resurrect_sickness: true,
+        resurrect_has_timer: true,
+        spirit_healer_in_range: true,
+        ..Default::default()
+    });
+    let ones = "return ResurrectHasSickness(), ResurrectHasTimer(), CheckSpiritHealerDist()";
+    assert_eq!(s.eval::<(i64, i64, i64)>(ones).unwrap(), (1, 1, 1));
+    s.set_instance_type(Some(4));
+    assert!(
+        s.eval::<bool>("return ResurrectHasTimer() == nil").unwrap(),
+        "an arena"
+    );
     assert!(s.errors().is_empty(), "script errors: {:?}", s.errors());
 }
 
