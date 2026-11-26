@@ -101,6 +101,8 @@ The built-ins, each documented in its own source (`lua_doc("Goals.push")`,
   `Goals.on = true` levels by itself; push goals, teach facts and actions, hold it), **`Upkeep`**,
   **`Professions`**, **`Revive`**, **`Avoid`**, **`Survive`**, **`Agent`** (`Agent.ask`, below),
   `require("wp.engine")` (a Playerbots-style decision engine) and `require("wp.values")`.
+- A zone you have outlevelled (fact `zone_outlevelled`) is left for the nearest zone that fits once
+  no quest work is left there; your own goals, holds and `data.zone` still come first.
 - A walk you start by hand already holds the goal runner until it ends. Its arrival can be a
   reflex in your own Lua (watch `AgentWalk().status`, then `Goals.release()` or the next step) or
   a wake-up when it needs judgement (`Agent.ask`): which is yours to choose.
