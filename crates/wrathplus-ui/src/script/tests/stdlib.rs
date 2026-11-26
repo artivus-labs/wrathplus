@@ -312,6 +312,50 @@ fn the_rest_of_the_bare_globals() {
     .unwrap();
 }
 
+/// `pcall` and `xpcall` hand back every result of the call, however many. Stock 5.1.5 pushes the
+/// status with no slot reserved, and a debug build's `LUA_USE_APICHECK` aborts on that push once
+/// the results fill the frame's `LUA_MINSTACK` (20) spare slots.
+#[test]
+fn a_protected_call_returns_any_number_of_results() {
+    let s = script();
+    s.run(
+        r##"
+        local t = {}
+        for i = 1, 7999 do t[i] = i end
+        local function count(n, ok, ...)
+            assert(ok == true and select("#", ...) == n and (n == 0 or select(n, ...) == n))
+        end
+        -- the push failed at 21 results for a call with no arguments, at 24 with three
+        for _, n in ipairs({ 0, 1, 20, 21, 23, 24, 255 }) do
+            count(n, pcall(unpack, t, 1, n))
+            count(n, pcall(function() return unpack(t, 1, n) end))
+            count(n, xpcall(function() return unpack(t, 1, n) end, geterrorhandler()))
+        end
+        -- the failing leg still answers false and the message
+        local ok, e = pcall(error, "x", 0)
+        assert(ok == false and e == "x")
+        ok, e = xpcall(function() error("y", 0) end, function(m) return m .. "!" end)
+        assert(ok == false and e == "y!")
+    "##,
+    )
+    .unwrap();
+    // The natives alone, past LUAI_MAXCSTACK (8000), where `lua_checkstack` would refuse a slot.
+    // The client's guards (`stdlib_guards.rs`) pass results through a Rust callback, which stops
+    // at that limit.
+    mlua::Lua::new()
+        .load(
+            r##"
+        local t = {}
+        for i = 1, 7999 do t[i] = i end
+        local function many() return 7997, 7998, 7999, unpack(t) end
+        assert(select("#", pcall(many)) == 8003 and select("#", xpcall(many, print)) == 8003)
+        assert(select(8003, pcall(many)) == 7999 and select(8003, xpcall(many, print)) == 7999)
+    "##,
+        )
+        .exec()
+        .unwrap();
+}
+
 /// `time()` is wall-clock epoch seconds and `date()` formats them, both engine globals in the 1.12
 /// `_G` (slots 34 and 33 of its base registry); addons save `time()` and compare across logins.
 #[test]
