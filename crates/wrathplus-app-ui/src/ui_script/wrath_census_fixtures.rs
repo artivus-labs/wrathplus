@@ -325,28 +325,28 @@ pub(super) fn seed(s: &mut UiScript) {
         ..Default::default()
     }));
 
+    s.set_cvar_host("currencyTokensBackpack1", "268435456"); // bit 29, Emblem of Frost
     s.set_wrath_currency_snapshot(WrathCurrencySnapshot {
-        entries: vec![
-            WrathCurrencyEntry {
-                name: Some("Dungeon and Raid".into()),
-                category_id: 22,
-                is_header: true,
-                is_expanded: true,
-                ..Default::default()
-            },
-            WrathCurrencyEntry {
-                name: Some("Emblem of Frost".into()),
-                category_id: 22,
-                is_watched: true,
-                count: 12,
-                icon: Some(r"Interface\Icons\INV_Misc_Frostemblem_01".into()),
-                item_id: 49426,
-                ..Default::default()
-            },
-        ],
+        categories: vec![WrathCurrencyCategory {
+            id: 22,
+            name: "Dungeon and Raid".into(),
+            is_expanded: true,
+            ..Default::default()
+        }],
+        entries: vec![WrathCurrencyEntry {
+            name: Some("Emblem of Frost".into()),
+            category_id: 22,
+            bit_index: 29,
+            count: 12,
+            icon: Some(r"Interface\Icons\INV_Misc_Frostemblem_01".into()),
+            item_id: 49426,
+            ..Default::default()
+        }],
+        known: 1 << 28,
         honor_current: Some(100),
         arena_current: Some(10),
         token_stacks: vec![(49426, 12)],
+        ..Default::default()
     });
 
     // The player's cast and channel.

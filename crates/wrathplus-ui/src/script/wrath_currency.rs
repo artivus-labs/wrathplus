@@ -1,108 +1,193 @@
 //! Build-12340 currency display state. No roster or balances are invented before a host push.
 //! Contracts: Blizzard_TokenUI.lua:68,180,254,263; Blizzard_TokenUI.xml:331,370;
 //! StaticPopup.lua:143-144. Display verbs do not stand in for server operations.
+//!
+//! The list is 12340's own build (`0x5b0030`), redone on a push and inside the three setters:
+//! categories sorted by `0x5afc40` (flag bit 0 last, then name), the last one the Unused bucket;
+//! each category's known tokens in table order, then sorted by item name (`0x5aff10`). The unused
+//! and backpack marks are bits of `currencyTokensUnused1/2` and `currencyTokensBackpack1/2`
+//! (`0x51f01a`-`0x51f08c`, flags `0x20`). Labelled: 12340 stores those per character; here they
+//! are global, as every other such CVar is.
 
 use super::{Model, UiScript};
+use crate::strings::collate;
 use mlua::{Lua, MultiValue, Value};
 use std::collections::HashMap;
 
+/// A `CurrencyTypes.dbc` row, in table order, with its item's display state.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct WrathCurrencyEntry {
-    /// Missing while the host item query is pending; Lua sees an empty string.
-    /// Installed TokenUI.lua:68-73 hides rows with absent/empty names.
+    /// The item's name; `None` while the item query is pending.
     pub name: Option<String>,
-    /// Raw category identity, including IDs absent from CurrencyCategory.dbc.
+    /// Raw category identity; an id with no `CurrencyCategory.dbc` row never shows.
     pub category_id: u32,
-    pub is_header: bool,
-    pub is_expanded: bool,
-    pub is_unused: bool,
-    pub is_watched: bool,
+    /// One-based bit in the known mask and in the CVar pairs.
+    pub bit_index: u32,
     pub count: u32,
     /// TokenUI: 1 = arena, 2 = honor, 0 = ordinary item currency.
     pub extra_currency_type: u32,
-    /// Pending item icon projects an empty texture path, never an invented texture.
+    /// `None` while the item query is pending, never an invented texture.
     pub icon: Option<String>,
     pub item_id: u32,
 }
 
-/// Ordered headers followed by their entries, including children of collapsed headers.
-/// Names/icons/item ids must come from the installed data; counts from host state; honor/arena caps are fixed native-client constants.
+/// A `CurrencyCategory.dbc` row.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct WrathCurrencyCategory {
+    pub id: u32,
+    pub flags: u32,
+    pub name: String,
+    /// 1 at load (`0x5afde2`); the VM keeps a fold by id across pushes and forgets it on the
+    /// empty logout push. Labelled: 12340 reloads the table on entering the world (`0x5afd90`).
+    pub is_expanded: bool,
+}
+
+/// One built row (`0xc1e960`, stride 0x18).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Row {
+    /// Index into the sorted categories.
+    Header(usize),
+    /// Index into the entries, and the backpack bit at the build (`+0x14`).
+    Token(usize, bool),
+}
+
+/// The built list; the VM rebuilds it, and a host push leaves it empty.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct WrathCurrencyList(Vec<Row>);
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct WrathCurrencySnapshot {
+    pub categories: Vec<WrathCurrencyCategory>,
     pub entries: Vec<WrathCurrencyEntry>,
-    /// Unavailable descriptor state remains explicit in the host snapshot.
+    /// `PLAYER_FIELD_KNOWN_CURRENCIES`, both words.
+    pub known: u64,
     /// Native getters project a missing Player to numeric zero, not nil.
     pub honor_current: Option<u32>,
     pub arena_current: Option<u32>,
     /// The hidden token bag's stacks (slots 118-149) as `(entry, count)`, whatever the known
     /// bits: `GetItemCount`'s default walk counts them (`0x753a50`, bit `0x200`).
     pub token_stacks: Vec<(u32, u32)>,
+    pub list: WrathCurrencyList,
+}
+
+/// A one-based bit as a mask; 0 and anything past 64 mark nothing.
+fn bit(index: u32) -> u64 {
+    index
+        .checked_sub(1)
+        .and_then(|i| 1u64.checked_shl(i))
+        .unwrap_or(0)
+}
+
+const UNUSED: [&str; 2] = ["currencyTokensUnused1", "currencyTokensUnused2"];
+const BACKPACK: [&str; 2] = ["currencyTokensBackpack1", "currencyTokensBackpack2"];
+
+/// A CVar pair's 64 bits: each CVar's integer (`[cvar+0x30]`, `SStrToInt`), the second the high word.
+fn marks(model: &Model, pair: [&str; 2]) -> u64 {
+    let word = |name: &str| {
+        let slot = model.cvars.get(&name.to_ascii_lowercase());
+        slot.map_or(0, |s| super::cvars::sstr_to_int(&s.value) as u32)
+    };
+    u64::from(word(pair[0])) | (u64::from(word(pair[1])) << 32)
+}
+
+/// Sets or clears a token's bit in a CVar pair, written as `%d` (`0x766940`).
+fn mark(model: &mut Model, pair: [&str; 2], index: u32, on: bool) {
+    let mask = bit(index);
+    if mask == 0 {
+        return;
+    }
+    let all = marks(model, pair);
+    let all = if on { all | mask } else { all & !mask };
+    let (name, word) = if index > 32 {
+        (pair[1], (all >> 32) as u32)
+    } else {
+        (pair[0], all as u32)
+    };
+    super::cvars::set_from_engine(model, name, (word as i32).to_string());
 }
 
 impl WrathCurrencySnapshot {
-    fn visible(&self) -> Vec<usize> {
-        let mut expanded = true;
-        self.entries
-            .iter()
-            .enumerate()
-            .filter_map(|(i, row)| {
-                if row.is_header {
-                    expanded = row.is_expanded;
-                    Some(i)
-                } else if expanded {
-                    Some(i)
-                } else {
-                    None
+    /// `0x5b0030`: a category shows when one of its own rows is known, or, for the last, when any
+    /// row is marked unused, known or not (`0x5afe30`). A folded header adds no rows.
+    fn build(&self, unused: u64, backpack: u64) -> Vec<Row> {
+        let mut rows = Vec::new();
+        let last = self.categories.len().checked_sub(1);
+        for (c, cat) in self.categories.iter().enumerate() {
+            let is_last = Some(c) == last;
+            let mine = |e: &WrathCurrencyEntry| e.category_id == cat.id;
+            let shows = self.entries.iter().any(|e| {
+                (mine(e) && self.known & bit(e.bit_index) != 0)
+                    || (is_last && unused & bit(e.bit_index) != 0)
+            });
+            if !shows {
+                continue;
+            }
+            rows.push(Row::Header(c));
+            if !cat.is_expanded {
+                continue;
+            }
+            let start = rows.len();
+            for (i, e) in self.entries.iter().enumerate() {
+                let mask = bit(e.bit_index);
+                let unused = unused & mask != 0;
+                let child = if is_last { unused } else { mine(e) && !unused };
+                if self.known & mask != 0 && child {
+                    rows.push(Row::Token(i, backpack & mask != 0));
                 }
-            })
-            .collect()
+            }
+            // `0x5aff10`: an item with no record or no name yet sorts last.
+            rows[start..].sort_by(|a, b| {
+                let name = |r: &Row| match r {
+                    Row::Token(i, _) => self.entries[*i].name.as_deref(),
+                    Row::Header(_) => None,
+                };
+                match (name(a), name(b)) {
+                    (Some(a), Some(b)) => collate(a, b),
+                    (a, b) => a.is_none().cmp(&b.is_none()),
+                }
+            });
+        }
+        rows
     }
 
-    fn list_index(&self, index: i64) -> Option<usize> {
-        let index = usize::try_from(index.checked_sub(1)?).ok()?;
-        self.visible().get(index).copied()
+    /// `0x5b0340`: the n-th row, in table order, both known and marked for the backpack. No cap:
+    /// `MAX_WATCHED_TOKENS` is TokenUI's (`Blizzard_TokenUI.lua:3`).
+    fn backpack(&self, backpack: u64, n: i64) -> Option<&WrathCurrencyEntry> {
+        let n = usize::try_from(n).ok()?;
+        let marked = |e: &&WrathCurrencyEntry| self.known & backpack & bit(e.bit_index) != 0;
+        self.entries.iter().filter(marked).nth(n)
+    }
+
+    fn row(&self, index: i64) -> Option<Row> {
+        self.list.0.get(usize::try_from(index).ok()?).copied()
     }
 }
 
+/// Rebuild the list from the snapshot and the CVars, as each of 12340's rebuild points does.
+fn rebuild(model: &mut Model) {
+    let (unused, backpack) = (marks(model, UNUSED), marks(model, BACKPACK));
+    let list = model.wrath_currency.build(unused, backpack);
+    model.wrath_currency.list = WrathCurrencyList(list);
+}
+
 impl UiScript {
-    /// Refresh authoritative values, preserving local flags by category/item identity.
-    /// Removed identities are forgotten; an empty push clears logout state.
-    /// No network request is emitted. Watch slots are bounded by TokenUI's MAX_WATCHED_TOKENS=3.
+    /// Refresh the tables and values; folds carry over by category id, and an empty push (logout)
+    /// forgets them. No network request is emitted.
     pub fn set_wrath_currency_snapshot(&mut self, mut snapshot: WrathCurrencySnapshot) {
-        let model = self.model_ref();
-        let old = &model.wrath_currency;
-        let headers: HashMap<_, _> = old
-            .entries
-            .iter()
-            .filter(|r| r.is_header)
-            .map(|r| (r.category_id, r.is_expanded))
+        let mut model = self.model_mut();
+        let folds: HashMap<_, _> = (model.wrath_currency.categories.iter())
+            .map(|c| (c.id, c.is_expanded))
             .collect();
-        let tokens: HashMap<_, _> = old
-            .entries
-            .iter()
-            .filter(|r| !r.is_header && r.item_id != 0)
-            .map(|r| (r.item_id, (r.is_unused, r.is_watched)))
-            .collect();
-        drop(model);
-        let mut watched = 0;
-        for row in &mut snapshot.entries {
-            if row.is_header {
-                if let Some(expanded) = headers.get(&row.category_id) {
-                    row.is_expanded = *expanded;
-                }
-                row.is_watched = false;
-            } else {
-                if let Some((unused, watched)) = tokens.get(&row.item_id) {
-                    row.is_unused = *unused;
-                    row.is_watched = *watched;
-                }
-            }
-            if !row.is_header && row.is_watched {
-                watched += 1;
-                row.is_watched = watched <= 3;
-            }
+        for cat in &mut snapshot.categories {
+            cat.is_expanded = folds.get(&cat.id).copied().unwrap_or(cat.is_expanded);
         }
-        self.model_mut().wrath_currency = snapshot;
+        snapshot.categories.sort_by(|a, b| {
+            (a.flags & 1)
+                .cmp(&(b.flags & 1))
+                .then_with(|| collate(&a.name, &b.name))
+        });
+        model.wrath_currency = snapshot;
+        rebuild(&mut model);
     }
 }
 
@@ -119,71 +204,91 @@ fn flag(value: Value) -> mlua::Result<bool> {
     }
 }
 
-fn info(lua: &Lua, row: Option<&WrathCurrencyEntry>, backpack: bool) -> mlua::Result<MultiValue> {
+/// `GetCurrencyListInfo`'s nine values for a built row (`0x5b0680`).
+fn list_info(lua: &Lua, model: &Model, row: Option<Row>) -> mlua::Result<MultiValue> {
+    let s = &model.wrath_currency;
     let Some(row) = row else {
         return Ok(MultiValue::from_vec(vec![Value::Nil]));
     };
-    let mut out = vec![Value::String(
-        lua.create_string(row.name.as_deref().unwrap_or_default())?,
-    )];
-    if !backpack {
-        out.extend([
-            Value::Boolean(row.is_header),
-            Value::Boolean(row.is_expanded),
-            Value::Boolean(row.is_unused),
-            Value::Boolean(row.is_watched),
-        ]);
-    }
-    out.extend([
-        Value::Integer(row.count.into()),
-        Value::Integer(row.extra_currency_type.into()),
-        Value::String(lua.create_string(row.icon.as_deref().unwrap_or_default())?),
-        Value::Integer(row.item_id.into()),
-    ]);
+    let text = |t: Option<&str>| lua.create_string(t.unwrap_or_default()).map(Value::String);
+    let out = match row {
+        Row::Header(c) => {
+            let last = c + 1 == s.categories.len();
+            vec![
+                text(Some(&s.categories[c].name))?,
+                Value::Boolean(true),
+                Value::Boolean(s.categories[c].is_expanded),
+                Value::Boolean(last),
+                Value::Boolean(false),
+                Value::Integer(0),
+                Value::Integer(0),
+                text(None)?,
+                Value::Integer(0),
+            ]
+        }
+        Row::Token(i, watched) => {
+            let e = &s.entries[i];
+            // `0x5b04f0`: the CVar bit of the first row naming the item, read at the call.
+            let first = s.entries.iter().find(|r| r.item_id == e.item_id);
+            let unused = marks(model, UNUSED) & bit(first.map_or(0, |r| r.bit_index)) != 0;
+            vec![
+                text(e.name.as_deref())?,
+                Value::Boolean(false),
+                Value::Boolean(false),
+                Value::Boolean(unused),
+                Value::Boolean(watched),
+                Value::Integer(e.count.into()),
+                Value::Integer(e.extra_currency_type.into()),
+                text(e.icon.as_deref())?,
+                Value::Integer(e.item_id.into()),
+            ]
+        }
+    };
     Ok(MultiValue::from_vec(out))
+}
+
+/// `GetBackpackCurrencyInfo`'s five values (`0x5b0a90`).
+fn backpack_info(lua: &Lua, e: Option<&WrathCurrencyEntry>) -> mlua::Result<MultiValue> {
+    let Some(e) = e else {
+        return Ok(MultiValue::from_vec(vec![Value::Nil]));
+    };
+    let text = |t: Option<&str>| lua.create_string(t.unwrap_or_default()).map(Value::String);
+    Ok(MultiValue::from_vec(vec![
+        text(e.name.as_deref())?,
+        Value::Integer(e.count.into()),
+        Value::Integer(e.extra_currency_type.into()),
+        text(e.icon.as_deref())?,
+        Value::Integer(e.item_id.into()),
+    ]))
 }
 
 pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     lua.globals().set(
         "GetCurrencyListSize",
         lua.create_function(|lua, ()| {
-            Ok(lua
-                .app_data_ref::<Model>()
-                .expect("model")
-                .wrath_currency
-                .visible()
-                .len())
+            let model = lua.app_data_ref::<Model>().expect("model");
+            Ok(model.wrath_currency.list.0.len())
         })?,
     )?;
     lua.globals().set(
         "GetCurrencyListInfo",
         lua.create_function(|lua, index: i64| {
             let model = lua.app_data_ref::<Model>().expect("model");
-            let snapshot = &model.wrath_currency;
-            info(
-                lua,
-                snapshot.list_index(index).map(|i| &snapshot.entries[i]),
-                false,
-            )
+            let row = index
+                .checked_sub(1)
+                .and_then(|i| model.wrath_currency.row(i));
+            list_info(lua, &model, row)
         })?,
     )?;
     lua.globals().set(
         "GetBackpackCurrencyInfo",
         lua.create_function(|lua, index: i64| {
             let model = lua.app_data_ref::<Model>().expect("model");
+            let backpack = marks(&model, BACKPACK);
             let row = index
                 .checked_sub(1)
-                .and_then(|i| usize::try_from(i).ok())
-                .filter(|i| *i < 3)
-                .and_then(|i| {
-                    model
-                        .wrath_currency
-                        .entries
-                        .iter()
-                        .filter(|r| !r.is_header && r.is_watched)
-                        .nth(i)
-                });
-            info(lua, row, true)
+                .and_then(|i| model.wrath_currency.backpack(backpack, i));
+            backpack_info(lua, row)
         })?,
     )?;
     for name in [
@@ -196,29 +301,29 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             lua.create_function(move |lua, (index, value): (i64, Value)| {
                 let enabled = flag(value)?;
                 let mut model = lua.app_data_mut::<Model>().expect("model");
-                let snapshot = &mut model.wrath_currency;
-                let Some(i) = snapshot.list_index(index) else {
-                    return Ok(());
-                };
-                match name {
-                    "ExpandCurrencyList" if snapshot.entries[i].is_header => {
-                        snapshot.entries[i].is_expanded = enabled
+                let row = index
+                    .checked_sub(1)
+                    .and_then(|i| model.wrath_currency.row(i));
+                match (name, row) {
+                    ("ExpandCurrencyList", Some(Row::Header(c))) => {
+                        model.wrath_currency.categories[c].is_expanded = enabled;
                     }
-                    "SetCurrencyUnused" if !snapshot.entries[i].is_header => {
-                        snapshot.entries[i].is_unused = enabled
-                    }
-                    "SetCurrencyBackpack" if !snapshot.entries[i].is_header => {
-                        let watched = snapshot
-                            .entries
-                            .iter()
-                            .filter(|r| !r.is_header && r.is_watched)
-                            .count();
-                        if !enabled || watched < 3 || snapshot.entries[i].is_watched {
-                            snapshot.entries[i].is_watched = enabled;
-                        }
+                    (_, Some(Row::Token(i, _))) if name != "ExpandCurrencyList" => {
+                        let item = model.wrath_currency.entries[i].item_id;
+                        let entries = &model.wrath_currency.entries;
+                        let first = entries.iter().find(|r| r.item_id == item);
+                        let index = first.map_or(0, |r| r.bit_index);
+                        let pair = if name == "SetCurrencyUnused" {
+                            UNUSED
+                        } else {
+                            BACKPACK
+                        };
+                        mark(&mut model, pair, index, enabled);
                     }
                     _ => {}
                 }
+                // Each setter rebuilds whatever the index (`0x5b098f`, `0x5b09ff`, `0x5b0a6f`).
+                rebuild(&mut model);
                 Ok(())
             })?,
         )?;
@@ -239,11 +344,11 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             })?,
         )?;
     }
-    // GameTooltip:SetCurrencyToken(index) (`0x630620`), over the list's visible rows, and
-    // :SetBackpackToken(index) (`0x6307e0`), over the watched ones: the token's item tooltip. A
-    // header (`+0xc`) or a row out of range shows nothing. Labelled: the reference shows the
-    // carried instance from the currency slots (118-149) else the template; this shows the
-    // template's link, as a token carries no instance state.
+    // GameTooltip:SetCurrencyToken(index) (`0x630620`), over the list's built rows, and
+    // :SetBackpackToken(index) (`0x6307e0`), over the backpack walk: the token's item tooltip. A
+    // header or a row out of range shows nothing. Labelled: the reference shows the carried
+    // instance from the currency slots (118-149) else the template; this shows the template's
+    // link, as a token carries no instance state.
     let tooltip: mlua::Table = lua.named_registry_value(super::tooltip::REG_TOOLTIP_METHODS)?;
     for (method, backpack) in [("SetCurrencyToken", false), ("SetBackpackToken", true)] {
         tooltip.set(
@@ -264,23 +369,17 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 };
                 let item = {
                     let model = lua.app_data_ref::<Model>().expect("model");
-                    let snapshot = &model.wrath_currency;
-                    let row = if backpack {
-                        usize::try_from(index - 1)
-                            .ok()
-                            .filter(|i| *i < 3)
-                            .and_then(|i| {
-                                snapshot
-                                    .entries
-                                    .iter()
-                                    .filter(|r| !r.is_header && r.is_watched)
-                                    .nth(i)
-                            })
+                    let s = &model.wrath_currency;
+                    let i = index.saturating_sub(1);
+                    let entry = if backpack {
+                        s.backpack(marks(&model, BACKPACK), i)
                     } else {
-                        snapshot.list_index(index).map(|i| &snapshot.entries[i])
+                        match s.row(i) {
+                            Some(Row::Token(e, _)) => s.entries.get(e),
+                            _ => None,
+                        }
                     };
-                    row.filter(|r| !r.is_header && r.item_id != 0)
-                        .map(|r| r.item_id)
+                    entry.map(|e| e.item_id).filter(|&id| id != 0)
                 };
                 if let Some(item) = item {
                     mlua::ObjectLike::call_method::<()>(

@@ -248,7 +248,7 @@ mod wrath_tutorial;
 pub use wrath_inspect_talents::{WrathInspectGroup, WrathInspectTalents};
 mod wrath_server_time;
 mod wrath_talent_preview;
-pub use wrath_currency::{WrathCurrencyEntry, WrathCurrencySnapshot};
+pub use wrath_currency::{WrathCurrencyCategory, WrathCurrencyEntry, WrathCurrencySnapshot};
 pub use wrath_tutorial::WrathTutorialRequest;
 mod wrath_achievement_format;
 mod wrath_achievement_listing;
