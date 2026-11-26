@@ -539,6 +539,14 @@ pub(crate) fn drain_native(
     }
 }
 
+/// `0x54ccc5`-`0x54ccd9`: the type's `MaxGroupSize` below the party without the player
+/// (`0x52bd10`) or the raid with the player (`[0xbeb608]`, 0 outside a raid).
+fn join_too_large(group: Option<&GroupState>, max: u32) -> bool {
+    let Some(g) = group else { return false };
+    let raid = usize::from(g.group_type == 1) * (g.members.len() + 1);
+    (max as usize) < g.party_slots().count() || (max as usize) < raid
+}
+
 /// Runs before the dialog and score feeds fire `UPDATE_BATTLEFIELD_STATUS` and
 /// `UPDATE_BATTLEFIELD_SCORE`, so their handlers read this frame's list and slots.
 #[allow(clippy::too_many_arguments)]
@@ -710,21 +718,10 @@ fn drain_battlefield(
             } => {
                 let ty = bm.and_then(|t| t.get(state.bg_type));
                 let arena = ty.is_some_and(|t| t.instance_type == 4);
-                // `0x54cc70`: a group larger than the type's maximum, by party or raid count.
-                if let (true, Some(t)) = (as_group, ty) {
-                    let (party, raid) = group.as_deref().map_or((0, 0), |g| {
-                        let raid = if g.group_type == 1 {
-                            g.members.len()
-                        } else {
-                            0
-                        };
-                        (g.party_slots().count() + 1, raid)
-                    });
-                    let max = t.max_group_size as usize;
-                    if max < party || max < raid {
-                        errors.push("ERR_GROUP_JOIN_BATTLEGROUND_TOO_MANY");
-                        continue;
-                    }
+                let max = ty.map(|t| t.max_group_size);
+                if as_group && max.is_some_and(|m| join_too_large(group.as_deref(), m)) {
+                    errors.push("ERR_GROUP_JOIN_BATTLEGROUND_TOO_MANY");
+                    continue;
                 }
                 // Not from inside a battleground, except into an arena.
                 let here = current_map
