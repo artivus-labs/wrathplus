@@ -728,15 +728,6 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // GetCurrentMapZone(): the zone cell plus one (`0x4a7f00`), so an instance map answers 0.
-    g.set(
-        "GetCurrentMapZone",
-        lua.create_function(|lua, ()| {
-            let model = lua.app_data_ref::<Model>().expect("model app_data");
-            Ok(i64::from(model.worldmap.selection.1))
-        })?,
-    )?;
-
     // SetMapToCurrentZone(): the resolver's whole answer, orphan leg included (`0x4a7e20` is
     // `call 0x4a6650; xor eax,eax; ret`).
     g.set(
