@@ -236,9 +236,8 @@ pub(super) fn selected_visible_index(model: &Model) -> u32 {
         .map_or(0, |p| (p + 1) as u32)
 }
 
-/// `SelectTradeSkill`: holds the recipe at a visible index. A header index leaves the selection
-/// as it was, and an out-of-range one clears it; the stock Lua folds a header instead of selecting
-/// it (`Blizzard_TradeSkillUI.lua:184-192`).
+/// `SelectTradeSkill`: holds the recipe at a visible index; a header or out-of-range index clears
+/// it, as 12340 stores 0 for a row id `<= 0` (`0x5da94d`-`0x5da95f`).
 pub(super) fn select(model: &mut Model, index: u32) {
     let visible = rows(model);
     match index.checked_sub(1).and_then(|n| visible.get(n as usize)) {
@@ -251,33 +250,32 @@ pub(super) fn select(model: &mut Model, index: u32) {
                 .and_then(|t| t.recipes.get(*ei))
                 .map_or(0, |r| r.spell_id);
         }
-        Some(Row::Header { .. }) => {}
-        None => {
+        Some(Row::Header { .. }) | None => {
             model.trade_skill_selection = 0;
             model.trade_skill_selected_spell = 0;
         }
     }
 }
 
-/// Folds or unfolds the group whose header is visible row `id`; 0 is every group, as the stock
-/// collapse-all button passes, and any other row is a no-op.
-pub(super) fn set_collapsed(model: &mut Model, id: usize, collapse: bool) {
-    if id == 0 && !collapse {
+/// Folds or unfolds the group whose header is visible row `id`; `<= 0` is every group, as the stock
+/// collapse-all button passes. Any other row answers `false`, which the verbs raise on.
+pub(super) fn set_collapsed(model: &mut Model, id: i64, collapse: bool) -> bool {
+    if id <= 0 && !collapse {
         model.trade_skill_collapsed.clear();
-        return;
+        return true;
     }
-    let targets: Vec<(u32, u32)> = if id == 0 {
+    let targets: Vec<(u32, u32)> = if id <= 0 {
         let Some(t) = model.trade_skill.as_ref() else {
-            return;
+            return true;
         };
         build_groups(&t.recipes)
             .into_iter()
             .map(|g| g.key)
             .collect()
     } else {
-        match rows(model).get(id - 1) {
+        match rows(model).get(id as usize - 1) {
             Some(Row::Header { key, .. }) => vec![*key],
-            _ => Vec::new(),
+            _ => return false,
         }
     };
     for k in targets {
@@ -287,4 +285,5 @@ pub(super) fn set_collapsed(model: &mut Model, id: usize, collapse: bool) {
             model.trade_skill_collapsed.remove(&k);
         }
     }
+    true
 }
