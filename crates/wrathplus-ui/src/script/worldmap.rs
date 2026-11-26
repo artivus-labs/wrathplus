@@ -48,6 +48,9 @@ impl<F: ?Sized> PartialEq for Hook<F> {
 /// The host's projection of a [`MapPos`] onto the displayed map (`0x544140`), `None` off it.
 pub type MapProjection = Hook<dyn Fn(MapSelection, MapPos) -> Option<(f32, f32)>>;
 
+/// The host's landmark walk for a selection (`0x546310`), over its current inputs.
+pub type LandmarkWalk = Hook<dyn Fn(MapSelection) -> Vec<WorldMapLandmarkView>>;
+
 /// One zone of a continent; its 1-based position is the Lua zone index.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct WorldMapZoneView {
@@ -286,7 +289,11 @@ pub struct WorldMapState {
     pub projection: Option<MapProjection>,
     /// `PLAYER_EXPLORED_ZONES_1`, 64 words, bit n being `AreaTable.dbc` exploreFlag n.
     pub explored: Vec<u32>,
+    /// The landmark list, walked for [`Self::landmarks_for`] (12340 walks in the setter).
     pub landmarks: Vec<WorldMapLandmarkView>,
+    pub landmarks_for: Option<MapSelection>,
+    /// The host's walk, run lazily for a selection the list was not walked for.
+    pub landmark_walk: Option<LandmarkWalk>,
 }
 
 fn explored_bit(explored: &[u32], n: u32) -> bool {
@@ -523,6 +530,25 @@ impl super::UiScript {
         }
     }
 
+    /// Installs the landmark walk over new inputs; a list that changes for the displayed map
+    /// queues `WORLD_MAP_UPDATE` to re-seat it.
+    pub fn set_world_map_landmark_walk(
+        &mut self,
+        walk: impl Fn(MapSelection) -> Vec<WorldMapLandmarkView> + 'static,
+    ) {
+        let mut model = self.model_mut();
+        let selection = model.map_selection();
+        let landmarks = walk(selection);
+        model.worldmap.landmark_walk = Some(Hook(Rc::new(walk)));
+        model.worldmap.landmarks_for = Some(selection);
+        if model.worldmap.landmarks != landmarks {
+            model.worldmap.landmarks = landmarks;
+            model
+                .pending_events
+                .push(("WORLD_MAP_UPDATE".to_string(), Vec::new()));
+        }
+    }
+
     /// Pushes the per-frame feed: the player's zone, the positions and the facing.
     pub fn set_world_map_feed(
         &mut self,
@@ -599,6 +625,21 @@ impl super::UiScript {
 }
 
 impl Model {
+    /// The displayed map's landmarks, walked now if the selection moved since the last walk.
+    pub(crate) fn map_landmarks(&mut self) -> &[WorldMapLandmarkView] {
+        let selection = self.map_selection();
+        let wm = &mut self.worldmap;
+        if let Some(walk) = wm
+            .landmark_walk
+            .as_ref()
+            .filter(|_| wm.landmarks_for != Some(selection))
+        {
+            wm.landmarks = (walk.0)(selection);
+            wm.landmarks_for = Some(selection);
+        }
+        &wm.landmarks
+    }
+
     /// A position on the displayed map at the moment of the call, `(0, 0)` off it.
     fn map_uv(&self, pos: Option<MapPos>) -> (f64, f64) {
         let project = self.worldmap.projection.as_ref();
@@ -916,8 +957,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     g.set(
         "GetNumMapLandmarks",
         lua.create_function(|lua, ()| {
-            let model = lua.app_data_ref::<Model>().expect("model app_data");
-            Ok(model.worldmap.landmarks.len() as i64)
+            let mut model = lua.app_data_mut::<Model>().expect("model app_data");
+            Ok(model.map_landmarks().len() as i64)
         })?,
     )?;
 

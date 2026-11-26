@@ -507,12 +507,11 @@ impl MapLevel {
     }
 }
 
-/// The inputs the landmark list is a pure function of: a selection change, a world-state push, a
-/// `PLAYER_EXPLORED_ZONES` change, the gossip marker's set and clear, and the player's WMO group,
-/// which picks a position's floor.
+/// The landmark walk's inputs besides the selection, which the engine applies itself: a
+/// world-state push, a `PLAYER_EXPLORED_ZONES` change, the gossip marker's set and clear, and the
+/// player's WMO group, which picks a position's floor.
 #[derive(PartialEq, Eq)]
 struct LandmarkKey {
-    selection: MapSelection,
     map: u32,
     states: u64,
     explored: Vec<u32>,
@@ -574,6 +573,62 @@ fn explored_bit(explored: &[u32], bit: u32) -> bool {
     explored.get(slot).is_some_and(|w| w & (1 << within) != 0)
 }
 
+/// An `AreaPOI.dbc` row with its 3.3.5 links, in file order: the walk's static table.
+type PoiRow = (wrathplus_formats::AreaPoi, Option<AreaPoiLinks>);
+
+/// The landmark walk for one selection (`0x546310`, which 12340 runs in the setter): the rows that
+/// passed the state gates, by index into `table` with their world-state value, through the level
+/// gates and onto the displayed map, in file order; then the guard-directions marker, last
+/// (`0x4a69c7`), with no gate and no icon substitution, only the degenerate-projection test.
+fn walk_landmarks(
+    data: &WorldMapUiData,
+    table: &[PoiRow],
+    rows: &[(usize, i32)],
+    marker: Option<&wrathplus_formats::AreaPoi>,
+    group: Option<u32>,
+    sel: MapSelection,
+) -> Vec<WorldMapLandmarkView> {
+    let level = MapLevel::of(sel);
+    let displayed = displayed_row(data, sel).and_then(|id| data.rows.get(&id));
+    let mut out = Vec::new();
+    for &(i, state) in rows {
+        let (poi, links) = &table[i];
+        if !landmark_level_gates(poi, sel, displayed) {
+            continue;
+        }
+        let [x, y, z] = poi.pos;
+        let floor = floor_at(data, poi.continent_id, group, z);
+        let Some(uv) = project_on_floor(data, sel, poi.continent_id, x, y, floor) else {
+            continue;
+        };
+        if is_degenerate(uv) {
+            continue;
+        }
+        out.push(WorldMapLandmarkView {
+            name: poi.name.clone(),
+            description: poi.description.clone(),
+            texture_index: landmark_texture_index(poi, links.as_ref(), level, state),
+            uv,
+            map_link: links.map_or(0, |l| l.world_map_link),
+            battle_map: poi.flags & 0x200 != 0,
+        });
+    }
+    if let Some(poi) = marker {
+        let uv = project_on_displayed(data, sel, poi.continent_id, poi.pos[0], poi.pos[1]);
+        if let Some(uv) = uv.filter(|uv| !is_degenerate(*uv)) {
+            out.push(WorldMapLandmarkView {
+                name: poi.name.clone(),
+                description: poi.description.clone(),
+                texture_index: poi.icon,
+                uv,
+                map_link: 0,
+                battle_map: false,
+            });
+        }
+    }
+    out
+}
+
 /// `GetMapLandmarkInfo`'s `textureIndex` (`0x545a30`): `Icon[state - 1]` for a world-state row
 /// (state 1-9, else the first), but 0 on a zone or an instance map for a row without
 /// `Flags & 0x80`.
@@ -581,14 +636,14 @@ fn landmark_texture_index(
     poi: &wrathplus_formats::AreaPoi,
     links: Option<&AreaPoiLinks>,
     level: MapLevel,
-    world_states: &crate::app_core::state::WorldStates,
+    state: i32,
 ) -> u32 {
     let shown = poi.flags & 0x80 != 0 || matches!(level, MapLevel::World | MapLevel::Continent);
     if !shown {
         return 0;
     }
     let slot = if poi.world_state_id != 0 {
-        usize::try_from(world_states.get(poi.world_state_id) - 1)
+        usize::try_from(state - 1)
             .ok()
             .filter(|&i| i < 9)
             .unwrap_or(0)
@@ -794,15 +849,20 @@ fn project_on_floor(
 
 /// Hand the engine its call-time projections over one shared copy of the catalog:
 /// `GetWorldLocMapPosition`'s, and the floor-aware one the position getters take (`0x544140`).
-fn install_world_loc_projector(script: &mut UiScript, data: &WorldMapUiData) {
+fn install_world_loc_projector(
+    script: &mut UiScript,
+    data: &WorldMapUiData,
+) -> std::sync::Arc<WorldMapUiData> {
     let copy = std::sync::Arc::new(data.clone());
     let shared = copy.clone();
+    let held = copy.clone();
     script.set_world_loc_projector(Box::new(move |selection, map, x, y| {
         project_on_displayed(&copy, selection, map, x, y)
     }));
     script.set_world_map_projection(move |sel, p| {
         project_on_floor(&shared, sel, p.map, p.x, p.y, p.floor)
     });
+    held
 }
 
 /// [`feed_world_map`]'s memos under one [`crate::ui_script::VmMemo`], so a new VM resets them all.
@@ -812,8 +872,10 @@ struct FeedMemos {
     landmarks: Option<LandmarkKey>,
     /// The world-enter sync has run: the reference's `old == 0` gate.
     map_synced: bool,
-    /// `GetWorldLocMapPosition`'s projection is installed over the current catalog.
-    projector: bool,
+    /// The catalog the engine's projections and landmark walk hold, installed once per catalog.
+    data: Option<std::sync::Arc<WorldMapUiData>>,
+    /// `AreaPOI.dbc` with its links, shared by every landmark walk.
+    pois: Option<std::sync::Arc<Vec<PoiRow>>>,
 }
 
 fn feed_world_map(
@@ -878,28 +940,24 @@ fn feed_world_map(
 
     // `GetWorldLocMapPosition` projects synchronously with the engine's own selection, so the
     // engine holds the projection over its own copy of the catalog.
-    {
+    let fresh = {
         let memo = memo.get(&script);
-        if !memo.projector || data.is_changed() {
-            memo.projector = true;
-            install_world_loc_projector(&mut script, &data);
+        let fresh = memo.data.is_none() || data.is_changed();
+        if fresh {
+            memo.data = Some(install_world_loc_projector(&mut script, &data));
         }
-    }
-
-    let selection = script.world_map_selection();
-    let project =
-        |pos_map: u32, px: f32, py: f32| project_on_displayed(&data, selection, pos_map, px, py);
-    // A position's floor is read with the player's WMO group and its own height (`0x544140`).
-    let project_z = |pos_map: u32, px: f32, py: f32, pz: f32| {
-        project_on_floor(
-            &data,
-            selection,
-            pos_map,
-            px,
-            py,
-            floor_at(&data, pos_map, wmo_group, pz),
-        )
+        if memo.pois.is_none() || pois.as_ref().is_some_and(|p| p.is_changed()) {
+            let table = pois.as_ref().map_or_else(Vec::new, |p| {
+                let row = |(id, poi): (u32, &wrathplus_formats::AreaPoi)| {
+                    (poi.clone(), data.poi_links.get(&id).copied())
+                };
+                p.0.rows().map(row).collect()
+            });
+            memo.pois = Some(std::sync::Arc::new(table));
+        }
+        fresh
     };
+
     let player_pos = MapPos {
         map: map.0,
         x: wx,
@@ -914,76 +972,33 @@ fn feed_world_map(
         MapPos { map, x, y, floor }
     });
 
-    // The landmarks (`GetNumMapLandmarks`), rebuilt only when a `LandmarkKey` input moves.
+    // The landmark walk's inputs (`GetNumMapLandmarks`): on a change the engine gets a new walk,
+    // which it runs for each selection it is asked about, as 12340's setter walks.
     let marker = poi_marker
         .on_map(map.0)
         .map(|m| (m.continent_id, m.pos.map(f32::to_bits), m.icon));
-    let states_gen = world_states.generation();
-    let unchanged = memo.get(&script).landmarks.as_ref().is_some_and(|k| {
-        *k == LandmarkKey {
-            selection,
-            map: map.0,
-            states: states_gen,
-            explored: explored.clone(),
-            marker,
-            group: wmo_group,
-        }
-    });
-    if !unchanged {
-        let level = MapLevel::of(selection);
-        let displayed = displayed_row(&data, selection).and_then(|id| data.rows.get(&id));
-        let mut landmarks = Vec::new();
-        // The DBC rows first, in file order, the Lua landmark index (`0x546310`'s walk).
-        if let Some(pois) = pois.as_ref() {
-            for (id, poi) in pois.0.rows() {
-                if !landmark_level_gates(poi, selection, displayed) {
-                    continue;
-                }
-                let Some(uv) = project_z(poi.continent_id, poi.pos[0], poi.pos[1], poi.pos[2])
-                else {
-                    continue;
-                };
-                if is_degenerate(uv)
-                    || !landmark_state_gates(poi, &areas.0, &explored, &world_states)
-                {
-                    continue;
-                }
-                let links = data.poi_links.get(&id);
-                landmarks.push(WorldMapLandmarkView {
-                    name: poi.name.clone(),
-                    description: poi.description.clone(),
-                    texture_index: landmark_texture_index(poi, links, level, &world_states),
-                    uv,
-                    map_link: links.map_or(0, |l| l.world_map_link),
-                    battle_map: poi.flags & 0x200 != 0,
-                });
-            }
-        }
-        // Then the guard-directions marker, last (`0x4a69c7`): no gate and no icon substitution,
-        // only the degenerate-projection test.
-        if let Some(poi) = poi_marker.on_map(map.0) {
-            if let Some(uv) = project(poi.continent_id, poi.pos[0], poi.pos[1]) {
-                if !is_degenerate(uv) {
-                    landmarks.push(WorldMapLandmarkView {
-                        name: poi.name.clone(),
-                        description: poi.description.clone(),
-                        texture_index: poi.icon,
-                        uv,
-                        map_link: 0,
-                        battle_map: false,
-                    });
-                }
-            }
-        }
-        memo.get(&script).landmarks = Some(LandmarkKey {
-            selection,
-            map: map.0,
-            states: states_gen,
-            explored: explored.clone(),
-            marker,
-            group: wmo_group,
+    let key = LandmarkKey {
+        map: map.0,
+        states: world_states.generation(),
+        explored: explored.clone(),
+        marker,
+        group: wmo_group,
+    };
+    let memo = memo.get(&script);
+    if fresh || memo.landmarks.as_ref() != Some(&key) {
+        memo.landmarks = Some(key);
+        let table = memo.pois.clone().unwrap_or_default();
+        let rows: Vec<(usize, i32)> = table
+            .iter()
+            .enumerate()
+            .filter(|(_, (poi, _))| landmark_state_gates(poi, &areas.0, &explored, &world_states))
+            .map(|(i, (poi, _))| (i, world_states.get(poi.world_state_id)))
+            .collect();
+        let marker = poi_marker.on_map(map.0).cloned();
+        let data = memo.data.clone().expect("installed above");
+        script.set_world_map_landmark_walk(move |sel| {
+            walk_landmarks(&data, &table, &rows, marker.as_ref(), wmo_group, sel)
         });
-        script.set_world_map_landmarks(landmarks);
     }
 
     // Each member's position, projected at the call: a streamed member's transform, else the
@@ -1278,34 +1293,69 @@ mod tests {
         let town = poi(0x0d, 0, 0);
         let tower = poi(0x87, 0, 2372);
         assert_eq!(
-            landmark_texture_index(&town, Some(&links), MapLevel::Zone, &states),
+            landmark_texture_index(
+                &town,
+                Some(&links),
+                MapLevel::Zone,
+                states.get(town.world_state_id)
+            ),
             0
         );
         assert_eq!(
-            landmark_texture_index(&town, Some(&links), MapLevel::MinusTwo, &states),
+            landmark_texture_index(
+                &town,
+                Some(&links),
+                MapLevel::MinusTwo,
+                states.get(town.world_state_id)
+            ),
             0
         );
         assert_eq!(
-            landmark_texture_index(&town, Some(&links), MapLevel::Continent, &states),
+            landmark_texture_index(
+                &town,
+                Some(&links),
+                MapLevel::Continent,
+                states.get(town.world_state_id)
+            ),
             10
         );
         assert_eq!(
-            landmark_texture_index(&town, None, MapLevel::World, &states),
+            landmark_texture_index(
+                &town,
+                None,
+                MapLevel::World,
+                states.get(town.world_state_id)
+            ),
             4
         );
         // State 3 picks the third icon; an unset or out-of-range state the first.
         assert_eq!(
-            landmark_texture_index(&tower, Some(&links), MapLevel::Zone, &states),
+            landmark_texture_index(
+                &tower,
+                Some(&links),
+                MapLevel::Zone,
+                states.get(tower.world_state_id)
+            ),
             10
         );
         states.write(&[(2372, 3)]);
         assert_eq!(
-            landmark_texture_index(&tower, Some(&links), MapLevel::Zone, &states),
+            landmark_texture_index(
+                &tower,
+                Some(&links),
+                MapLevel::Zone,
+                states.get(tower.world_state_id)
+            ),
             12
         );
         states.write(&[(2372, 12)]);
         assert_eq!(
-            landmark_texture_index(&tower, Some(&links), MapLevel::Zone, &states),
+            landmark_texture_index(
+                &tower,
+                Some(&links),
+                MapLevel::Zone,
+                states.get(tower.world_state_id)
+            ),
             10
         );
     }

@@ -400,10 +400,10 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 return Err(mlua::Error::runtime("Usage: GetMapLandmarkInfo(index)"));
             };
             let landmark = {
-                let model = lua.app_data_ref::<Model>().expect("model app_data");
+                let mut model = lua.app_data_mut::<Model>().expect("model app_data");
                 usize::try_from(i.round_ties_even() as i64 - 1)
                     .ok()
-                    .and_then(|i| model.worldmap.landmarks.get(i).cloned())
+                    .and_then(|i| model.map_landmarks().get(i).cloned())
             };
             let Some(l) = landmark else {
                 return Ok(MultiValue::from_vec(vec![

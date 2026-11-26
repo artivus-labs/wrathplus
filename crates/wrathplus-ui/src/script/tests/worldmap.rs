@@ -233,6 +233,18 @@ fn worldmap_current_zone_and_player_feed() {
         )
         .unwrap();
     assert_eq!(both, (0.25, 0.75, 0.0, 0.0));
+    // The landmark walk runs for the selection as it stands (12340 walks in the setter).
+    s.set_world_map_landmark_walk(|sel| {
+        let inn = crate::script::WorldMapLandmarkView {
+            name: "Inn".into(),
+            ..Default::default()
+        };
+        vec![inn; sel.zone as usize]
+    });
+    let counts: (i64, i64) = s
+        .eval("SetMapZoom(1, 2) local a = GetNumMapLandmarks() SetMapZoom(1) return a, GetNumMapLandmarks()")
+        .unwrap();
+    assert_eq!(counts, (2, 0));
 
     // No feed → the world sheet (never an error).
     s.set_world_map_feed(None, None, 0.0, None, Vec::new());
