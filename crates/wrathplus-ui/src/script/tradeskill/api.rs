@@ -753,4 +753,17 @@ mod wrath_tests {
         assert!(err(&s, "SetTradeSkillSubClassFilter({})")
             .contains("Usage: SetTradeSkillSubClassFilter(index [, on\\off, exclusive])"));
     }
+
+    /// A recipe with no product files under the (-1, -1) header, which 12340 names by the line's
+    /// alternate verb (`0x5db325`, `0x5daab4`).
+    #[test]
+    fn the_no_product_header_is_the_alternate_verb() {
+        let mut s = UiScript::new().unwrap();
+        let mut state = two_recipe_state();
+        state.recipes[0].group = None;
+        state.recipes[0].alt_verb = Some("Enchant".into());
+        s.set_trade_skill(Some(state));
+        let probe = "local n = GetTradeSkillInfo(3) return n .. '/' .. select(2, GetTradeSkillSubClasses())";
+        assert_eq!(s.eval::<String>(probe).unwrap(), "Enchant/Enchant");
+    }
 }

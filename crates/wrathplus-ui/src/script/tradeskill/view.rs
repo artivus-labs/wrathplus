@@ -120,7 +120,7 @@ fn collate(a: &str, b: &str) -> std::cmp::Ordering {
 
 /// The groups in display order (`0x4fca20`): by `ItemClass`, then name, never subclass id; each
 /// group's recipes by tier, product ItemLevel (`record+0x14`), then name. A recipe with no group
-/// yet goes into an empty-named group keyed `u32::MAX`, which sorts last.
+/// goes into the group keyed `u32::MAX`, which sorts last.
 pub(super) fn build_groups(recipes: &[TradeSkillRecipe]) -> Vec<TradeSkillGroup> {
     let mut map: HashMap<(u32, u32), TradeSkillGroup> = HashMap::new();
     for (i, r) in recipes.iter().enumerate() {
@@ -128,14 +128,16 @@ pub(super) fn build_groups(recipes: &[TradeSkillRecipe]) -> Vec<TradeSkillGroup>
             Some((class, subclass, name)) => ((*class, *subclass), name.clone()),
             None => ((u32::MAX, u32::MAX), String::new()),
         };
-        map.entry(key)
-            .or_insert_with(|| TradeSkillGroup {
-                key,
-                name,
-                entries: Vec::new(),
-            })
-            .entries
-            .push(i);
+        let g = map.entry(key).or_insert_with(|| TradeSkillGroup {
+            key,
+            name,
+            entries: Vec::new(),
+        });
+        // The no-product group is named by the line's alternate verb (`0x5db325`, `0x5daab4`).
+        if g.name.is_empty() {
+            g.name = r.alt_verb.clone().unwrap_or_default();
+        }
+        g.entries.push(i);
     }
     let mut groups: Vec<TradeSkillGroup> = map.into_values().collect();
     for g in &mut groups {
