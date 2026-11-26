@@ -393,6 +393,45 @@ fn sickness_duration(level: u32, get: &dyn Fn(&str) -> Option<String>) -> Option
     ))
 }
 
+/// `RetrieveCorpse` (`0x51b800`): first decline a pending offer (`0x6d1d30(player, 0)`), then
+/// `CMSG_RECLAIM_CORPSE` with the corpse guid, else 0: the server resolves the corpse through the
+/// player and never reads it.
+fn retrieve_corpse(death_net: &mut DeathNet) -> Vec<ClientCommand> {
+    let decline = death_net
+        .resurrect
+        .take()
+        .map(|o| ClientCommand::ResurrectResponse {
+            caster: o.caster,
+            accept: false,
+        });
+    let corpse = death_net.corpse_guid.unwrap_or(0);
+    decline
+        .into_iter()
+        .chain([ClientCommand::ReclaimCorpse { corpse }])
+        .collect()
+}
+
+/// `0x727860`: the `EffectMiscValue` of the first aura on the player whose spell applies aura 314
+/// (`SPELL_AURA_PREVENT_RESURRECTION`, `0x727930`), unless the self-res spell carries
+/// `AttributesEx7` `0x8000000` (`0x7278cd`).
+fn resurrection_blocked(
+    self_res: Option<u32>,
+    auras: impl IntoIterator<Item = u32>,
+    spells: &wrathplus_formats::SpellCatalog,
+) -> Option<i32> {
+    if self_res
+        .and_then(|id| spells.get(id))
+        .is_some_and(|d| d.attributes_ex7 & 0x0800_0000 != 0)
+    {
+        return None;
+    }
+    auras.into_iter().find_map(|id| {
+        let d = spells.get(id)?;
+        let i = d.effect_apply_aura.iter().position(|&a| a == 314)?;
+        Some(d.effect_misc_value[i])
+    })
+}
+
 /// Map the queued Lua death intents onto the wire, after `UiInput` so a click drains that frame.
 fn drain_death(
     script: Option<NonSendMut<UiScript>>,
@@ -404,18 +443,44 @@ fn drain_death(
     mut ui_errors: ResMut<crate::app_core::errors::UiErrorKeys>,
     // The soulstone's item leg is an item use (`0x5d8d00`), so it carries the bind gate.
     mut gate: crate::ui_bind_confirm::BindGate,
+    auras: Res<crate::net::wrath_auras::PacketAuras>,
+    self_guid: Res<SelfGuid>,
 ) {
     let Some(mut script) = script else {
         return;
     };
+    let own = self_guid.0.and_then(|g| auras.by_guid.get(&g));
+    let blocked = |script: &UiScript,
+                   ui_errors: &mut crate::app_core::errors::UiErrorKeys,
+                   ladder: &crate::spell::CastLadder| {
+        let store = targeting.self_store.single().ok();
+        let n = store
+            .zip(ladder.spells.as_deref())
+            .and_then(|(store, spells)| {
+                let ids = own.into_iter().flatten().map(|a| a.aura.spell_id);
+                resurrection_blocked(store.0.player_self_res_spell(), ids, &spells.catalog)
+            });
+        // Shown as `ERR_SPELL_FAILED_S` over `SPELL_FAILED_CUSTOM_ERROR_<n>` (`0x7fef10`).
+        let key = n.map(|n| format!("SPELL_FAILED_CUSTOM_ERROR_{n}"));
+        if let Some(text) = key.and_then(|k| script.lua().globals().get::<String>(k).ok()) {
+            ui_errors.0.push(crate::app_core::errors::UiError::s(
+                "ERR_SPELL_FAILED_S",
+                text,
+            ));
+        }
+        n.is_some()
+    };
     for action in script.take_death_actions() {
         let _ = match action {
+            // `0x6d2950`: `CMSG_REPOP_REQUEST` with a 0 byte.
+            DeathAction::Repop if blocked(&script, &mut ui_errors, &ladder) => Ok(()),
             DeathAction::Repop => net.0.send(ClientCommand::RepopRequest),
-            // Else 0: vmangos resolves the corpse through the player and never reads the guid
-            // (`MiscHandler.cpp:573-603`).
-            DeathAction::RetrieveCorpse => net.0.send(ClientCommand::ReclaimCorpse {
-                corpse: death_net.corpse_guid.unwrap_or(0),
-            }),
+            DeathAction::RetrieveCorpse => {
+                for cmd in retrieve_corpse(&mut death_net) {
+                    let _ = net.0.send(cmd);
+                }
+                Ok(())
+            }
             DeathAction::AcceptResurrect | DeathAction::DeclineResurrect => {
                 let accept = action == DeathAction::AcceptResurrect;
                 match death_net.resurrect.take() {
@@ -444,6 +509,9 @@ fn drain_death(
                         &ladder.commands,
                     )
                 }) {
+                    Some(SelfRes::Spell { .. }) if blocked(&script, &mut ui_errors, &ladder) => {
+                        Ok(())
+                    }
                     Some(SelfRes::Spell { .. }) => net.0.send(ClientCommand::SelfRes),
                     // An ordinary item use, `0x5d8d00`, like every bag click.
                     Some(SelfRes::Item {

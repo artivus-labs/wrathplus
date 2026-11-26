@@ -138,3 +138,30 @@ fn the_spirit_healer_reaches_four_yards_past_its_reach_and_asks_only_a_ghost() {
     assert_eq!(standing_ask(Some(9), false, |_| true), None, "alive");
     assert_eq!(standing_ask(Some(9), true, |_| false), None, "out of range");
 }
+
+/// `0x51b800` declines a pending offer before `CMSG_RECLAIM_CORPSE`.
+#[test]
+fn retrieve_corpse_declines_a_pending_offer_first() {
+    let mut net = DeathNet {
+        resurrect: Some(offer(7, "Priest")),
+        corpse_guid: Some(0xC0),
+        ..Default::default()
+    };
+    let sent = retrieve_corpse(&mut net);
+    assert!(matches!(
+        sent.as_slice(),
+        [
+            ClientCommand::ResurrectResponse {
+                caster: 7,
+                accept: false
+            },
+            ClientCommand::ReclaimCorpse { corpse: 0xC0 }
+        ]
+    ));
+    assert!(net.resurrect.is_none());
+    let again = retrieve_corpse(&mut net);
+    assert!(matches!(
+        again.as_slice(),
+        [ClientCommand::ReclaimCorpse { corpse: 0xC0 }]
+    ));
+}
