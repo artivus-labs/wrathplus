@@ -6,7 +6,7 @@ pub mod wrath;
 
 use mlua::{Lua, MultiValue, Value};
 
-use super::binding_abi::flag;
+use super::binding_abi::{flag, number_arg};
 use super::cursor::{self, CursorPayload};
 use super::Model;
 
@@ -336,14 +336,13 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // GetInboxHeaderInfo(index): the 13 values `MailFrame.lua:105` reads; nil out of range.
+    // GetInboxHeaderInfo(index) (`0x56e520`): the 14 values `MailFrame.lua:105` reads.
     g.set(
         "GetInboxHeaderInfo",
-        lua.create_function(|lua, index: usize| {
-            let row = {
-                let model = lua.app_data_ref::<Model>().expect("model app_data");
-                row_at(&model, index)
-            };
+        lua.create_function(|lua, index: Value| {
+            let index = number_arg(lua, index, "Usage: GetInboxHeaderInfo(index)")?;
+            let index = usize::try_from(index).unwrap_or(0);
+            let row = row_at(&lua.app_data_ref::<Model>().expect("model app_data"), index);
             // A miss: nil x4, 0, 0, 0, nil x7 (`0x56e935`-`0x56e99c`).
             let Some(r) = row else {
                 let mut miss = vec![Value::Nil; 14];

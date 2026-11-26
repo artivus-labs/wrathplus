@@ -678,6 +678,11 @@ mod family_tests {
             "nil,nil,nil,nil,0,0,0,nil,nil,nil,nil,nil,nil,nil"
         );
         assert_eq!(shape(&s, "GetInboxInvoiceInfo(99)"), "nil,nil,nil,0,0,0,0");
+        let usage = s.run("GetInboxHeaderInfo()").unwrap_err().to_string();
+        assert!(
+            usage.contains("Usage: GetInboxHeaderInfo(index)"),
+            "{usage}"
+        );
         let att = |count| Attachment {
             entry: 2589,
             count,

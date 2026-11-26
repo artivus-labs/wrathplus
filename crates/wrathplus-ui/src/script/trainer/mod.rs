@@ -468,7 +468,9 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     // as stock `ClassTrainer_SetSelection` formats it unguarded (Blizzard_TrainerUI.lua:269).
     g.set(
         "GetTrainerServiceInfo",
-        lua.create_function(|lua, index: usize| {
+        lua.create_function(|lua, index: Value| {
+            const USAGE: &str = "Usage: GetTrainerServiceInfo(index)";
+            let index = usize::try_from(binding_abi::number_arg(lua, index, USAGE)?).unwrap_or(0);
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             let Some(n) = index.checked_sub(1) else {
                 return Ok(MultiValue::from_vec(vec![Value::Nil]));
@@ -686,13 +688,22 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
 
     // Collapse/ExpandTrainerSkillLine(id) (`0x596150`, `0x5961f0`): fold the group headed by row
     // `id`, or all at `<= 0`; a row that is no header raises the reference's own text.
-    for (verb, collapse) in [
-        ("CollapseTrainerSkillLine", true),
-        ("ExpandTrainerSkillLine", false),
+    for (verb, collapse, usage) in [
+        (
+            "CollapseTrainerSkillLine",
+            true,
+            "Usage: CollapseTrainerSkillLine(index)",
+        ),
+        (
+            "ExpandTrainerSkillLine",
+            false,
+            "Usage: ExpandTrainerSkillLine(index)",
+        ),
     ] {
         g.set(
             verb,
-            lua.create_function(move |lua, id: i64| {
+            lua.create_function(move |lua, id: Value| {
+                let id = i64::from(binding_abi::ftol_arg(lua, id, usage)?);
                 let mut model = lua.app_data_mut::<Model>().expect("model app_data");
                 if !set_collapsed(&mut model, id, collapse) {
                     return Err(mlua::Error::runtime(format!("Bad skill line in {verb}")));
@@ -707,7 +718,9 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     // header it stores 0, which selects nothing and is not a fresh list's unseated `None`.
     g.set(
         "SelectTrainerService",
-        lua.create_function(|lua, index: usize| {
+        lua.create_function(|lua, index: Value| {
+            const USAGE: &str = "Usage: SelectTrainerService(index)";
+            let index = usize::try_from(binding_abi::number_arg(lua, index, USAGE)?).unwrap_or(0);
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
             model.trainer_selection = Some(service(&model, index).map_or(0, |s| s.spell_id));
             Ok(())

@@ -659,6 +659,10 @@ fn service_rows_folds_and_the_skill_line_follow_12340() {
         "robe",
         "the index truncates"
     );
+    for verb in ["GetTrainerServiceInfo", "SelectTrainerService"] {
+        let err = s.run(&format!("{verb}()")).unwrap_err().to_string();
+        assert!(err.contains(&format!("Usage: {verb}(index)")), "{err}");
+    }
     for (verb, text) in [
         (
             "CollapseTrainerSkillLine",
@@ -671,6 +675,8 @@ fn service_rows_folds_and_the_skill_line_follow_12340() {
     ] {
         let err = s.run(&format!("{verb}(2)")).unwrap_err().to_string();
         assert!(err.contains(text), "{err}");
+        let err = s.run(&format!("{verb}()")).unwrap_err().to_string();
+        assert!(err.contains(&format!("Usage: {verb}(index)")), "{err}");
     }
     s.run("CollapseTrainerSkillLine(0) ExpandTrainerSkillLine(-1)")
         .unwrap();

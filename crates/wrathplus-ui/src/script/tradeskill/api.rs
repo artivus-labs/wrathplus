@@ -195,21 +195,24 @@ pub(in crate::script) fn install(lua: &Lua) -> mlua::Result<()> {
     // Expand/CollapseTradeSkillSubClass(i) (`0x5dd500`, `0x5dd460`): the group whose header is
     // visible row i, `<= 0` all; any other row raises the reference's own text, which names a skill
     // line for the one and a sub class for the other.
-    for (verb, collapse, bad) in [
+    for (verb, collapse, bad, usage) in [
         (
             "ExpandTradeSkillSubClass",
             false,
             "Bad skill line in ExpandTradeSkillSubClass",
+            "Usage: ExpandTradeSkillSubClass(index)",
         ),
         (
             "CollapseTradeSkillSubClass",
             true,
             "Bad sub class in CollapseTradeSkillSubClass",
+            "Usage: CollapseTradeSkillSubClass(index)",
         ),
     ] {
         g.set(
             verb,
-            lua.create_function(move |lua, id: i64| {
+            lua.create_function(move |lua, id: Value| {
+                let id = i64::from(binding_abi::ftol_arg(lua, id, usage)?);
                 let mut model = lua.app_data_mut::<Model>().expect("model app_data");
                 if !set_collapsed(&mut model, id, collapse) {
                     return Err(mlua::Error::runtime(bad));
@@ -222,7 +225,9 @@ pub(in crate::script) fn install(lua: &Lua) -> mlua::Result<()> {
 
     g.set(
         "GetTradeSkillIcon",
-        lua.create_function(|lua, index: usize| {
+        lua.create_function(|lua, index: Value| {
+            let index = number_arg(lua, index, "Usage: GetTradeSkillIcon(index)")?;
+            let index = usize::try_from(index).unwrap_or(0);
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             opt_str(lua, recipe_at(&model, index).and_then(|r| r.icon.as_ref()))
         })?,
@@ -322,9 +327,10 @@ pub(in crate::script) fn install(lua: &Lua) -> mlua::Result<()> {
     // SelectTradeSkill and GetTradeSkillSelectionIndex take and answer visible indices.
     g.set(
         "SelectTradeSkill",
-        lua.create_function(|lua, index: u32| {
+        lua.create_function(|lua, index: Value| {
+            let index = number_arg(lua, index, "Usage: SelectTradeSkill(index)")?;
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-            select(&mut model, index);
+            select(&mut model, u32::try_from(index).unwrap_or(0));
             Ok(())
         })?,
     )?;
@@ -376,7 +382,9 @@ pub(in crate::script) fn install(lua: &Lua) -> mlua::Result<()> {
     // groups raises.
     g.set(
         "GetTradeSkillSubClassFilter",
-        lua.create_function(|lua, index: i64| {
+        lua.create_function(|lua, index: Value| {
+            const USAGE: &str = "Usage: GetTradeSkillSubClassFilter(index)";
+            let index = i64::from(number_arg(lua, index, USAGE)?);
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             let groups = model
                 .trade_skill
@@ -755,6 +763,15 @@ mod wrath_tests {
             .contains("Bad sub class in SetTradeSkillSubClassFilter"));
         assert!(err(&s, "SetTradeSkillSubClassFilter({})")
             .contains("Usage: SetTradeSkillSubClassFilter(index [, on\\off, exclusive])"));
+        for verb in [
+            "ExpandTradeSkillSubClass",
+            "CollapseTradeSkillSubClass",
+            "GetTradeSkillSubClassFilter",
+            "SelectTradeSkill",
+            "GetTradeSkillIcon",
+        ] {
+            assert!(err(&s, &format!("{verb}()")).contains(&format!("Usage: {verb}(index)")));
+        }
     }
 
     /// A recipe with no product files under the (-1, -1) header, which 12340 names by the line's
