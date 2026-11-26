@@ -351,6 +351,30 @@ fn the_geometry_round_trips_through_the_save_file() {
         "script errors: {:?}",
         fresh.errors()
     );
+
+    // The chat cache's own path: the drag stored the geometry (`FCF_SavePositionAndDimensions`),
+    // and the records alone bring the window back through `FCF_RestorePositionAndDimensions` on
+    // `UPDATE_CHAT_WINDOWS` (FloatingChatFrame.lua:1100-1140), screen ratios rounded through f32.
+    let mut cached = chat_ui();
+    cached.set_chat_window_looks(s.chat_window_looks().into_iter().enumerate());
+    cached.fire_event("UPDATE_CHAT_WINDOWS", vec![]);
+    let bottom = |s: &mut UiScript| s.eval::<f64>("return ChatFrame1:GetBottom()").unwrap() as f32;
+    let got = [
+        width(&mut cached),
+        height(&mut cached),
+        left(&mut cached),
+        bottom(&mut cached),
+    ];
+    let want = [want.0, want.1, want.2, want.3];
+    assert!(
+        got.iter().zip(want).all(|(g, w)| (g - w).abs() < 0.01),
+        "the chat cache restores the window: {got:?} vs {want:?}"
+    );
+    assert!(
+        cached.errors().is_empty(),
+        "script errors: {:?}",
+        cached.errors()
+    );
 }
 
 /// `CHAT_FRAME_TEXTURES` (FloatingChatFrame.lua:30-46) fade in together on a hover to
