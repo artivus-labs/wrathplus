@@ -660,4 +660,45 @@ mod family_tests {
             vec!["A".to_string(), "B".to_string(), "C".to_string()]
         );
     }
+
+    /// 12340's inbox miss shapes (`0x56e935`-`0x56e99c`, `0x56ec44`-`0x56ec93`), and the first
+    /// stack count, given only for a one-attachment mail.
+    #[test]
+    fn inbox_misses_and_the_single_stack_count_follow_12340() {
+        let mut s = crate::script::UiScript::new().unwrap();
+        let shape = |s: &crate::script::UiScript, call: &str| -> String {
+            s.eval(&format!(
+                "local t = {{n = select('#', {call}), {call}}} local o = {{}} \
+                 for i = 1, t.n do o[i] = tostring(t[i]) end return table.concat(o, ',')"
+            ))
+            .unwrap()
+        };
+        assert_eq!(
+            shape(&s, "GetInboxHeaderInfo(99)"),
+            "nil,nil,nil,nil,0,0,0,nil,nil,nil,nil,nil,nil,nil"
+        );
+        assert_eq!(shape(&s, "GetInboxInvoiceInfo(99)"), "nil,nil,nil,0,0,0,0");
+        let att = |count| Attachment {
+            entry: 2589,
+            count,
+            ..Default::default()
+        };
+        let row = |attachments: Vec<Attachment>| Row {
+            header: crate::script::MailInboxRow {
+                item_count: attachments.len() as u32,
+                ..Default::default()
+            },
+            attachments,
+            ..Default::default()
+        };
+        s.set_wrath_mail(Some(Inbox {
+            total_count: 2,
+            rows: vec![row(vec![att(5), att(7)]), row(vec![att(3)])],
+        }));
+        let quantity = |i: u32| {
+            s.eval::<Option<i64>>(&format!("return select(14, GetInboxHeaderInfo({i}))"))
+                .unwrap()
+        };
+        assert_eq!((quantity(1), quantity(2)), (None, Some(3)));
+    }
 }

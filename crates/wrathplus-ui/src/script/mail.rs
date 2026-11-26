@@ -344,8 +344,11 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 let model = lua.app_data_ref::<Model>().expect("model app_data");
                 row_at(&model, index)
             };
+            // A miss: nil x4, 0, 0, 0, nil x7 (`0x56e935`-`0x56e99c`).
             let Some(r) = row else {
-                return Ok(MultiValue::from_vec(vec![Value::Nil]));
+                let mut miss = vec![Value::Nil; 14];
+                miss[4..7].fill(Value::Integer(0));
+                return Ok(MultiValue::from_vec(miss));
             };
             let opt_str = |s: &Option<String>| -> mlua::Result<Value> {
                 Ok(match s {
@@ -358,9 +361,11 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 .wrath_mail
                 .as_ref()
                 .and_then(|m| index.checked_sub(1).and_then(|i| m.rows.get(i)))
-                .and_then(|r| r.attachments.first())
-                .map_or(0, |a| a.count);
-            // Stock Wrath MailFrame.lua:154 consumes attachment count and first stack separately.
+                .filter(|r| r.attachments.len() == 1)
+                .map_or(Value::Nil, |r| {
+                    Value::Integer(i64::from(r.attachments[0].count))
+                });
+            // Stock MailFrame.lua:154 reads the count and the first stack, given for one attachment.
             let package_icon = if r.item_count != 0 && !r.is_gm {
                 opt_str(&r.package_icon)?
             } else {
@@ -384,15 +389,14 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 flag(r.text_created),
                 flag(r.can_reply),
                 flag(r.is_gm),
-                Value::Integer(i64::from(first_quantity)),
+                first_quantity,
             ];
             Ok(MultiValue::from_vec(values))
         })?,
     )?;
 
     // GetInboxText(index): body, stationeryTexture, isTakeable, isInvoice (`MailFrame.lua:292`);
-    // reading a mail queues its open. isTakeable with `not textCreated` gates the copy button
-    // (`MailFrame.lua:366`), the pair vmangos requires (`MailHandler.cpp:867`).
+    // reading a mail queues its open; isTakeable gates the copy button (`MailFrame.lua:366`).
     g.set(
         "GetInboxText",
         lua.create_function(|lua, index: usize| {
@@ -426,10 +430,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // GetInboxInvoiceInfo(index) (`MailFrame.lua:302`): seven values in 1.12 (`0x4af5a1`), a miss
-    // being three nils and four zeros (`0x4af559`). Build 12340 adds `moneyDelay, etaHour,
-    // etaMin` (`MailFrame.lua:348`) and the sale-pending type `"seller_temp_invoice"`; a miss
-    // there pads with zeros too (labelled: the 12340 miss path is untraced).
+    // GetInboxInvoiceInfo(index) (`0x56e9b0`): ten values, `moneyDelay, etaHour, etaMin` last
+    // (`MailFrame.lua:348`); a miss is seven, three nils and four zeros (`0x56ec44`-`0x56ec93`).
     g.set(
         "GetInboxInvoiceInfo",
         lua.create_function(|lua, index: usize| {
@@ -437,10 +439,9 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 let model = lua.app_data_ref::<Model>().expect("model app_data");
                 row_at(&model, index)
             };
-            let width = 10;
             let Some(inv) = row.and_then(|r| r.invoice) else {
                 let mut miss = vec![Value::Nil, Value::Nil, Value::Nil];
-                miss.resize(width, Value::Integer(0));
+                miss.resize(7, Value::Integer(0));
                 return Ok(MultiValue::from_vec(miss));
             };
             let kind = match (inv.seller, inv.pending) {
@@ -1578,7 +1579,7 @@ mod stationery_tests {
                 "local t, _, p, _, _, _, c, d, h, m = GetInboxInvoiceInfo(1) \
                  return select('#', GetInboxInvoiceInfo(1)) == 10 and t == 'seller_temp_invoice' \
                  and p == 'Buyer' and c == 450 and d == 3600 and h == 14 and m == 35 \
-                 and select('#', GetInboxInvoiceInfo(2)) == 10"
+                 and select('#', GetInboxInvoiceInfo(2)) == 7"
             )
             .unwrap());
     }
