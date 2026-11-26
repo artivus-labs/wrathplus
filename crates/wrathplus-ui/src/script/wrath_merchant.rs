@@ -6,6 +6,7 @@
 
 use mlua::{Lua, MultiValue, Value};
 
+use super::binding_abi::flag;
 use super::Model;
 
 /// One item an extended cost asks for, resolved by the app.
@@ -150,6 +151,22 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             })
         })?,
     )?;
+    // GetRepairAllCost() (`0x585990`) → one 0 away from a repairer; else the carried total and 1
+    // or nil for any carried damage, which enables Repair All (`MerchantFrame.lua:546`).
+    g.set(
+        "GetRepairAllCost",
+        lua.create_function(|lua, ()| {
+            let model = lua.app_data_ref::<Model>().expect("model app_data");
+            if !model.merchant.as_ref().is_some_and(|m| m.can_repair) {
+                return Ok(MultiValue::from_vec(vec![Value::Integer(0)]));
+            }
+            Ok(MultiValue::from_vec(vec![
+                Value::Integer(i64::from(model.repair_all_cost.0)),
+                flag(model.repair_all_cost.1),
+            ]))
+        })?,
+    )?;
+
     g.set(
         "GetBuybackItemLink",
         lua.create_function(|lua, v: Value| {
@@ -235,5 +252,25 @@ mod tests {
             "##,
         )
         .unwrap();
+    }
+
+    /// Away from a vendor that repairs, one value, 0, as `0x5859d1` pushes there.
+    #[test]
+    fn the_repair_all_total_reads_zero_away_from_a_repairer() {
+        let mut s = UiScript::new().unwrap();
+        s.set_repair_all_cost(1234, true);
+        assert!(
+            s.eval::<bool>(
+                "return select('#', GetRepairAllCost()) == 1 and GetRepairAllCost() == 0"
+            )
+            .unwrap(),
+            "no vendor: one 0"
+        );
+        s.set_merchant(Some(MerchantState::default()));
+        assert!(
+            s.eval::<bool>("return select('#', GetRepairAllCost()) == 1")
+                .unwrap(),
+            "a vendor that does not repair"
+        );
     }
 }

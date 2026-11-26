@@ -48,6 +48,8 @@ pub enum MerchantRefusal {
 }
 
 mod net;
+mod repair;
+use repair::{item_repair_cost, repair_all_cost, repair_costs};
 
 pub struct UiMerchantPlugin;
 
@@ -323,110 +325,6 @@ fn resolve_buyback(
     }
 }
 
-/// One item's repair cost, by the reference's `0x4faf30` arithmetic
-/// ([`wrathplus_formats::DurabilityTables`]), after the price `discount` (`0x4faf8a`).
-fn item_repair_cost(
-    guid: u64,
-    objects: &Objects,
-    items: &Items,
-    tables: &RepairTables,
-    commands: &NetCommands,
-    discount: f64,
-) -> u32 {
-    let Some(obj) = objects.object(guid) else {
-        return 0;
-    };
-    let cur = obj.item_durability().unwrap_or(0);
-    let max = obj.item_max_durability().unwrap_or(0);
-    let entry = obj.object_entry().unwrap_or(0);
-    if max == 0 || cur >= max || entry == 0 {
-        return 0;
-    }
-    let points = max - cur;
-    let Some(t) = items.template(entry, guid, commands) else {
-        return 0;
-    };
-    let (level, quality, class, subclass) = (t.item_level, t.quality, t.class, t.subclass);
-    tables
-        .0
-        .repair_cost(points, level, quality, class, subclass, discount)
-}
-
-/// Each damaged carried or banked item's cost (`0x4faf30`), keyed as the bindings take it.
-fn repair_costs(
-    store: &wrathplus_protocol::ObjectFields,
-    objects: &Objects,
-    items: &Items,
-    tables: &RepairTables,
-    commands: &NetCommands,
-    discount: f64,
-) -> RepairCosts {
-    let cost = |guid: u64| {
-        (guid != 0)
-            .then(|| item_repair_cost(guid, objects, items, tables, commands, discount))
-            .filter(|&c| c > 0)
-    };
-    let mut costs = RepairCosts::default();
-    for i in 0..19u8 {
-        if let Some(c) = cost(store.player_inv_slot(i).unwrap_or(0)) {
-            costs.equipped.insert(u32::from(i) + 1, c);
-        }
-    }
-    for i in 0..16u8 {
-        if let Some(c) = cost(store.player_pack_slot(i).unwrap_or(0)) {
-            costs.bags.insert((0, u32::from(i) + 1), c);
-        }
-    }
-    for i in 0..crate::inventory::BANK_SLOTS {
-        if let Some(c) = cost(store.player_bank_slot(i).unwrap_or(0)) {
-            costs
-                .bags
-                .insert((crate::inventory::BANK_CONTAINER, u32::from(i) + 1), c);
-        }
-    }
-    // Bags 1-4 are inventory slots 19-22, bank bags 5-11 the bank bag slots.
-    let bags = (1..=4u8)
-        .map(|b| (i64::from(b), store.player_inv_slot(18 + b)))
-        .chain((0..crate::inventory::BANK_BAGS).map(|i| {
-            (
-                crate::inventory::BANK_BAG_ID_FIRST + i64::from(i),
-                store.player_bank_bag_slot(i),
-            )
-        }));
-    for (bag, bag_guid) in bags {
-        let bag_guid = bag_guid.unwrap_or(0);
-        if bag_guid == 0 {
-            continue;
-        }
-        let Some(b) = objects.object(bag_guid) else {
-            continue;
-        };
-        let n = b.container_num_slots().unwrap_or(0).min(36) as u8;
-        for j in 0..n {
-            if let Some(c) = b.container_slot(j).and_then(cost) {
-                costs.bags.insert((bag, u32::from(j) + 1), c);
-            }
-        }
-    }
-    costs
-}
-
-/// `GetRepairAllCost`'s sum of the per-item costs (`0x4fbd60`): equipped and bags, never the bank.
-fn repair_all_cost(costs: &RepairCosts) -> u32 {
-    let carried = costs
-        .bags
-        .iter()
-        .filter(|((bag, _), _)| (0..=4).contains(bag))
-        .map(|(_, c)| c);
-    let total: u64 = costs
-        .equipped
-        .values()
-        .chain(carried)
-        .map(|&c| u64::from(c))
-        .sum();
-    total.min(u64::from(u32::MAX)) as u32
-}
-
 /// The open vendor's unit, `None` with none open or its unit not streamed.
 fn vendor_store<'a>(
     open: &MerchantOpen,
@@ -481,6 +379,7 @@ impl RepairPurse<'_, '_> {
         let cost = guids.into_iter().filter(|&g| g != 0).fold(0u32, |sum, g| {
             let item = self.tables.as_deref().map_or(0, |t| {
                 item_repair_cost(g, &self.objects, &self.items, t, &self.commands, discount)
+                    .unwrap_or(0)
             });
             sum.wrapping_add(item)
         });
@@ -502,7 +401,7 @@ pub struct RepairFeedMemo {
     templates: gate::Watch,
     discount: gate::Watch,
     repairer: gate::Watch,
-    pushed: Option<(u32, RepairCosts)>,
+    pushed: Option<((u32, bool), RepairCosts)>,
 }
 
 /// Push each item's repair cost, and `GetRepairAllCost`'s total while a repairer is open.
@@ -561,17 +460,21 @@ pub fn feed_repair_costs(
     if gate.skip() {
         return;
     }
-    let costs = tables.as_deref().map_or_else(RepairCosts::default, |t| {
+    let (costs, damaged) = tables.as_deref().map_or_else(Default::default, |t| {
         repair_costs(&player.0, &inv.objects, &items, t, &commands, discount)
     });
-    let total = if repairer { repair_all_cost(&costs) } else { 0 };
+    // Both only with a repairer open (`0x5859cf`).
+    let total = (
+        repairer.then(|| repair_all_cost(&costs)).unwrap_or(0),
+        repairer && damaged,
+    );
     if memo
         .pushed
         .as_ref()
         .is_none_or(|(t, c)| *t != total || *c != costs)
     {
         gate.audit("feed_repair_costs", "the repair costs");
-        script.set_repair_all_cost(total);
+        script.set_repair_all_cost(total.0, total.1);
         script.set_repair_costs(costs.clone());
         memo.pushed = Some((total, costs));
     }
@@ -1339,16 +1242,17 @@ mod tests {
             let mut store = app.world_mut().get_mut::<ObjectStore>(e).unwrap();
             store.0.merge(ObjectFields::from_pairs(pairs));
         };
-        // (worn, backpack, bank, `GetRepairAllCost`) after one frame.
+        // (worn, backpack, bank, `GetRepairAllCost`'s two values, nil as 0) after one frame.
         let frame = |app: &mut App| {
             app.update();
             app.world()
                 .non_send_resource::<UiScript>()
-                .eval::<(i64, i64, i64, i64)>(
+                .eval::<(i64, i64, i64, i64, i64)>(
                     r#"local _, _, worn = TT:SetInventoryItem("player", 16)
                        local _, carried = TT:SetBagItem(0, 1)
                        local _, banked = TT:SetBagItem(-1, 28)
-                       return worn, carried, banked, (GetRepairAllCost())"#,
+                       local total, damaged = GetRepairAllCost()
+                       return worn, carried, banked, total, damaged or 0"#,
                 )
                 .unwrap()
         };
@@ -1363,45 +1267,45 @@ mod tests {
         let moved =
             |from: u16, to: u16| [(from, 0), (from + 1, 0), (to, SWORD as u32), (to + 1, hi)];
 
-        assert_eq!(frame(&mut app), (0, 0, 0, 0), "no tables, no prices");
+        assert_eq!(frame(&mut app), (0, 0, 0, 0, 0), "no tables, no prices");
         // 1 copper a point, less 0.05: 40 points cost 38.
         app.insert_resource(tables);
-        assert_eq!(frame(&mut app), (38, 0, 0, 38), "the tables arrive");
+        assert_eq!(frame(&mut app), (38, 0, 0, 38, 1), "the tables arrive");
         let sword = entity(&app, SWORD);
         write(&mut app, sword, &[(ITEM_DURABILITY, 55)]);
         assert_eq!(
             frame(&mut app),
-            (19, 0, 0, 19),
+            (19, 0, 0, 19, 1),
             "a repair's write: 20 points"
         );
         write(&mut app, me, &moved(main_hand, bank_28));
         assert_eq!(
             frame(&mut app),
-            (0, 0, 19, 0),
-            "banked: priced, not in the total"
+            (0, 0, 19, 0, 0),
+            "banked: priced, neither in the total nor carried damage"
         );
         write(&mut app, me, &moved(bank_28, backpack_1));
-        assert_eq!(frame(&mut app), (0, 19, 0, 19), "the sword in the backpack");
+        assert_eq!(
+            frame(&mut app),
+            (0, 19, 0, 19, 1),
+            "the sword in the backpack"
+        );
         write(&mut app, vendor, &[(FIELD_UNIT_FACTIONTEMPLATE, 0)]);
         assert_eq!(
             frame(&mut app),
-            (0, 20, 0, 20),
+            (0, 20, 0, 20, 1),
             "no friendly reaction, no discount"
-        );
-        app.world_mut().resource_mut::<MerchantOpen>().clear();
-        assert_eq!(
-            frame(&mut app),
-            (0, 20, 0, 0),
-            "the repairer gone: no total"
         );
         app.world_mut()
             .resource_mut::<Items>()
             .insert_template(SWORD_ENTRY, None);
         assert_eq!(
             frame(&mut app),
-            (0, 0, 0, 0),
-            "an unknown template prices nothing"
+            (0, 0, 0, 0, 1),
+            "an unknown template prices nothing, yet is damage (`0x585ab5`)"
         );
+        app.world_mut().resource_mut::<MerchantOpen>().clear();
+        assert_eq!(frame(&mut app), (0, 0, 0, 0, 0), "the repairer gone: one 0");
     }
 
     fn row(entry: u32, slot: u32, count: u32) -> VendorItem {

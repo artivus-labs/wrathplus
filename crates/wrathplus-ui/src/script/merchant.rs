@@ -70,12 +70,12 @@ pub struct ItemStatsHead {
     pub sell_price: u32,
 }
 
-/// Each damaged item's repair cost in copper after the vendor's discount (`0x4faf30`).
+/// Each damaged item's repair cost in copper after the vendor's discount (`0x584b20`).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RepairCosts {
     /// Equipped items by live inventory id.
     pub equipped: std::collections::HashMap<u32, u32>,
-    /// Container items by `(bag, slot)`: bags 0-4, the bank vault -1 and bank bags 5-10.
+    /// Container items by `(bag, slot)`: bags 0-4, the bank vault -1 and bank bags 5-11.
     pub bags: std::collections::HashMap<(i64, u32), u32>,
 }
 
@@ -102,9 +102,10 @@ impl super::UiScript {
         }
     }
 
-    /// Push `GetRepairAllCost`'s total in copper, swept by the app ahead of the events that read it.
-    pub fn set_repair_all_cost(&mut self, copper: u32) {
-        self.model_mut().repair_all_cost = copper;
+    /// Push `GetRepairAllCost`'s values: the carried total in copper, and whether a worn or
+    /// bags-0-4 item is below its max durability, priced or not (`0x585ab5`).
+    pub fn set_repair_all_cost(&mut self, copper: u32, damaged: bool) {
+        self.model_mut().repair_all_cost = (copper, damaged);
     }
 
     /// Push the repair costs the item tooltip bindings return.
@@ -412,26 +413,6 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 model.merchant.as_ref().is_some_and(|m| m.can_repair)
             };
             Ok(if can { Value::Integer(1) } else { Value::Nil })
-        })?,
-    )?;
-
-    // GetRepairAllCost() → cost, canRepair: whether there is damage to pay for, which enables the
-    // repair-all button (`MerchantFrame.lua:38`); 0 away from a vendor that repairs (`0x4fbd60`).
-    g.set(
-        "GetRepairAllCost",
-        lua.create_function(|lua, ()| {
-            let cost = {
-                let model = lua.app_data_ref::<Model>().expect("model app_data");
-                if model.merchant.as_ref().is_some_and(|m| m.can_repair) {
-                    model.repair_all_cost
-                } else {
-                    0
-                }
-            };
-            Ok(MultiValue::from_vec(vec![
-                Value::Integer(i64::from(cost)),
-                Value::Boolean(cost > 0),
-            ]))
         })?,
     )?;
 
@@ -778,22 +759,6 @@ mod tests {
         assert!(s.take_merchant_buybacks().is_empty(), "drained");
     }
 
-    /// Away from a vendor that repairs, the total reads 0, as `0x4fbd60` pushes there.
-    #[test]
-    fn the_repair_all_total_reads_zero_away_from_a_repairer() {
-        let mut s = UiScript::new().unwrap();
-        s.set_repair_all_cost(1234);
-        assert!(
-            s.eval::<bool>("return GetRepairAllCost() == 0").unwrap(),
-            "no vendor"
-        );
-        s.set_merchant(Some(stock()));
-        assert!(
-            s.eval::<bool>("return GetRepairAllCost() == 0").unwrap(),
-            "a vendor that does not repair"
-        );
-    }
-
     /// `RepairAllItems` returns before anything else unless the open merchant repairs
     /// (`0x4fadb0`, tested at `0x4fbfe9`–`0x4fbff0`): no vendor, or one without the repair flag,
     /// queues nothing.
@@ -815,11 +780,16 @@ mod tests {
         let mut state = stock();
         state.can_repair = true;
         s.set_merchant(Some(state));
-        s.set_repair_all_cost(1234);
+        s.set_repair_all_cost(1234, false);
         assert!(s.eval::<bool>("return CanMerchantRepair() == 1").unwrap());
-        assert!(s
-            .eval::<bool>("local c, can = GetRepairAllCost()\nreturn c == 1234 and can == true",)
-            .unwrap());
+        let probe = "local c, can = GetRepairAllCost() return c == 1234 and can";
+        assert_eq!(
+            s.eval::<Option<i64>>(probe).unwrap(),
+            None,
+            "no damage: nil"
+        );
+        s.set_repair_all_cost(1234, true);
+        assert_eq!(s.eval::<Option<i64>>(probe).unwrap(), Some(1), "damaged: 1");
 
         s.run("RepairAllItems()").unwrap();
         assert!(s.take_repair_all());
