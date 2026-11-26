@@ -2,10 +2,10 @@
 //! `GuildRecruitment - City` on its own. On AUTO (`[0x843608]`, the default) a guilded player
 //! leaves it (`0x49ee70`) and an unguilded one in a capital joins it (`0x49eb70`), with no
 //! membership check; otherwise a retry waits for the next zone change. Once joined, the zone walk
-//! owns it as it owns Trade. Triggers: `SetGuildRecruitmentMode(1)` and the `PLAYER_GUILDID`
-//! watcher (`0x5e2770`), whose first sight is the player create (`0x5dec1e`). Deviation: no re-run
-//! when a remote player streams in, because the reference's re-run only repeats the join, which
-//! vmangos swallows, or the leave, whose "Not on channel" notice nothing prints.
+//! owns it as it owns Trade. Trigger: the `PLAYER_GUILDID` watcher (`0x5e2770`), whose first
+//! sight is the player create (`0x5dec1e`); 12340 has no Lua setter for the option. Deviation: no
+//! re-run when a remote player streams in, because the reference's re-run only repeats the join,
+//! which vmangos swallows, or the leave, whose "Not on channel" notice nothing prints.
 
 use bevy::prelude::*;
 
@@ -34,11 +34,6 @@ pub(crate) struct GuildRecruitmentCascade {
 }
 
 impl GuildRecruitmentCascade {
-    /// A trigger fired: `SetGuildRecruitmentMode(1)`, or the watcher.
-    pub(super) fn request(&mut self) {
-        self.pending = true;
-    }
-
     /// The watcher: note the guild id, and request a run when it moved or is first seen.
     pub(super) fn observe_guild_id(&mut self, guild_id: u32) -> bool {
         if self.last_guild_id == Some(guild_id) {
@@ -94,10 +89,6 @@ pub(super) fn guild_recruitment_cascade(
     commands: Res<NetCommands>,
 ) {
     let Some(mut script) = script else { return };
-    // `SetGuildRecruitmentMode(1)` runs it even when the value did not move (`0x49ea70`).
-    if script.take_guild_recruitment_cascade() {
-        state.request();
-    }
     // Only while the avatar is streamed: a despawned body has not "left the guild".
     let Some(guild_id) = self_q.iter().next().map(|s| s.0.player_guild_id()) else {
         return;

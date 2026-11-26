@@ -6,6 +6,7 @@
 
 use bevy::prelude::*;
 
+mod channel_verbs;
 mod parse;
 pub(super) use parse::{parse_line, ParsedChat};
 
@@ -107,7 +108,7 @@ pub(super) struct ChatOut<'w, 's> {
 }
 
 /// The verbs the stock `ChatFrame.lua` handlers call once they have parsed a line (`DoEmote`,
-/// `RandomRoll`, `UninviteByName`, `ConsoleExec`, the channel verbs), drained from the VM as
+/// `RandomRoll`, `ConsoleExec`, the channel verbs), drained from the VM as
 /// [`ParsedChat`] values, so one executor serves them and the lines the Lua never sees.
 fn engine_verbs(
     script: &mut wrathplus_ui::script::UiScript,
@@ -122,6 +123,7 @@ fn engine_verbs(
                 ParsedChat::TextEmote {
                     text_id,
                     arg: e.target,
+                    unit: e.target_guid,
                 },
             )),
             None => warn!(
@@ -132,9 +134,6 @@ fn engine_verbs(
     }
     for (min, max) in script.take_roll_requests() {
         out.push((String::new(), ParsedChat::Random { min, max }));
-    }
-    for name in script.take_uninvite_requests() {
-        out.push((String::new(), ParsedChat::Uninvite { name: Some(name) }));
     }
     for line in script.take_console_lines() {
         // `ConsoleExec` already applied a valued CVar line; what reaches here is a console
@@ -689,7 +688,7 @@ pub(super) fn drain_chat_input(
                 }
             }
             // `DoEmote` (`0x5ef560`): the gates in the client's order, then posture and packet.
-            ParsedChat::TextEmote { text_id, arg } => {
+            ParsedChat::TextEmote { text_id, arg, unit } => {
                 let (stand_state, flags) = self_player
                     .single()
                     .map_or((0, 0), |(_, m, _)| (m.stand_state, m.flags));
@@ -784,12 +783,14 @@ pub(super) fn drain_chat_input(
                         });
                     }
                 }
-                let target = emote_target(
-                    arg.as_deref(),
-                    &selection,
-                    |name| chat_out.players.find(&names, name),
-                    self_player.single().ok().map(|(entity, _, _)| entity),
-                );
+                let target = unit.unwrap_or_else(|| {
+                    emote_target(
+                        arg.as_deref(),
+                        &selection,
+                        |name| chat_out.players.find(&names, name),
+                        self_player.single().ok().map(|(entity, _, _)| entity),
+                    )
+                });
                 match commands
                     .0
                     .send(ClientCommand::TextEmote { text_id, target })
@@ -889,76 +890,12 @@ pub(super) fn drain_chat_input(
                 }
             }
             ParsedChat::Channel(cmd) => {
-                use wrathplus_ui::script::ChannelCommand as C;
-                let cmd = match cmd {
-                    C::Join { name, password } => {
-                        manual_join_or_leave(&channels, &mut script, &name);
-                        ClientCommand::JoinChannel {
-                            name,
-                            password,
-                            channel_id: 0,
-                        }
-                    }
-                    C::Leave { name } => {
-                        // `LeaveChannelByName` (`0x4a0000` → `0x49ee70`): a number names a
-                        // confirmed slot or the call does nothing. Only this path clears the zone
-                        // mask and the custom re-join list.
-                        let Some(name) = channels.leave_target(&name) else {
-                            continue;
-                        };
-                        manual_join_or_leave(&channels, &mut script, &name);
-                        channels.note_zone_channel_left(&name);
-                        channels.note_custom_channel_left(&name);
-                        // Wrath 0x5093f0 writes +0xa0=1 on the explicit local intent,
-                        // before its acknowledgment. Automatic walk leaves do not use this path.
-                        if let Some(native) = chat_out.native_channels.as_deref_mut() {
-                            native.explicit_leave(&name);
-                        }
-                        ClientCommand::LeaveChannel { name }
-                    }
-                    C::List { name } => ClientCommand::ChannelList { name },
-                    // `ListChannels()`: the joined roster, numbered as `/N` addresses it.
-                    C::ListAll => {
-                        let roster: Vec<String> = channels
-                            .joined
-                            .iter()
-                            .enumerate()
-                            .filter_map(|(i, c)| {
-                                c.as_ref().map(|c| format!("{}. {}", i + 1, c.name))
-                            })
-                            .collect();
-                        let text = if roster.is_empty() {
-                            "You are not in any channels.".to_string()
-                        } else {
-                            format!("Channels: {}", roster.join(", "))
-                        };
-                        chat_log.push_event(super::event::ChatEvent::text_only(
-                            super::event::ChatEventKind::System,
-                            text,
-                        ));
-                        continue;
-                    }
-                    C::DisplayOwner { name } => ClientCommand::ChannelOwner { name },
-                    C::SetOwner { name, player } => ClientCommand::ChannelSetOwner { name, player },
-                    C::SetPassword { name, password } => {
-                        ClientCommand::ChannelPassword { name, password }
-                    }
-                    C::Ban { name, player } => ClientCommand::ChannelBan { name, player },
-                    C::Invite { name, player } => ClientCommand::ChannelInvite { name, player },
-                    C::Kick { name, player } => ClientCommand::ChannelKick { name, player },
-                    C::Moderator { name, player } => {
-                        ClientCommand::ChannelModerator { name, player }
-                    }
-                    C::Unmoderator { name, player } => {
-                        ClientCommand::ChannelUnmoderator { name, player }
-                    }
-                    C::Mute { name, player } => ClientCommand::ChannelMute { name, player },
-                    C::Unmute { name, player } => ClientCommand::ChannelUnmute { name, player },
-                    C::Unban { name, player } => ClientCommand::ChannelUnban { name, player },
-                    C::Moderate { name } => ClientCommand::ChannelModerate { name },
-                    C::ToggleAnnouncements { name } => ClientCommand::ChannelAnnouncements { name },
-                };
-                let _ = commands.0.send(cmd);
+                let native = chat_out.native_channels.as_deref_mut();
+                if let Some(cmd) =
+                    channel_verbs::command(cmd, &mut channels, &mut script, native, &mut chat_log)
+                {
+                    let _ = commands.0.send(cmd);
+                }
             }
             ParsedChat::Unknown => {
                 // `SlashCmdList` gets the line before the help reply: an addon's command, or a

@@ -1,45 +1,40 @@
 //! The engine verbs stock `ChatFrame.lua`'s slash handlers call that are not sends, channels or
-//! window state: `DoEmote` (`0x49fd30`), `RandomRoll` (`0x48c7b0`), `AssistByName` (`0x489c40`),
-//! `UninviteByName` (`0x48a610`), `ConsoleExec`, `LoggingChat` and `LoggingCombat`. Each is a
-//! queue or a flag the app drains.
+//! window state: `DoEmote` (`0x500980`), `RandomRoll` (`0x516610`), `ConsoleExec` (`0x608270`),
+//! `LoggingChat` and `LoggingCombat` (`0x4fbd00`, `0x4fbd20`). Each is a queue or a flag the app
+//! drains.
 
 use mlua::{Lua, MultiValue, Value};
 
+use super::binding_abi::{bool_or_default, flag, optional_string, string_arg};
+use super::cvars::sstr_to_int;
 use super::Model;
 
 /// `DoEmote(token [, target])`: the `EmotesText.dbc` name token (`"WAVE"`, not `/wave`) and an
-/// optional target string (`0x49fd30` reads arg 2 with `lua_tostring`): a player name, or a `%`
-/// word for the selection. A non-string, non-number second argument reads as none.
+/// optional target word (`0x500980` reads arg 2 with `lua_tolstring`): a unit token, a player
+/// name, or a `%` word for the selection. A non-string, non-number second argument reads as none.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EmoteRequest {
     pub token: String,
     pub target: Option<String>,
+    /// When `target` is a unit token, the guid the emote carries, 0 for none; `None` leaves the
+    /// word to the app's player-name search.
+    pub target_guid: Option<u64>,
 }
 
-/// The reference's `lua_tonumber` coercion: a number or a numeric string; anything else is 0.
-fn to_u32(v: &Value) -> u32 {
-    match v {
-        Value::Integer(i) => u32::try_from(*i).unwrap_or(0),
-        Value::Number(n) if n.is_finite() && *n >= 0.0 => *n as u32,
-        Value::String(s) => s
-            .to_str()
-            .ok()
-            .and_then(|s| s.trim().parse::<f64>().ok())
-            .filter(|n| n.is_finite() && *n >= 0.0)
-            .map_or(0, |n| n as u32),
-        _ => 0,
+/// `0x520190`'s resolver arm (`0x5201e5`) for a `DoEmote` word: `None` when it is no unit token, or
+/// one naming nobody (`0x5201f8`), which go to the name search. A known object that is no player is
+/// no target (`0x52022a`), a guid with no object goes as it is, and yourself goes untargeted
+/// (`0x6dda9a`).
+fn emote_unit(model: &Model, word: &str) -> Option<u64> {
+    let r = model.resolve_token(word);
+    if !r.ok || r.guid == super::unit::token::NOBODY {
+        return None;
     }
-}
-
-fn flag_arg(v: Option<Value>) -> Option<bool> {
-    match v {
-        None | Some(Value::Nil) => None,
-        Some(Value::Boolean(b)) => Some(b),
-        Some(Value::Integer(n)) => Some(n != 0),
-        Some(Value::Number(n)) => Some(n != 0.0),
-        Some(Value::String(s)) => Some(s.to_str().is_ok_and(|s| s != "0" && !s.is_empty())),
-        Some(_) => Some(true),
-    }
+    let guid = match model.unit_by_guid(r.guid) {
+        Some(u) if u.has_object && !u.is_player => 0,
+        _ => r.guid,
+    };
+    Some(if guid == model.local_guid() { 0 } else { guid })
 }
 
 impl super::UiScript {
@@ -51,11 +46,6 @@ impl super::UiScript {
     /// `RandomRoll(min, max)` calls since the last drain, each a `CMSG_RANDOM_ROLL`.
     pub fn take_roll_requests(&mut self) -> Vec<(u32, u32)> {
         std::mem::take(&mut self.model_mut().roll_requests)
-    }
-
-    /// `UninviteByName` calls since the last drain.
-    pub fn take_uninvite_requests(&mut self) -> Vec<String> {
-        std::mem::take(&mut self.model_mut().uninvite_requests)
     }
 
     /// `ConsoleExec` lines that write no CVar: the app's console commands (`reloadui`, …).
@@ -78,72 +68,60 @@ impl super::UiScript {
 pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     let g = lua.globals();
 
+    // DoEmote("emote"[, "target"]) (`0x500980`): a non-string token raises; a target word that
+    // is not empty and does not open with `%` goes to `0x520190`, whose first arm is the unit
+    // resolver (`0x5201e5`).
     g.set(
         "DoEmote",
-        lua.create_function(|lua, (token, target): (Option<String>, Value)| {
-            let Some(token) = token.filter(|t| !t.is_empty()) else {
+        lua.create_function(|lua, (token, target): (Value, Value)| {
+            let token = string_arg(lua, token, "Usage: DoEmote(\"emote\"[, \"target\"])")?;
+            if token.is_empty() {
                 return Ok(());
-            };
+            }
+            let target = optional_string(lua, &target).filter(|t| !t.is_empty());
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
+            let target_guid = target
+                .as_deref()
+                .filter(|t| !t.starts_with('%'))
+                .and_then(|t| emote_unit(&model, t));
             model.emote_requests.push(EmoteRequest {
                 token: token.to_ascii_uppercase(),
-                target: match target {
-                    Value::String(s) => Some(s.to_string_lossy()),
-                    Value::Integer(i) => Some(i.to_string()),
-                    Value::Number(n) => Some(n.to_string()),
-                    _ => None,
-                }
-                .filter(|t| !t.is_empty()),
+                target,
+                target_guid,
             });
             Ok(())
         })?,
     )?;
 
+    // RandomRoll(min, max) (`0x516610`): both must pass `lua_isstring`, so the one-argument form
+    // its usage line offers raises too; each is read by `SStrToInt`, and no packet goes unless
+    // 0 <= min <= max <= 1000000 and not both 0 (`0x516669`-`0x516687`).
     g.set(
         "RandomRoll",
         lua.create_function(|lua, (min, max): (Value, Value)| {
-            let (min, max) = (to_u32(&min), to_u32(&max));
-            let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-            model.roll_requests.push((min, max));
-            Ok(())
-        })?,
-    )?;
-
-    g.set(
-        "AssistByName",
-        lua.create_function(|lua, name: Option<String>| {
-            let Some(name) = name.filter(|n| !n.trim().is_empty()) else {
+            const USAGE: &str = "Usage: RandomRoll(\"max\") or RandomRoll(\"min\", \"max\")";
+            let min = sstr_to_int(&string_arg(lua, min, USAGE)?);
+            let max = sstr_to_int(&string_arg(lua, max, USAGE)?);
+            if (min == 0 && max == 0) || min < 0 || max < min || max > 1_000_000 {
                 return Ok(());
-            };
+            }
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-            model.script_calls.push(super::ScriptCall::Select(
-                super::SelectionRequest::AssistByName(name),
-            ));
+            model.roll_requests.push((min as u32, max as u32));
             Ok(())
         })?,
     )?;
 
-    g.set(
-        "UninviteByName",
-        lua.create_function(|lua, name: Option<String>| {
-            let Some(name) = name.filter(|n| !n.trim().is_empty()) else {
-                return Ok(());
-            };
-            let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-            model.uninvite_requests.push(name);
-            Ok(())
-        })?,
-    )?;
-
-    // `ConsoleExec("name value")`: a registered CVar with a value is written at once, as `SetCVar`
-    // writes it; anything else, a bare CVar name included (the reference answers it with
-    // `CVar "%s" is "%s"`, `0x63dde0`), goes to the app's command registry.
+    // `ConsoleExec("name value")` (`0x608270`), a non-string raising: a registered CVar with a
+    // value is written at once, as `SetCVar` writes it; anything else, a bare CVar name included
+    // (the reference answers it with `CVar "%s" is "%s"`), goes to the app's command registry.
     g.set(
         "ConsoleExec",
-        lua.create_function(|lua, line: Option<String>| {
-            let Some(line) = line.map(|l| l.trim().to_string()).filter(|l| !l.is_empty()) else {
+        lua.create_function(|lua, line: Value| {
+            let line = string_arg(lua, line, "Usage: ConsoleExec(\"console_command\")")?;
+            let line = line.trim().to_string();
+            if line.is_empty() {
                 return Ok(());
-            };
+            }
             let (name, value) = line
                 .split_once(char::is_whitespace)
                 .map_or((line.as_str(), ""), |(n, v)| (n, v.trim()));
@@ -158,30 +136,27 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
+    // LoggingChat([on]) and LoggingCombat([on]) (`0x4fbc60`): any argument, an explicit nil
+    // included (`lua_gettop`), sets the flag through `0x815500` with default 1; either way the
+    // binding answers 1 or nil. The app opens the file a frame later, so a failed open does not
+    // clear the flag here (`0x4fbcba`): the log module's deviation.
     for (name, chat) in [("LoggingChat", true), ("LoggingCombat", false)] {
         g.set(
             name,
-            lua.create_function(move |lua, flag: Option<Value>| {
+            lua.create_function(move |lua, args: MultiValue| {
                 let mut model = lua.app_data_mut::<Model>().expect("model app_data");
                 let slot = if chat {
                     &mut model.logging_chat
                 } else {
                     &mut model.logging_combat
                 };
-                match flag_arg(flag) {
-                    None => Ok(MultiValue::from_vec(vec![if *slot {
-                        Value::Integer(1)
-                    } else {
-                        Value::Nil
-                    }])),
-                    Some(on) => {
-                        if *slot != on {
-                            *slot = on;
-                            model.logging_changed = true;
-                        }
-                        Ok(MultiValue::new())
-                    }
+                let was = *slot;
+                if !args.is_empty() {
+                    *slot = bool_or_default(args.front(), true);
                 }
+                let on = *slot;
+                model.logging_changed |= on != was;
+                Ok(flag(on))
             })?,
         )?;
     }
@@ -192,65 +167,104 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::script::{SelectionRequest, UiScript};
+    use crate::script::UiScript;
 
     #[test]
     fn do_emote_queues_the_uppercased_token_and_a_non_empty_target() {
         let mut s = UiScript::new().unwrap();
-        s.run("DoEmote('wave', 'Bob') DoEmote('DANCE', '') DoEmote('') DoEmote()")
+        s.run("DoEmote('wave', 'Bob') DoEmote('DANCE', '') DoEmote('')")
             .unwrap();
         assert_eq!(
             s.take_emote_requests(),
             vec![
                 EmoteRequest {
                     token: "WAVE".into(),
-                    target: Some("Bob".into())
+                    target: Some("Bob".into()),
+                    target_guid: None,
                 },
                 EmoteRequest {
                     token: "DANCE".into(),
-                    target: None
+                    target: None,
+                    target_guid: None,
                 },
             ]
         );
+        for call in ["DoEmote()", "DoEmote({}, 'Bob')"] {
+            let err = s.run(call).unwrap_err().to_string();
+            assert!(
+                err.contains("Usage: DoEmote(\"emote\"[, \"target\"])"),
+                "{err}"
+            );
+        }
         assert!(s.take_emote_requests().is_empty(), "drained");
     }
 
-    /// The second argument is a string, never a unit token: `"target"` is a name like any other,
-    /// and `%t` reaches the app's selection arm untouched (`0x49fdb1`).
+    /// `0x520190` tries the unit resolver before the name search: a token naming a player is that
+    /// guid, a held non-player or yourself none (`0x52022a`, `0x6dda9a`); a word that is no token,
+    /// or names nobody, and a `%` word stay words for the app.
     #[test]
-    fn do_emote_second_argument_is_passed_as_a_string() {
+    fn do_emote_resolves_a_unit_token_before_the_name_search() {
         let mut s = UiScript::new().unwrap();
-        s.run("DoEmote('WAVE', 'target') DoEmote('WAVE', '%t') DoEmote('WAVE', {})")
-            .unwrap();
-        let targets: Vec<_> = s
+        let (me, mob, ally) = (0x10, 0xF130_0000_0000_0001, 0x21);
+        s.set_unit_guids(&crate::script::UnitGuids {
+            player: me,
+            target: mob,
+            focus: ally,
+            ..Default::default()
+        });
+        for (guid, is_player) in [(mob, false), (ally, true)] {
+            let unit = crate::script::UnitState {
+                exists: true,
+                has_object: true,
+                is_player,
+                ..Default::default()
+            };
+            s.set_unit_by_guid(guid, Some(unit));
+        }
+        s.run(
+            "for _, t in ipairs({'focus', 'target', 'player', 'party1', 'Bob', '%t'}) do \
+             DoEmote('WAVE', t) end DoEmote('WAVE', {})",
+        )
+        .unwrap();
+        let got: Vec<_> = s
             .take_emote_requests()
             .into_iter()
-            .map(|e| e.target)
+            .map(|e| (e.target, e.target_guid))
             .collect();
+        let word = |w: &str| (Some(w.to_string()), None);
         assert_eq!(
-            targets,
-            vec![Some("target".into()), Some("%t".into()), None]
+            got,
+            vec![
+                (Some("focus".into()), Some(ally)),
+                (Some("target".into()), Some(0)),
+                (Some("player".into()), Some(0)),
+                word("party1"),
+                word("Bob"),
+                word("%t"),
+                (None, None),
+            ]
         );
     }
 
+    /// `0x516610`: both arguments `lua_isstring`, each read by `SStrToInt` (no whitespace, no `+`,
+    /// no exponent), and only `0 <= min <= max <= 1000000`, not both 0, is sent.
     #[test]
-    fn random_roll_coerces_the_strings_the_stock_handler_passes() {
+    fn random_roll_reads_both_strings_and_sends_only_a_valid_range() {
         let mut s = UiScript::new().unwrap();
-        s.run("RandomRoll('1', '100') RandomRoll(5, 10) RandomRoll('x', nil)")
-            .unwrap();
-        assert_eq!(s.take_roll_requests(), vec![(1, 100), (5, 10), (0, 0)]);
-    }
-
-    #[test]
-    fn assist_and_uninvite_by_name_queue_their_names() {
-        let mut s = UiScript::new().unwrap();
-        s.run("AssistByName('Alice') AssistByName('') UninviteByName('Carol') UninviteByName()")
-            .unwrap();
+        s.run(
+            "RandomRoll('1', '100') RandomRoll(5, 10) RandomRoll('0', '0') RandomRoll('5', '3') \
+             RandomRoll('-1', '5') RandomRoll('1', '1000001') RandomRoll('0', '1e2') \
+             RandomRoll(' 5', '10')",
+        )
+        .unwrap();
         assert_eq!(
-            s.take_selection_requests(),
-            vec![SelectionRequest::AssistByName("Alice".into())]
+            s.take_roll_requests(),
+            vec![(1, 100), (5, 10), (0, 1), (0, 10)]
         );
-        assert_eq!(s.take_uninvite_requests(), vec!["Carol".to_string()]);
+        for call in ["RandomRoll('100')", "RandomRoll('x', nil)", "RandomRoll()"] {
+            let err = s.run(call).unwrap_err().to_string();
+            assert!(err.contains("Usage: RandomRoll(\"max\")"), "{call}: {err}");
+        }
     }
 
     #[test]
@@ -259,6 +273,11 @@ mod tests {
         s.register_cvars([("benchUiScale", "1")]);
         s.run("ConsoleExec('benchuiscale 0.8') ConsoleExec('reloadui') ConsoleExec('  ') ConsoleExec('benchUiScale')")
             .unwrap();
+        let err = s.run("ConsoleExec()").unwrap_err().to_string();
+        assert!(
+            err.contains("Usage: ConsoleExec(\"console_command\")"),
+            "{err}"
+        );
         assert_eq!(
             s.eval::<String>("return GetCVar('benchUiScale')").unwrap(),
             "0.8",
@@ -276,20 +295,21 @@ mod tests {
         );
     }
 
+    /// `0x4fbc60`: one value either way, 1 or nil; any argument sets through `0x815500`, so an
+    /// explicit nil and "no" turn it off.
     #[test]
-    fn the_logging_flags_read_as_one_or_nil_and_set_from_any_truthy_arg() {
+    fn the_logging_flags_answer_one_or_nil_and_any_argument_sets_them() {
         let mut s = UiScript::new().unwrap();
         assert!(s.eval::<bool>("return LoggingChat() == nil").unwrap());
         assert!(s.eval::<bool>("return LoggingCombat() == nil").unwrap());
-        assert_eq!(
-            s.arity("LoggingChat(true)").unwrap(),
-            0,
-            "the setter returns nothing"
-        );
+        assert_eq!(s.eval::<i64>("return LoggingChat(true)").unwrap(), 1);
         assert_eq!(s.eval::<i64>("return LoggingChat()").unwrap(), 1);
         assert_eq!(s.logging_flags(), (true, false));
         assert!(s.take_logging_changes());
-        s.run("LoggingCombat(1) LoggingChat(false)").unwrap();
+        assert_eq!(s.arity("LoggingChat(nil)").unwrap(), 1);
+        assert_eq!(s.logging_flags(), (false, false), "nil is off");
+        s.run("LoggingCombat(1) LoggingChat('yes') LoggingChat('no')")
+            .unwrap();
         assert_eq!(s.logging_flags(), (false, true));
         assert!(s.take_logging_changes());
         s.run("LoggingCombat(true)").unwrap();

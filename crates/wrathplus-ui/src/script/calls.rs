@@ -11,7 +11,7 @@ use super::{ActionUse, SelectionRequest, UiScript};
 /// One queued call, in the reference's terms.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ScriptCall {
-    /// `TargetUnit`, `AssistUnit`, `AssistByName` and `TargetLastEnemy`.
+    /// `TargetUnit`, `AssistUnit` and `TargetLastEnemy`.
     Select(SelectionRequest),
     /// `TargetByName(name, exactMatch)` (`0x489d60`), the stock `/target`.
     TargetByName { name: String, exact: bool },

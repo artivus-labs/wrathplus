@@ -106,6 +106,10 @@ pub struct ChannelState {
     /// confirmed custom join, shrunk by an explicit leave. A channel whose re-join is refused, or
     /// that kicks the player, stays listed until a `/leave`, where the reference's file drops it.
     pub custom: Vec<String>,
+    /// Custom channels a `JoinPermanentChannel` asked for and the server has not confirmed: the
+    /// record's `+0xa5` flag, which the cache writer requires of a re-join row (`0x4fd43a`). The
+    /// latest request for a name decides; the session end clears it.
+    pub(crate) permanent: Vec<String>,
 }
 
 /// One slot, the reference's `[0xb4fe04] + n*0xa0` record, in the fields this client uses.
@@ -170,6 +174,30 @@ impl ChannelState {
             return;
         }
         self.custom.push(name.to_string());
+    }
+
+    /// A join request: a custom channel's permanent flag, kept until the server confirms it.
+    pub(crate) fn note_join_request(&mut self, name: &str, permanent: bool) {
+        self.permanent.retain(|c| !c.eq_ignore_ascii_case(name));
+        if permanent && self.channels.zone_channel_id(name) == 0 {
+            self.permanent.push(name.to_string());
+        }
+    }
+
+    /// A confirmed join of a permanent request enters [`Self::custom`] (`0x4fd41e`-`0x4fd43a`);
+    /// any other confirmed join is for the session only.
+    pub(crate) fn note_join_confirmed(&mut self, name: &str) {
+        let before = self.permanent.len();
+        self.permanent.retain(|c| !c.eq_ignore_ascii_case(name));
+        if self.permanent.len() != before {
+            self.note_custom_channel_joined(name);
+        }
+    }
+
+    /// The session end: no record survives it, nor a pending permanent request.
+    pub(crate) fn end_session(&mut self) {
+        self.joined.clear();
+        self.permanent.clear();
     }
 
     /// An explicit leave drops a custom channel, case-insensitively as the server's names are.
@@ -256,11 +284,33 @@ impl ChannelState {
             .map(|s| s.state)
     }
 
-    /// The names for the VM's mirror, holes kept so `/N` addresses the right channel.
-    pub(crate) fn names(&self) -> Vec<Option<String>> {
+    /// The VM's mirror, holes kept so `/N` addresses the right channel: each record's name, its
+    /// `ChatChannels.dbc` id (`+0x94`) and whether it is in state 0 (`+0x9c`).
+    pub(crate) fn names(&self) -> Vec<Option<wrathplus_ui::script::JoinedChannel>> {
         self.joined
             .iter()
-            .map(|s| s.as_ref().map(|s| s.name.clone()))
+            .map(|s| {
+                s.as_ref().map(|s| wrathplus_ui::script::JoinedChannel {
+                    name: s.name.clone(),
+                    id: self.channels.zone_channel_id(&s.name),
+                    confirmed: s.state == SlotState::Joined,
+                })
+            })
+            .collect()
+    }
+
+    /// `ListChannels()`'s line (`0x50dae0`): `"[%d. %s] "` (`0x9fceec`) for each record in state
+    /// 0, by its wire name.
+    pub(crate) fn list_text(&self) -> String {
+        self.joined
+            .iter()
+            .enumerate()
+            .filter_map(|(i, s)| {
+                s.as_ref()
+                    .filter(|s| s.state == SlotState::Joined)
+                    .map(|s| (i, s))
+            })
+            .map(|(i, s)| format!("[{}. {}] ", i + 1, s.name))
             .collect()
     }
 

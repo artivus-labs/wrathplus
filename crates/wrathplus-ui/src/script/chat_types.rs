@@ -5,6 +5,7 @@
 
 use mlua::{Lua, MultiValue, Value};
 
+use super::binding_abi::{coerced_number, is_number, is_string, optional_string, string_arg};
 use super::Model;
 
 /// The fixed segment: 62 entries, in the reference's order (index = position + 1).
@@ -171,58 +172,65 @@ impl super::UiScript {
 pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     let g = lua.globals();
 
+    // GetChatTypeIndex(type) (`0x4feee0`): a non-string raises; a miss answers 0.
     g.set(
         "GetChatTypeIndex",
-        lua.create_function(|lua, name: Option<String>| {
-            let Some(name) = name else {
-                return Ok(0);
-            };
+        lua.create_function(|lua, name: Value| {
+            let name = string_arg(lua, name, "Usage: GetChatTypeIndex(type)")?;
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             Ok(position(&model.chat_colors, &name).map_or(0, |i| i as i64 + 1))
         })?,
     )?;
 
+    // ChangeChatColor(chatType, r, g, b) (`0x4feaf0`): a string and three numbers or the usage
+    // line; a matched type stores the truncated bytes and fires UPDATE_CHAT_COLOR with the
+    // caller's spelling (`[ebp-0xc]`, `0x4fecab`), an unknown one nothing.
     g.set(
         "ChangeChatColor",
-        lua.create_function(
-            |lua, (name, r, g, b): (String, Option<f64>, Option<f64>, Option<f64>)| {
-                let written = {
-                    let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-                    let Some(i) = position(&model.chat_colors, &name) else {
-                        return Ok(());
-                    };
-                    let rgb = [
-                        to_byte(r.unwrap_or(0.0)),
-                        to_byte(g.unwrap_or(0.0)),
-                        to_byte(b.unwrap_or(0.0)),
-                    ];
-                    model.chat_colors[i].rgb = rgb;
-                    model.chat_colors_changed = true;
-                    (model.chat_colors[i].name.clone(), rgb)
+        lua.create_function(|lua, args: MultiValue| {
+            let ok = is_string(args.front()) && (1..4).all(|n| is_number(lua, args.get(n)));
+            if !ok {
+                return Err(mlua::Error::runtime(
+                    "Usage: ChangeChatColor(chatType, r, g, b)",
+                ));
+            }
+            let name = args
+                .front()
+                .and_then(|v| optional_string(lua, v))
+                .unwrap_or_default();
+            let [r, g, b] = [1, 2, 3].map(|n| coerced_number(lua, args.get(n).cloned()));
+            let rgb = {
+                let mut model = lua.app_data_mut::<Model>().expect("model app_data");
+                let Some(i) = position(&model.chat_colors, &name) else {
+                    return Ok(());
                 };
-                let (name, rgb) = written;
-                super::tick::fire_event_into(
-                    lua,
-                    "UPDATE_CHAT_COLOR",
-                    vec![
-                        super::ScriptValue::Str(name),
-                        super::ScriptValue::Number(from_byte(rgb[0])),
-                        super::ScriptValue::Number(from_byte(rgb[1])),
-                        super::ScriptValue::Number(from_byte(rgb[2])),
-                    ],
-                );
-                Ok(())
-            },
-        )?,
+                let rgb = [to_byte(r), to_byte(g), to_byte(b)];
+                model.chat_colors[i].rgb = rgb;
+                model.chat_colors_changed = true;
+                rgb
+            };
+            super::tick::fire_event_into(
+                lua,
+                "UPDATE_CHAT_COLOR",
+                vec![
+                    super::ScriptValue::Str(name),
+                    super::ScriptValue::Number(from_byte(rgb[0])),
+                    super::ScriptValue::Number(from_byte(rgb[1])),
+                    super::ScriptValue::Number(from_byte(rgb[2])),
+                ],
+            );
+            Ok(())
+        })?,
     )?;
 
+    // ResetChatColors() (`0x4fed10`) answers nothing and fires nothing.
     g.set(
         "ResetChatColors",
         lua.create_function(|lua, _ignored: MultiValue| {
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
             reset(&mut model.chat_colors);
             model.chat_colors_changed = true;
-            Ok(Value::Nil)
+            Ok(())
         })?,
     )?;
 
@@ -254,7 +262,8 @@ mod tests {
             "extras follow the 62 fixed types"
         );
         assert_eq!(s.eval::<i64>("return GetChatTypeIndex('NOPE')").unwrap(), 0);
-        assert_eq!(s.eval::<i64>("return GetChatTypeIndex()").unwrap(), 0);
+        let err = s.run("GetChatTypeIndex()").unwrap_err().to_string();
+        assert!(err.contains("Usage: GetChatTypeIndex(type)"), "{err}");
     }
 
     #[test]
@@ -271,8 +280,8 @@ mod tests {
         assert_eq!(say.rgb, [127, 255, 254], "truncate, never round");
         assert_eq!(
             s.eval::<String>("return SEEN[1]").unwrap(),
-            "SAY",
-            "the registry's spelling, not the caller's"
+            "say",
+            "the caller's spelling, not the registry's"
         );
         let heard = s.eval::<f64>("return SEEN[2]").unwrap();
         assert!(
@@ -281,6 +290,13 @@ mod tests {
         );
         assert!(s.take_chat_color_changes());
         assert!(!s.take_chat_color_changes(), "the cue is one-shot");
+        // A missing channel raises (`0x9fc0dc`) where it read as 0.
+        let err = s.run("ChangeChatColor('SAY', 1)").unwrap_err().to_string();
+        assert!(
+            err.contains("Usage: ChangeChatColor(chatType, r, g, b)"),
+            "{err}"
+        );
+        assert_eq!(s.chat_colors()[1].rgb, [127, 255, 254]);
     }
 
     #[test]
@@ -313,7 +329,7 @@ mod tests {
             [255, 192, 192],
             "an extra keeps its seed colour — the cache does not re-seed it from CHANNEL"
         );
-        s.run("ResetChatColors()").unwrap();
+        assert_eq!(s.arity("ResetChatColors()").unwrap(), 0);
         let table = s.chat_colors();
         assert_eq!(table[0].rgb, [255, 255, 0]);
         assert_eq!(table[17].rgb, [255, 192, 192]);

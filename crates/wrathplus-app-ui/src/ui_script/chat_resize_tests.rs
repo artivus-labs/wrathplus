@@ -101,6 +101,9 @@ fn drag_tab(s: &mut UiScript, tab: &str, dx: f32, dy: f32) {
 
 const GRIP: &str = "ChatFrame1ResizeButton";
 
+/// A window's alpha byte until a setter moves it, `0x28` (`0x501813`), as `GetChatWindowInfo` reads it.
+const STOCK_ALPHA: f64 = (40.0f32 * (1.0f32 / 255.0f32)) as f64;
+
 fn grab_grip(s: &mut UiScript, grip: &str) -> (f32, f32) {
     let (x, y) = centre(s, grip);
     s.mouse_button(x, y, "LeftButton", true);
@@ -348,6 +351,30 @@ fn the_geometry_round_trips_through_the_save_file() {
         "script errors: {:?}",
         fresh.errors()
     );
+
+    // The chat cache's own path: the drag stored the geometry (`FCF_SavePositionAndDimensions`),
+    // and the records alone bring the window back through `FCF_RestorePositionAndDimensions` on
+    // `UPDATE_CHAT_WINDOWS` (FloatingChatFrame.lua:1100-1140), screen ratios rounded through f32.
+    let mut cached = chat_ui();
+    cached.set_chat_window_looks(s.chat_window_looks().into_iter().enumerate());
+    cached.fire_event("UPDATE_CHAT_WINDOWS", vec![]);
+    let bottom = |s: &mut UiScript| s.eval::<f64>("return ChatFrame1:GetBottom()").unwrap() as f32;
+    let got = [
+        width(&mut cached),
+        height(&mut cached),
+        left(&mut cached),
+        bottom(&mut cached),
+    ];
+    let want = [want.0, want.1, want.2, want.3];
+    assert!(
+        got.iter().zip(want).all(|(g, w)| (g - w).abs() < 0.01),
+        "the chat cache restores the window: {got:?} vs {want:?}"
+    );
+    assert!(
+        cached.errors().is_empty(),
+        "script errors: {:?}",
+        cached.errors()
+    );
 }
 
 /// `CHAT_FRAME_TEXTURES` (FloatingChatFrame.lua:30-46) fade in together on a hover to
@@ -366,8 +393,8 @@ fn the_chrome_follows_the_windows_reveal_and_tint() {
         assert_eq!(
             s.eval::<f64>(&format!("return ChatFrame1{piece}:GetAlpha()"))
                 .unwrap(),
-            0.0,
-            "{piece} is invisible at rest"
+            STOCK_ALPHA,
+            "{piece} rests at the window's alpha"
         );
     }
     reveal(&mut s);
@@ -420,7 +447,7 @@ fn a_resize_in_flight_holds_the_chrome_visible() {
     }
     let alpha: f64 = s.eval("return ChatFrame1Background:GetAlpha()").unwrap();
     assert!(
-        alpha < 1e-6,
+        (alpha - STOCK_ALPHA).abs() < 1e-6,
         "and the chrome fades once it is let go: {alpha}"
     );
 }

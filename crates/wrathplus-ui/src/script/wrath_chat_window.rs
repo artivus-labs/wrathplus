@@ -4,50 +4,36 @@
 //! Wow.exe 12340 evidence (`/tmp/azb-ui-fcf-native.log`, `/tmp/azb-ui-fcf-helpers.log`): the
 //! window records sit at `0xbcf0b0`, stride 0x100, ten slots: name `+0x00`, message-group flags
 //! `+0x80`, font size `+0xd0`, colour bytes `+0xd4..+0xd7` (B, G, R, A), locked `+0xd8`, docked
-//! `+0xdc`, shown `+0xe0`, uninteractable `+0xe4`. `GetChatWindowInfo` `0x4fbd90`,
-//! `SetChatWindowUninteractable` `0x4fc6e0`, `ResetChatWindows` `0x501f00`,
-//! `SetChatColorNameByClass` `0x4fedc0`, `JoinPermanentChannel` `0x50dac0` (the shared join
-//! `0x50d900` with its permanent flag set), `BNLeaveConversation` `0x536030`.
+//! `+0xdc`, shown `+0xe0`, uninteractable `+0xe4`, saved geometry `+0xe8..+0xfc`.
+//! `GetChatWindowInfo` `0x4fbd90`, `SetChatWindowUninteractable` `0x4fc6e0`, `ResetChatWindows`
+//! `0x501f00`, `SetChatColorNameByClass` `0x4fedc0`, `BNLeaveConversation` `0x536030`;
+//! `JoinPermanentChannel` `0x50dac0` is the shared join in `channel`.
 //!
 //! The registries are 12340's: 62 chat types (`chat_types`) and 46 message groups
-//! (`chat_window::MESSAGE_GROUPS`). Unresolved, labelled rather than guessed: the window helpers
-//! `0x5019d0`/`0x501800` ResetChatWindows runs per record were not audited and are taken as the
-//! stock record. The host persists `uninteractable` and colorNameByClass in `chat-cache.txt`.
+//! (`chat_window::MESSAGE_GROUPS`). Per record ResetChatWindows frees the channels (`0x5019d0`)
+//! and writes the default record (`0x501800`: name "", size 0, locked, docked 0, hidden, colour
+//! 0, 0, 0 with alpha `0x28`). The host persists `uninteractable` and colorNameByClass in
+//! `chat-cache.txt`.
 
 use mlua::{Lua, MultiValue, Value};
 
-use super::binding_abi::bool_or_default;
+use super::binding_abi::{bool_or_default, coerced_number, is_number, is_string, optional_string};
 use super::chat_types;
-use super::chat_window::{ChatWindowLook, ENGINE_CHAT_WINDOW_SLOTS};
+use super::chat_window::{
+    checked_window, edit_look, ChatWindowGeometry, ChatWindowLook, ENGINE_CHAT_WINDOW_SLOTS,
+};
 use super::{Model, ScriptValue};
-
-/// A window id as the 12340 bindings read it: `lua_isnumber`, then rounded (`fistp`), 1-based.
-/// `None` for a number outside the ten slots, which the bindings ignore.
-fn window_slot(lua: &Lua, v: &Value) -> Option<Option<usize>> {
-    let n = lua.coerce_number(v.clone()).ok().flatten()?;
-    let index = (n.round_ties_even() as i64).wrapping_sub(1);
-    Some(
-        usize::try_from(index)
-            .ok()
-            .filter(|i| *i < ENGINE_CHAT_WINDOW_SLOTS),
-    )
-}
 
 /// `byte · (1/255)` in f32 (`[0xa45564]`), as the colour getters push it.
 fn unit(b: u8) -> f64 {
     f64::from(f32::from(b) * (1.0f32 / 255.0f32))
 }
 
-/// The ten windows' saved geometry (records `0xbcf0b0`, stride 0x100): width and height
-/// `+0xf8/+0xfc`, the anchor point, x and y `+0xec/+0xf0`, and the saved-position flag `+0xf4`.
-#[derive(Clone, Default)]
-struct SavedWindow {
-    dimensions: Option<(f32, f32)>,
-    position: Option<(String, f32, f32)>,
+/// Window `i`'s saved geometry.
+fn geometry(lua: &Lua, i: usize) -> ChatWindowGeometry {
+    let model = lua.app_data_ref::<Model>().expect("model app_data");
+    model.chat_window_looks[i].geometry
 }
-
-#[derive(Default)]
-struct SavedGeometry([SavedWindow; ENGINE_CHAT_WINDOW_SLOTS]);
 
 impl super::UiScript {
     /// Seeds the `ChatChannels.dbc` auto-join rows (`flags & 1`) as `(Shortcut, id)`, which
@@ -59,91 +45,97 @@ impl super::UiScript {
 
 pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     let g = lua.globals();
-    lua.set_app_data(SavedGeometry::default());
 
-    // GetChatWindowSavedDimensions(index) (`0x4fc020`) → width, height for a window 1..10;
-    // nothing outside. GetChatWindowSavedPosition(index) (`0x4fbf60`) → point, x, y once saved,
-    // else nothing. A non-number answers nothing. Deviation, labelled: the native record always
-    // holds dimensions, its defaults written by ResetChatWindows (`0x501f00`, unread for them);
-    // an unsaved window answers nothing here, as sizing to 0x0 would. The setters' own checks
-    // and the chat-cache persistence are unread; the setters store.
+    // GetChatWindowSavedDimensions(index) (`0x4fc020`) → width, height, which 12340 pushes for every
+    // window, the static zeros (`0x9c9360`) of one never sized included. Deviation: a stored
+    // (0, 0) answers nothing, because stock then calls `SetSize(0, 0)` (FloatingChatFrame.lua:1128),
+    // and a frame on one anchor with no size resolves no rect here, so ChatFrame1 would stop
+    // drawing. GetChatWindowSavedPosition(index) (`0x4fbf60`) → point, x, y once saved (`+0xf4`).
     g.set(
         "GetChatWindowSavedDimensions",
-        lua.create_function(|lua, id: Value| {
-            let Some(Some(slot)) = window_slot(lua, &id) else {
+        lua.create_function(|lua, args: MultiValue| {
+            let ok = is_number(lua, args.front());
+            let usage = "Usage: GetChatWindowSavedDimensions(index)";
+            let Some(i) = checked_window(lua, &args, ok, usage)? else {
                 return Ok(MultiValue::new());
             };
-            let saved = lua.app_data_ref::<SavedGeometry>().expect("geometry");
-            let Some((w, h)) = saved.0[slot].dimensions else {
+            let geo = geometry(lua, i);
+            if geo.width == 0.0 && geo.height == 0.0 {
                 return Ok(MultiValue::new());
-            };
+            }
             Ok(MultiValue::from_vec(vec![
-                Value::Number(f64::from(w)),
-                Value::Number(f64::from(h)),
+                Value::Number(f64::from(geo.width)),
+                Value::Number(f64::from(geo.height)),
             ]))
         })?,
     )?;
     g.set(
         "SetChatWindowSavedDimensions",
-        lua.create_function(|lua, (id, w, h): (Value, Value, Value)| {
-            if let Some(Some(slot)) = window_slot(lua, &id) {
-                let (w, h) = (
-                    lua.coerce_number(w)?.unwrap_or(0.0),
-                    lua.coerce_number(h)?.unwrap_or(0.0),
-                );
-                let mut saved = lua.app_data_mut::<SavedGeometry>().expect("geometry");
-                saved.0[slot].dimensions = Some((w as f32, h as f32));
-            }
+        lua.create_function(|lua, args: MultiValue| {
+            let ok = (0..3).all(|n| is_number(lua, args.get(n)));
+            let usage = "Usage: SetChatWindowSavedDimensions(index, width, height)";
+            let Some(i) = checked_window(lua, &args, ok, usage)? else {
+                return Ok(());
+            };
+            let [w, h] = [1, 2].map(|n| coerced_number(lua, args.get(n).cloned()) as f32);
+            edit_look(lua, i, |l| (l.geometry.width, l.geometry.height) = (w, h));
             Ok(())
         })?,
     )?;
     g.set(
         "GetChatWindowSavedPosition",
-        lua.create_function(|lua, id: Value| {
-            let Some(Some(slot)) = window_slot(lua, &id) else {
+        lua.create_function(|lua, args: MultiValue| {
+            let ok = is_number(lua, args.front());
+            let usage = "Usage: GetChatWindowSavedPosition(index)";
+            let Some(i) = checked_window(lua, &args, ok, usage)? else {
                 return Ok(MultiValue::new());
             };
-            let saved = lua.app_data_ref::<SavedGeometry>().expect("geometry");
-            let Some((point, x, y)) = saved.0[slot].position.clone() else {
+            let geo = geometry(lua, i);
+            if !geo.saved {
                 return Ok(MultiValue::new());
-            };
+            }
             Ok(MultiValue::from_vec(vec![
-                Value::String(lua.create_string(&point)?),
-                Value::Number(f64::from(x)),
-                Value::Number(f64::from(y)),
+                Value::String(lua.create_string(geo.point_name())?),
+                Value::Number(f64::from(geo.x)),
+                Value::Number(f64::from(geo.y)),
             ]))
         })?,
     )?;
+    // SetChatWindowSavedPosition(index, "point", xOffsetRatio, yOffsetRatio) (`0x4fc890`): inside
+    // 1..10 a point `0x814ed0` does not name raises `Unknown Region Point` (`0x4fc933`) and stores
+    // nothing; else point, x and y, and the saved flag.
     g.set(
         "SetChatWindowSavedPosition",
-        lua.create_function(|lua, (id, point, x, y): (Value, Value, Value, Value)| {
-            if let Some(Some(slot)) = window_slot(lua, &id) {
-                let point = lua
-                    .coerce_string(point)?
-                    .map(|s| s.to_string_lossy())
-                    .unwrap_or_default();
-                let (x, y) = (
-                    lua.coerce_number(x)?.unwrap_or(0.0),
-                    lua.coerce_number(y)?.unwrap_or(0.0),
-                );
-                let mut saved = lua.app_data_mut::<SavedGeometry>().expect("geometry");
-                saved.0[slot].position = Some((point, x as f32, y as f32));
+        lua.create_function(|lua, args: MultiValue| {
+            let ok = is_number(lua, args.front())
+                && is_string(args.get(1))
+                && (2..4).all(|n| is_number(lua, args.get(n)));
+            let usage =
+                "Usage: SetChatWindowSavedPosition(index, \"point\", xOffsetRatio, yOffsetRatio)";
+            let Some(i) = checked_window(lua, &args, ok, usage)? else {
+                return Ok(());
+            };
+            let point = args.get(1).and_then(|v| optional_string(lua, v));
+            let mut geo = geometry(lua, i);
+            if !geo.set_point(&point.unwrap_or_default()) {
+                return Err(mlua::Error::runtime("Unknown Region Point"));
             }
+            let [x, y] = [2, 3].map(|n| coerced_number(lua, args.get(n).cloned()) as f32);
+            (geo.x, geo.y, geo.saved) = (x, y, true);
+            edit_look(lua, i, |l| l.geometry = geo);
             Ok(())
         })?,
     )?;
 
-    // GetChatWindowInfo(index) → name, fontSize, r, g, b, alpha, shown, locked, docked,
-    // uninteractable. A non-number raises the usage line; an index outside 1..=10 answers nothing.
-    // shown and locked are 1 or nil, docked the dock position or nil, uninteractable the stored
-    // number or nil (`0x4fbe9a`).
+    // GetChatWindowInfo(index) (`0x4fbd90`) → name, fontSize, r, g, b, alpha, shown, locked,
+    // docked, uninteractable. shown and locked are 1 or nil, docked the dock position read unsigned
+    // or nil, uninteractable the stored number or nil (`0x4fbe9a`); FrameXML tests them bare.
     g.set(
         "GetChatWindowInfo",
-        lua.create_function(|lua, id: Value| {
-            let Some(slot) = window_slot(lua, &id) else {
-                return Err(mlua::Error::runtime("Usage: GetChatWindowInfo(index)"));
-            };
-            let Some(i) = slot else {
+        lua.create_function(|lua, args: MultiValue| {
+            let ok = is_number(lua, args.front());
+            let usage = "Usage: GetChatWindowInfo(index)";
+            let Some(i) = checked_window(lua, &args, ok, usage)? else {
                 return Ok(MultiValue::new());
             };
             let look = lua
@@ -174,20 +166,13 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     g.set(
         "SetChatWindowUninteractable",
         lua.create_function(|lua, args: MultiValue| {
-            let id = args.front().cloned().unwrap_or(Value::Nil);
-            let Some(slot) = window_slot(lua, &id) else {
-                return Err(mlua::Error::runtime(
-                    "Usage: SetChatWindowUninteractable(index, uninteractable)",
-                ));
+            let ok = is_number(lua, args.front());
+            let usage = "Usage: SetChatWindowUninteractable(index, uninteractable)";
+            let Some(i) = checked_window(lua, &args, ok, usage)? else {
+                return Ok(());
             };
             let on = bool_or_default(args.get(1), false);
-            if let Some(i) = slot {
-                let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-                if model.chat_window_looks[i].uninteractable != on {
-                    model.chat_window_looks[i].uninteractable = on;
-                    model.chat_window_changes.insert(i);
-                }
-            }
+            edit_look(lua, i, |l| l.uninteractable = on);
             Ok(())
         })?,
     )?;
@@ -212,7 +197,12 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 model.chat_colors_changed = true;
                 let seed = model.chat_channel_seed.clone();
                 for i in 0..ENGINE_CHAT_WINDOW_SLOTS {
-                    model.chat_window_looks[i] = ChatWindowLook::stock(i);
+                    // `0x501800` writes nothing past `+0xe4`: the saved geometry stays.
+                    let geometry = model.chat_window_looks[i].geometry;
+                    model.chat_window_looks[i] = ChatWindowLook {
+                        geometry,
+                        ..ChatWindowLook::stock(i)
+                    };
                     model.chat_window_changes.insert(i);
                 }
                 model.chat_window_looks[0].channels = seed;
@@ -277,18 +267,6 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // JoinPermanentChannel(name, password, frameID, hasVoice) (`0x50dac0`): the shared join with
-    // the permanent flag, so the same answers, send and window registration as JoinChannelByName.
-    // The host persists joined custom channels either way; voice is not supported.
-    let join: mlua::Function = g.get("JoinChannelByName")?;
-    g.set(
-        "JoinPermanentChannel",
-        lua.create_function(move |_, args: MultiValue| {
-            let first_three: MultiValue = args.into_iter().take(3).collect();
-            join.call::<MultiValue>(first_three)
-        })?,
-    )?;
-
     // BNLeaveConversation(channel) (`0x536030`): every check before the usage line asks for a
     // connected Battle.net session, which a 3.3.5a realm never opens, so it does nothing, raising
     // nothing even without an argument.
@@ -341,12 +319,76 @@ mod tests {
         assert!(s.run("SetChatWindowUninteractable('x')").is_err());
     }
 
+    /// `+0xe8..+0xfc` (`0x4fc890`, `0x4fc9a0`, `0x4fbf60`, `0x4fc020`): the point by name
+    /// (`0x814ed0`), answered canonical; position only once saved; each setter's own usage, and
+    /// `Unknown Region Point` only inside 1..10.
+    #[test]
+    fn saved_position_and_dimensions_live_in_the_record() {
+        let mut s = wrath();
+        let n = |s: &UiScript, e: &str| s.arity(e).unwrap();
+        assert_eq!(n(&s, "GetChatWindowSavedPosition(1)"), 0, "never saved");
+        assert_eq!(
+            n(&s, "GetChatWindowSavedDimensions(1)"),
+            0,
+            "the labelled (0, 0)"
+        );
+        s.run("SetChatWindowSavedDimensions(1, 400, 100)").unwrap();
+        assert_eq!(
+            n(&s, "GetChatWindowSavedPosition(1)"),
+            0,
+            "dimensions set no flag"
+        );
+        s.run("SetChatWindowSavedPosition(1, 'topLeft', 0.25, '-0.5')")
+            .unwrap();
+        assert_eq!(
+            s.eval::<(String, f64, f64, f64, f64)>(
+                "local p, x, y = GetChatWindowSavedPosition(1) \
+                 return p, x, y, GetChatWindowSavedDimensions(1)"
+            )
+            .unwrap(),
+            ("TOPLEFT".into(), 0.25, -0.5, 400.0, 100.0)
+        );
+        assert_eq!(s.take_chat_window_changes(), vec![0], "the save is cued");
+        let err = s
+            .run("SetChatWindowSavedPosition(2, 'MIDDLE', 0, 0)")
+            .unwrap_err();
+        assert!(err.to_string().contains("Unknown Region Point"), "{err}");
+        assert!(
+            !s.chat_window_looks()[1].geometry.saved,
+            "and stores nothing"
+        );
+        s.run("SetChatWindowSavedPosition(11, 'MIDDLE', 0, 0)")
+            .unwrap();
+        for (call, usage) in [
+            (
+                "GetChatWindowSavedPosition()",
+                "GetChatWindowSavedPosition(index)",
+            ),
+            (
+                "GetChatWindowSavedDimensions('x')",
+                "GetChatWindowSavedDimensions(index)",
+            ),
+            (
+                "SetChatWindowSavedDimensions(11, 1)",
+                "SetChatWindowSavedDimensions(index, width, height)",
+            ),
+            (
+                "SetChatWindowSavedPosition(11, 'TOP', 0)",
+                "SetChatWindowSavedPosition(index, \"point\"",
+            ),
+        ] {
+            let err = s.run(call).unwrap_err().to_string();
+            assert!(err.contains(&format!("Usage: {usage}")), "{call}: {err}");
+        }
+    }
+
     #[test]
     fn reset_chat_windows_restores_records_colours_and_fires_in_order() {
         let mut s = wrath();
         s.set_chat_channel_seed(vec![("General".into(), 1), ("Trade".into(), 2)]);
         s.run(
             "SetChatWindowName(1, 'Mine') SetChatWindowDocked(1, nil) SetChatWindowShown(4, 1) \
+             SetChatWindowSavedPosition(1, 'BOTTOM', 0.5, 0) SetChatWindowSavedDimensions(1, 9, 9) \
              SetChatWindowUninteractable(2, 1) ChangeChatColor('SAY', 0, 0, 0) \
              SetChatColorNameByClass('SAY', true) \
              SEEN = {} local f = CreateFrame('Frame') \
@@ -358,6 +400,10 @@ mod tests {
         .unwrap();
         let looks = s.chat_window_looks();
         assert_eq!(looks[0].name, "");
+        assert!(
+            looks[0].geometry.saved && looks[0].geometry.width == 9.0,
+            "geometry kept"
+        );
         assert_eq!(looks[0].docked, Some(1));
         assert_eq!(looks[1].docked, Some(2));
         assert!(!looks[1].uninteractable);
@@ -419,7 +465,11 @@ mod tests {
             vec![crate::script::ChannelCommand::Join {
                 name: "MyChan".into(),
                 password: String::new(),
-            }]
+                channel_id: 0,
+                voice: true,
+                permanent: true,
+            }],
+            "the permanent and voice flags go with the join (`0x50dac7`, `0x50da28`)"
         );
         assert_eq!(
             s.chat_window_looks()[1].channels,

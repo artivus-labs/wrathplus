@@ -68,7 +68,7 @@ fn end_channel_session(
 ) {
     walk.clear_session();
     cascade.clear_session();
-    channels.joined.clear();
+    channels.end_session();
     if let Some(script) = script {
         script.set_joined_channels(Vec::new());
     }

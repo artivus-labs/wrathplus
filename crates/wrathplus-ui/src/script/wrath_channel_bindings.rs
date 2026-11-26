@@ -75,15 +75,18 @@ fn select(model: &mut Model, identity: Identity) -> bool {
 pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     let g = lua.globals();
     // SetChannelWatch("channel") (`0x4ffc30` → `0x4fe460(0x3ef)`) and ClearChannelWatch()
-    // (`0x4ffc50`, `0x3F3` with no body). Labelled: the name resolver (`0x4fe160`) is not read, so
-    // the argument goes out as given and an empty one sends nothing.
+    // (`0x4ffc50`, `0x3F3` with no body): the channel through the verbs' resolver `0x4fe160`.
     g.set(
         "SetChannelWatch",
         lua.create_function(|lua, value: Value| {
             let Some(name) = lua.coerce_string(value)?.map(|s| s.to_string_lossy()) else {
                 return Err(mlua::Error::runtime("Usage: SetChannelWatch(\"channel\")"));
             };
-            if !name.is_empty() {
+            let resolved = {
+                let m = lua.app_data_ref::<Model>().expect("model");
+                super::channel::resolve_channel(&m, &name)
+            };
+            if let Some(name) = resolved {
                 let mut m = lua.app_data_mut::<Model>().expect("model");
                 m.wrath_channel_roster
                     .requests
@@ -135,19 +138,22 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 ]));
             }
             let synthetic = matches!(row.identity, Some(Identity::Synthetic(_)));
-            let name = if synthetic {
-                localized(lua, &row.name)?
-            } else {
-                Value::String(lua.create_string(&row.name)?)
-            };
-            let category = if synthetic {
-                "CHANNEL_CATEGORY_GROUP"
-            } else if m
+            let id = m
                 .wrath_channel_display
                 .channels
                 .iter()
-                .any(|c| c.name == row.name && c.channel_id != 0)
-            {
+                .find(|c| c.name == row.name)
+                .map_or(0, |c| c.channel_id);
+            let name = if synthetic {
+                localized(lua, &row.name)?
+            } else {
+                // `0x4fdf50(slot, 1)`: a DBC channel's Shortcut, whatever the record's state.
+                let name = super::channel::listed_name(&m, &row.name, id);
+                Value::String(lua.create_string(name)?)
+            };
+            let category = if synthetic {
+                "CHANNEL_CATEGORY_GROUP"
+            } else if id != 0 {
                 "CHANNEL_CATEGORY_WORLD"
             } else {
                 "CHANNEL_CATEGORY_CUSTOM"

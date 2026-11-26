@@ -6,7 +6,14 @@ use super::common::script;
 /// Two channels in join order, which is the numbering; deliberately not sorted.
 fn joined() -> crate::script::UiScript {
     let mut s = script();
-    s.set_joined_channels(vec![Some("World".into()), Some("Trade - City".into())]);
+    let joined = |name: &str, id| {
+        Some(crate::script::JoinedChannel {
+            name: name.into(),
+            id,
+            confirmed: true,
+        })
+    };
+    s.set_joined_channels(vec![joined("World", 0), joined("Trade - City", 2)]);
     s
 }
 
@@ -71,12 +78,26 @@ fn a_channel_that_is_not_joined_answers_the_number_zero_never_nil() {
     );
 }
 
-/// `ChatFrame.lua:2113` passes the `"1"` it cuts out of `/1`, which Lua coerces to a number.
+/// `ChatFrame.lua:2113` passes the `"1"` it cuts out of `/1`: `lua_isnumber` takes any numeric
+/// string and the number truncates (`0x4fe85c`-`0x4fe873`); nil and other types raise (`0x9fc0a4`).
 #[test]
 fn a_numeric_string_resolves_as_an_index_not_as_a_name() {
     let s = joined();
-    let id: i64 = s.eval("return GetChannelName('2')").unwrap();
-    assert_eq!(id, 2, "the `/2` slash-command path depends on this");
+    for key in ["'2'", "' 2'", "'2.0'", "'0x2'", "2.9"] {
+        let id: i64 = s.eval(&format!("return GetChannelName({key})")).unwrap();
+        assert_eq!(id, 2, "GetChannelName({key})");
+    }
+    for call in [
+        "GetChannelName()",
+        "GetChannelName(nil)",
+        "GetChannelName({})",
+    ] {
+        let e = s.run(call).unwrap_err().to_string();
+        assert!(
+            e.contains("Usage: GetChannelName([channelIndex] or [channelName])"),
+            "{e}"
+        );
+    }
 }
 
 /// `ui_chat::feed` appends on the server's YOU_JOINED notice, never on the request.
@@ -118,133 +139,400 @@ fn get_channel_list_is_a_flat_slot_name_vararg_in_join_order() {
     assert_eq!(empty.arity("GetChannelList()").unwrap(), 0);
 }
 
-/// `GetGuildRecruitmentMode` (`0x4a0040`) always pushes its int global as a number; it boots at 1
-/// from a `.data` initialiser (`raw 0x443608`), the value `UIOptionsFrame_SetDefaults` sets.
+/// `0x4fe6a0`/`0x4fdf50`: a record whose DBC id names a row lists as its Shortcut, which a
+/// window's `channelList` holds; `GetChannelName` keeps the record name. `GetChannelList` and the
+/// numeric lookup skip a pending record (`+0x9c`), the name lookup finds it (`0x4fdfc0`).
 #[test]
-fn the_guild_recruitment_mode_boots_auto_and_answers_a_number() {
-    let s = script();
+fn a_dbc_channel_lists_by_its_shortcut_and_a_pending_one_by_name_only() {
+    let mut s = joined();
+    s.set_zone_channel_catalog(vec![crate::script::ZoneChannelRow {
+        id: 2,
+        shortcut: "Trade".into(),
+        resolved: None,
+        listed: false,
+    }]);
+    let mut mirror = vec![None; 3];
+    mirror[1] = Some(crate::script::JoinedChannel {
+        name: "Trade - City".into(),
+        id: 2,
+        confirmed: true,
+    });
+    mirror[2] = Some(crate::script::JoinedChannel {
+        name: "Pending".into(),
+        id: 0,
+        confirmed: false,
+    });
+    s.set_joined_channels(mirror);
     assert_eq!(
-        s.eval::<f64>("return GetGuildRecruitmentMode()").unwrap(),
-        1.0,
-        "the reference's own .data initialiser, not a BSS zero"
+        s.eval::<(i64, String)>("return GetChannelList()").unwrap(),
+        (2, "Trade".to_string())
     );
-    assert!(s
-        .eval::<bool>("return type(GetGuildRecruitmentMode()) == 'number'")
-        .unwrap());
-    s.run("SetGuildRecruitmentMode(0)").unwrap();
     assert_eq!(
-        s.eval::<f64>("return GetGuildRecruitmentMode()").unwrap(),
-        0.0
+        s.arity("GetChannelList()").unwrap(),
+        2,
+        "the pending record is not listed"
+    );
+    assert_eq!(
+        s.eval::<String>("return select(2, GetChannelName(2))")
+            .unwrap(),
+        "Trade - City"
+    );
+    assert_eq!(s.eval::<i64>("return GetChannelName(3)").unwrap(), 0);
+    assert_eq!(
+        s.eval::<i64>("return GetChannelName('pending')").unwrap(),
+        3
+    );
+    s.set_wrath_display_channels(vec![crate::script::WrathDisplayChannel {
+        slot: 2,
+        name: "Trade - City".into(),
+        channel_id: 2,
+        active: true,
+        custom_state: 0,
+    }]);
+    assert_eq!(
+        s.eval::<String>("return (GetChannelDisplayInfo(3))")
+            .unwrap(),
+        "Trade"
     );
 }
 
-/// `0x4a0060` raises `Usage:` unless `lua_isnumber` (`0x6f34d0`), truncates through `__ftol`
-/// (`0x40a2b0`), and raises `invalid mode` outside `0 <= mode < 2`; success pushes no values.
+/// Five 1.12 names build 12340 does not register: `ChannelModerate`, `AssistByName`,
+/// `UninviteByName` and the recruitment pair, whose option is the global `0xac7a3c`, written only by
+/// the join and leave handlers and the chat cache. The latch still boots AUTO (1).
 #[test]
-fn the_guild_recruitment_setter_gates_its_argument_the_way_the_reference_does() {
+fn the_names_12340_does_not_register_are_absent() {
     let s = script();
-
-    s.run(r#"SetGuildRecruitmentMode("0")"#).unwrap();
-    assert_eq!(
-        s.eval::<f64>("return GetGuildRecruitmentMode()").unwrap(),
-        0.0
-    );
-
-    // 1.7 truncates to a legal 1.
-    s.run("SetGuildRecruitmentMode(1.7)").unwrap();
-    assert_eq!(
-        s.eval::<f64>("return GetGuildRecruitmentMode()").unwrap(),
-        1.0
-    );
-
-    for bad in ["", "nil", r#""AUTO""#, "{}", "true"] {
-        let e = s
-            .run(&format!("SetGuildRecruitmentMode({bad})"))
-            .expect_err(&format!("SetGuildRecruitmentMode({bad}) must raise"));
+    for name in [
+        "ChannelModerate",
+        "AssistByName",
+        "UninviteByName",
+        "GetGuildRecruitmentMode",
+        "SetGuildRecruitmentMode",
+    ] {
         assert!(
-            e.to_string().contains("Usage: SetGuildRecruitmentMode"),
-            "{bad}: {e}"
+            s.eval::<bool>(&format!("return {name} == nil")).unwrap(),
+            "{name}"
         );
     }
-    for bad in ["-1", "2", "-1.7", "37"] {
-        let e = s
-            .run(&format!("SetGuildRecruitmentMode({bad})"))
-            .expect_err(&format!("SetGuildRecruitmentMode({bad}) must raise"));
-        assert!(e.to_string().contains("invalid mode"), "{bad}: {e}");
-    }
-
-    // None of the refused calls moved the latch.
-    assert_eq!(
-        s.eval::<f64>("return GetGuildRecruitmentMode()").unwrap(),
-        1.0
-    );
-    assert_eq!(
-        s.arity("SetGuildRecruitmentMode(0)").unwrap(),
-        0,
-        "0x4a0060 returns `xor eax,eax` — zero values, not a nil"
-    );
+    assert_eq!(s.guild_recruitment_mode(), 1);
 }
 
-/// `0x49ea70` stores the latch and jumps into the cascade `0x49ea90` whenever the new value is 1,
-/// moved or not; `0x4a00a4`/`0x4a00a9` fire `UPDATE_CHAT_WINDOWS` on every successful call.
-#[test]
-fn the_setter_asks_for_the_cascade_on_one_and_fires_update_chat_windows() {
-    let mut s = script();
-    s.run(
-        r#"
-        n = 0
-        local f = CreateFrame("Frame", "GRF")
-        f:RegisterEvent("UPDATE_CHAT_WINDOWS")
-        f:SetScript("OnEvent", function() n = n + 1 end)
-    "#,
-    )
-    .unwrap();
-    assert!(!s.take_guild_recruitment_cascade(), "nothing asked yet");
-
-    // Boots at 1; a Set(1) that moves nothing still asks for the cascade.
-    s.run("SetGuildRecruitmentMode(1)").unwrap();
-    assert!(s.take_guild_recruitment_cascade());
-    assert!(!s.take_guild_recruitment_cascade(), "drained");
-    assert!(
-        !s.take_guild_recruitment_change(),
-        "…and the file is not dirtied by a no-move"
-    );
-
-    s.run("SetGuildRecruitmentMode(0)").unwrap();
-    assert!(
-        !s.take_guild_recruitment_cascade(),
-        "mode 0 is the latch alone"
-    );
-    assert!(
-        s.take_guild_recruitment_change(),
-        "the file is dirtied by the move"
-    );
-
-    // A refused call fires nothing.
-    s.run("SetGuildRecruitmentMode(2)").unwrap_err();
-    s.tick(0.016);
-    assert_eq!(
-        s.eval::<i64>("return n").unwrap(),
-        2,
-        "one UPDATE_CHAT_WINDOWS per successful call: Set(1), Set(0); the raise fired none"
-    );
-}
-
-/// A manual join or leave of `GuildRecruitment` calls `0x49ea70(0)` (`0x49ed3d`, `0x49ef8f`): it
-/// dirties the file and, as mode 0, asks for no cascade.
+/// A manual join or leave of `GuildRecruitment` sets the option to 0 (`0x508260(0, 1)` at
+/// `0x507be6`; `0x509513`-`0x509525`), which dirties the file.
 #[test]
 fn a_manual_guild_recruitment_verb_resets_the_latch() {
     let mut s = script();
     assert!(s.reset_guild_recruitment_mode(), "1 → 0 moved");
-    assert_eq!(
-        s.eval::<f64>("return GetGuildRecruitmentMode()").unwrap(),
-        0.0
-    );
+    assert_eq!(s.guild_recruitment_mode(), 0);
     assert!(s.take_guild_recruitment_change());
-    assert!(!s.take_guild_recruitment_cascade());
     assert!(
         !s.reset_guild_recruitment_mode(),
         "already 0: nothing moved"
     );
     assert!(!s.take_guild_recruitment_change());
+}
+
+/// The join and management verbs, as they queue their `CMSG_*`.
+mod command_tests {
+    use crate::script::{ChannelCommand, UiScript, ZoneChannelRow};
+
+    fn catalog() -> Vec<ZoneChannelRow> {
+        vec![
+            ZoneChannelRow {
+                id: 1,
+                shortcut: "General".into(),
+                resolved: Some("General - Elwynn Forest".into()),
+                listed: true,
+            },
+            ZoneChannelRow {
+                id: 2,
+                shortcut: "Trade".into(),
+                resolved: None,
+                listed: false,
+            },
+        ]
+    }
+
+    /// `0x50d900` → `0x507a80`: a Shortcut answers `id, Shortcut` and joins the zone's name with
+    /// no password; a custom name answers `0, nil`; a missing zone text, a space or 128 bytes
+    /// answer nothing; a held channel sends nothing but still registers its window; a non-string
+    /// raises the binding's own usage line.
+    #[test]
+    fn join_channel_by_name_answers_the_row_custom_and_nil_legs() {
+        let mut s = UiScript::new().unwrap();
+        s.set_zone_channel_catalog(catalog());
+        s.run(
+            "A = {JoinChannelByName('General', 'pw', 1)} \
+             B = {JoinChannelByName('MyChan', nil, '2', 1)} \
+             C = select('#', JoinChannelByName('Trade', nil, 1)) \
+             D = select('#', JoinChannelByName('two words', nil, 1)) \
+             E = select('#', JoinChannelByName(string.rep('x', 128))) \
+             F = select('#', JoinChannelByName('x', string.rep('x', 128)))",
+        )
+        .unwrap();
+        assert_eq!(
+            s.eval::<(i64, String)>("return A[1], A[2]").unwrap(),
+            (1, "General".to_string()),
+            "the Shortcut, not the composed name (`0x507ba0`)"
+        );
+        assert!(s
+            .eval::<bool>("return B[1] == 0 and B[2] == nil and table.getn(B) == 1")
+            .unwrap());
+        assert_eq!(
+            s.eval::<(i64, i64, i64, i64)>("return C, D, E, F").unwrap(),
+            (0, 0, 0, 0)
+        );
+        let join = |name: &str, channel_id, voice| ChannelCommand::Join {
+            name: name.into(),
+            password: String::new(),
+            channel_id,
+            voice,
+            permanent: false,
+        };
+        assert_eq!(
+            s.take_channel_commands(),
+            vec![
+                join("General - Elwynn Forest", 1, false),
+                join("MyChan", 0, true)
+            ],
+            "the row's id and no password (`0x507bcc`); the voice flag carried"
+        );
+        assert_eq!(
+            s.chat_window_looks()[1].channels,
+            vec![("MyChan".to_string(), 0)]
+        );
+        s.set_joined_channels(vec![Some(crate::script::JoinedChannel {
+            name: "General - Elwynn Forest".into(),
+            id: 1,
+            confirmed: true,
+        })]);
+        assert_eq!(
+            s.eval::<(i64, String)>("return JoinChannelByName('general', nil, 3)")
+                .unwrap(),
+            (1, "General".to_string())
+        );
+        assert!(s.take_channel_commands().is_empty(), "held: no join goes");
+        assert_eq!(
+            s.chat_window_looks()[2].channels,
+            vec![("General".to_string(), 1)]
+        );
+        for (call, usage) in [
+            ("JoinChannelByName()", "Usage: JoinChannelByName(\"name\""),
+            (
+                "JoinPermanentChannel({})",
+                "Usage: JoinPermanentChannel(\"name\"",
+            ),
+        ] {
+            let e = s.run(call).unwrap_err().to_string();
+            assert!(e.contains(usage), "{call}: {e}");
+        }
+    }
+
+    #[test]
+    fn enumerate_server_channels_lists_the_shortcuts_the_zone_admits() {
+        let mut s = UiScript::new().unwrap();
+        assert_eq!(
+            s.arity("EnumerateServerChannels()").unwrap(),
+            0,
+            "no zone yet — 0 values"
+        );
+        s.set_zone_channel_catalog(catalog());
+        assert_eq!(
+            s.eval::<Vec<String>>("return {EnumerateServerChannels()}")
+                .unwrap(),
+            vec!["General".to_string()],
+            "the shortcut, never the composed name; a city row only in a city"
+        );
+    }
+
+    /// `0x4fe160`: a slot number names its confirmed record and an empty or unconfirmed one
+    /// sends nothing; any other word goes as typed. `0x4fe330`/`0x4fe460`/`0x4fe720` raise their
+    /// usage lines and `Name too long` past 48 bytes, and send the second word raw.
+    #[test]
+    fn the_management_verbs_resolve_slot_numbers_and_check_their_arguments() {
+        let mut s = UiScript::new().unwrap();
+        let rec = |name: &str, confirmed| {
+            Some(crate::script::JoinedChannel {
+                name: name.into(),
+                id: 0,
+                confirmed,
+            })
+        };
+        s.set_joined_channels(vec![rec("Mine", true), rec("Pending", false)]);
+        s.run(
+            "LeaveChannelByName('General') ListChannelByName('') ListChannelByName('1') \
+             ListChannelByName('2') ListChannelByName('3') ListChannels() \
+             SetChannelPassword('1', '') ChannelKick('General', 'Bob') ChannelKick('1', '') \
+             ChannelToggleAnnouncements(' 1') SetChannelOwner('General', ' Ann')",
+        )
+        .unwrap();
+        let named = |name: &str| name.to_string();
+        assert_eq!(
+            s.take_channel_commands(),
+            vec![
+                ChannelCommand::Leave {
+                    name: named("General")
+                },
+                ChannelCommand::List {
+                    name: named("Mine")
+                },
+                ChannelCommand::ListAll,
+                ChannelCommand::SetPassword {
+                    name: named("Mine"),
+                    password: String::new()
+                },
+                ChannelCommand::Kick {
+                    name: named("General"),
+                    player: named("Bob")
+                },
+                ChannelCommand::Kick {
+                    name: named("Mine"),
+                    player: String::new()
+                },
+                ChannelCommand::ToggleAnnouncements { name: named(" 1") },
+                ChannelCommand::SetOwner {
+                    name: named("General"),
+                    player: named(" Ann")
+                },
+            ]
+        );
+        for (call, err) in [
+            (
+                "ListChannelByName()",
+                "Usage: ListChannelByName(\"channel\")",
+            ),
+            (
+                "ChannelKick('1')",
+                "Usage: ChannelKick(\"channel\", \"name\")",
+            ),
+            (
+                "ChannelBan({}, 'x')",
+                "Usage: ChannelBan(\"channel\", \"name\")",
+            ),
+            (
+                "SetChannelPassword('1')",
+                "Usage: SetChannelPassword(\"name\", \"password\")",
+            ),
+            ("ChannelInvite('1', string.rep('x', 49))", "Name too long"),
+        ] {
+            let e = s.run(call).unwrap_err().to_string();
+            assert!(e.contains(err), "{call}: {e}");
+        }
+        s.run("ChannelInvite('9', string.rep('x', 49)) ChannelInvite('1', string.rep('x', 48))")
+            .unwrap();
+        assert_eq!(
+            s.take_channel_commands().len(),
+            1,
+            "an unresolved channel stops first"
+        );
+    }
+
+    /// `frameId - 1` indexes the ten window records (`0x49ec24`); a missing, non-numeric or
+    /// out-of-range frame skips the registration and nothing else.
+    #[test]
+    fn join_channel_by_name_registers_the_channel_in_the_named_window() {
+        let mut s = UiScript::new().unwrap();
+        s.set_zone_channel_catalog(catalog());
+        s.run(
+            "JoinChannelByName('General', nil, 1) \
+             JoinChannelByName('general', nil, 1) \
+             JoinChannelByName('MyChan', nil, 2) \
+             JoinChannelByName('Trade', nil, nil) \
+             JoinChannelByName('LocalDefense', nil, 11) \
+             JoinChannelByName('WorldDefense', nil, 0)",
+        )
+        .unwrap();
+        let looks = s.chat_window_looks();
+        assert_eq!(
+            looks[0].channels,
+            vec![("General".to_string(), 1)],
+            "the DBC Shortcut and its id, once — the second join deduplicated by name"
+        );
+        assert_eq!(
+            looks[1].channels,
+            vec![("MyChan".to_string(), 0)],
+            "a custom channel: the name and id 0"
+        );
+        assert!(
+            looks[2..].iter().all(|l| l.channels.is_empty()),
+            "nil, 11 and 0 register nowhere"
+        );
+        assert_eq!(
+            s.take_chat_window_changes(),
+            vec![0, 1],
+            "…and both windows are owed a save"
+        );
+        // The joins went out whatever the frame argument: five, as this catalog's Trade is the
+        // nil leg, which registers nothing either.
+        assert_eq!(s.take_channel_commands().len(), 5);
+    }
+
+    /// `LeaveChannelByName`'s four legs and its raise (`0x4a0000` → `0x49ee70`); a Shortcut strips
+    /// its entry from every window.
+    #[test]
+    fn leave_channel_by_name_composes_strips_and_raises_the_way_the_reference_does() {
+        let mut s = UiScript::new().unwrap();
+        s.set_zone_channel_catalog(catalog());
+        s.run(
+            "JoinChannelByName('General', nil, 1) JoinChannelByName('MyChan', nil, 1) \
+             JoinChannelByName('General', nil, 2)",
+        )
+        .unwrap();
+        s.take_channel_commands();
+        s.take_chat_window_changes();
+
+        s.run("LeaveChannelByName('2')").unwrap();
+        assert_eq!(
+            s.take_channel_commands(),
+            vec![ChannelCommand::Leave { name: "2".into() }],
+            "a number goes through as typed — the app holds the slot states"
+        );
+        assert!(
+            s.take_chat_window_changes().is_empty(),
+            "…and strips no window: a slot name never equals a window entry"
+        );
+
+        s.run("LeaveChannelByName('general')").unwrap();
+        assert_eq!(
+            s.take_channel_commands(),
+            vec![ChannelCommand::Leave {
+                name: "General - Elwynn Forest".into()
+            }],
+            "a shortcut composes for the zone"
+        );
+        let looks = s.chat_window_looks();
+        assert_eq!(
+            looks[0].channels,
+            vec![("MyChan".to_string(), 0)],
+            "General stripped from window 1, MyChan kept"
+        );
+        assert!(
+            looks[1].channels.is_empty(),
+            "…and from window 2 — all ten are walked"
+        );
+        assert_eq!(s.take_chat_window_changes(), vec![0, 1]);
+
+        s.run("LeaveChannelByName('Trade')").unwrap();
+        assert!(
+            s.take_channel_commands().is_empty(),
+            "unresolvable here (no city word in this catalog): a complete no-op"
+        );
+
+        s.run("LeaveChannelByName('mychan')").unwrap();
+        assert_eq!(
+            s.take_channel_commands(),
+            vec![ChannelCommand::Leave {
+                name: "mychan".into()
+            }],
+            "custom: verbatim"
+        );
+        assert!(
+            s.chat_window_looks()[0].channels.is_empty(),
+            "…and stripped verbatim, case-folded"
+        );
+
+        let e = s.run("LeaveChannelByName()").unwrap_err();
+        assert!(e.to_string().contains("Usage: LeaveChannelByName"), "{e}");
+        assert_eq!(s.arity("LeaveChannelByName('x')").unwrap(), 0);
+    }
 }

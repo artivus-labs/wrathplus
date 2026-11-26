@@ -290,8 +290,8 @@ pub(super) fn deliver(
     if notice == Some(channel_notice::YOU_JOINED) {
         // A confirmed join sets the `ZONECHANNELS` bit (`0x49bbaf`), its only runtime growth.
         channels.note_zone_channel_joined(&event.channel);
-        // A custom channel's confirmed join enters the chat cache's re-join list.
-        channels.note_custom_channel_joined(&event.channel);
+        // A permanent custom channel's confirmed join enters the chat cache's re-join list.
+        channels.note_join_confirmed(&event.channel);
         // A slot the walk renamed is numbered already, but its state must return to `Joined`.
         channels.confirm_slot(&event.channel);
     }

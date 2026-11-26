@@ -307,9 +307,9 @@ pub(super) fn target_named(
     commit.commit(entity, guid);
 }
 
-/// `/assist [name]` and the Lua `AssistByName`: the basis is a named player, or bare the current
-/// selection (`AssistUnit("target")`, `ChatFrame.lua:744`), and [`SelectCommit::assist`] selects
-/// its target.
+/// A probe's `/assist [name]`: the basis is a named player (1.12's `AssistByName`), or bare the
+/// current selection (`AssistUnit("target")`, `ChatFrame.lua:744`), and [`SelectCommit::assist`]
+/// selects its target.
 pub(super) fn assist_named(
     scan_params: &ByNameScan,
     commit: &mut SelectCommit,
