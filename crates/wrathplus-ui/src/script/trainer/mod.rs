@@ -125,6 +125,9 @@ pub struct TrainerService {
     /// Build 12340's `GetTrainerServiceItemLink` (`0x596290`): at a tradeskill trainer, the link
     /// of the item the spell's first effect creates, once its template is cached.
     pub item_link: Option<String>,
+    /// `GetTrainerServiceSkillLine` (`0x5952f0`): the spell's own `SkillLine` name, which at a
+    /// tradeskill trainer is not the header's; `None` answers nil.
+    pub skill_line: Option<String>,
 }
 
 /// One header and its services, built by [`UiScript::set_trainer`].
@@ -385,19 +388,20 @@ fn queue_trainer_update(model: &mut Model) {
         .push(("TRAINER_UPDATE".to_string(), Vec::new()));
 }
 
-fn set_collapsed(model: &mut Model, id: usize, collapse: bool) {
-    if id == 0 && !collapse {
+/// Fold or unfold the group headed by row `id`, every group at `<= 0`; `false` for any other row.
+fn set_collapsed(model: &mut Model, id: i64, collapse: bool) -> bool {
+    if id <= 0 && !collapse {
         model.trainer_collapsed.clear();
-        return;
+        return true;
     }
-    let targets: Vec<u32> = if id == 0 {
+    let targets: Vec<u32> = if id <= 0 {
         model
             .trainer
             .as_ref()
             .map(|t| t.groups.iter().map(|g| g.key).collect())
             .unwrap_or_default()
     } else {
-        match rows(model).0.get(id - 1) {
+        match rows(model).0.get(id as usize - 1) {
             Some(Row::Header(gi)) => model
                 .trainer
                 .as_ref()
@@ -405,7 +409,7 @@ fn set_collapsed(model: &mut Model, id: usize, collapse: bool) {
                 .map(|g| g.key)
                 .into_iter()
                 .collect(),
-            _ => Vec::new(),
+            _ => return false,
         }
     };
     for sl in targets {
@@ -415,6 +419,7 @@ fn set_collapsed(model: &mut Model, id: usize, collapse: bool) {
             model.trainer_collapsed.remove(&sl);
         }
     }
+    true
 }
 
 fn opt_str(lua: &Lua, s: Option<&String>) -> mlua::Result<Value> {
@@ -481,7 +486,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                     let expanded = !model.trainer_collapsed.contains(&g.key);
                     Ok(MultiValue::from_vec(vec![
                         Value::String(lua.create_string(&g.name)?),
-                        Value::Nil,
+                        // A header's subtext is "" (`0x594fd4`).
+                        Value::String(lua.create_string("")?),
                         Value::String(lua.create_string("header")?),
                         binding_abi::flag(expanded),
                     ]))
@@ -492,32 +498,29 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                         opt_str(lua, s.name.as_ref())?,
                         Value::String(lua.create_string(s.subtext.as_deref().unwrap_or(""))?),
                         Value::String(lua.create_string(s.category.era_str())?),
-                        Value::Nil,
+                        // `0x594300` answers 0 for a service, pushed as 1 (`0x59512d`).
+                        binding_abi::flag(true),
                     ]))
                 }
             }
         })?,
     )?;
 
-    // GetTrainerServiceSkillLine(index): the group name, nil for a header. The reference's return
-    // (`0x4d9160`) is untraced; the stock `CONFIRM_PROFESSION` dialog shows it as the profession.
+    // GetTrainerServiceSkillLine(index) (`0x5952f0`): the service spell's own SkillLine name, nil
+    // for a header or none; the stock `CONFIRM_PROFESSION` dialog shows it as the profession.
     g.set(
         "GetTrainerServiceSkillLine",
-        lua.create_function(|lua, index: usize| {
+        lua.create_function(|lua, index: Value| {
+            let usage = "Usage: GetTrainerServiceSkillLine(index)";
+            let index = binding_abi::ftol_arg(lua, index, usage)?;
             let model = lua.app_data_ref::<Model>().expect("model app_data");
-            let Some(n) = index.checked_sub(1) else {
-                return Ok(Value::Nil);
-            };
-            let Some(Row::Service(si)) = rows(&model).0.get(n).copied() else {
-                return Ok(Value::Nil);
-            };
-            let t = model
-                .trainer
-                .as_ref()
-                .expect("a resolved row ⇒ an open trainer");
-            Ok(Value::String(
-                lua.create_string(&t.services[si].group_name)?,
-            ))
+            let line = usize::try_from(index.wrapping_sub(1)).ok().and_then(|n| {
+                match rows(&model).0.get(n).copied()? {
+                    Row::Service(si) => model.trainer.as_ref()?.services[si].skill_line.clone(),
+                    Row::Header(_) => None,
+                }
+            });
+            opt_str(lua, line.as_ref())
         })?,
     )?;
 
@@ -681,26 +684,24 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
 
     filter::register(lua, &g)?;
 
-    // Collapse/ExpandTrainerSkillLine(id): fold the group headed by row `id`, or all at 0. `id`
-    // spans the whole row array like the getters' gate (`0x4d89b0`); their own bound is untraced.
-    g.set(
-        "CollapseTrainerSkillLine",
-        lua.create_function(|lua, id: usize| {
-            let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-            set_collapsed(&mut model, id, true);
-            queue_trainer_update(&mut model);
-            Ok(())
-        })?,
-    )?;
-    g.set(
-        "ExpandTrainerSkillLine",
-        lua.create_function(|lua, id: usize| {
-            let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-            set_collapsed(&mut model, id, false);
-            queue_trainer_update(&mut model);
-            Ok(())
-        })?,
-    )?;
+    // Collapse/ExpandTrainerSkillLine(id) (`0x596150`, `0x5961f0`): fold the group headed by row
+    // `id`, or all at `<= 0`; a row that is no header raises the reference's own text.
+    for (verb, collapse) in [
+        ("CollapseTrainerSkillLine", true),
+        ("ExpandTrainerSkillLine", false),
+    ] {
+        g.set(
+            verb,
+            lua.create_function(move |lua, id: i64| {
+                let mut model = lua.app_data_mut::<Model>().expect("model app_data");
+                if !set_collapsed(&mut model, id, collapse) {
+                    return Err(mlua::Error::runtime(format!("Bad skill line in {verb}")));
+                }
+                queue_trainer_update(&mut model);
+                Ok(())
+            })?,
+        )?;
+    }
 
     // SelectTrainerService(index) (12340 `0x5943a0`): the row's record id; past the end or on a
     // header it stores 0, which selects nothing and is not a fresh list's unseated `None`.
