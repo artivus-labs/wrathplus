@@ -186,8 +186,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             lua.create_function(move |lua, args: MultiValue| {
                 let now = clock::now(lua);
                 // Both refusals are kind 0 in the 12340 message table (`ERR_NOT_IN_GROUP` entry
-                // at `0xac9130`, `ERR_NOT_LEADER` at `0xac9180`): a system chat line, not a red
-                // UI error (kind 2).
+                // at `0xac9130`, `ERR_NOT_LEADER` at `0xac9180`): a system chat line, which the
+                // message sink raises with the chat event's full argument list.
                 let refusal = {
                     let m = lua.app_data_ref::<Model>().expect("model");
                     let own = m.unit("player").map_or(m.unit_guids.player, |p| p.guid);
@@ -203,19 +203,11 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                         None
                     }
                 };
+                let mut m = lua.app_data_mut::<Model>().expect("model");
                 if let Some(key) = refusal {
-                    let message = match lua.globals().get::<Value>(key)? {
-                        Value::String(s) => s.to_string_lossy(),
-                        _ => key.to_string(),
-                    };
-                    super::super::tick::fire_event_into(
-                        lua,
-                        "CHAT_MSG_SYSTEM",
-                        vec![super::super::ScriptValue::Str(message)],
-                    );
+                    m.ui_errors.push(key);
                     return Ok(());
                 }
-                let mut m = lua.app_data_mut::<Model>().expect("model");
                 let a = assignment(
                     lua,
                     args.front().cloned().unwrap_or(Value::Nil),
@@ -382,6 +374,11 @@ mod tests {
         assert_eq!(s.take_ui_errors(), vec!["ERR_UNIT_NOT_FOUND"]);
         let err = s.run("SetPartyAssignment()").unwrap_err().to_string();
         assert!(err.contains("Usage: SetPartyAssignment("), "{err}");
+        // Solo, both verbs refuse through the message table, never a bare CHAT_MSG_SYSTEM.
+        let mut solo = UiScript::new().unwrap();
+        solo.run("SetPartyAssignment('MAINTANK') ClearPartyAssignment('MAINTANK')")
+            .unwrap();
+        assert_eq!(solo.take_ui_errors(), vec!["ERR_NOT_IN_GROUP"; 2]);
         // Failed resolution must not consume the throttle.
         s.eval::<()>("SetPartyAssignment('MAINTANK','party1')")
             .unwrap();
