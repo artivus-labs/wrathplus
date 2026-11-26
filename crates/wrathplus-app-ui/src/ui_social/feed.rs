@@ -247,25 +247,21 @@ fn friend_rows(
                 .resolve(entry.guid, commands)
                 .map(str::to_string)
                 .unwrap_or_default();
-            let online = entry.is_online();
             (
                 entry.guid,
                 FriendInfo {
                     name,
                     level: entry.level,
-                    // An offline friend has no class or zone on the wire; empty, the frame prints
-                    // its Offline template.
-                    class: online
-                        .then(|| class_names(entry.class as u8))
-                        .flatten()
+                    // 12340 reads both whatever the online byte (`0x6b4210`-`0x6b42d4`): an offline
+                    // friend keeps the last ones sent, or none, which the binding shows as UNKNOWN.
+                    class: class_names(entry.class as u8)
                         .map(|(display, _)| display.to_string())
                         .unwrap_or_default(),
-                    area: online
-                        .then(|| areas.and_then(|a| a.name(entry.area)))
-                        .flatten()
+                    area: areas
+                        .and_then(|a| friend_zone(a, entry.area))
                         .unwrap_or_default()
                         .to_string(),
-                    connected: online,
+                    connected: entry.is_online(),
                     status: away(entry.status),
                     note: social.notes.get(&entry.guid).cloned(),
                     refer_a_friend: entry.status & FRIEND_STATUS_RAF != 0,
@@ -283,6 +279,17 @@ fn friend_rows(
             .then_with(|| wrathplus_ui::strings::collate(&a.name, &b.name))
     });
     rows.into_iter().map(|(guid, row)| (row, guid)).unzip()
+}
+
+/// A friend's zone name: the area's parent when it has a row (12340's `0x6b42aa`-`0x6b42c6`, one
+/// level), else the area itself.
+fn friend_zone(areas: &AreaTableCatalog, id: u32) -> Option<&str> {
+    let row = areas.get(id)?;
+    let row = areas
+        .get(row.zone_id)
+        .filter(|_| row.zone_id != 0)
+        .unwrap_or(row);
+    Some(&row.name)
 }
 
 /// The ignore rows: names only, same ordering rule.
@@ -693,24 +700,53 @@ mod tests {
         );
     }
 
+    /// 12340's `GetFriendInfo` reads class and zone whatever the online byte (`0x6b4210`-`0x6b42d4`),
+    /// the zone one parent up (`0x6b42aa`); the away tag tests DND, then AFK (`0x6b4307`, `0x6b4325`).
     #[test]
-    fn an_offline_row_carries_no_class_or_zone() {
-        let entry = wrathplus_protocol::types::FriendEntry {
-            guid: 7,
-            status: friend_status::OFFLINE,
-            area: 12,
-            level: 60,
-            class: 4,
+    fn friend_rows_resolve_class_parent_zone_and_away_bits() {
+        let area = |zone_id, name: &str| wrathplus_formats::AreaTableRow {
+            map_id: 0,
+            zone_id,
+            explore_flag: 0,
+            flags: 0,
+            faction_group_mask: 0,
+            exploration_level: 0,
+            name: name.into(),
         };
-        // The class resolution `friend_rows` uses.
-        let online = entry.is_online();
-        assert!(!online);
-        let class = online
-            .then(|| class_names(entry.class as u8))
-            .flatten()
-            .map(|(d, _)| d.to_string())
-            .unwrap_or_default();
-        assert_eq!(class, "");
+        let areas = AreaTableCatalog::from_rows(vec![
+            (12, area(0, "Elwynn Forest")),
+            (87, area(12, "Goldshire")),
+        ]);
+        let mut social = SocialState::default();
+        social.friends = vec![
+            wrathplus_protocol::types::FriendEntry {
+                guid: 7,
+                status: friend_status::OFFLINE,
+                area: 87,
+                level: 60,
+                class: 4,
+            },
+            wrathplus_protocol::types::FriendEntry {
+                guid: 8,
+                status: friend_status::AFK | FRIEND_STATUS_RAF,
+                area: 999,
+                level: 1,
+                class: 0,
+            },
+        ];
+        let (tx, _rx) = crossbeam_channel::unbounded();
+        let away = |s: u8| status_flag_key(s).unwrap_or_default().to_string();
+        let names = NameCache::default();
+        let (rows, _) = friend_rows(&social, &names, &NetCommands(tx), Some(&areas), &away);
+        let got: Vec<_> = rows
+            .iter()
+            .map(|r| (r.class.as_str(), r.area.as_str(), r.status.as_str()))
+            .collect();
+        assert_eq!(
+            got,
+            [("", "", "CHAT_FLAG_AFK"), ("Rogue", "Elwynn Forest", "")],
+            "no row stays empty for the binding's UNKNOWN"
+        );
     }
 }
 

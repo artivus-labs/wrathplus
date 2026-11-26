@@ -180,6 +180,8 @@ fn friend_rows_render_the_online_and_offline_templates() {
         .eval::<bool>("return FriendsFrameFriendsScrollFrameButton2:IsShown()")
         .unwrap());
     assert_eq!(row(&s, "Button3Name:GetText()"), "Twomage");
+    // `infoText = area` for offline rows too (`FriendsFrame.lua:2157`): no zone row is `UNKNOWN`.
+    assert_eq!(row(&s, "Button3Info:GetText()"), "Unknown");
     assert!(
         s.eval::<bool>("return FriendsFrameFriendsScrollFrameButton3:IsVisible()")
             .unwrap(),

@@ -615,11 +615,9 @@ impl SocialState {
             }
             friend_result::OFFLINE => {
                 if let Some(entry) = self.friend_mut(update.guid) {
+                    // 12340 writes only the online byte (`0x6b761a` → `0x6b3d10`); the level,
+                    // class and zone stay as last sent.
                     entry.status = friend_status::OFFLINE;
-                    // An offline friend carries no area, level or class on the wire.
-                    entry.area = 0;
-                    entry.level = 0;
-                    entry.class = 0;
                 }
                 self.friends_dirty = true;
             }

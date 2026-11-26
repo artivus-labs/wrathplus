@@ -61,13 +61,15 @@ fn name_pushes(key: &str) -> usize {
 }
 
 /// The key a friend row's away tag resolves through, the pair the chat frame prefixes a speaker's
-/// name with.
+/// name with: the status bits, DND tested before AFK (12340's `0x6b4307`, `0x6b4325`).
 fn status_flag_key(status: u8) -> Option<&'static str> {
-    Some(match status {
-        friend_status::AFK => "CHAT_FLAG_AFK",
-        friend_status::DND => "CHAT_FLAG_DND",
-        _ => return None,
-    })
+    if status & friend_status::DND != 0 {
+        Some("CHAT_FLAG_DND")
+    } else if status & friend_status::AFK != 0 {
+        Some("CHAT_FLAG_AFK")
+    } else {
+        None
+    }
 }
 
 /// The social packet handlers: the friend and ignore lists, the `/who` answer and the result
@@ -214,7 +216,8 @@ mod tests {
         assert!(social.friends.is_empty());
     }
 
-    /// Going offline clears the level and zone, which the wire stops sending.
+    /// Going offline writes only the online byte (12340's `0x6b761a` → `0x6b3d10`): the level, zone
+    /// and class stay as last sent.
     #[test]
     fn presence_broadcasts_patch_the_row() {
         let mut social = SocialState::default();
@@ -238,11 +241,8 @@ mod tests {
 
         social.apply_friend_status(status(friend_result::OFFLINE, 7));
         assert!(!social.friends[0].is_online());
-        assert_eq!(
-            (social.friends[0].area, social.friends[0].level),
-            (0, 0),
-            "offline carries no zone or level"
-        );
+        let f = &social.friends[0];
+        assert_eq!((f.area, f.level, f.class), (1519, 42, 8));
     }
 
     #[test]
