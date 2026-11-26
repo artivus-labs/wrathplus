@@ -170,6 +170,26 @@ fn the_name_plate_faction_branch_picks_player_red_blue_over_the_reaction_swatch(
     );
 }
 
+/// `HasFullControl` (`0x611600`): a player object, alive, holding the control flag.
+#[test]
+fn has_full_control_needs_a_living_player_in_control() {
+    let mut s = UiScript::new().unwrap();
+    let full = |s: &UiScript| s.eval::<Option<i64>>("return HasFullControl()").unwrap();
+    assert_eq!(full(&s), None, "no player object");
+    let me = |health| UnitState {
+        exists: true,
+        health,
+        ..Default::default()
+    };
+    s.set_unit("player", Some(me(1)));
+    assert_eq!(full(&s), Some(1));
+    s.set_player_control(false);
+    assert_eq!(full(&s), None);
+    s.set_player_control(true);
+    s.set_unit("player", Some(me(0)));
+    assert_eq!(full(&s), None, "dead (`0x611631`)");
+}
+
 #[test]
 fn corpse_can_attack_and_green_range_bindings() {
     use crate::script::PlayerReqState;

@@ -567,7 +567,7 @@ pub(crate) struct Model {
     pub(crate) pet_autocast_toggles: Vec<u32>,
     /// `PetStopAttack()` calls.
     pub(crate) pet_stop_attacks: u32,
-    /// `HasFullControl`, the reference's `[0xb4b3e4]`: set by `SMSG_CLIENT_CONTROL_UPDATE` for the
+    /// `HasFullControl`, 12340's `[0xbcfb8c]`: set by `SMSG_CLIENT_CONTROL_UPDATE` for the
     /// player, boots 1, and every cast, item and cursor gate refuses at 0.
     pub(crate) player_control: bool,
     /// One `CMSG_PET_SET_ACTION` per entry, its one or two `(position, packed word)` pairs: the

@@ -436,14 +436,17 @@ pub(in crate::script) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // HasFullControl(): the flag `SMSG_CLIENT_CONTROL_UPDATE` writes for the local player
-    // (`0xb4b3e4`, read at `0x51a158`), which the stock unit menu greys Trade and Duel on
-    // (`UnitPopup.lua:474-477`, `:502-505`).
+    // HasFullControl() (`0x611600`): a living player (health `> 0`, `0x611631`) holding the control
+    // flag `SMSG_CLIENT_CONTROL_UPDATE` writes (`[0xbcfb8c]`). Labelled: the far-sight bit
+    // (`[player+0x1858] & 1`, set as `CMSG_FAR_SIGHT` goes out, `0x6e29b5`) is not modelled.
     g.set(
         "HasFullControl",
         lua.create_function(|lua, ()| {
             let model = lua.app_data_ref::<Model>().expect("model app_data");
-            Ok(flag(model.player_control))
+            let alive = model
+                .unit("player")
+                .is_some_and(|u| u.exists && u.health > 0);
+            Ok(flag(alive && model.player_control))
         })?,
     )?;
 
