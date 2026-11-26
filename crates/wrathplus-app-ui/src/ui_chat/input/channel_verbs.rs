@@ -13,12 +13,21 @@ pub(super) fn command(
 ) -> Option<ClientCommand> {
     use wrathplus_ui::script::ChannelCommand as C;
     Some(match cmd {
-        C::Join { name, password } => {
+        // Label: the voice flag rides the header's second byte (`0x507c93`), which the encoder
+        // writes as 0; AzerothCore reads and ignores it.
+        C::Join {
+            name,
+            password,
+            channel_id,
+            permanent,
+            ..
+        } => {
             super::manual_join_or_leave(channels, script, &name);
+            channels.note_join_request(&name, permanent);
             ClientCommand::JoinChannel {
                 name,
                 password,
-                channel_id: 0,
+                channel_id,
             }
         }
         C::Leave { name } => {

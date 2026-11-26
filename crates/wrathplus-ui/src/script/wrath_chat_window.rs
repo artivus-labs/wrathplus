@@ -6,8 +6,8 @@
 //! `+0x80`, font size `+0xd0`, colour bytes `+0xd4..+0xd7` (B, G, R, A), locked `+0xd8`, docked
 //! `+0xdc`, shown `+0xe0`, uninteractable `+0xe4`, saved geometry `+0xe8..+0xfc`.
 //! `GetChatWindowInfo` `0x4fbd90`, `SetChatWindowUninteractable` `0x4fc6e0`, `ResetChatWindows`
-//! `0x501f00`, `SetChatColorNameByClass` `0x4fedc0`, `JoinPermanentChannel` `0x50dac0` (the shared
-//! join `0x50d900` with its permanent flag set), `BNLeaveConversation` `0x536030`.
+//! `0x501f00`, `SetChatColorNameByClass` `0x4fedc0`, `BNLeaveConversation` `0x536030`;
+//! `JoinPermanentChannel` `0x50dac0` is the shared join in `channel`.
 //!
 //! The registries are 12340's: 62 chat types (`chat_types`) and 46 message groups
 //! (`chat_window::MESSAGE_GROUPS`). Per record ResetChatWindows frees the channels (`0x5019d0`)
@@ -267,18 +267,6 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // JoinPermanentChannel(name, password, frameID, hasVoice) (`0x50dac0`): the shared join with
-    // the permanent flag, so the same answers, send and window registration as JoinChannelByName.
-    // The host persists joined custom channels either way; voice is not supported.
-    let join: mlua::Function = g.get("JoinChannelByName")?;
-    g.set(
-        "JoinPermanentChannel",
-        lua.create_function(move |_, args: MultiValue| {
-            let first_three: MultiValue = args.into_iter().take(3).collect();
-            join.call::<MultiValue>(first_three)
-        })?,
-    )?;
-
     // BNLeaveConversation(channel) (`0x536030`): every check before the usage line asks for a
     // connected Battle.net session, which a 3.3.5a realm never opens, so it does nothing, raising
     // nothing even without an argument.
@@ -477,7 +465,11 @@ mod tests {
             vec![crate::script::ChannelCommand::Join {
                 name: "MyChan".into(),
                 password: String::new(),
-            }]
+                channel_id: 0,
+                voice: true,
+                permanent: true,
+            }],
+            "the permanent and voice flags go with the join (`0x50dac7`, `0x50da28`)"
         );
         assert_eq!(
             s.chat_window_looks()[1].channels,

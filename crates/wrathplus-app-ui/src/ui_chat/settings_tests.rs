@@ -223,6 +223,27 @@ fn the_custom_list_moves_on_join_and_explicit_leave_only() {
     assert_eq!(state.custom, vec!["MyChan".to_string()], "once, by name");
     state.note_custom_channel_left("MYCHAN");
     assert!(state.custom.is_empty(), "an explicit leave drops it");
+    // `0x4fd43a`: only a JoinPermanentChannel's custom channel, once confirmed, is a re-join row.
+    state.note_join_request("Perm", true);
+    state.note_join_request("Temp", false);
+    state.note_join_request("Again", true);
+    state.note_join_request("again", false);
+    for name in ["Temp", "Again", "Perm"] {
+        state.note_join_confirmed(name);
+    }
+    assert_eq!(
+        state.custom,
+        vec!["Perm".to_string()],
+        "the latest request decides"
+    );
+    state.note_join_request("Pending", true);
+    state.end_session();
+    state.note_join_confirmed("Pending");
+    assert_eq!(
+        state.custom.len(),
+        1,
+        "the session end drops a pending request"
+    );
 }
 
 /// The teardown write ignores the dirty flag, as the reference's does, so a `/leave` persists.

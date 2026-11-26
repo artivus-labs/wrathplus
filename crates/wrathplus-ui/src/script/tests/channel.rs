@@ -348,44 +348,79 @@ mod command_tests {
         ]
     }
 
-    /// The row, custom-channel and nil legs, and that 0 is truthy.
+    /// `0x50d900` → `0x507a80`: a Shortcut answers `id, Shortcut` and joins the zone's name with
+    /// no password; a custom name answers `0, nil`; a missing zone text, a space or 128 bytes
+    /// answer nothing; a held channel sends nothing but still registers its window; a non-string
+    /// raises the binding's own usage line.
     #[test]
     fn join_channel_by_name_answers_the_row_custom_and_nil_legs() {
         let mut s = UiScript::new().unwrap();
         s.set_zone_channel_catalog(catalog());
         s.run(
             "A = {JoinChannelByName('General', 'pw', 1)} \
-             B = {JoinChannelByName('MyChan', nil, 1)} \
-             C = {JoinChannelByName('Trade', nil, 1)} \
-             D = {JoinChannelByName('two words', nil, 1)}",
+             B = {JoinChannelByName('MyChan', nil, '2', 1)} \
+             C = select('#', JoinChannelByName('Trade', nil, 1)) \
+             D = select('#', JoinChannelByName('two words', nil, 1)) \
+             E = select('#', JoinChannelByName(string.rep('x', 128))) \
+             F = select('#', JoinChannelByName('x', string.rep('x', 128)))",
         )
         .unwrap();
         assert_eq!(
             s.eval::<(i64, String)>("return A[1], A[2]").unwrap(),
-            (1, "General - Elwynn Forest".to_string())
+            (1, "General".to_string()),
+            "the Shortcut, not the composed name (`0x507ba0`)"
         );
         assert!(s
             .eval::<bool>("return B[1] == 0 and B[2] == nil and table.getn(B) == 1")
             .unwrap());
-        assert!(
-            s.eval::<bool>("return C[1] == nil").unwrap(),
-            "empty substitution"
+        assert_eq!(
+            s.eval::<(i64, i64, i64, i64)>("return C, D, E, F").unwrap(),
+            (0, 0, 0, 0)
         );
-        assert!(s.eval::<bool>("return D[1] == nil").unwrap(), "a space");
+        let join = |name: &str, channel_id, voice| ChannelCommand::Join {
+            name: name.into(),
+            password: String::new(),
+            channel_id,
+            voice,
+            permanent: false,
+        };
         assert_eq!(
             s.take_channel_commands(),
             vec![
-                ChannelCommand::Join {
-                    name: "General - Elwynn Forest".into(),
-                    password: "pw".into()
-                },
-                ChannelCommand::Join {
-                    name: "MyChan".into(),
-                    password: String::new()
-                },
+                join("General - Elwynn Forest", 1, false),
+                join("MyChan", 0, true)
             ],
-            "sent on both non-nil legs, the resolved name for a row"
+            "the row's id and no password (`0x507bcc`); the voice flag carried"
         );
+        assert_eq!(
+            s.chat_window_looks()[1].channels,
+            vec![("MyChan".to_string(), 0)]
+        );
+        s.set_joined_channels(vec![Some(crate::script::JoinedChannel {
+            name: "General - Elwynn Forest".into(),
+            id: 1,
+            confirmed: true,
+        })]);
+        assert_eq!(
+            s.eval::<(i64, String)>("return JoinChannelByName('general', nil, 3)")
+                .unwrap(),
+            (1, "General".to_string())
+        );
+        assert!(s.take_channel_commands().is_empty(), "held: no join goes");
+        assert_eq!(
+            s.chat_window_looks()[2].channels,
+            vec![("General".to_string(), 1)]
+        );
+        for (call, usage) in [
+            ("JoinChannelByName()", "Usage: JoinChannelByName(\"name\""),
+            (
+                "JoinPermanentChannel({})",
+                "Usage: JoinPermanentChannel(\"name\"",
+            ),
+        ] {
+            let e = s.run(call).unwrap_err().to_string();
+            assert!(e.contains(usage), "{call}: {e}");
+        }
     }
 
     #[test]
