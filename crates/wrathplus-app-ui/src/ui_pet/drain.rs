@@ -42,15 +42,16 @@ pub struct PetPress<'w, 's> {
 }
 
 impl PetPress<'_, '_> {
-    /// `CastPetAction(slot)`, a 1-based bar slot.
-    pub fn press_slot(&mut self, slot: u32) {
+    /// `CastPetAction(slot[, unit])`, a 1-based bar slot and the unit's guid, else the selection
+    /// (`0x5d4210` takes `[0xbd07b0]` for a zero guid).
+    pub fn press_slot(&mut self, slot: u32, target: Option<u64>) {
         if let Some(native) = &self.bar.native {
             if let Some(entry) = slot
                 .checked_sub(1)
                 .and_then(|i| native.actions.get(i as usize))
                 .copied()
             {
-                self.press_native(entry);
+                self.press_native(entry, target.filter(|&g| g != 0));
             }
             return;
         }
@@ -72,14 +73,14 @@ impl PetPress<'_, '_> {
     /// number only labels logs.
     pub fn order(&mut self, packed: u32) {
         if self.bar.native.is_some() {
-            self.press_native(wrathplus_protocol::wrath_pet::Action(packed));
+            self.press_native(wrathplus_protocol::wrath_pet::Action(packed), None);
         } else {
             self.press(0, PetActionEntry::from(packed));
         }
     }
 
     /// Native action dispatch never narrows a spell ID through the Vanilla entry helper.
-    fn press_native(&mut self, entry: wrathplus_protocol::wrath_pet::Action) {
+    fn press_native(&mut self, entry: wrathplus_protocol::wrath_pet::Action, target: Option<u64>) {
         let Some(store) = self.pet.usable_pet(&self.bar) else {
             return;
         };
@@ -116,7 +117,7 @@ impl PetPress<'_, '_> {
             return;
         }
         let possessing = possessing(Some(store), self.pet.self_guid.0);
-        let mut target_guid = self.selection.guid.unwrap_or(0);
+        let mut target_guid = target.or(self.selection.guid).unwrap_or(0);
         if kind == 7 && id == PET_COMMAND_ATTACK {
             if crate::ui_action::attack_actor_refusal(
                 Some(store),
@@ -126,7 +127,7 @@ impl PetPress<'_, '_> {
                 return;
             }
             let Some(guid) = self.pick.target(
-                None,
+                target,
                 &mut self.selection,
                 &mut self.seam,
                 &mut self.ui_errors,

@@ -664,3 +664,23 @@ fn native_claw_bar() -> wrathplus_protocol::wrath_pet::PetSpells {
         ..Default::default()
     }
 }
+
+/// `CastPetAction(index, unit)`'s unit (`0x5d68ca`) aims the press; without one, the selection
+/// (`0x5d4237`).
+#[test]
+fn a_native_press_aims_at_the_unit_it_names_else_the_selection() {
+    let mut rig = scene();
+    rig.app.world_mut().resource_mut::<PetBar>().native = Some(native_claw_bar());
+    for (unit, want) in [(None, FOE), (Some(ME), ME)] {
+        rig.app
+            .world_mut()
+            .run_system_once(move |mut p: crate::ui_pet::drain::PetPress| p.press_slot(1, unit))
+            .expect("the press applies");
+        let sent = rig.sent();
+        let aimed = sent.iter().find_map(|c| match c {
+            ClientCommand::PetAction { target_guid, .. } => Some(*target_guid),
+            _ => None,
+        });
+        assert_eq!(aimed, Some(want), "{unit:?}: {sent:?}");
+    }
+}

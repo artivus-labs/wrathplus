@@ -251,6 +251,16 @@ fn slot_at(model: &Model, i: u32) -> Option<&StoredPetAction> {
         .and_then(|n| model.pet_bar.slots.get(n))
 }
 
+/// A pet bar index as `CastPetAction` and `TogglePetAutocast` read it: `isnumber` or the usage,
+/// truncated (`fistp`), then `index - 1 <= 10` unsigned or the invalid-slot error (`0x5d6805`).
+fn pet_slot(lua: &Lua, v: Value, usage: &'static str, invalid: &'static str) -> mlua::Result<u32> {
+    let i = super::binding_abi::number_arg(lua, v, usage)?;
+    match i.wrapping_sub(1) as u32 {
+        0..=10 => Ok(i as u32),
+        _ => Err(mlua::Error::RuntimeError(invalid.into())),
+    }
+}
+
 /// The 1-based pet action slot whose action word holds `spell` (`0x5d3410`).
 pub(super) fn slot_index_by_spell(model: &Model, spell: u32) -> Option<u32> {
     model
@@ -379,24 +389,35 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // An empty slot, whose button shows only under show-grid, queues nothing; the reference sends
-    // its zero word (`0x4bd230` falls to the send at `0x4bd444`), which vmangos ignores
-    // (`PetHandler.cpp:178`).
+    // CastPetAction(index[, unit]) (`0x5d67b0`): the unit goes through the resolver with flag 1
+    // (`0x5d68ca`), so an absent or empty one is the selection and one it rejects casts nothing.
+    // An empty slot queues nothing; the reference sends its zero word, which the server ignores.
     g.set(
         "CastPetAction",
-        lua.create_function(|lua, i: u32| {
+        lua.create_function(|lua, args: MultiValue| {
+            let arg = |i: usize| args.get(i).cloned().unwrap_or(Value::Nil);
+            const USAGE: &str = "Usage: CastPetAction(index, target)";
+            let i = pet_slot(lua, arg(0), USAGE, "Invalid slot in CastPetAction")?;
+            let unit = super::unit::token::token_text(lua, &arg(1)).filter(|t| !t.is_empty());
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
+            if unit.as_ref().is_some_and(|t| !model.resolve_token(t).ok) {
+                return Ok(());
+            }
             if slot_at(&model, i).is_some_and(|s| s.view.name.is_some()) {
-                model.script_calls.push(super::ScriptCall::PetAction(i));
+                let call = super::ScriptCall::PetAction(i).at_unit(unit);
+                model.script_calls.push(call);
             }
             Ok(())
         })?,
     )?;
 
-    // Only a slot that can autocast queues: the wire verb names a spell, and a token has none.
+    // TogglePetAutocast(index) (`0x5d66f0`): only a slot that can autocast queues, as the wire
+    // verb names a spell.
     g.set(
         "TogglePetAutocast",
-        lua.create_function(|lua, i: u32| {
+        lua.create_function(|lua, i: Value| {
+            const USAGE: &str = "Usage: TogglePetAutocast(index)";
+            let i = pet_slot(lua, i, USAGE, "Invalid slot in TogglePetAutocast")?;
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
             if slot_at(&model, i).is_some_and(|s| s.view.autocast_allowed) {
                 model.pet_autocast_toggles.push(i);
@@ -726,12 +747,32 @@ mod tests {
         );
         assert!(s.take_pet_actions().is_empty(), "drain empties");
 
-        s.run("TogglePetAutocast(1) TogglePetAutocast(2)").unwrap();
+        s.run("TogglePetAutocast(1) TogglePetAutocast(2.9) TogglePetAutocast(11)")
+            .unwrap();
         assert_eq!(
             s.take_pet_autocast_toggles(),
             vec![2],
-            "only the autocastable slot"
+            "only the autocastable slot, the index truncated"
         );
+        // Slots 1..=11 pass `0x5d6805`; outside it, and without a number, the bindings raise.
+        for (call, err) in [
+            ("CastPetAction(0)", "Invalid slot in CastPetAction"),
+            ("CastPetAction(12)", "Invalid slot in CastPetAction"),
+            ("CastPetAction()", "Usage: CastPetAction(index, target)"),
+            ("TogglePetAutocast(-1)", "Invalid slot in TogglePetAutocast"),
+            ("TogglePetAutocast()", "Usage: TogglePetAutocast(index)"),
+        ] {
+            let e = s.run(call).unwrap_err().to_string();
+            assert!(e.contains(err), "{call}: {e}");
+        }
+        // A unit rides with the press; one the resolver rejects casts nothing.
+        s.run("CastPetAction(1, 'bogus') CastPetAction(1, 'target')")
+            .unwrap();
+        assert!(matches!(
+            &s.take_script_calls()[..],
+            [super::super::ScriptCall::AtUnit { unit, call }]
+                if unit == "target" && **call == super::super::ScriptCall::PetAction(1)
+        ));
 
         assert_eq!(s.take_pet_stop_attacks(), 0);
         s.run("PetStopAttack() PetStopAttack()").unwrap();

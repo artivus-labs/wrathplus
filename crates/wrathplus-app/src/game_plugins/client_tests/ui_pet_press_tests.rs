@@ -105,7 +105,7 @@ impl Rig {
     pub(super) fn press(&mut self, slot: u32) {
         self.app
             .world_mut()
-            .run_system_once(move |mut press: PetPress| press.press_slot(slot))
+            .run_system_once(move |mut press: PetPress| press.press_slot(slot, None))
             .expect("the press applies as a one-shot system");
     }
 
