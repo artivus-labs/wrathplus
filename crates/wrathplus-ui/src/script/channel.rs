@@ -1,11 +1,22 @@
 //! The chat-channel globals: the joined-channel lookups, the join, leave and management verbs the
-//! app sends, and the guild-recruitment auto-join latch. `GetChannelName` (`0x4a05e0`) looks up by
+//! app sends, and the guild-recruitment auto-join latch. `GetChannelName` (`0x4fe850`) looks up by
 //! 1-based slot or by name and returns three values: the slot (`CHAT_MSG_*` arg8), the name and
 //! `instanceID` (arg10).
 
 use mlua::{Lua, MultiValue, Value};
 
+use super::binding_abi::{ftol, is_string};
 use super::Model;
+
+/// A joined channel as the VM mirrors build 12340's record (`0xbcf094`, stride 0xa8): the name
+/// `+0x04`, the `ChatChannels.dbc` id `+0x94` (0 for a custom channel), and whether the state
+/// `+0x9c` is 0, the confirmed join.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct JoinedChannel {
+    pub name: String,
+    pub id: u32,
+    pub confirmed: bool,
+}
 
 /// One `ChatChannels.dbc` row for the channel verbs: the id, the Shortcut a typed name is matched
 /// against case-folded, the name composed for the player's zone (`None` while the zone text is
@@ -151,19 +162,37 @@ fn non_empty(s: Option<String>) -> Option<String> {
     s.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
 }
 
+/// The record named `name`, whole and case-folded, whatever its state (`0x4fdfc0`).
 fn slot_of(model: &Model, name: &str) -> Option<usize> {
     model
         .joined_channels
         .iter()
-        .position(|c| c.as_deref().is_some_and(|c| c.eq_ignore_ascii_case(name)))
+        .position(|c| {
+            c.as_ref()
+                .is_some_and(|c| c.name.eq_ignore_ascii_case(name))
+        })
         .map(|i| i + 1)
 }
 
-/// The name in slot `n` (1-based), `None` out of range or for a freed slot: the reference's lookup
-/// `0x49bf30` requires the entry's own number to equal `n`, which a leave zeroes (`0x49bbd0`), so a
-/// left channel's number answers "not joined" while every channel above it keeps its own.
-fn name_at(model: &Model, n: usize) -> Option<&str> {
-    model.joined_channels.get(n.checked_sub(1)?)?.as_deref()
+/// The confirmed record numbered `n`: `1 <= n <= count`, the record's own number `n` (a freed
+/// one holds 0) and its state 0 (`0x4fe87d`-`0x4fe8a7`, `0x4fe17a`-`0x4fe1a3`).
+fn confirmed_at(model: &Model, n: i64) -> Option<&JoinedChannel> {
+    let i = usize::try_from(n).ok()?.checked_sub(1)?;
+    model
+        .joined_channels
+        .get(i)?
+        .as_ref()
+        .filter(|c| c.confirmed)
+}
+
+/// The name `GetChannelList` and `GetChannelDisplayInfo` answer (`0x4fe6a0`-`0x4fe6d5`,
+/// `0x4fdf8f`-`0x4fdfab`): the row's Shortcut when the record's DBC id names one, else the name.
+pub(super) fn listed_name<'a>(model: &'a Model, name: &'a str, id: u32) -> &'a str {
+    model
+        .zone_channel_catalog
+        .iter()
+        .find(|r| id != 0 && r.id == id)
+        .map_or(name, |r| r.shortcut.as_str())
 }
 
 pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
@@ -227,69 +256,52 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
+    // GetChannelName(index | name) (`0x4fe850`): a `lua_isnumber` argument truncates to a
+    // confirmed slot, so `"1"`, `" 1"` and `"1.0"` are slot 1; any other string is a record name,
+    // a pending one included; anything else raises. Three values on every other path: the slot or
+    // 0, the record name or nil, and `+0x98`, which AzerothCore's `YOU_JOINED` leaves 0.
     g.set(
         "GetChannelName",
         lua.create_function(|lua, key: Value| {
             let model = lua.app_data_ref::<Model>().expect("model app_data");
-            let slot = match &key {
-                // The reference bounds-checks `1 <= n <= count` (`0x49bf30`) and answers only a
-                // confirmed slot; `joined` holds only those, so the bound is the whole check.
-                Value::Integer(_) | Value::Number(_) => {
-                    let n = match &key {
-                        Value::Integer(i) => *i,
-                        Value::Number(n) => *n as i64,
-                        _ => unreachable!(),
-                    };
-                    usize::try_from(n)
-                        .ok()
-                        .filter(|n| name_at(&model, *n).is_some())
+            let slot = match lua.coerce_number(key.clone())? {
+                Some(n) => {
+                    let n = i64::from(ftol(n));
+                    confirmed_at(&model, n).map(|_| n as usize)
                 }
-                // A numeric string still resolves as a number, as Lua's coercion does in the
-                // reference: `ChatFrame.lua:2113` passes a `gsub` result, `GetChannelName("1")`.
-                Value::String(s) => {
-                    let name = s.to_str()?;
-                    match name.trim().parse::<usize>() {
-                        Ok(n) if name_at(&model, n).is_some() => Some(n),
-                        Ok(_) => None,
-                        Err(_) => slot_of(&model, &name),
-                    }
+                None if is_string(Some(&key)) => slot_of(&model, &key.to_string()?),
+                None => {
+                    return Err(mlua::Error::runtime(
+                        "Usage: GetChannelName([channelIndex] or [channelName])",
+                    ))
                 }
-                _ => None,
             };
-
-            let Some(slot) = slot else {
-                // Three values on every path, the name `lua_pushstring(NULL)`, which is nil
-                // (`0x4a0659`); an unconfirmed channel answers the same, as `joined` models.
-                return Ok(MultiValue::from_vec(vec![
-                    Value::Integer(0),
-                    Value::Nil,
-                    Value::Integer(0),
-                ]));
-            };
-            let name = name_at(&model, slot).unwrap_or_default().to_string();
+            let name = slot.and_then(|n| model.joined_channels[n - 1].as_ref());
             Ok(MultiValue::from_vec(vec![
-                Value::Integer(slot as i64),
-                Value::String(lua.create_string(&name)?),
-                // `instanceID`: `YOU_JOINED`'s split index, 0 on vanilla servers; never nil.
+                Value::Integer(slot.map_or(0, |n| n as i64)),
+                match name {
+                    Some(c) => Value::String(lua.create_string(&c.name)?),
+                    None => Value::Nil,
+                },
                 Value::Integer(0),
             ]))
         })?,
     )?;
 
-    // GetChannelList() (`0x4a02d0`): a flat vararg of slot, name pairs in join order, as
-    // `FCFDropDown_LoadChannels` steps it (`FloatingChatFrame.lua:445`); none joined is zero
-    // returns. The slots must match `slot_of`'s, so it agrees with `GetChannelName`.
+    // GetChannelList() (`0x4fe650`): slot, name pairs for the confirmed records in slot order,
+    // a DBC channel named by its Shortcut, as `CreateChatChannelList` ticks it against a window's
+    // `channelList` (ChatConfigFrame.lua:1495-1520); none joined is zero values.
     g.set(
         "GetChannelList",
         lua.create_function(|lua, ()| {
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             let mut out = Vec::with_capacity(model.joined_channels.len() * 2);
-            // Occupied slots only: the reference skips the cleared entries of its record array.
-            for (i, name) in model.joined_channels.iter().enumerate() {
-                let Some(name) = name.as_deref() else {
+            for (i, c) in model.joined_channels.iter().enumerate() {
+                let Some(c) = c.as_ref().filter(|c| c.confirmed) else {
                     continue;
                 };
                 out.push(Value::Integer(i as i64 + 1));
+                let name = listed_name(&model, &c.name, c.id);
                 out.push(Value::String(lua.create_string(name)?));
             }
             Ok(MultiValue::from_vec(out))
@@ -363,9 +375,10 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         )?,
     )?;
 
-    // EnumerateServerChannels() (`0x4a1790`): the `ChatChannels.dbc` Shortcuts in row order, never
+    // EnumerateServerChannels() (`0x4ff200`): the `ChatChannels.dbc` Shortcuts in row order, never
     // the composed names, a `flags & 0x10` row only in a city (`AreaTable.Flags & 0x8`); zero
-    // values while the zone is unresolved.
+    // values while the zone is unresolved. Label: an empty Shortcut answers the row's name
+    // (`0x4ff27d`), which no shipped row has, so it is not modelled.
     g.set(
         "EnumerateServerChannels",
         lua.create_function(|lua, _ignored: MultiValue| {
@@ -521,9 +534,9 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
 }
 
 impl super::UiScript {
-    /// Mirror the app's confirmed-joined channels in join order, `None` for a freed slot;
-    /// `ui_chat::feed` pushes it on each `YOU_JOINED` and `YOU_LEFT`.
-    pub fn set_joined_channels(&mut self, joined: Vec<Option<String>>) {
+    /// Mirror the app's channel records in slot order, `None` for a freed slot; `ui_chat::feed`
+    /// pushes it on each `YOU_JOINED` and `YOU_LEFT`.
+    pub fn set_joined_channels(&mut self, joined: Vec<Option<JoinedChannel>>) {
         self.model_mut().joined_channels = joined;
     }
 }

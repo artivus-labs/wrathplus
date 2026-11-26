@@ -6,7 +6,14 @@ use super::common::script;
 /// Two channels in join order, which is the numbering; deliberately not sorted.
 fn joined() -> crate::script::UiScript {
     let mut s = script();
-    s.set_joined_channels(vec![Some("World".into()), Some("Trade - City".into())]);
+    let joined = |name: &str, id| {
+        Some(crate::script::JoinedChannel {
+            name: name.into(),
+            id,
+            confirmed: true,
+        })
+    };
+    s.set_joined_channels(vec![joined("World", 0), joined("Trade - City", 2)]);
     s
 }
 
@@ -71,12 +78,26 @@ fn a_channel_that_is_not_joined_answers_the_number_zero_never_nil() {
     );
 }
 
-/// `ChatFrame.lua:2113` passes the `"1"` it cuts out of `/1`, which Lua coerces to a number.
+/// `ChatFrame.lua:2113` passes the `"1"` it cuts out of `/1`: `lua_isnumber` takes any numeric
+/// string and the number truncates (`0x4fe85c`-`0x4fe873`); nil and other types raise (`0x9fc0a4`).
 #[test]
 fn a_numeric_string_resolves_as_an_index_not_as_a_name() {
     let s = joined();
-    let id: i64 = s.eval("return GetChannelName('2')").unwrap();
-    assert_eq!(id, 2, "the `/2` slash-command path depends on this");
+    for key in ["'2'", "' 2'", "'2.0'", "'0x2'", "2.9"] {
+        let id: i64 = s.eval(&format!("return GetChannelName({key})")).unwrap();
+        assert_eq!(id, 2, "GetChannelName({key})");
+    }
+    for call in [
+        "GetChannelName()",
+        "GetChannelName(nil)",
+        "GetChannelName({})",
+    ] {
+        let e = s.run(call).unwrap_err().to_string();
+        assert!(
+            e.contains("Usage: GetChannelName([channelIndex] or [channelName])"),
+            "{e}"
+        );
+    }
 }
 
 /// `ui_chat::feed` appends on the server's YOU_JOINED notice, never on the request.
@@ -116,6 +137,63 @@ fn get_channel_list_is_a_flat_slot_name_vararg_in_join_order() {
 
     let empty = crate::script::tests::common::script();
     assert_eq!(empty.arity("GetChannelList()").unwrap(), 0);
+}
+
+/// `0x4fe6a0`/`0x4fdf50`: a record whose DBC id names a row lists as its Shortcut, which a
+/// window's `channelList` holds; `GetChannelName` keeps the record name. `GetChannelList` and the
+/// numeric lookup skip a pending record (`+0x9c`), the name lookup finds it (`0x4fdfc0`).
+#[test]
+fn a_dbc_channel_lists_by_its_shortcut_and_a_pending_one_by_name_only() {
+    let mut s = joined();
+    s.set_zone_channel_catalog(vec![crate::script::ZoneChannelRow {
+        id: 2,
+        shortcut: "Trade".into(),
+        resolved: None,
+        listed: false,
+    }]);
+    let mut mirror = vec![None; 3];
+    mirror[1] = Some(crate::script::JoinedChannel {
+        name: "Trade - City".into(),
+        id: 2,
+        confirmed: true,
+    });
+    mirror[2] = Some(crate::script::JoinedChannel {
+        name: "Pending".into(),
+        id: 0,
+        confirmed: false,
+    });
+    s.set_joined_channels(mirror);
+    assert_eq!(
+        s.eval::<(i64, String)>("return GetChannelList()").unwrap(),
+        (2, "Trade".to_string())
+    );
+    assert_eq!(
+        s.arity("GetChannelList()").unwrap(),
+        2,
+        "the pending record is not listed"
+    );
+    assert_eq!(
+        s.eval::<String>("return select(2, GetChannelName(2))")
+            .unwrap(),
+        "Trade - City"
+    );
+    assert_eq!(s.eval::<i64>("return GetChannelName(3)").unwrap(), 0);
+    assert_eq!(
+        s.eval::<i64>("return GetChannelName('pending')").unwrap(),
+        3
+    );
+    s.set_wrath_display_channels(vec![crate::script::WrathDisplayChannel {
+        slot: 2,
+        name: "Trade - City".into(),
+        channel_id: 2,
+        active: true,
+        custom_state: 0,
+    }]);
+    assert_eq!(
+        s.eval::<String>("return (GetChannelDisplayInfo(3))")
+            .unwrap(),
+        "Trade"
+    );
 }
 
 /// `GetGuildRecruitmentMode` (`0x4a0040`) always pushes its int global as a number; it boots at 1

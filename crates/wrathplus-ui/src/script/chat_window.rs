@@ -633,7 +633,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                     match usize::try_from(n)
                         .ok()
                         .and_then(|n| model.joined_channels.get(n - 1))
-                        .and_then(|c| c.clone())
+                        .and_then(|c| c.as_ref().filter(|c| c.confirmed))
+                        .map(|c| c.name.clone())
                     {
                         Some(name) => name,
                         None => return Ok(()),

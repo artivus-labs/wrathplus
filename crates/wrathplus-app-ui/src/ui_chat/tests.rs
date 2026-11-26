@@ -962,9 +962,9 @@ fn a_leave_notice_keeps_its_number_because_the_record_dies_after_the_line() {
         compose(&e, K::ChannelNotice, "Common").unwrap(),
         "Left Channel: |Hchannel:CHANNEL:2|h[2. General - Elwynn Forest]|h"
     );
-    assert_eq!(
-        channels.names(),
-        [Some("World".to_string()), None],
+    let mirror = channels.names();
+    assert!(
+        matches!(&mirror[..], [Some(w), None] if w.name == "World"),
         "and only THEN is the record gone — as a HOLE at slot 2, not a shortened list"
     );
 }

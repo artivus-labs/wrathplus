@@ -135,19 +135,22 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 ]));
             }
             let synthetic = matches!(row.identity, Some(Identity::Synthetic(_)));
-            let name = if synthetic {
-                localized(lua, &row.name)?
-            } else {
-                Value::String(lua.create_string(&row.name)?)
-            };
-            let category = if synthetic {
-                "CHANNEL_CATEGORY_GROUP"
-            } else if m
+            let id = m
                 .wrath_channel_display
                 .channels
                 .iter()
-                .any(|c| c.name == row.name && c.channel_id != 0)
-            {
+                .find(|c| c.name == row.name)
+                .map_or(0, |c| c.channel_id);
+            let name = if synthetic {
+                localized(lua, &row.name)?
+            } else {
+                // `0x4fdf50(slot, 1)`: a DBC channel's Shortcut, whatever the record's state.
+                let name = super::channel::listed_name(&m, &row.name, id);
+                Value::String(lua.create_string(name)?)
+            };
+            let category = if synthetic {
+                "CHANNEL_CATEGORY_GROUP"
+            } else if id != 0 {
                 "CHANNEL_CATEGORY_WORLD"
             } else {
                 "CHANNEL_CATEGORY_CUSTOM"

@@ -256,11 +256,18 @@ impl ChannelState {
             .map(|s| s.state)
     }
 
-    /// The names for the VM's mirror, holes kept so `/N` addresses the right channel.
-    pub(crate) fn names(&self) -> Vec<Option<String>> {
+    /// The VM's mirror, holes kept so `/N` addresses the right channel: each record's name, its
+    /// `ChatChannels.dbc` id (`+0x94`) and whether it is in state 0 (`+0x9c`).
+    pub(crate) fn names(&self) -> Vec<Option<wrathplus_ui::script::JoinedChannel>> {
         self.joined
             .iter()
-            .map(|s| s.as_ref().map(|s| s.name.clone()))
+            .map(|s| {
+                s.as_ref().map(|s| wrathplus_ui::script::JoinedChannel {
+                    name: s.name.clone(),
+                    id: self.channels.zone_channel_id(&s.name),
+                    confirmed: s.state == SlotState::Joined,
+                })
+            })
             .collect()
     }
 

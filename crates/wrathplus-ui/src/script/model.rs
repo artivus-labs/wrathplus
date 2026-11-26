@@ -275,8 +275,8 @@ pub(crate) struct Model {
     /// `DropItemOnUnit` tokens (`0x48d960`), gated by the app; a refusal silently keeps the item.
     pub(crate) drop_item_on_unit: Vec<String>,
 
-    /// Channels the server confirmed, in join order: the numbers `GetChannelName` answers.
-    pub(crate) joined_channels: Vec<Option<String>>,
+    /// The channel records in slot order, `None` for a freed slot: what `GetChannelName` reads.
+    pub(crate) joined_channels: Vec<Option<super::channel::JoinedChannel>>,
     pub(crate) wrath_channel_display: super::wrath_channel_display::Display,
     pub(crate) wrath_channel_roster: super::wrath_channel_roster::WrathChannelRoster,
     /// The party or raid roster the app pushes; the default is not in a group.
