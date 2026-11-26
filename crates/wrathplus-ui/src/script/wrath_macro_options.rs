@@ -3,9 +3,11 @@
 //! `/tmp/azb-app-mig/ghidra/{shim2,opt1,opt2}.log` and the condition table (`0xad14d8` names,
 //! `0xad1560` handlers).
 //!
-//! Clauses split on `;`. A clause's bracket groups are alternatives; the first that holds, all of
-//! its comma-separated conditions true, gives the clause. A clause with no group always holds. The
-//! answer is the text after the last `]`, trimmed of spaces (not other whitespace), and the
+//! The tokenizer (`0x5f0df0`) scans a clause for `[` or `;`. Each `[...]` group, read to its `]`
+//! (so a `;` inside one does not end the clause), is evaluated until one holds, all of its
+//! comma-separated conditions true; later groups of the clause are read past unevaluated. A clause
+//! with no group holds; `;` after groups of which none held moves to the next clause. The answer
+//! is the text after the clause's last `]`, trimmed of spaces (not other whitespace), and the
 //! holding group's unit (`@unit` or `target=unit`), else nil. With no clause holding, nothing is
 //! returned.
 //!
@@ -246,46 +248,45 @@ fn group<'a>(lua: &Lua, body: &'a str) -> (bool, Option<&'a str>) {
     (ok, unit.filter(|u| !u.is_empty()))
 }
 
-/// The answer and the holding group's unit, or `None` when no clause holds.
+/// The answer and the holding group's unit, or `None` when no clause holds (`0x5f0df0`).
 pub(crate) fn parse<'a>(lua: &Lua, options: &'a str) -> Option<(&'a str, Option<&'a str>)> {
-    for clause in options.split(';') {
-        let mut rest = clause;
-        let mut any_group = false;
-        let mut held: Option<Option<&str>> = None;
-        loop {
-            let trimmed = rest.trim_start_matches(' ');
-            let Some(after) = trimmed.strip_prefix('[') else {
-                break;
-            };
-            any_group = true;
-            let (body, tail) = after.split_once(']').unwrap_or((after, ""));
+    let bytes = options.as_bytes();
+    let end = bytes.len();
+    let (mut at, mut grouped, mut held) = (0, false, None);
+    loop {
+        let text = at;
+        let stop = (at..end)
+            .find(|&i| matches!(bytes[i], b'[' | b';'))
+            .unwrap_or(end);
+        if stop < end && bytes[stop] == b'[' {
+            let close = (stop..end).find(|&i| bytes[i] == b']').unwrap_or(end);
             if held.is_none() {
-                let (ok, unit) = group(lua, body);
-                if ok {
-                    held = Some(unit);
-                }
+                let (ok, unit) = group(lua, options[stop + 1..close].trim_matches(' '));
+                held = ok.then_some(unit);
             }
-            rest = tail;
+            (at, grouped) = ((close + 1).min(end), true);
+            continue;
         }
-        if !any_group || held.is_some() {
-            return Some((rest.trim_matches(' '), held.flatten()));
+        if !grouped || held.is_some() {
+            return Some((options[text..stop].trim_matches(' '), held.flatten()));
         }
+        if stop == end {
+            return None;
+        }
+        (at, grouped) = (stop + 1, false);
     }
-    None
 }
 
 pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     lua.globals().set(
         "SecureCmdOptionParse",
         lua.create_function(|lua, options: Value| {
-            let options = match options {
-                Value::String(s) => s.to_string_lossy(),
-                _ => {
-                    return Err(mlua::Error::runtime(
-                        "Usage: SecureCmdOptionParse(\"options\")",
-                    ))
-                }
-            };
+            // `lua_tolstring`: a number is parsed as its text.
+            let options = super::binding_abi::string_arg(
+                lua,
+                options,
+                "Usage: SecureCmdOptionParse(\"options\")",
+            )?;
             let s = |t: &str| lua.create_string(t).map(Value::String);
             Ok(MultiValue::from_vec(match parse(lua, &options) {
                 Some((value, Some(unit))) => vec![s(value)?, s(unit)?],
@@ -336,5 +337,15 @@ mod tests {
         assert_eq!(eval(&s, "[mod:shift] x"), "x|nil");
         assert_eq!(eval(&s, "  plain  "), "plain|nil");
         assert!(s.run("SecureCmdOptionParse()").is_err());
+        // `0x5f0df0` scans the whole clause for `[`, answers the text after its last `]`, and
+        // reads a group to its `]` before looking for the clause's `;`.
+        assert_eq!(eval(&s, "Frostbolt [form]"), "|nil");
+        assert_eq!(eval(&s, "[form] a [noform] b"), "b|nil");
+        assert_eq!(eval(&s, "[@focus;x] a; b"), "a|focus;x");
+        // `lua_tolstring`: a number is its text.
+        assert_eq!(
+            s.eval::<String>("return SecureCmdOptionParse(5)").unwrap(),
+            "5"
+        );
     }
 }
