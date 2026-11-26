@@ -171,6 +171,7 @@ fn getters_read_the_snapshot_in_native_shapes() {
         "select(6, GetLFGInfoServer())=='hi' and select(7, GetLFGInfoServer())==2",
         "GetLFGQueuedList()[7]==true and GetLFGQueuedList(nil)[9]==true",
         "IsListedInLFR()==true",
+        "select('#', GetLFGTypes())==7 and select(7, GetLFGTypes())=='LFG_TYPE_RANDOM_DUNGEON'",
         "select(1, GetLFGRoleUpdate())==true and select(2, GetLFGRoleUpdate())==1 and select(3, GetLFGRoleUpdate())==2",
         "select(1, GetLFGRoleUpdateSlot(1))==1 and select(2, GetLFGRoleUpdateSlot(1))==7",
         "select('#', GetLFGRoleUpdateSlot(2))==0",
@@ -376,6 +377,24 @@ fn selection_roles_and_verbs_follow_the_native_gates() {
     });
     assert_eq!(pick(&mut s, "SetLFGDungeon(9)"), (vec![2 << 24 | 9], true));
     s.set_party(PartyState::default());
+    // `0x5593a0` drops the named entry alone; `0x552e90` shows the local state.
+    let local = "local a, b, c, d, e, f, g, h = GetLFGInfoLocal() \
+                 return select('#', GetLFGInfoLocal()), a, b, c, #d, e, f + g + h";
+    assert_eq!(
+        s.eval::<(i64, bool, bool, bool, i64, i64, i64)>(local)
+            .unwrap(),
+        (8, false, false, false, 63, 1, 0)
+    );
+    assert_eq!(
+        pick(&mut s, "ClearLFGDungeon(1, 9) ClearLFGDungeon(2, 7)"),
+        (vec![2 << 24 | 9], false)
+    );
+    assert_eq!(pick(&mut s, "ClearLFGDungeon(2, '9')"), (vec![], true));
+    assert!(s
+        .run("ClearLFGDungeon('x', {})")
+        .unwrap_err()
+        .to_string()
+        .contains("Usage: ClearLFGDungeon(type, id)"));
 
     // Role check: the counter starts at 2 (`0xacdd54`), so the first call tests the clock and
     // resets it; two more pass, then nothing within ten seconds.

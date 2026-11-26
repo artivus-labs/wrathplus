@@ -925,6 +925,62 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         Ok(MultiValue::new())
     })?;
 
+    // ClearLFGDungeon(type, id) (`0x559500`): raises only when neither argument is a number; both
+    // truncate, a type under 7 and a catalog id name an entry (`type << 24 | id`), and
+    // `0x5593a0` drops it, marking the selection for resend.
+    set(lua, "ClearLFGDungeon", |lua, args| {
+        let num = |i| lua.coerce_number(arg(&args, i)).ok().flatten();
+        let (kind, id) = (num(0), num(1));
+        if kind.is_none() && id.is_none() {
+            return Err(mlua::Error::runtime("Usage: ClearLFGDungeon(type, id)"));
+        }
+        let [kind, id] = [kind, id].map(|n| n.map_or(0, |n| n as i64 as i32) as u32);
+        let mut m = lua.app_data_mut::<Model>().expect("model app_data");
+        if kind < 7 && m.wrath_lfg.row(id).is_some() {
+            let q = &mut m.wrath_lfg.queue;
+            let entry = kind << 24 | id & 0xff_ffff;
+            if let Some(at) = q.selection.iter().position(|&e| e == entry) {
+                q.selection.remove(at);
+                q.pending = true;
+            }
+        }
+        Ok(MultiValue::new())
+    })?;
+    // GetLFGInfoLocal() (`0x552e90`) → join sent, the two flag bytes, the comment, the selection
+    // count and the three needs bytes; the flags and needs have no 3.3.5 Lua setter.
+    set(lua, "GetLFGInfoLocal", |lua, _| {
+        let m = lua.app_data_ref::<Model>().expect("model app_data");
+        let q = &m.wrath_lfg.queue;
+        let mut out = vec![
+            Value::Boolean(q.sent),
+            Value::Boolean(false),
+            Value::Boolean(false),
+        ];
+        out.extend([text(lua, &q.comment)?, int(q.selection.len() as i64)]);
+        out.extend([int(0), int(0), int(0)]);
+        Ok(MultiValue::from_vec(out))
+    })?;
+    // GetLFGTypes() (`0x552dd0`) → the seven type names, each key's global string (`0x819d40`).
+    set(lua, "GetLFGTypes", |lua, _| {
+        let keys = [
+            "LFG_TYPE_NONE",
+            "LFG_TYPE_DUNGEON",
+            "LFG_TYPE_RAID",
+            "LFG_TYPE_QUEST",
+            "LFG_TYPE_ZONE",
+            "LFG_TYPE_HEROIC_DUNGEON",
+            "LFG_TYPE_RANDOM_DUNGEON",
+        ];
+        let mut out = Vec::with_capacity(keys.len());
+        for key in keys {
+            out.push(match lua.globals().get::<Value>(key)? {
+                v @ Value::String(_) => v,
+                _ => text(lua, key)?,
+            });
+        }
+        Ok(MultiValue::from_vec(out))
+    })?;
+
     // ── verbs ──
     // JoinLFG() (`0x557660`): an empty selection or no role past leader refuses locally.
     set(lua, "JoinLFG", |lua, _| {
