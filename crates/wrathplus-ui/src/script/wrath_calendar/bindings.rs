@@ -160,12 +160,18 @@ fn sequence_type(row: &WrathCalendarEntry) -> &'static str {
 /// The 15 `CalendarGetDayEvent` values for a row (`0x5c1070`).
 fn day_event(lua: &Lua, row: &WrathCalendarEntry) -> Rv {
     let raid = row.raid.as_ref();
-    let (status, rank) = row.invite.unwrap_or((u8::MAX, 0));
+    let guild = row.flags & GUILD_EVENT != 0;
     // `+0xa8 + 1` for every row: 0 (INVITED) where no invite set it (`0x5c125a`).
     let invite_status = match row.invite {
-        Some(_) => i(status + 1),
-        None if row.kind == K::GuildEvent => i(LUA_NOT_SIGNEDUP),
+        Some((status, _)) => i(status + 1),
+        None if guild => i(LUA_NOT_SIGNEDUP),
         None => i(1),
+    };
+    // `0x5b8080` and `0x5b80b0` read the invite bits, not the rank.
+    let rank = if row.bits & 4 != 0 {
+        2
+    } else {
+        row.bits >> 1 & 1
     };
     // `+0xa0 + 1`: holiday, lockout and reset rows are built with type -1 (`0x5b784d`, `0x5c2652`).
     let event_type = match row.kind {
@@ -184,7 +190,7 @@ fn day_event(lua: &Lua, row: &WrathCalendarEntry) -> Rv {
         invite_status,
         s(lua, row.invited_by.as_deref().unwrap_or(""))?,
         i(raid.map_or(0, |r| r.difficulty + 1)),
-        i(if row.kind == K::GuildEvent && row.invite.is_none() {
+        i(if guild && row.bits & 8 != 0 {
             LUA_SIGNUP
         } else {
             1
@@ -373,7 +379,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             None => many(vec![i(0), i(0), s(lua, "")?]),
         }
     })?;
-    // CalendarGetFirstPendingInvite (`0x5b9e10`): the day's first unanswered invite, 0 for none.
+    // CalendarGetFirstPendingInvite (`0x5b9e10`): the first row with the pending bit (`0x5b92b0`).
     set(lua, "CalendarGetFirstPendingInvite", |lua, args| {
         let (Some(o), Some(d)) = (int_arg(lua, &args, 0), int_arg(lua, &args, 1)) else {
             return usage("Usage: CalendarGetDay([-1,0,1], monthDay)");
@@ -382,7 +388,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             st.slot(o as i32, d, 1).map_or(0, |(y, m, d, _)| {
                 st.day(y, m, d)
                     .iter()
-                    .position(|r| r.invite.is_some_and(|(s, _)| s == INVITED))
+                    .position(|r| r.bits & 1 != 0)
                     .map_or(0, |p| p as i64 + 1)
             })
         });

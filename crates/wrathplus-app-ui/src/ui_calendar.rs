@@ -49,6 +49,7 @@ use crate::names::NameCache;
 use crate::net::wrath_calendar_capture::NativeCalendarPackets;
 use crate::net::{ClientCommand, NetCommands, NetHandlerApp};
 use wrathplus_protocol::{SessionEvent, SessionEventKind};
+mod invite_bits;
 
 /// Wire statuses and ranks.
 const INVITED: u8 = 0;
@@ -137,8 +138,8 @@ impl CalendarCatalog {
 #[derive(Clone, Debug, PartialEq)]
 struct Listed {
     row: EventRow,
-    /// Invite id, wire status, rank.
-    invite: Option<(u64, u8, u8)>,
+    /// Invite id, wire status, rank, type.
+    invite: Option<(u64, u8, u8, u8)>,
 }
 
 #[derive(Resource, Default)]
@@ -406,7 +407,7 @@ fn reduce(
                         dungeon: e.dungeon,
                         creator: e.creator,
                     },
-                    invite: mine.map(|i| (i.invite_id, i.status, i.rank)),
+                    invite: mine.map(|i| (i.invite_id, i.status, i.rank, i.guild_member)),
                 });
                 let copy = e.send_type == SEND_COPY;
                 if !copy && state.open.as_ref().is_some_and(|o| o.event_id == 0) {
@@ -572,7 +573,7 @@ fn reduce(
                     dungeon,
                     creator,
                 },
-                invite: Some((invite_id, status, rank)),
+                invite: Some((invite_id, status, rank, 0)),
             });
             list(fired);
         }
@@ -664,7 +665,7 @@ fn calendar(state: &mut CalendarState, c: Calendar) {
                 .invites
                 .iter()
                 .find(|i| i.event_id == row.event_id)
-                .map(|i| (i.invite_id, i.status, i.rank));
+                .map(|i| (i.invite_id, i.status, i.rank, i.guild_event));
             Listed { row, invite }
         })
         .collect();
@@ -990,8 +991,11 @@ fn build(
         }
     }
     let mut rest = Vec::new();
+    let now = state.local(state.now_unix());
     for l in &state.events {
-        let Some(date) = WrathCalendarDate::from_packed(l.row.packed_time) else {
+        let bits = invite_bits::invite_bits(&l.row, l.invite.map(|i| (i.1, i.2, i.3)), me, now);
+        let (Some(date), Some(bits)) = (WrathCalendarDate::from_packed(l.row.packed_time), bits)
+        else {
             continue;
         };
         rest.push(WrathCalendarEntry {
@@ -1007,6 +1011,7 @@ fn build(
             dungeon: l.row.dungeon,
             texture: texture_of(l.row.flags, l.row.dungeon),
             invite: l.invite.map(|i| (i.1, i.2)),
+            bits,
             ..Default::default()
         });
     }

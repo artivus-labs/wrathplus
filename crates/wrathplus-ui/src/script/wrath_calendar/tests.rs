@@ -29,6 +29,7 @@ fn event_row(day: u8, hour: u8, rank: u8) -> WrathCalendarEntry {
         event_type: 0,
         dungeon: -1,
         invite: Some((0, rank)),
+        bits: 1 | [0, 2, 6][usize::from(rank)],
         ..Default::default()
     }
 }
@@ -117,6 +118,15 @@ fn a_day_lists_events_holidays_and_projected_resets() {
             sequence: (0, 1),
             ..Default::default()
         },
+        // The player's own guild event, its invite answered: creator and sign-up bits, no pending.
+        WrathCalendarEntry {
+            kind: WrathCalendarKind::GuildEvent,
+            date: WrathCalendarDate::new(2010, 3, 19, 20, 0),
+            flags: 0x400,
+            invite: Some((0, 0)),
+            bits: 4 | 8,
+            ..Default::default()
+        },
     ];
     // Weekly from Tuesday 2 March 2010 05:00: Tuesday the 16th.
     view.raid_resets = vec![WrathCalendarRaidReset {
@@ -198,6 +208,15 @@ fn a_day_lists_events_holidays_and_projected_resets() {
     assert_eq!(row(&s, 15), ("ONGOING".into(), 0, 1, 2, 3));
     assert_eq!(row(&s, 16), ("".into(), 0, 1, 1, 0));
     assert_eq!(row(&s, 18), ("".into(), 0, 1, 1, 1));
+    // `0x5b8080`, `0x5b80b0` and `0x5b92b0` read the bits `0x5c2cd9` set, not the invite.
+    assert_eq!(
+        s.eval::<(String, i64, i64)>(
+            "local _, _, _, _, _, _, _, mod, _, _, _, kind = CalendarGetDayEvent(0, 19, 1)
+             return mod, kind, CalendarGetFirstPendingInvite(0, 19)"
+        )
+        .unwrap(),
+        ("CREATOR".into(), 2, 0)
+    );
     assert_eq!(
         s.eval::<(i64, i64, String)>("return CalendarGetDayEventSequenceInfo(0, 15, 1)")
             .unwrap(),

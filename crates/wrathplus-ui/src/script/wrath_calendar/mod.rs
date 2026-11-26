@@ -81,6 +81,8 @@ pub struct WrathCalendarEntry {
     pub texture: String,
     /// The player's invite: wire status 0..8 and rank 0..2; `None` without an invite.
     pub invite: Option<(u8, u8)>,
+    /// `+0x9c`: 1 pending, 2 moderator, 4 creator, 8 sign-up (`0x5c2cd9`).
+    pub bits: u8,
     /// A holiday's day: its 0-based place and the holiday's day count (`+0xc4`, `+0xc8`).
     pub sequence: (u32, u32),
     pub holiday_description: String,

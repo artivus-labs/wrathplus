@@ -113,6 +113,37 @@ fn the_calendar_lists_events_lockouts_and_holiday_days() {
     assert_eq!((now.day, now.hour), (15, 14));
     // The reset projects from the relation time in the server's zone.
     assert_eq!(view.raid_resets[0].first, 1_135_814_400 + 7200);
+    // `0x5c2cd9`: the unanswered invite to a later, unlocked event is pending.
+    assert_eq!(event.bits, 1);
+}
+
+/// `0x5c2cd9`-`0x5c2f8d`'s invite bits, row by row.
+#[test]
+fn invite_bits_follow_the_receipt() {
+    let now = WrathCalendarDate::new(2010, 3, 15, 14, 0);
+    let bits = |flags: u32, day: u8, creator: u64, invite: Option<(u8, u8, u8)>| {
+        let row = EventRow {
+            event_id: 1,
+            title: String::new(),
+            kind: 0,
+            packed_time: packed(2010, 3, day, 19, 0),
+            flags,
+            dungeon: -1,
+            creator,
+        };
+        invite_bits::invite_bits(&row, invite, ME, now)
+    };
+    assert_eq!(bits(1, 16, 9, Some((0, 0, 0))), Some(1));
+    // Past or locked: no pending bit; any other status neither.
+    assert_eq!(bits(1, 14, 9, Some((0, 0, 0))), Some(0));
+    assert_eq!(bits(0x11, 16, 9, Some((0, 0, 0))), Some(0));
+    assert_eq!(bits(1, 16, 9, Some((1, 1, 0))), Some(2));
+    assert_eq!(bits(1, 16, ME, Some((3, 2, 0))), Some(6));
+    // A sign-up invite; a guild event without one; an announcement; nothing to list.
+    assert_eq!(bits(0x400, 16, 9, Some((7, 0, 1))), Some(8));
+    assert_eq!(bits(0x400, 16, ME, None), Some(12));
+    assert_eq!(bits(0x40, 16, ME, None), Some(4));
+    assert_eq!(bits(1, 16, 9, None), None);
 }
 
 /// The asked-for event opens with its type; a resend refreshes it.
@@ -281,7 +312,7 @@ fn a_draft_adds_with_its_invites() {
         ["CALENDAR_NEW_EVENT", "CALENDAR_UPDATE_EVENT_LIST"]
     );
     assert!(state.open.is_none());
-    assert_eq!(state.events[0].invite, Some((301, CONFIRMED, OWNER)));
+    assert_eq!(state.events[0].invite, Some((301, CONFIRMED, OWNER, 0)));
 }
 
 /// Build 12340's switch (`0x6cd380`): its own keys for 9, 11 and 13, the limits it knows for the
