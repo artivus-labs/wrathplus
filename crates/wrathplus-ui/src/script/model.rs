@@ -544,9 +544,9 @@ pub(crate) struct Model {
     pub(crate) battlefield_leave_requests: u32,
     /// The battleground queue slots, type list, instance list, selection and world-PvP queue.
     pub(crate) battlefield: super::battlefield_queue::QueueState,
-    /// Teammates' map positions, the flag carrier, the icon scale and position requests.
+    /// Teammates' map positions, the flag carriers, the icon scale and position requests.
     pub(crate) battlefield_positions: Vec<super::battlefield_positions::BattlefieldPositionView>,
-    pub(crate) battlefield_flag: Option<super::battlefield_positions::BattlefieldFlagView>,
+    pub(crate) battlefield_flags: Vec<super::battlefield_positions::BattlefieldFlagView>,
     pub(crate) battlefield_icon_scale: f32,
     pub(crate) battlefield_position_requests: u32,
     /// Acknowledged tutorials, `None` before `SMSG_TUTORIAL_FLAGS`; all `TutorialsEnabled()` reads.
@@ -1332,7 +1332,7 @@ impl Model {
             battlefield_leave_requests: 0,
             battlefield: Default::default(),
             battlefield_positions: Vec::new(),
-            battlefield_flag: None,
+            battlefield_flags: Vec::new(),
             battlefield_icon_scale: 1.0,
             battlefield_position_requests: 0,
             tutorial_bank: None,
