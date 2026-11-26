@@ -50,6 +50,30 @@ pub(super) fn add_months(y: i32, m: u8, offset: i32) -> (i32, u8) {
     (n.div_euclid(12), (n.rem_euclid(12) + 1) as u8)
 }
 
+/// `0x5b8ec0`: `offset` months on with C division and remainder, the year then held to 2030
+/// (keeping its month) and, at 2004 or before, to November 2004 or later.
+pub(super) fn offset_month(y: i32, m: u8, offset: i32) -> (i32, u8) {
+    let (mut y, mut m) = (y - 2000 + offset / 12, i32::from(m) - 1 + offset % 12);
+    if m >= 12 {
+        (y, m) = (y + 1, m - 12);
+    } else if m < 0 {
+        (y, m) = (y - 1, m + 12);
+    }
+    if y >= 30 {
+        y = 30;
+    } else if y <= 4 {
+        (y, m) = (4, m.max(10));
+    }
+    (2000 + y, (m + 1) as u8)
+}
+
+/// `0x5b8f70`: month `|(month - 1) % 12|`, the year held to today's ±5, then to 2004..2030.
+pub(super) fn abs_month(today_year: i32, month: i64, year: i64) -> (i32, u8) {
+    let t = i64::from(today_year);
+    let y = year.clamp(t - 5, t + 5).clamp(2004, 2030);
+    (y as i32, ((month - 1) % 12).unsigned_abs() as u8 + 1)
+}
+
 pub(super) fn to_seconds(y: i32, m: u8, d: u8, hour: u8, minute: u8) -> i64 {
     days_from_civil(y, m, d) * 86_400 + i64::from(hour) * 3600 + i64::from(minute) * 60
 }

@@ -76,17 +76,23 @@ fn the_shown_month_starts_at_today_and_moves() {
             .unwrap(),
         (11, 24, 2004)
     );
-    // `0x5b7a80`: the first of the month thirteen months on; `0x5b82a0`: 1 January 2031.
-    assert_eq!(
-        s.eval::<(i64, i64, i64)>("local _, m, d, y = CalendarGetMaxCreateDate() return m, d, y")
-            .unwrap(),
-        (4, 1, 2011)
-    );
-    assert_eq!(
-        s.eval::<(i64, i64, i64)>("local _, m, d, y = CalendarGetMaxDate() return m, d, y")
-            .unwrap(),
-        (1, 1, 2031)
-    );
+    // `0x5b7a80`: the last day of this month next year; `0x5b82a0`: 31 December 2030, a Tuesday;
+    // `0x5b8350`: today less 14 days.
+    let date = |s: &UiScript, verb: &str| -> (i64, i64, i64, i64) {
+        s.eval(&format!("return {verb}()")).unwrap()
+    };
+    assert_eq!(date(&s, "CalendarGetMaxCreateDate"), (5, 3, 31, 2011));
+    assert_eq!(date(&s, "CalendarGetMaxDate"), (3, 12, 31, 2030));
+    assert_eq!(date(&s, "CalendarGetMinHistoryDate"), (2, 3, 1, 2010));
+    // Arguments truncate; `0x5b8f70` takes `|(month - 1) % 12|` and holds the year to today ±5;
+    // `0x5b8ec0` holds an offset to 2030 (keeping the month) and to November 2004.
+    assert_eq!(month(&s, "CalendarGetMonth(0.6)"), (2, 2012, 29, 4));
+    assert_eq!(month(&s, "CalendarGetAbsMonth(13, 2010)"), (1, 2010, 31, 6));
+    assert_eq!(month(&s, "CalendarGetAbsMonth(1, 2040)"), (1, 2015, 31, 5));
+    s.run("CalendarSetAbsMonth(12, 2015)").unwrap();
+    assert_eq!(month(&s, "CalendarGetMonth(200)"), (8, 2030, 31, 5));
+    assert_eq!(month(&s, "CalendarGetMonth(-200)"), (11, 2004, 30, 2));
+    assert!(s.run("CalendarSetMonth()").is_err());
 }
 
 /// A day lists App's rows, then the raid resets that fall on it.

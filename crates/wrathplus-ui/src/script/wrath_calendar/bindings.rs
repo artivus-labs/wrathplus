@@ -3,15 +3,13 @@
 
 use mlua::{Lua, MultiValue, Value};
 
-use super::date::{days_in_month, weekday};
+mod dates;
+
 use super::{
     Open, Opened, State, WrathCalendarDate, WrathCalendarEntry, WrathCalendarFields,
     WrathCalendarInvitee, WrathCalendarKind as K, WrathCalendarRequest as R, CRITERIA,
 };
 use crate::script::{Model, ScriptValue};
-
-/// The calendar's last year (`0x5b82a0`'s constant, `0x5b7a80`'s clamp at 31 past 2000).
-const MAX_YEAR: i32 = 2031;
 
 /// `CALENDAR_STATUS_*` by wire status (`0x5f1000`).
 const STATUS_KEYS: [&str; 9] = [
@@ -37,29 +35,6 @@ const REPEAT_KEYS: [&str; 4] = [
     "CALENDAR_REPEAT_WEEKLY",
     "CALENDAR_REPEAT_BIWEEKLY",
     "CALENDAR_REPEAT_MONTHLY",
-];
-const MONTH_KEYS: [&str; 12] = [
-    "MONTH_JANUARY",
-    "MONTH_FEBRUARY",
-    "MONTH_MARCH",
-    "MONTH_APRIL",
-    "MONTH_MAY",
-    "MONTH_JUNE",
-    "MONTH_JULY",
-    "MONTH_AUGUST",
-    "MONTH_SEPTEMBER",
-    "MONTH_OCTOBER",
-    "MONTH_NOVEMBER",
-    "MONTH_DECEMBER",
-];
-const WEEKDAY_KEYS: [&str; 7] = [
-    "WEEKDAY_SUNDAY",
-    "WEEKDAY_MONDAY",
-    "WEEKDAY_TUESDAY",
-    "WEEKDAY_WEDNESDAY",
-    "WEEKDAY_THURSDAY",
-    "WEEKDAY_FRIDAY",
-    "WEEKDAY_SATURDAY",
 ];
 /// Labelled (`0x5f26f0` untraced): the statuses a moderator may set, by invite kind.
 const NORMAL_STATUSES: [u8; 7] = [0, 1, 2, 3, 4, 5, 8];
@@ -91,9 +66,9 @@ fn num(lua: &Lua, args: &MultiValue, i: usize) -> Option<f64> {
     lua.coerce_number(arg(args, i)).ok().flatten()
 }
 
-/// A rounded number argument.
+/// A number argument as the calendar verbs read it, `lua_tonumber` then truncated (`0x88b9c0`).
 fn int_arg(lua: &Lua, args: &MultiValue, i: usize) -> Option<i64> {
-    num(lua, args, i).map(|n| n.round() as i64)
+    num(lua, args, i).map(|n| i64::from(crate::script::binding_abi::ftol(n)))
 }
 
 fn text_arg(lua: &Lua, args: &MultiValue, i: usize) -> Option<String> {
@@ -162,10 +137,6 @@ fn set(
 ) -> mlua::Result<()> {
     lua.globals()
         .set(name, lua.create_function(move |lua, args| f(lua, args))?)
-}
-
-fn date4(d: &WrathCalendarDate) -> Vec<Value> {
-    vec![i(d.weekday), i(d.month), i(d.day), i(d.year)]
 }
 
 fn mod_status(rank: u8) -> &'static str {
@@ -332,96 +303,8 @@ fn rsvp_context(lua: &Lua, status: u8) {
     });
 }
 
-fn month_values(y: i32, m: u8) -> Vec<Value> {
-    vec![i(m), i(y), i(days_in_month(y, m)), i(weekday(y, m, 1))]
-}
-
 pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
-    // ── dates and months ──────────────────────────────────────────────────────────────────────
-    // CalendarGetDate (`0x5b8160`): weekday, month, day, year of the server's today.
-    set(lua, "CalendarGetDate", |lua, _| {
-        let t = read(lua, State::today);
-        many(date4(&t))
-    })?;
-    // CalendarGetMonth([offset]) (`0x5b99f0`): month, year, days, weekday of the 1st.
-    set(lua, "CalendarGetMonth", |lua, args| {
-        let offset = int_arg(lua, &args, 0).unwrap_or(0) as i32;
-        let v = read(lua, |st| {
-            let (y, m) = st.month(offset);
-            month_values(y, m)
-        });
-        many(v)
-    })?;
-    set(lua, "CalendarGetAbsMonth", |lua, args| {
-        let (Some(m), y) = (int_arg(lua, &args, 0), int_arg(lua, &args, 1)) else {
-            return usage("Usage: CalendarGetAbsMonth(month[, year])");
-        };
-        let v = read(lua, |st| {
-            let y = y.map_or(st.shown().0, |y| y as i32);
-            let (y, m) = super::date::add_months(y, 1, m as i32 - 1);
-            month_values(y, m)
-        });
-        many(v)
-    })?;
-    // CalendarSetMonth(offset) (`0x5bcc00`) and CalendarSetAbsMonth(month[, year]) (`0x5c43b0`).
-    set(lua, "CalendarSetMonth", |lua, args| {
-        let Some(offset) = int_arg(lua, &args, 0) else {
-            return usage("Usage: CalendarSetMonth(offsetMonths)");
-        };
-        write(lua, |st, _| st.shown = Some(st.month(offset as i32)));
-        many(vec![])
-    })?;
-    set(lua, "CalendarSetAbsMonth", |lua, args| {
-        let Some(m) = int_arg(lua, &args, 0) else {
-            return usage("Usage: CalendarSetAbsMonth(month[, year])");
-        };
-        let y = int_arg(lua, &args, 1);
-        write(lua, |st, _| {
-            let y = y.map_or(st.shown().0, |y| y as i32);
-            st.shown = Some(super::date::add_months(y, 1, m as i32 - 1));
-        });
-        many(vec![])
-    })?;
-    // CalendarGetMinDate (`0x5b81f0`): 24 November 2004. Labelled: the history floor is the same,
-    // where `0x5b8350` steps a copy of today back 14 days and the decompile pushes today itself.
-    for name in ["CalendarGetMinDate", "CalendarGetMinHistoryDate"] {
-        set(lua, name, |_, _| {
-            many(date4(&WrathCalendarDate::new(2004, 11, 24, 0, 0)))
-        })?;
-    }
-    // CalendarGetMaxCreateDate (`0x5b8410` → `0x5b7a80`): the first of the month thirteen months on
-    // from today, 23:59, its year at most 2031.
-    set(lua, "CalendarGetMaxCreateDate", |lua, _| {
-        let t = read(lua, State::today);
-        let (y, m) = super::date::add_months(t.year, t.month, 13);
-        many(date4(&WrathCalendarDate::new(
-            y.min(MAX_YEAR),
-            m,
-            1,
-            23,
-            59,
-        )))
-    })?;
-    // CalendarGetMaxDate (`0x5b82a0`): 1 January 2031, a constant.
-    set(lua, "CalendarGetMaxDate", |_, _| {
-        many(date4(&WrathCalendarDate::new(MAX_YEAR, 1, 1, 23, 59)))
-    })?;
-    set(lua, "CalendarGetMonthNames", |lua, _| {
-        many(
-            MONTH_KEYS
-                .iter()
-                .map(|k| s(lua, &gs(lua, k)))
-                .collect::<mlua::Result<_>>()?,
-        )
-    })?;
-    set(lua, "CalendarGetWeekdayNames", |lua, _| {
-        many(
-            WEEKDAY_KEYS
-                .iter()
-                .map(|k| s(lua, &gs(lua, k)))
-                .collect::<mlua::Result<_>>()?,
-        )
-    })?;
+    dates::install(lua)?;
 
     // ── the day lists ─────────────────────────────────────────────────────────────────────────
     set(lua, "CalendarGetNumDayEvents", |lua, args| {
