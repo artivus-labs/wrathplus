@@ -75,15 +75,18 @@ fn select(model: &mut Model, identity: Identity) -> bool {
 pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     let g = lua.globals();
     // SetChannelWatch("channel") (`0x4ffc30` → `0x4fe460(0x3ef)`) and ClearChannelWatch()
-    // (`0x4ffc50`, `0x3F3` with no body). Labelled: the name resolver (`0x4fe160`) is not read, so
-    // the argument goes out as given and an empty one sends nothing.
+    // (`0x4ffc50`, `0x3F3` with no body): the channel through the verbs' resolver `0x4fe160`.
     g.set(
         "SetChannelWatch",
         lua.create_function(|lua, value: Value| {
             let Some(name) = lua.coerce_string(value)?.map(|s| s.to_string_lossy()) else {
                 return Err(mlua::Error::runtime("Usage: SetChannelWatch(\"channel\")"));
             };
-            if !name.is_empty() {
+            let resolved = {
+                let m = lua.app_data_ref::<Model>().expect("model");
+                super::channel::resolve_channel(&m, &name)
+            };
+            if let Some(name) = resolved {
                 let mut m = lua.app_data_mut::<Model>().expect("model");
                 m.wrath_channel_roster
                     .requests

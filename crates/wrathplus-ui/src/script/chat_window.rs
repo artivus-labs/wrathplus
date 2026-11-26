@@ -225,28 +225,6 @@ impl ChatWindowLook {
     }
 }
 
-/// The leading decimal integer after optional whitespace and a sign, 0 when there is none. The
-/// reference's `SStrToInt` (`0x64ac60`) takes neither the whitespace nor a `+`.
-pub(super) fn leading_int(s: &str) -> i64 {
-    let s = s.trim_start();
-    let (neg, digits) = match s.strip_prefix('-') {
-        Some(rest) => (true, rest),
-        None => (false, s.strip_prefix('+').unwrap_or(s)),
-    };
-    let n: i64 = digits
-        .chars()
-        .take_while(|c| c.is_ascii_digit())
-        .fold(0i64, |acc, c| {
-            acc.saturating_mul(10)
-                .saturating_add(i64::from(c as u8 - b'0'))
-        });
-    if neg {
-        -n
-    } else {
-        n
-    }
-}
-
 /// The byte `fistp(x · 255.0)` stores, clamped (the module's deviation); non-finite stores 0.
 fn to_byte(x: f64) -> u8 {
     if !x.is_finite() {
@@ -611,9 +589,9 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // RemoveChatWindowChannel(index, "channel") (`0x4ff0d0`): a numeric key names the joined
-    // channel in slot n, and an empty slot removes nothing; the key then resolves to its DBC
-    // Shortcut as above, and the entry of that name is freed.
+    // RemoveChatWindowChannel(index, "channel") (`0x4ff0d0`): the key through the channel verbs'
+    // resolver `0x4fe160` (a slot number names its confirmed record, an empty slot removes
+    // nothing), then its DBC Shortcut as above, and the entry of that name is freed.
     g.set(
         "RemoveChatWindowChannel",
         lua.create_function(|lua, args: MultiValue| {
@@ -628,19 +606,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 .unwrap_or_default();
             let key = {
                 let model = lua.app_data_ref::<Model>().expect("model app_data");
-                let n = leading_int(&key);
-                let key = if n > 0 {
-                    match usize::try_from(n)
-                        .ok()
-                        .and_then(|n| model.joined_channels.get(n - 1))
-                        .and_then(|c| c.as_ref().filter(|c| c.confirmed))
-                        .map(|c| c.name.clone())
-                    {
-                        Some(name) => name,
-                        None => return Ok(()),
-                    }
-                } else {
-                    key.trim().to_string()
+                let Some(key) = super::channel::resolve_channel(&model, &key) else {
+                    return Ok(());
                 };
                 match model
                     .zone_channel_catalog

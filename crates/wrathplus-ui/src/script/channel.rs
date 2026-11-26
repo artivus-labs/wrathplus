@@ -185,6 +185,25 @@ fn confirmed_at(model: &Model, n: i64) -> Option<&JoinedChannel> {
         .filter(|c| c.confirmed)
 }
 
+/// `0x4fe160`, the channel verbs' name resolver: an empty name is none; one whose `SStrToInt` is
+/// 0 goes as typed; a number names the confirmed record in that slot, else none.
+pub(super) fn resolve_channel(model: &Model, arg: &str) -> Option<String> {
+    if arg.is_empty() {
+        return None;
+    }
+    match super::cvars::sstr_to_int(arg) {
+        0 => Some(arg.to_string()),
+        n => confirmed_at(model, i64::from(n)).map(|c| c.name.clone()),
+    }
+}
+
+/// `lua_tolstring` of an argument `lua_isstring` passed, or `None`.
+fn string_value(lua: &Lua, v: &Value) -> Option<String> {
+    is_string(Some(v))
+        .then(|| super::binding_abi::optional_string(lua, v))
+        .flatten()
+}
+
 /// The name `GetChannelList` and `GetChannelDisplayInfo` answer (`0x4fe6a0`-`0x4fe6d5`,
 /// `0x4fdf8f`-`0x4fdfab`): the row's Shortcut when the record's DBC id names one, else the name.
 pub(super) fn listed_name<'a>(model: &'a Model, name: &'a str, id: u32) -> &'a str {
@@ -411,7 +430,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                     .to_string(),
                 _ => return Err(mlua::Error::runtime(r#"Usage: LeaveChannelByName("name")"#)),
             };
-            if super::chat_window::leading_int(&key) != 0 {
+            if super::cvars::sstr_to_int(&key) != 0 {
                 push(lua, ChannelCommand::Leave { name: key });
                 return Ok(());
             }
@@ -438,7 +457,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // The one-name verbs: each queues its `CMSG_*` and returns nothing.
+    // The one-name verbs (`0x4fe460`): `lua_isstring` or `Usage: %s("channel")`, the channel
+    // through `0x4fe160`, and the `CMSG_*` when it resolves; no values.
     for (verb, make) in [
         (
             "ListChannelByName",
@@ -454,9 +474,13 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     ] {
         g.set(
             verb,
-            lua.create_function(move |lua, name: Option<String>| {
-                if let Some(name) = non_empty(name) {
-                    push(lua, make(name));
+            lua.create_function(move |lua, channel: Value| {
+                let Some(channel) = string_value(lua, &channel) else {
+                    return Err(mlua::Error::runtime(format!("Usage: {verb}(\"channel\")")));
+                };
+                let mut model = lua.app_data_mut::<Model>().expect("model app_data");
+                if let Some(name) = resolve_channel(&model, &channel) {
+                    model.channel_commands.push(make(name));
                 }
                 Ok(())
             })?,
@@ -471,7 +495,10 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // The two-name verbs: (channel, player), or (channel, password) for the password.
+    // The two-name verbs (`0x4fe330`): both `lua_isstring` or `Usage: %s("channel", "name")`; a
+    // channel `0x4fe160` resolves to nothing sends nothing; a player past 48 bytes raises
+    // `Name too long` (`0x4fe392`). SetChannelPassword (`0x4fe720`) has its own usage line and no
+    // length test. The second word goes raw, an empty one included.
     for (verb, make) in [
         (
             "SetChannelOwner",
@@ -512,21 +539,29 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             player,
         }),
     ] {
+        let password = verb == "SetChannelPassword";
         g.set(
             verb,
-            lua.create_function(
-                move |lua, (name, second): (Option<String>, Option<String>)| {
-                    if let Some(name) = non_empty(name) {
-                        // A password may be empty (`/password General` clears it); a player name
-                        // may not.
-                        let second = second.unwrap_or_default();
-                        if verb == "SetChannelPassword" || !second.trim().is_empty() {
-                            push(lua, make(name, second.trim().to_string()));
-                        }
-                    }
-                    Ok(())
-                },
-            )?,
+            lua.create_function(move |lua, (channel, second): (Value, Value)| {
+                let (Some(channel), Some(second)) =
+                    (string_value(lua, &channel), string_value(lua, &second))
+                else {
+                    return Err(mlua::Error::runtime(if password {
+                        "Usage: SetChannelPassword(\"name\", \"password\")".to_string()
+                    } else {
+                        format!("Usage: {verb}(\"channel\", \"name\")")
+                    }));
+                };
+                let mut model = lua.app_data_mut::<Model>().expect("model app_data");
+                let Some(name) = resolve_channel(&model, &channel) else {
+                    return Ok(());
+                };
+                if !password && second.len() > 0x30 {
+                    return Err(mlua::Error::runtime("Name too long"));
+                }
+                model.channel_commands.push(make(name, second));
+                Ok(())
+            })?,
         )?;
     }
 
@@ -538,233 +573,5 @@ impl super::UiScript {
     /// pushes it on each `YOU_JOINED` and `YOU_LEFT`.
     pub fn set_joined_channels(&mut self, joined: Vec<Option<JoinedChannel>>) {
         self.model_mut().joined_channels = joined;
-    }
-}
-
-#[cfg(test)]
-mod command_tests {
-    use super::{ChannelCommand, ZoneChannelRow};
-    use crate::script::UiScript;
-
-    fn catalog() -> Vec<ZoneChannelRow> {
-        vec![
-            ZoneChannelRow {
-                id: 1,
-                shortcut: "General".into(),
-                resolved: Some("General - Elwynn Forest".into()),
-                listed: true,
-            },
-            ZoneChannelRow {
-                id: 2,
-                shortcut: "Trade".into(),
-                resolved: None,
-                listed: false,
-            },
-        ]
-    }
-
-    /// The row, custom-channel and nil legs, and that 0 is truthy.
-    #[test]
-    fn join_channel_by_name_answers_the_row_custom_and_nil_legs() {
-        let mut s = UiScript::new().unwrap();
-        s.set_zone_channel_catalog(catalog());
-        s.run(
-            "A = {JoinChannelByName('General', 'pw', 1)} \
-             B = {JoinChannelByName('MyChan', nil, 1)} \
-             C = {JoinChannelByName('Trade', nil, 1)} \
-             D = {JoinChannelByName('two words', nil, 1)}",
-        )
-        .unwrap();
-        assert_eq!(
-            s.eval::<(i64, String)>("return A[1], A[2]").unwrap(),
-            (1, "General - Elwynn Forest".to_string())
-        );
-        assert!(s
-            .eval::<bool>("return B[1] == 0 and B[2] == nil and table.getn(B) == 1")
-            .unwrap());
-        assert!(
-            s.eval::<bool>("return C[1] == nil").unwrap(),
-            "empty substitution"
-        );
-        assert!(s.eval::<bool>("return D[1] == nil").unwrap(), "a space");
-        assert_eq!(
-            s.take_channel_commands(),
-            vec![
-                ChannelCommand::Join {
-                    name: "General - Elwynn Forest".into(),
-                    password: "pw".into()
-                },
-                ChannelCommand::Join {
-                    name: "MyChan".into(),
-                    password: String::new()
-                },
-            ],
-            "sent on both non-nil legs, the resolved name for a row"
-        );
-    }
-
-    #[test]
-    fn enumerate_server_channels_lists_the_shortcuts_the_zone_admits() {
-        let mut s = UiScript::new().unwrap();
-        assert_eq!(
-            s.arity("EnumerateServerChannels()").unwrap(),
-            0,
-            "no zone yet — 0 values"
-        );
-        s.set_zone_channel_catalog(catalog());
-        assert_eq!(
-            s.eval::<Vec<String>>("return {EnumerateServerChannels()}")
-                .unwrap(),
-            vec!["General".to_string()],
-            "the shortcut, never the composed name; a city row only in a city"
-        );
-    }
-
-    #[test]
-    fn the_management_verbs_queue_in_call_order_and_drop_empty_names() {
-        let mut s = UiScript::new().unwrap();
-        s.run(
-            "LeaveChannelByName('General') ListChannelByName('') ListChannels() \
-             SetChannelPassword('General', '') ChannelKick('General', 'Bob') \
-             ChannelKick('General', '') ChannelModerate('General') \
-             ChannelToggleAnnouncements('General') SetChannelOwner('General', 'Ann')",
-        )
-        .unwrap();
-        assert_eq!(
-            s.take_channel_commands(),
-            vec![
-                ChannelCommand::Leave {
-                    name: "General".into()
-                },
-                ChannelCommand::ListAll,
-                ChannelCommand::SetPassword {
-                    name: "General".into(),
-                    password: String::new()
-                },
-                ChannelCommand::Kick {
-                    name: "General".into(),
-                    player: "Bob".into()
-                },
-                ChannelCommand::Moderate {
-                    name: "General".into()
-                },
-                ChannelCommand::ToggleAnnouncements {
-                    name: "General".into()
-                },
-                ChannelCommand::SetOwner {
-                    name: "General".into(),
-                    player: "Ann".into()
-                },
-            ]
-        );
-    }
-
-    /// `frameId - 1` indexes the ten window records (`0x49ec24`); a missing, non-numeric or
-    /// out-of-range frame skips the registration and nothing else.
-    #[test]
-    fn join_channel_by_name_registers_the_channel_in_the_named_window() {
-        let mut s = UiScript::new().unwrap();
-        s.set_zone_channel_catalog(catalog());
-        s.run(
-            "JoinChannelByName('General', nil, 1) \
-             JoinChannelByName('general', nil, 1) \
-             JoinChannelByName('MyChan', nil, 2) \
-             JoinChannelByName('Trade', nil, nil) \
-             JoinChannelByName('LocalDefense', nil, 11) \
-             JoinChannelByName('WorldDefense', nil, 0)",
-        )
-        .unwrap();
-        let looks = s.chat_window_looks();
-        assert_eq!(
-            looks[0].channels,
-            vec![("General".to_string(), 1)],
-            "the DBC Shortcut and its id, once — the second join deduplicated by name"
-        );
-        assert_eq!(
-            looks[1].channels,
-            vec![("MyChan".to_string(), 0)],
-            "a custom channel: the name and id 0"
-        );
-        assert!(
-            looks[2..].iter().all(|l| l.channels.is_empty()),
-            "nil, 11 and 0 register nowhere"
-        );
-        assert_eq!(
-            s.take_chat_window_changes(),
-            vec![0, 1],
-            "…and both windows are owed a save"
-        );
-        // The joins went out whatever the frame argument: five, as this catalog's Trade is the
-        // nil leg, which registers nothing either.
-        assert_eq!(s.take_channel_commands().len(), 5);
-    }
-
-    /// `LeaveChannelByName`'s four legs and its raise (`0x4a0000` → `0x49ee70`); a Shortcut strips
-    /// its entry from every window.
-    #[test]
-    fn leave_channel_by_name_composes_strips_and_raises_the_way_the_reference_does() {
-        let mut s = UiScript::new().unwrap();
-        s.set_zone_channel_catalog(catalog());
-        s.run(
-            "JoinChannelByName('General', nil, 1) JoinChannelByName('MyChan', nil, 1) \
-             JoinChannelByName('General', nil, 2)",
-        )
-        .unwrap();
-        s.take_channel_commands();
-        s.take_chat_window_changes();
-
-        s.run("LeaveChannelByName('2')").unwrap();
-        assert_eq!(
-            s.take_channel_commands(),
-            vec![ChannelCommand::Leave { name: "2".into() }],
-            "a number goes through as typed — the app holds the slot states"
-        );
-        assert!(
-            s.take_chat_window_changes().is_empty(),
-            "…and strips no window: a slot name never equals a window entry"
-        );
-
-        s.run("LeaveChannelByName('general')").unwrap();
-        assert_eq!(
-            s.take_channel_commands(),
-            vec![ChannelCommand::Leave {
-                name: "General - Elwynn Forest".into()
-            }],
-            "a shortcut composes for the zone"
-        );
-        let looks = s.chat_window_looks();
-        assert_eq!(
-            looks[0].channels,
-            vec![("MyChan".to_string(), 0)],
-            "General stripped from window 1, MyChan kept"
-        );
-        assert!(
-            looks[1].channels.is_empty(),
-            "…and from window 2 — all ten are walked"
-        );
-        assert_eq!(s.take_chat_window_changes(), vec![0, 1]);
-
-        s.run("LeaveChannelByName('Trade')").unwrap();
-        assert!(
-            s.take_channel_commands().is_empty(),
-            "unresolvable here (no city word in this catalog): a complete no-op"
-        );
-
-        s.run("LeaveChannelByName('mychan')").unwrap();
-        assert_eq!(
-            s.take_channel_commands(),
-            vec![ChannelCommand::Leave {
-                name: "mychan".into()
-            }],
-            "custom: verbatim"
-        );
-        assert!(
-            s.chat_window_looks()[0].channels.is_empty(),
-            "…and stripped verbatim, case-folded"
-        );
-
-        let e = s.run("LeaveChannelByName()").unwrap_err();
-        assert!(e.to_string().contains("Usage: LeaveChannelByName"), "{e}");
-        assert_eq!(s.arity("LeaveChannelByName('x')").unwrap(), 0);
     }
 }

@@ -326,3 +326,273 @@ fn a_manual_guild_recruitment_verb_resets_the_latch() {
     );
     assert!(!s.take_guild_recruitment_change());
 }
+
+/// The join and management verbs, as they queue their `CMSG_*`.
+mod command_tests {
+    use crate::script::{ChannelCommand, UiScript, ZoneChannelRow};
+
+    fn catalog() -> Vec<ZoneChannelRow> {
+        vec![
+            ZoneChannelRow {
+                id: 1,
+                shortcut: "General".into(),
+                resolved: Some("General - Elwynn Forest".into()),
+                listed: true,
+            },
+            ZoneChannelRow {
+                id: 2,
+                shortcut: "Trade".into(),
+                resolved: None,
+                listed: false,
+            },
+        ]
+    }
+
+    /// The row, custom-channel and nil legs, and that 0 is truthy.
+    #[test]
+    fn join_channel_by_name_answers_the_row_custom_and_nil_legs() {
+        let mut s = UiScript::new().unwrap();
+        s.set_zone_channel_catalog(catalog());
+        s.run(
+            "A = {JoinChannelByName('General', 'pw', 1)} \
+             B = {JoinChannelByName('MyChan', nil, 1)} \
+             C = {JoinChannelByName('Trade', nil, 1)} \
+             D = {JoinChannelByName('two words', nil, 1)}",
+        )
+        .unwrap();
+        assert_eq!(
+            s.eval::<(i64, String)>("return A[1], A[2]").unwrap(),
+            (1, "General - Elwynn Forest".to_string())
+        );
+        assert!(s
+            .eval::<bool>("return B[1] == 0 and B[2] == nil and table.getn(B) == 1")
+            .unwrap());
+        assert!(
+            s.eval::<bool>("return C[1] == nil").unwrap(),
+            "empty substitution"
+        );
+        assert!(s.eval::<bool>("return D[1] == nil").unwrap(), "a space");
+        assert_eq!(
+            s.take_channel_commands(),
+            vec![
+                ChannelCommand::Join {
+                    name: "General - Elwynn Forest".into(),
+                    password: "pw".into()
+                },
+                ChannelCommand::Join {
+                    name: "MyChan".into(),
+                    password: String::new()
+                },
+            ],
+            "sent on both non-nil legs, the resolved name for a row"
+        );
+    }
+
+    #[test]
+    fn enumerate_server_channels_lists_the_shortcuts_the_zone_admits() {
+        let mut s = UiScript::new().unwrap();
+        assert_eq!(
+            s.arity("EnumerateServerChannels()").unwrap(),
+            0,
+            "no zone yet — 0 values"
+        );
+        s.set_zone_channel_catalog(catalog());
+        assert_eq!(
+            s.eval::<Vec<String>>("return {EnumerateServerChannels()}")
+                .unwrap(),
+            vec!["General".to_string()],
+            "the shortcut, never the composed name; a city row only in a city"
+        );
+    }
+
+    /// `0x4fe160`: a slot number names its confirmed record and an empty or unconfirmed one
+    /// sends nothing; any other word goes as typed. `0x4fe330`/`0x4fe460`/`0x4fe720` raise their
+    /// usage lines and `Name too long` past 48 bytes, and send the second word raw.
+    #[test]
+    fn the_management_verbs_resolve_slot_numbers_and_check_their_arguments() {
+        let mut s = UiScript::new().unwrap();
+        let rec = |name: &str, confirmed| {
+            Some(crate::script::JoinedChannel {
+                name: name.into(),
+                id: 0,
+                confirmed,
+            })
+        };
+        s.set_joined_channels(vec![rec("Mine", true), rec("Pending", false)]);
+        s.run(
+            "LeaveChannelByName('General') ListChannelByName('') ListChannelByName('1') \
+             ListChannelByName('2') ListChannelByName('3') ListChannels() \
+             SetChannelPassword('1', '') ChannelKick('General', 'Bob') ChannelKick('1', '') \
+             ChannelToggleAnnouncements(' 1') SetChannelOwner('General', ' Ann')",
+        )
+        .unwrap();
+        let named = |name: &str| name.to_string();
+        assert_eq!(
+            s.take_channel_commands(),
+            vec![
+                ChannelCommand::Leave {
+                    name: named("General")
+                },
+                ChannelCommand::List {
+                    name: named("Mine")
+                },
+                ChannelCommand::ListAll,
+                ChannelCommand::SetPassword {
+                    name: named("Mine"),
+                    password: String::new()
+                },
+                ChannelCommand::Kick {
+                    name: named("General"),
+                    player: named("Bob")
+                },
+                ChannelCommand::Kick {
+                    name: named("Mine"),
+                    player: String::new()
+                },
+                ChannelCommand::ToggleAnnouncements { name: named(" 1") },
+                ChannelCommand::SetOwner {
+                    name: named("General"),
+                    player: named(" Ann")
+                },
+            ]
+        );
+        for (call, err) in [
+            (
+                "ListChannelByName()",
+                "Usage: ListChannelByName(\"channel\")",
+            ),
+            (
+                "ChannelKick('1')",
+                "Usage: ChannelKick(\"channel\", \"name\")",
+            ),
+            (
+                "ChannelBan({}, 'x')",
+                "Usage: ChannelBan(\"channel\", \"name\")",
+            ),
+            (
+                "SetChannelPassword('1')",
+                "Usage: SetChannelPassword(\"name\", \"password\")",
+            ),
+            ("ChannelInvite('1', string.rep('x', 49))", "Name too long"),
+        ] {
+            let e = s.run(call).unwrap_err().to_string();
+            assert!(e.contains(err), "{call}: {e}");
+        }
+        s.run("ChannelInvite('9', string.rep('x', 49)) ChannelInvite('1', string.rep('x', 48))")
+            .unwrap();
+        assert_eq!(
+            s.take_channel_commands().len(),
+            1,
+            "an unresolved channel stops first"
+        );
+    }
+
+    /// `frameId - 1` indexes the ten window records (`0x49ec24`); a missing, non-numeric or
+    /// out-of-range frame skips the registration and nothing else.
+    #[test]
+    fn join_channel_by_name_registers_the_channel_in_the_named_window() {
+        let mut s = UiScript::new().unwrap();
+        s.set_zone_channel_catalog(catalog());
+        s.run(
+            "JoinChannelByName('General', nil, 1) \
+             JoinChannelByName('general', nil, 1) \
+             JoinChannelByName('MyChan', nil, 2) \
+             JoinChannelByName('Trade', nil, nil) \
+             JoinChannelByName('LocalDefense', nil, 11) \
+             JoinChannelByName('WorldDefense', nil, 0)",
+        )
+        .unwrap();
+        let looks = s.chat_window_looks();
+        assert_eq!(
+            looks[0].channels,
+            vec![("General".to_string(), 1)],
+            "the DBC Shortcut and its id, once — the second join deduplicated by name"
+        );
+        assert_eq!(
+            looks[1].channels,
+            vec![("MyChan".to_string(), 0)],
+            "a custom channel: the name and id 0"
+        );
+        assert!(
+            looks[2..].iter().all(|l| l.channels.is_empty()),
+            "nil, 11 and 0 register nowhere"
+        );
+        assert_eq!(
+            s.take_chat_window_changes(),
+            vec![0, 1],
+            "…and both windows are owed a save"
+        );
+        // The joins went out whatever the frame argument: five, as this catalog's Trade is the
+        // nil leg, which registers nothing either.
+        assert_eq!(s.take_channel_commands().len(), 5);
+    }
+
+    /// `LeaveChannelByName`'s four legs and its raise (`0x4a0000` → `0x49ee70`); a Shortcut strips
+    /// its entry from every window.
+    #[test]
+    fn leave_channel_by_name_composes_strips_and_raises_the_way_the_reference_does() {
+        let mut s = UiScript::new().unwrap();
+        s.set_zone_channel_catalog(catalog());
+        s.run(
+            "JoinChannelByName('General', nil, 1) JoinChannelByName('MyChan', nil, 1) \
+             JoinChannelByName('General', nil, 2)",
+        )
+        .unwrap();
+        s.take_channel_commands();
+        s.take_chat_window_changes();
+
+        s.run("LeaveChannelByName('2')").unwrap();
+        assert_eq!(
+            s.take_channel_commands(),
+            vec![ChannelCommand::Leave { name: "2".into() }],
+            "a number goes through as typed — the app holds the slot states"
+        );
+        assert!(
+            s.take_chat_window_changes().is_empty(),
+            "…and strips no window: a slot name never equals a window entry"
+        );
+
+        s.run("LeaveChannelByName('general')").unwrap();
+        assert_eq!(
+            s.take_channel_commands(),
+            vec![ChannelCommand::Leave {
+                name: "General - Elwynn Forest".into()
+            }],
+            "a shortcut composes for the zone"
+        );
+        let looks = s.chat_window_looks();
+        assert_eq!(
+            looks[0].channels,
+            vec![("MyChan".to_string(), 0)],
+            "General stripped from window 1, MyChan kept"
+        );
+        assert!(
+            looks[1].channels.is_empty(),
+            "…and from window 2 — all ten are walked"
+        );
+        assert_eq!(s.take_chat_window_changes(), vec![0, 1]);
+
+        s.run("LeaveChannelByName('Trade')").unwrap();
+        assert!(
+            s.take_channel_commands().is_empty(),
+            "unresolvable here (no city word in this catalog): a complete no-op"
+        );
+
+        s.run("LeaveChannelByName('mychan')").unwrap();
+        assert_eq!(
+            s.take_channel_commands(),
+            vec![ChannelCommand::Leave {
+                name: "mychan".into()
+            }],
+            "custom: verbatim"
+        );
+        assert!(
+            s.chat_window_looks()[0].channels.is_empty(),
+            "…and stripped verbatim, case-folded"
+        );
+
+        let e = s.run("LeaveChannelByName()").unwrap_err();
+        assert!(e.to_string().contains("Usage: LeaveChannelByName"), "{e}");
+        assert_eq!(s.arity("LeaveChannelByName('x')").unwrap(), 0);
+    }
+}
