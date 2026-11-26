@@ -162,14 +162,23 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // `GetBindLocation()`: the hearthstone's bind location name, which the instance-boot dialog
-    // formats into its text (`StaticPopup.lua:1742`). `""` until `SMSG_BINDPOINTUPDATE` lands, as
-    // the reference's empty buffer, never nil, since addons concatenate it.
+    // `GetBindLocation()` (`0x516b20`): the bind area's AreaTable name, else `GetText("HOME_INN")`
+    // (`0x516b60`), the global or the token itself; never nil (`StaticPopup.lua:1742` formats it).
     g.set(
         "GetBindLocation",
         lua.create_function(|lua, ()| {
-            let model = lua.app_data_ref::<Model>().expect("model app_data");
-            lua.create_string(&model.bind_location)
+            let name = lua
+                .app_data_ref::<Model>()
+                .expect("model")
+                .bind_location
+                .clone();
+            if !name.is_empty() {
+                return lua.create_string(&name);
+            }
+            match lua.globals().get::<Value>("HOME_INN")? {
+                Value::String(inn) => Ok(inn),
+                _ => lua.create_string("HOME_INN"),
+            }
         })?,
     )?;
 

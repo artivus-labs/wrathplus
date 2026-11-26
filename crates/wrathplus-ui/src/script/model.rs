@@ -1012,7 +1012,7 @@ pub(crate) struct Model {
     /// by `"player"` pushes that carry it: corrected, never blanked. A per-login rebuild is unseen,
     /// as its verbs exist only in game (`0x850438`), not at the glue screen (`0x46abb0`).
     pub(crate) player_record: super::PlayerRecord,
-    /// `GetBindLocation()`, the bind point's area name: `""` before it lands, never nil.
+    /// `GetBindLocation()`'s bind point area name, `""` until it lands (then `HOME_INN`).
     pub(crate) bind_location: String,
     /// `GMTicketCategory.dbc` `(id, name)` rows in file order; the ids are wire values.
     pub(crate) gm_ticket_categories: Vec<(u32, String)>,
