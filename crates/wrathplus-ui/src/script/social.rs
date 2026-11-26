@@ -68,8 +68,8 @@ pub struct SocialState {
 pub enum SocialRequest {
     /// `ShowFriends()`: `CMSG_FRIEND_LIST`.
     RefreshFriends,
-    /// `AddFriend(name)`.
-    AddFriend(String),
+    /// `AddFriend(name [, note])` and `AddOrRemoveFriend`'s add: CMSG `0x69` carries both.
+    AddFriend { name: String, note: String },
     /// `RemoveFriend(index)`, from the friends frame's button.
     RemoveFriendIndex(u32),
     /// `RemoveFriend(name)`, from `/removefriend`; the app resolves either shape to the guid.
@@ -184,14 +184,15 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // AddFriend(name): a blank name is not sent, as vmangos drops it without a reply
-    // (`MiscHandler.cpp:468`).
+    // AddFriend(name [, note]) (`0x6b6af0`): no name does nothing; the note is a string argument
+    // 2, else empty. No blank test: `0x6b5400` sends what it is given.
     g.set(
         "AddFriend",
-        lua.create_function(|lua, name: String| {
-            if !name.trim().is_empty() {
+        lua.create_function(|lua, args: MultiValue| {
+            if let Some((name, note)) = friend_args(lua, &args) {
                 let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-                model.social_requests.push(SocialRequest::AddFriend(name));
+                let request = SocialRequest::AddFriend { name, note };
+                model.social_requests.push(request);
             }
             Ok(())
         })?,
@@ -263,6 +264,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
+    // AddIgnore / DelIgnore / AddOrDelIgnore(name) (`0x6b6c00`, `0x6b7d70`, `0x6b6ba0`): no name
+    // does nothing.
     for (global, make) in [
         ("AddIgnore", SocialRequest::AddIgnore as fn(String) -> _),
         ("DelIgnore", SocialRequest::DelIgnore as fn(String) -> _),
@@ -273,7 +276,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     ] {
         g.set(
             global,
-            lua.create_function(move |lua, name: String| {
+            lua.create_function(move |lua, name: Value| {
+                let name = super::binding_abi::optional_string(lua, &name).unwrap_or_default();
                 if !name.trim().is_empty() {
                     let mut model = lua.app_data_mut::<Model>().expect("model app_data");
                     model.social_requests.push(make(name));
@@ -378,6 +382,16 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     )?;
 
     Ok(())
+}
+
+/// `AddFriend`'s name and note as `0x6b6af0` reads them: `lua_tostring(1)`, then argument 2 when
+/// `lua_isstring`, else `""`.
+pub(super) fn friend_args(lua: &Lua, args: &MultiValue) -> Option<(String, String)> {
+    let name = super::binding_abi::optional_string(lua, args.front()?)?;
+    let note = args
+        .get(1)
+        .and_then(|v| super::binding_abi::optional_string(lua, v));
+    Some((name, note.unwrap_or_default()))
 }
 
 /// 12340's `UNKNOWN` (`0x9e4110`) through `0x819d40`, which answers `""` for an unset global.

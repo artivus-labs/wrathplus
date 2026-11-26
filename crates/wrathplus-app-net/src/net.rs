@@ -2003,6 +2003,7 @@ pub enum ClientCommand {
     /// `CMSG_ADD_FRIEND`.
     AddFriend {
         name: String,
+        note: String,
     },
     /// `CMSG_DEL_FRIEND`.
     DelFriend {

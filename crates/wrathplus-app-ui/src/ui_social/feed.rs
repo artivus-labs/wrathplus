@@ -403,14 +403,14 @@ pub fn drain_social(
             SocialRequest::RefreshFriends => {
                 let _ = commands.0.send(ClientCommand::FriendListRequest);
             }
-            SocialRequest::AddFriend(name) => {
-                // `0x5ae67c`: the Friends tutorial is acknowledged just before the send.
+            SocialRequest::AddFriend { name, note } => {
+                // `0x6b5409`: the Friends tutorial is acknowledged just before the send.
                 if let Some(t) = tutorials.as_mut() {
                     t.write(crate::app_core::state::TutorialEvent::Acknowledge {
                         id: crate::app_core::tutorial::id::FRIENDS,
                     });
                 }
-                let _ = commands.0.send(ClientCommand::AddFriend { name });
+                let _ = commands.0.send(ClientCommand::AddFriend { name, note });
             }
             SocialRequest::RemoveFriendIndex(index) => {
                 if let Some(guid) = row_guid(&social.display_order, index) {

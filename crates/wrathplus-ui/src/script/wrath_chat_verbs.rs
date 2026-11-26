@@ -201,22 +201,20 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     }
 
     // ── friends ──
-    // AddOrRemoveFriend(name [, note]) (`0x6b7b70` → `0x6b6e10`): removes a listed friend, else
-    // adds. Labelled: the note is not carried by the add request.
+    // AddOrRemoveFriend(name [, note]) (`0x6b7b70` → `0x6b6e10`): removes a friend whose name
+    // matches through `0x76ea40` (`0x6b6e98`), else adds with the note, as AddFriend.
     set(lua, "AddOrRemoveFriend", |lua, args| {
-        let Some(name) = text(lua, &arg(&args, 0))?.filter(|n| !n.trim().is_empty()) else {
+        let Some((name, note)) = super::social::friend_args(lua, &args) else {
             return none();
         };
         let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-        let listed = model
-            .social
-            .friends
-            .iter()
-            .any(|f| f.name.eq_ignore_ascii_case(&name));
+        let listed = model.social.friends.iter().any(|f| {
+            !f.name.is_empty() && super::unit::token::sstr_eq_i(f.name.as_bytes(), name.as_bytes())
+        });
         let request = if listed {
             super::social::SocialRequest::RemoveFriendName(name)
         } else {
-            super::social::SocialRequest::AddFriend(name)
+            super::social::SocialRequest::AddFriend { name, note }
         };
         model.social_requests.push(request);
         none()
@@ -656,14 +654,20 @@ mod tests {
                 name: "Fay".into(),
                 ..Default::default()
             });
-        s.run("AddOrRemoveFriend('fay') AddOrRemoveFriend('Gus', 'note')")
-            .unwrap();
+        s.run(
+            "AddOrRemoveFriend('fay') AddOrRemoveFriend('Gus', 'note') AddFriend() AddIgnore() \
+             DelIgnore() AddOrDelIgnore() AddOrRemoveFriend()",
+        )
+        .unwrap();
         let reqs = s.model_mut().social_requests.clone();
         assert_eq!(
             reqs,
             vec![
                 crate::script::social::SocialRequest::RemoveFriendName("fay".into()),
-                crate::script::social::SocialRequest::AddFriend("Gus".into()),
+                crate::script::social::SocialRequest::AddFriend {
+                    name: "Gus".into(),
+                    note: "note".into()
+                },
             ]
         );
     }

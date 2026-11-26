@@ -2671,9 +2671,9 @@ fn contacts_packet(command: ClientCommand) -> std::io::Result<(u32, Vec<u8>)> {
     match command {
         // Friends, ignores and mutes: AC lists the contacts carrying any asked flag.
         ClientCommand::FriendListRequest => social(S::ContactList { flags: 0x07 }),
-        ClientCommand::AddFriend { name } => social(S::AddFriend {
+        ClientCommand::AddFriend { name, note } => social(S::AddFriend {
             name: name.into_bytes(),
-            note: Vec::new(),
+            note: note.into_bytes(),
         }),
         ClientCommand::DelFriend { guid } => social(S::DeleteFriend { guid }),
         ClientCommand::AddIgnore { name } => social(S::AddIgnore {
