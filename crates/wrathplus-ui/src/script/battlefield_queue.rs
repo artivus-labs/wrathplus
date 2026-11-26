@@ -10,7 +10,8 @@
 //! pushes those, with every DBC and world-state value resolved; the VM owns the selection, the
 //! type order and the requests.
 //!
-//! Every index argument is `lua_isnumber`-gated and rounded to nearest (`0x84e030` + `ROUND`).
+//! Every index argument is `lua_isnumber`-gated and cut toward zero, by `fistp` under chop or by
+//! `__ftol2_sse` as each verb converts.
 
 use mlua::{Lua, MultiValue, Value};
 
@@ -159,15 +160,20 @@ fn status_text(status: u32) -> &'static str {
     }
 }
 
-/// `lua_isnumber` then the rounded value; `None` for a non-number.
+/// `lua_isnumber` then `fistp` under chop, its low dword (`0x54bc7c`); `None` for a non-number.
 fn number(lua: &Lua, v: &Value) -> mlua::Result<Option<i64>> {
     Ok(lua
         .coerce_number(v.clone())?
-        .map(|n| n.round_ties_even() as i64))
+        .map(|n| i64::from(n as i64 as i32)))
 }
 
 fn index_arg(lua: &Lua, v: &Value, usage: &'static str) -> mlua::Result<i64> {
     number(lua, v)?.ok_or_else(|| mlua::Error::RuntimeError(usage.into()))
+}
+
+/// [`index_arg`] for the verbs that convert by `__ftol2_sse` (`0x54e046`, `0x54e701`).
+fn ftol_index_arg(lua: &Lua, v: &Value, usage: &'static str) -> mlua::Result<i64> {
+    super::binding_abi::ftol_arg(lua, v.clone(), usage).map(i64::from)
 }
 
 /// A 1-based index under `n`, unsigned as the reference compares it.
@@ -611,7 +617,7 @@ pub(super) fn install_wrath(lua: &Lua) -> mlua::Result<()> {
     g.set(
         "GetBattlegroundInfo",
         lua.create_function(|lua, index: Value| {
-            let index = index_arg(lua, &index, "Usage: GetBattlegroundInfo(index)")?;
+            let index = ftol_index_arg(lua, &index, "Usage: GetBattlegroundInfo(index)")?;
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             let q = &model.battlefield;
             let Some(t) = slot_index(index, q.order.len())
@@ -646,7 +652,8 @@ pub(super) fn install_wrath(lua: &Lua) -> mlua::Result<()> {
     g.set(
         "RequestBattlegroundInstanceInfo",
         lua.create_function(|lua, index: Value| {
-            let index = index_arg(lua, &index, "Usage: RequestBattlegroundInstanceInfo(index)")?;
+            let usage = "Usage: RequestBattlegroundInstanceInfo(index)";
+            let index = ftol_index_arg(lua, &index, usage)?;
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
             if !player_exists(&model) {
                 return Ok(());
@@ -730,12 +737,12 @@ pub(super) fn install_wrath(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // The battlefield-manager queue and exit verbs: a rounded id, no usage errors (`0x54e1a0`,
-    // `0x54e200`). The two invite answers are the static-popup module's.
+    // The battlefield-manager queue and exit verbs: an unchecked `lua_tonumber` cut by
+    // `__ftol2_sse`, no usage errors (`0x54e1a0`, `0x54e200`). The invite answers are elsewhere.
     g.set(
         "BattlefieldMgrQueueRequest",
         lua.create_function(|lua, id: Value| {
-            let battle_id = number(lua, &id)?.unwrap_or(0) as u32;
+            let battle_id = super::binding_abi::ftol(lua.coerce_number(id)?.unwrap_or(0.0)) as u32;
             push(lua, BattlefieldRequest::BfQueueRequest { battle_id });
             Ok(())
         })?,
@@ -743,7 +750,7 @@ pub(super) fn install_wrath(lua: &Lua) -> mlua::Result<()> {
     g.set(
         "BattlefieldMgrExitRequest",
         lua.create_function(|lua, id: Value| {
-            let battle_id = number(lua, &id)?.unwrap_or(0) as u32;
+            let battle_id = super::binding_abi::ftol(lua.coerce_number(id)?.unwrap_or(0.0)) as u32;
             push(lua, BattlefieldRequest::BfExit { battle_id });
             Ok(())
         })?,

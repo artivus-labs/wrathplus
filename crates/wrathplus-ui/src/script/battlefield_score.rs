@@ -193,11 +193,11 @@ impl super::UiScript {
     }
 }
 
-/// `lua_isnumber` then the rounded value.
+/// `lua_isnumber` then `fistp` under chop, its low dword (`0x54bee8`).
 fn number(lua: &Lua, v: &Value) -> mlua::Result<Option<i64>> {
     Ok(lua
         .coerce_number(v.clone())?
-        .map(|n| n.round_ties_even() as i64))
+        .map(|n| i64::from(n as i64 as i32)))
 }
 
 fn index_arg(lua: &Lua, v: &Value, usage: &'static str) -> mlua::Result<i64> {
@@ -305,7 +305,9 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     g.set(
         "SetBattlefieldScoreFaction",
         lua.create_function(|lua, faction: Value| {
-            let f = number(lua, &faction)?.map_or(-1, |n| n as i32);
+            let f = lua
+                .coerce_number(faction)?
+                .map_or(-1, super::binding_abi::ftol); // `0x54c145`
             if f != -1 && (f as u32) > 1 {
                 return Ok(());
             }
@@ -537,6 +539,9 @@ mod tests {
         assert_eq!(names(&s), "Dana,Alice,Carl,Bob");
         assert_eq!(s.arity("GetBattlefieldScore(1)").unwrap(), 12);
         assert_eq!(s.arity("GetBattlefieldScore(9)").unwrap(), 12);
+        assert!(s
+            .eval::<bool>("return GetBattlefieldScore(1.9) == 'Dana'")
+            .unwrap());
         let got = s
             .eval::<String>(
                 "local n, kb, hk, d, h, f, rank, race, class, token, dmg, heal = \

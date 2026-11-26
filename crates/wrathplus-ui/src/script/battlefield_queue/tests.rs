@@ -59,7 +59,7 @@ fn the_type_list_sorts_random_first_then_holiday_then_level() {
     s.run("SortBGList()").unwrap();
     assert_eq!(names(&s), "32,7,2,3,1");
     let (n, enter, holiday, random, id): (String, Option<i64>, Option<i64>, Option<i64>, i64) =
-        s.eval("return GetBattlegroundInfo(2)").unwrap();
+        s.eval("return GetBattlegroundInfo(2.9)").unwrap();
     assert_eq!(
         (n.as_str(), enter, holiday, random, id),
         ("Type 7", Some(1), Some(1), None, 7)
@@ -165,7 +165,7 @@ fn status_answers_seven_values_and_the_port_closes_the_listed_window() {
     assert_eq!(s.arity("GetBattlefieldStatus(3)").unwrap(), 7);
     let got = s
         .eval::<String>(
-            "local st, n, id, lo, hi, size, rated = GetBattlefieldStatus(1) \
+            "local st, n, id, lo, hi, size, rated = GetBattlefieldStatus(1.9) \
              return st .. '|' .. n .. '|' .. id .. '|' .. lo .. '|' .. hi .. '|' .. size \
              .. '|' .. tostring(rated) .. '|' .. GetBattlefieldPortExpiration(1) \
              .. '|' .. GetBattlefieldEstimatedWaitTime(1) .. '|' .. GetBattlefieldTimeWaited(1)",
@@ -295,7 +295,7 @@ fn world_pvp_reads_the_pushed_queue_and_states() {
         s.take_battlefield_requests(),
         [
             BattlefieldRequest::BfQueueRequest { battle_id: 1 },
-            BattlefieldRequest::BfExit { battle_id: 2 },
+            BattlefieldRequest::BfExit { battle_id: 1 },
         ]
     );
 }

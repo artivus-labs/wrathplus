@@ -198,8 +198,8 @@ impl UiScript {
     }
 }
 
-/// `lua_isnumber` (`0x84df20`) then the binding's rounding, as a 0-based index; `None` for a
-/// non-number.
+/// `lua_isnumber` (`0x84df20`) then `fistp` under chop (`0x5a38b2`), as a 0-based index; `None`
+/// for a non-number.
 fn index(v: &Value) -> Option<i64> {
     let n = match v {
         Value::Integer(i) => *i as f64,
@@ -207,7 +207,7 @@ fn index(v: &Value) -> Option<i64> {
         Value::String(s) => s.to_str().ok()?.trim().parse().ok()?,
         _ => return None,
     };
-    Some(n.round() as i64 - 1)
+    Some(i64::from(n as i64 as i32) - 1)
 }
 
 /// A 0-based team slot under 3.
@@ -558,6 +558,7 @@ mod tests {
             assert(r == 1 and g == 0 and b == 0 and e == 7 and eg == 1 and bo == 3 and bb == 1)
             assert(select("#", GetArenaTeam(1)) == 22 and select("#", GetArenaTeam(2)) == 22)
             assert(GetArenaTeam(2) == nil and select(22, GetArenaTeam(4)) == 0)
+            assert(GetArenaTeam(1.9) == "Two" and GetArenaTeam(2.9) == nil)
             assert(IsArenaTeamCaptain(1) == 1 and IsArenaTeamCaptain(2) == 1 and IsArenaTeamCaptain(4) == nil)
             assert(GetNumArenaTeamMembers(1) == 3 and GetNumArenaTeamMembers(2, 1) == 0)
             -- Sorted by name on arrival.
