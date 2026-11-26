@@ -1,93 +1,148 @@
 //! Build 12340's modified clicks, binding set 3 of the key-binding system: `IsModifiedClick`
 //! (`0x55fcc0` → `0x55f940`), `GetModifiedClick` (`0x55fc20`), `SetModifiedClick` (`0x55fb90`),
 //! `GetModifiedClickAction` (`0x55ea70` → `0x55e870`) and `GetNumModifiedClickActions`
-//! (`0x55dc60`). The actions and their default chords are `Bindings.xml`'s `<ModifiedClick>` rows.
-//! Evidence: `/tmp/azb-app-mig/ghidra/shim{1,2}.log`.
+//! (`0x55dc60`). The actions and their default chords are `Bindings.xml`'s `<ModifiedClick>` rows;
+//! a name finds its action case-folded (`0x55f4d0`). Evidence:
+//! `/tmp/azb-app-mig/ghidra/shim{1,2}.log`.
+//!
+//! A chord (`0x55e180`) is a mask of the six modifier keys (`0x512d20` 0-5: left and right shift,
+//! ctrl and alt) and an optional mouse button: modifier words (`0x55d860`), then `BUTTONn`, then
+//! the end. `GetModifiedClick` prints it `ALT-CTRL-SHIFT-BUTTONn`, `NONE` when empty (`0x55e230`).
 //!
 //! `IsModifiedClick(arg)`: with no argument, 1 if any modifier key is down, else if any action's
-//! chord matches. An argument that parses as modifiers alone (`"SHIFT"`, `"CTRL-ALT"`) needs those
-//! held, others free. Anything else is an action, and its chord must match.
-//!
-//! Labelled: the chord matcher (`0x55d6b0`) is not decompiled; a chord matches when its modifiers
-//! are exactly the ones held and its `BUTTONn` part, if any, is the last mouse button pressed.
-//! The client tells left from right modifiers (`0x512d20` 0-5); the app feeds one bit per pair,
-//! so `LSHIFT` and `RSHIFT` read as `SHIFT`. A `SetModifiedClick` is not saved with the bindings.
+//! chord holds. An argument led by modifier words needs each named pair held (`SHIFT` either key,
+//! `LSHIFT` the left one) and what follows is not read; any other names an action, whose chord
+//! holds (`0x55d6b0`) when one of its keys is down and its button, read only while a click
+//! dispatches, is the click's.
 
-use mlua::{Lua, MultiValue, Value};
+use mlua::{Lua, Value};
 
+use super::binding_abi::{flag, ftol_arg, optional_string, string_arg};
+use super::wrath_input_sides::button_name;
 use super::{Model, UiScript};
+
+/// A chord as `0x55e180` stores it: the six-key mask and the `BUTTONn` digit.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct Chord {
+    mask: u8,
+    button: Option<u8>,
+}
 
 #[derive(Default)]
 pub(crate) struct State {
     /// `(action, chord)` in registration order (`0x108`'s list).
-    actions: Vec<(String, String)>,
+    actions: Vec<(String, Chord)>,
+}
+
+impl State {
+    fn find(&self, action: &str) -> Option<usize> {
+        self.actions
+            .iter()
+            .position(|(a, _)| a.eq_ignore_ascii_case(action))
+    }
 }
 
 impl UiScript {
     /// Register `Bindings.xml`'s `<ModifiedClick>` rows; a repeated action keeps its place and
-    /// takes the new default.
+    /// takes the new default. Labelled: a default `0x55e180` refuses reads as no chord.
     pub fn register_modified_clicks(&self, rows: &[crate::bindings_xml::ModifiedClick]) {
         let mut model = self.model_mut();
-        let actions = &mut model.wrath_modified_clicks.actions;
+        let state = &mut model.wrath_modified_clicks;
         for row in rows {
-            let chord = row.default.to_ascii_uppercase();
-            match actions.iter_mut().find(|(a, _)| a == &row.action) {
-                Some(slot) => slot.1 = chord,
-                None => actions.push((row.action.clone(), chord)),
+            let chord = parse(Some(&row.default)).unwrap_or_default();
+            match state.find(&row.action) {
+                Some(i) => state.actions[i].1 = chord,
+                None => state.actions.push((row.action.clone(), chord)),
             }
         }
     }
 }
 
-/// The `(shift, ctrl, alt)` a modifier-only string names, or `None` when a part is not one.
-fn modifier_mask(s: &str) -> Option<(bool, bool, bool)> {
-    let mut mask = (false, false, false);
-    for part in s.split('-') {
-        match part.to_ascii_uppercase().as_str() {
-            "SHIFT" | "LSHIFT" | "RSHIFT" => mask.0 = true,
-            "CTRL" | "LCTRL" | "RCTRL" => mask.1 = true,
-            "ALT" | "LALT" | "RALT" => mask.2 = true,
-            _ => return None,
-        }
+/// `0x55d860`: the modifier words leading `s`, case-folded and each with an optional `-`, as key
+/// bits, and what follows them.
+fn modifier_prefix(mut s: &str) -> (u8, &str) {
+    const WORDS: [(&str, u8); 9] = [
+        ("LSHIFT", 0x01),
+        ("RSHIFT", 0x02),
+        ("SHIFT", 0x03),
+        ("LCTRL", 0x04),
+        ("RCTRL", 0x08),
+        ("CTRL", 0x0c),
+        ("LALT", 0x10),
+        ("RALT", 0x20),
+        ("ALT", 0x30),
+    ];
+    let mut mask = 0;
+    let leads = |s: &str, w: &str| {
+        s.len() >= w.len() && s.as_bytes()[..w.len()].eq_ignore_ascii_case(w.as_bytes())
+    };
+    while let Some(&(word, bits)) = WORDS.iter().find(|(w, _)| leads(s, w)) {
+        mask |= bits;
+        s = &s[word.len()..];
+        s = s.strip_prefix('-').unwrap_or(s);
     }
-    Some(mask)
+    (mask, s)
 }
 
-/// `LeftButton` → `BUTTON1`, as the binding names spell mouse buttons.
-fn button_key(button: &str) -> Option<&'static str> {
-    Some(match button {
-        "LeftButton" => "BUTTON1",
-        "RightButton" => "BUTTON2",
-        "MiddleButton" => "BUTTON3",
-        "Button4" => "BUTTON4",
-        "Button5" => "BUTTON5",
-        _ => return None,
+/// `0x55f940`'s modifier test: each pair the mask names has one of its named keys down.
+fn held(mask: u8, keys: u8) -> bool {
+    (0..3).all(|pair| {
+        let want = mask >> (2 * pair) & 3;
+        want == 0 || keys >> (2 * pair) & want != 0
     })
 }
 
-fn chord_matches(chord: &str, held: (bool, bool, bool), last_button: Option<&str>) -> bool {
-    if chord == "NONE" || chord.is_empty() {
-        return false;
+/// `0x55e180`: nil, empty or `NONE` is the empty chord; else modifier words, then optionally
+/// `BUTTON` and one character (`atoi` reads its digit, else 0), then the end. `None` refuses.
+fn parse(binding: Option<&str>) -> Option<Chord> {
+    let binding = binding.filter(|b| !b.is_empty() && !b.eq_ignore_ascii_case("NONE"));
+    let Some(binding) = binding else {
+        return Some(Chord::default());
+    };
+    let (mask, rest) = modifier_prefix(binding);
+    let button = match rest.as_bytes() {
+        [] => None,
+        [head @ .., n] if head.eq_ignore_ascii_case(b"BUTTON") => {
+            Some(if n.is_ascii_digit() { n - b'0' } else { 0 })
+        }
+        _ => return None,
+    };
+    Some(Chord { mask, button })
+}
+
+/// `0x55e230` with `0x55d990`: `ALT-`, `CTRL-`, `SHIFT-` (or one side's `LALT-`, `RCTRL-`, ...),
+/// then `BUTTONn`; `NONE` for the empty chord.
+fn format(chord: Chord) -> String {
+    let mut s = String::new();
+    for (shift, [both, left, right]) in [
+        (4, ["ALT-", "LALT-", "RALT-"]),
+        (2, ["CTRL-", "LCTRL-", "RCTRL-"]),
+        (0, ["SHIFT-", "LSHIFT-", "RSHIFT-"]),
+    ] {
+        s.push_str(match chord.mask >> shift & 3 {
+            3 => both,
+            1 => left,
+            2 => right,
+            _ => "",
+        });
     }
-    let mut want = (false, false, false);
-    let mut key = None;
-    for part in chord.split('-') {
-        match modifier_mask(part) {
-            Some(m) => {
-                want.0 |= m.0;
-                want.1 |= m.1;
-                want.2 |= m.2;
-            }
-            None => key = Some(part),
+    match chord.button {
+        Some(n) => s + &format!("BUTTON{n}"),
+        None if s.is_empty() => "NONE".into(),
+        None => {
+            s.pop();
+            s
         }
     }
-    // 12340's `0x55d6b0`: any one of the chord's modifiers held passes, and its button is checked
-    // only while a click dispatches (the click's own button, `[0xb499a8+0x1234]`), so a hovered
-    // `CTRL-BUTTON1` matches on Ctrl alone.
-    let any = (want.0 && held.0) || (want.1 && held.1) || (want.2 && held.2);
-    (any || (want == (false, false, false) && key.is_some()))
-        && match (key, last_button) {
-            (Some(k), Some(b)) => button_key(b) == Some(k),
+}
+
+/// `0x55d6b0`: an empty chord never holds; one of its keys must be down, and its button, while a
+/// click dispatches, must be the click's, compared exactly.
+fn chord_holds(chord: Chord, keys: u8, click: Option<&str>) -> bool {
+    (chord.mask != 0 || chord.button.is_some())
+        && (chord.mask == 0 || chord.mask & keys != 0)
+        && match (chord.button, click) {
+            (Some(n), Some(click)) => click == button_name(i64::from(n)),
             _ => true,
         }
 }
@@ -102,33 +157,19 @@ impl super::UiScript {
     }
 }
 
-pub(super) fn is_modified_click(model: &Model, arg: Option<&str>) -> bool {
-    let held = model.modifiers;
-    let last = model.last_mouse_button.as_deref();
-    let actions = &model.wrath_modified_clicks.actions;
+/// `0x55f940`: `arg` is `IsModifiedClick`'s `lua_tolstring`, `None` for no string.
+pub(super) fn is_modified_click(lua: &Lua, arg: Option<&str>) -> bool {
+    let keys = super::wrath_input_sides::sides(lua);
+    let model = lua.app_data_ref::<Model>().expect("model app_data");
+    let click = model.last_mouse_button.as_deref();
+    let state = &model.wrath_modified_clicks;
+    let holds = |i: usize| chord_holds(state.actions[i].1, keys, click);
     match arg {
-        None => {
-            held.0
-                || held.1
-                || held.2
-                || actions
-                    .iter()
-                    .any(|(_, chord)| chord_matches(chord, held, last))
-        }
-        Some(arg) => match modifier_mask(arg) {
-            Some(want) => (!want.0 || held.0) && (!want.1 || held.1) && (!want.2 || held.2),
-            None => actions
-                .iter()
-                .find(|(a, _)| a == arg)
-                .is_some_and(|(_, chord)| chord_matches(chord, held, last)),
+        None => keys != 0 || (0..state.actions.len()).any(holds),
+        Some(arg) => match modifier_prefix(arg).0 {
+            0 => state.find(arg).is_some_and(holds),
+            mask => held(mask, keys),
         },
-    }
-}
-
-fn string_arg(args: &MultiValue, i: usize) -> Option<String> {
-    match args.get(i)? {
-        Value::String(s) => Some(s.to_string_lossy()),
-        _ => None,
     }
 }
 
@@ -136,76 +177,51 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     let g = lua.globals();
     g.set(
         "IsModifiedClick",
-        lua.create_function(|lua, args: MultiValue| {
-            let arg = string_arg(&args, 0);
-            let model = lua.app_data_ref::<Model>().expect("model app_data");
-            Ok(is_modified_click(&model, arg.as_deref()).then_some(1.0))
+        lua.create_function(|lua, arg: Value| {
+            let arg = optional_string(lua, &arg);
+            Ok(flag(is_modified_click(lua, arg.as_deref())))
         })?,
     )?;
     g.set(
         "GetModifiedClick",
-        lua.create_function(|lua, args: MultiValue| {
-            let action = string_arg(&args, 0)
-                .ok_or_else(|| mlua::Error::runtime("Usage: GetModifiedClick(\"action\")"))?;
-            let chord = lua
-                .app_data_ref::<Model>()
-                .expect("model app_data")
-                .wrath_modified_clicks
-                .actions
-                .iter()
-                .find(|(a, _)| *a == action)
-                .map(|(_, c)| c.clone());
-            Ok(chord)
+        lua.create_function(|lua, action: Value| {
+            let action = string_arg(lua, action, "Usage: GetModifiedClick(\"action\")")?;
+            let model = lua.app_data_ref::<Model>().expect("model app_data");
+            let state = &model.wrath_modified_clicks;
+            Ok(state.find(&action).map(|i| format(state.actions[i].1)))
         })?,
     )?;
     g.set(
         "SetModifiedClick",
-        lua.create_function(|lua, args: MultiValue| {
-            let action = string_arg(&args, 0).ok_or_else(|| {
-                mlua::Error::runtime("Usage: SetModifiedClick(\"action\", \"binding\")")
-            })?;
-            let binding = string_arg(&args, 1);
-            let chord = binding.as_deref().and_then(|b| {
-                if b.eq_ignore_ascii_case("NONE") || modifier_mask(b).is_some() {
-                    Some(b.to_ascii_uppercase())
-                } else {
-                    super::keybind::normalize_binding_key(b)
-                }
-            });
+        lua.create_function(|lua, (action, binding): (Value, Value)| {
+            let usage = "Usage: SetModifiedClick(\"action\", \"binding\")";
+            let action = string_arg(lua, action, usage)?;
+            let binding = optional_string(lua, &binding);
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-            let slot = model
-                .wrath_modified_clicks
-                .actions
-                .iter_mut()
-                .find(|(a, _)| *a == action);
-            match (slot, chord) {
-                (Some(slot), Some(chord)) => {
-                    slot.1 = chord;
+            let state = &mut model.wrath_modified_clicks;
+            match (state.find(&action), parse(binding.as_deref())) {
+                (Some(i), Some(chord)) => {
+                    state.actions[i].1 = chord;
                     Ok(())
                 }
+                // `luaL_error`'s `%s` of a nil binding prints `(null)`.
                 _ => Err(mlua::Error::runtime(format!(
                     "SetModifiedClick(): Unknown action ({action}) or binding ({})",
-                    binding.unwrap_or_default()
+                    binding.as_deref().unwrap_or("(null)")
                 ))),
             }
         })?,
     )?;
     g.set(
         "GetModifiedClickAction",
-        lua.create_function(|lua, args: MultiValue| {
-            let index = args
-                .front()
-                .and_then(|v| lua.coerce_integer(v.clone()).ok().flatten())
-                .ok_or_else(|| mlua::Error::runtime("Usage: GetModifiedClickAction(index)"))?;
-            let action = usize::try_from(index - 1).ok().and_then(|i| {
-                lua.app_data_ref::<Model>()
-                    .expect("model app_data")
-                    .wrath_modified_clicks
-                    .actions
-                    .get(i)
-                    .map(|(a, _)| a.clone())
-            });
-            Ok(action)
+        lua.create_function(|lua, index: Value| {
+            let index = ftol_arg(lua, index, "Usage: GetModifiedClickAction(index)")?;
+            let model = lua.app_data_ref::<Model>().expect("model app_data");
+            let actions = &model.wrath_modified_clicks.actions;
+            let action = usize::try_from(index.wrapping_sub(1))
+                .ok()
+                .and_then(|i| actions.get(i));
+            Ok(action.map(|(a, _)| a.clone()))
         })?,
     )?;
     g.set(
@@ -259,13 +275,14 @@ mod tests {
                 .unwrap(),
             4
         );
+        // `0x55ea70` truncates its index (`0x88b9c0`); `0x55f4d0` finds an action case-folded.
         assert_eq!(
-            s.eval::<String>("return GetModifiedClickAction(3)")
+            s.eval::<String>("return GetModifiedClickAction(3.7)")
                 .unwrap(),
             "CHATLINK"
         );
         assert_eq!(
-            s.eval::<String>("return GetModifiedClick('CHATLINK')")
+            s.eval::<String>("return GetModifiedClick('chatlink')")
                 .unwrap(),
             "SHIFT-BUTTON1"
         );
@@ -307,6 +324,17 @@ mod tests {
             .eval::<bool>("return IsModifiedClick('FOCUSCAST') == nil")
             .unwrap());
         assert!(s.eval::<bool>("return IsModifiedClick() == nil").unwrap());
+        // `0x55f940` reads the six keys: `SHIFT` is either side, `LSHIFT` the left alone, and a
+        // string led by modifier words is decided by them; a number names an action.
+        s.set_modifier_sides(crate::script::ModifierKeys {
+            right_shift: true,
+            ..Default::default()
+        });
+        let probe =
+            "local t = {} for _, a in ipairs({'LSHIFT', 'RSHIFT', 'SHIFT', 'SHIFT-BUTTON1', \
+                     'shiftfoo', 'chatlink', 1}) do t[#t + 1] = tostring(IsModifiedClick(a)) end \
+                     return table.concat(t, ',')";
+        assert_eq!(s.eval::<String>(probe).unwrap(), "nil,1,1,1,1,1,nil");
     }
 
     #[test]
@@ -325,5 +353,24 @@ mod tests {
         assert!(s.run("SetModifiedClick('NOPE', 'ALT')").is_err());
         assert!(s.run("SetModifiedClick('SELFCAST', 'NOTAKEY')").is_err());
         assert!(s.run("GetModifiedClick()").is_err());
+        // `0x55e180`: nil or `NONE` clears; only modifier words and one `BUTTONn` parse; the
+        // chord prints in `0x55d990`'s order.
+        let set = |binding: &str| {
+            s.eval::<String>(&format!(
+                "local ok, e = pcall(SetModifiedClick, 'SELFCAST', {binding}) \
+                 return ok and GetModifiedClick('SELFCAST') or e"
+            ))
+            .unwrap()
+        };
+        assert_eq!(set("nil"), "NONE");
+        assert_eq!(set("'shift-ctrl-button1'"), "CTRL-SHIFT-BUTTON1");
+        assert_eq!(set("'lalt-rshift'"), "LALT-RSHIFT");
+        assert_eq!(set("'BUTTON2'"), "BUTTON2");
+        assert!(set("'A'").ends_with("Unknown action (SELFCAST) or binding (A)"));
+        assert!(set("'SHIFT-BUTTON12'").contains("or binding (SHIFT-BUTTON12)"));
+        assert!(s
+            .eval::<String>("return select(2, pcall(SetModifiedClick, 'NOPE'))")
+            .unwrap()
+            .ends_with("Unknown action (NOPE) or binding ((null))"));
     }
 }

@@ -294,19 +294,13 @@ fn holds(lua: &Lua, c: &Condition, unit: &str) -> bool {
                     || any_text(text(lua, ask(lua, "UnitName", "pet")))
                     || any_text(text(lua, ask(lua, "UnitCreatureFamily", "pet"))))
         }
-        "modifier" | "mod" => {
-            let (shift, ctrl, alt) = lua.app_data_ref::<Model>().expect("model").modifiers;
-            if args.is_empty() {
-                shift || ctrl || alt
-            } else {
-                args.iter().any(|a| match a.to_ascii_lowercase().as_str() {
-                    "shift" => shift,
-                    "ctrl" => ctrl,
-                    "alt" => alt,
-                    _ => truthy(ask(lua, "IsModifiedClick", a.as_str())),
-                })
-            }
-        }
+        // `0x5ef040`: `IsModifiedClick` of an argument, any one; with none, of nothing.
+        "modifier" | "mod" => match args.is_empty() {
+            true => super::wrath_modified_click::is_modified_click(lua, None),
+            false => args
+                .iter()
+                .any(|a| super::wrath_modified_click::is_modified_click(lua, Some(a))),
+        },
         "button" | "btn" => button(lua, args),
         // `0x5ef200`: the page itself (`[0xc1e598] + 1`), not `GetActionBarPage`'s override.
         "actionbar" | "bar" => any_number(super::wrath_state_queries::action_bar_page(lua) + 1),

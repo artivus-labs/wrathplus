@@ -60,6 +60,11 @@ pub(super) fn fold(lua: &Lua, (shift, ctrl, alt): (bool, bool, bool)) {
     }
 }
 
+/// The six side bits, `0x512d20(0..5)`, which the modified clicks read.
+pub(super) fn sides(lua: &Lua) -> u8 {
+    lua.app_data_ref::<Sides>().map_or(0, |s| s.0)
+}
+
 impl super::UiScript {
     /// Push the six modifier keys: the sides behind `IsLeftShiftKeyDown` and its kin, and the
     /// pairs behind `IsShiftKeyDown`/`IsControlKeyDown`/`IsAltKeyDown`. Call it where

@@ -102,15 +102,11 @@ pub(super) fn run_form(lua: &Lua, command: &str, down: bool) -> mlua::Result<boo
 /// focus under `FOCUSCAST` when there is one, else the default target (`0x563150`'s
 /// `0x55f940("SELFCAST")`/`("FOCUSCAST")` legs). `Some(None)` is the player.
 fn form_target(lua: &Lua) -> mlua::Result<Option<Option<&'static str>>> {
-    let (selfcast, focuscast) = {
-        let model = lua.app_data_ref::<Model>().expect("model app_data");
-        let modified = |a| super::wrath_modified_click::is_modified_click(&model, Some(a));
-        (modified("SELFCAST"), modified("FOCUSCAST"))
-    };
-    if selfcast {
+    let modified = |a| super::wrath_modified_click::is_modified_click(lua, Some(a));
+    if modified("SELFCAST") {
         return Ok(Some(None));
     }
-    let focus = focuscast
+    let focus = modified("FOCUSCAST")
         && lua
             .globals()
             .get::<mlua::Function>("UnitExists")?
