@@ -245,7 +245,7 @@ mod wrath_saved_instances;
 mod wrath_state_queries;
 pub use wrath_char_state::{power_regen as wrath_power_regen, WrathCharState, WrathUnitExtra};
 mod wrath_tutorial;
-pub use wrath_inspect_talents::{WrathInspectGroup, WrathInspectTalents};
+pub use wrath_inspect_talents::{WrathInspectGroup, WrathInspectTalents, WrathTalentGroups};
 mod wrath_server_time;
 mod wrath_talent_preview;
 pub use wrath_currency::{WrathCurrencyEntry, WrathCurrencySnapshot};

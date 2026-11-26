@@ -3,14 +3,22 @@ use wrathplus_formats::{SpellCatalog, TalentTabInfo};
 use wrathplus_protocol::{types::Field, ObjectFields};
 
 fn packet(app: &mut App, unspent: u32, ranks: &[(u32, u8)]) {
+    packet_groups(app, unspent, 0, &[ranks]);
+}
+
+/// A player `SMSG_TALENTS_INFO` with `groups`, the 0-based `active` one active, no glyphs.
+fn packet_groups(app: &mut App, unspent: u32, active: u8, groups: &[&[(u32, u8)]]) {
     let mut body = vec![0];
     body.extend(unspent.to_le_bytes());
-    body.extend([1, 0, ranks.len() as u8]);
-    for &(id, rank) in ranks {
-        body.extend(id.to_le_bytes());
-        body.push(rank);
+    body.extend([groups.len() as u8, active]);
+    for ranks in groups {
+        body.push(ranks.len() as u8);
+        for &(id, rank) in *ranks {
+            body.extend(id.to_le_bytes());
+            body.push(rank);
+        }
+        body.push(0); // glyph count
     }
-    body.push(0); // glyph count
     let events = wrathplus_protocol::wrath_progress::decode(
         wrathplus_protocol::wrath_progress::SMSG_TALENTS_INFO,
         &body,
@@ -174,4 +182,27 @@ fn player_rank_uses_active_spec_not_pet_or_delayed_spellbook() {
         0,
         "respec ignores stale learned spells"
     );
+}
+
+/// 12340 keeps the packet's group count and active group (`0x5c9740` into `[0xc20ff8]` and
+/// `[0xc20ff4]`), which `GetNumTalentGroups` and `GetActiveTalentGroup` answer.
+#[test]
+fn the_talents_packet_sets_the_group_count_and_active_group() {
+    let mut app = App::new();
+    app.add_plugins(crate::net::NetPlugin { connect: false });
+    app.init_resource::<PlayerActions>();
+    app.insert_non_send_resource(UiScript::new().unwrap());
+    let mut schedule = Schedule::default();
+    schedule.add_systems(feed_talents);
+    let groups = |app: &mut App| {
+        let script = app.world_mut().non_send_resource_mut::<UiScript>();
+        script
+            .eval::<(u32, u32)>("return GetNumTalentGroups(), GetActiveTalentGroup()")
+            .unwrap()
+    };
+    schedule.run(app.world_mut());
+    assert_eq!(groups(&mut app), (0, 1), "none before the packet");
+    packet_groups(&mut app, 0, 1, &[&[], &[]]);
+    schedule.run(app.world_mut());
+    assert_eq!(groups(&mut app), (2, 2));
 }

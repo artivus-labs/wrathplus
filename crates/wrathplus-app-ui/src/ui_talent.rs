@@ -16,6 +16,7 @@ use bevy::prelude::*;
 use wrathplus_formats::{Talent, TalentCatalog};
 use wrathplus_ui::script::{
     ScriptValue, TalentPrereqView, TalentTabView, TalentUiState, TalentView, UiScript,
+    WrathTalentGroups,
 };
 use wrathplus_ui::strings::{fill, Arg};
 
@@ -72,6 +73,7 @@ fn load_talents(mut commands: Commands, assets: Option<Res<WorldAssets>>) {
 #[derive(Default)]
 struct FeedMemory {
     pushed: TalentUiState,
+    groups: WrathTalentGroups,
     /// `None` until the first read, which gives zero deltas.
     points: Option<(u32, u32)>,
 }
@@ -119,6 +121,11 @@ fn feed_talents(
     );
     if gate.skip() {
         return;
+    }
+    let groups = player_groups(progress.as_deref());
+    if groups != memory.groups {
+        script.set_talent_groups(groups.clone());
+        memory.groups = groups;
     }
     let (Some(talents), Some(spells)) = (talents.as_deref(), spells.as_deref()) else {
         return;
@@ -199,6 +206,17 @@ fn player_talent_state(
 ) -> Option<(u32, &wrathplus_protocol::events::TalentGroup)> {
     let (unspent, active, groups) = progress?.talents.get(&false)?;
     Some((*unspent, groups.get(usize::from(*active))?))
+}
+
+/// The player's group count and active group off the talents packet, zero without one.
+fn player_groups(progress: Option<&WrathProgress>) -> WrathTalentGroups {
+    progress.and_then(|p| p.talents.get(&false)).map_or_else(
+        Default::default,
+        |(_, active, groups)| WrathTalentGroups {
+            count: groups.len() as u32,
+            active: u32::from(*active),
+        },
+    )
 }
 
 fn player_rank(t: &Talent, known: &BTreeSet<u32>, progress: Option<&WrathProgress>) -> u32 {

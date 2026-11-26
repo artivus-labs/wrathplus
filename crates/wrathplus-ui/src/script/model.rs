@@ -296,6 +296,7 @@ pub(crate) struct Model {
     pub(crate) wrath_state: super::wrath_state_queries::State,
     pub(crate) wrath_quests: super::wrath_quest_queries::State,
     pub(crate) wrath_inspect_talents: Option<super::WrathInspectTalents>,
+    pub(crate) talent_groups: super::WrathTalentGroups,
     /// The player's talent preview ranks and queued `LearnPreviewTalents` lists.
     pub(crate) talent_preview: super::wrath_talent_preview::TalentPreview,
     /// The six glyph sockets the app pushes; `None` without a player.
@@ -1215,6 +1216,7 @@ impl Model {
             wrath_state: Default::default(),
             wrath_quests: Default::default(),
             wrath_inspect_talents: None,
+            talent_groups: Default::default(),
             talent_preview: Default::default(),
             glyph_sockets: None,
             raid_vehicle_units: HashSet::new(),

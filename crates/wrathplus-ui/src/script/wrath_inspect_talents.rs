@@ -24,7 +24,21 @@ pub struct WrathInspectTalents {
     pub groups: Vec<WrathInspectGroup>,
 }
 
+/// The player's talent groups as `SMSG_TALENTS_INFO` leaves them (12340's handler `0x5c9e60`):
+/// the count `[0xc20ff8]` and the 0-based active group `[0xc20ff4]`, both 0 before the first
+/// packet (`0x5c9ab9`).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct WrathTalentGroups {
+    pub count: u32,
+    pub active: u32,
+}
+
 impl super::UiScript {
+    /// Replace the player's talent group count and active group.
+    pub fn set_talent_groups(&mut self, groups: WrathTalentGroups) {
+        self.model_mut().talent_groups = groups;
+    }
+
     /// Replace the inspected talents; `None` once nothing is inspected. The host fires
     /// `INSPECT_TALENT_READY` after a reply.
     pub fn set_wrath_inspect_talents(&mut self, talents: Option<WrathInspectTalents>) {
@@ -267,7 +281,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // GetNumTalentGroups([isInspect [, isPet]]): the inspected groups; the player's one; the pet's.
+    // GetNumTalentGroups([isInspect [, isPet]]) (`0x5c5df0`): the inspected groups (`[0xc21010]`),
+    // the pet's one, the player's from the talents packet (`[0xc20ff8]`).
     g.set(
         "GetNumTalentGroups",
         lua.create_function(|lua, args: MultiValue| {
@@ -278,23 +293,24 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                     .as_ref()
                     .map_or(0, |t| t.groups.len()) as i64,
                 (false, true) => i64::from(model.pet_talents.is_some()),
-                (false, false) => 1,
+                (false, false) => i64::from(model.talent_groups.count),
             })
         })?,
     )?;
 
-    // GetActiveTalentGroup([isInspect [, isPet]]): 1-based.
+    // GetActiveTalentGroup([isInspect [, isPet]]) (`0x5c5810`), 1-based: the inspected
+    // `[0xc21004]`, the pet's always 1, the player's `[0xc20ff4]`.
     g.set(
         "GetActiveTalentGroup",
         lua.create_function(|lua, args: MultiValue| {
             let model = lua.app_data_ref::<Model>().expect("model app_data");
-            Ok(if truth(&args, 0) {
-                model
+            Ok(match (truth(&args, 0), truth(&args, 1)) {
+                (true, _) => model
                     .wrath_inspect_talents
                     .as_ref()
-                    .map_or(1, |t| i64::from(t.active_group.max(1)))
-            } else {
-                1
+                    .map_or(1, |t| i64::from(t.active_group.max(1))),
+                (false, true) => 1,
+                (false, false) => i64::from(model.talent_groups.active) + 1,
             })
         })?,
     )?;
@@ -420,7 +436,24 @@ mod tests {
             4
         );
         assert_eq!(s.eval::<i64>("return GetUnspentTalentPoints()").unwrap(), 7);
-        assert_eq!(s.eval::<i64>("return GetNumTalentGroups()").unwrap(), 1);
+        // The player's groups come from the talents packet: none before it (`0x5c9ab9`).
+        assert_eq!(
+            s.eval::<(i64, i64)>("return GetNumTalentGroups(), GetActiveTalentGroup()")
+                .unwrap(),
+            (0, 1)
+        );
+        s.set_talent_groups(WrathTalentGroups {
+            count: 2,
+            active: 1,
+        });
+        assert_eq!(
+            s.eval::<(i64, i64, i64)>(
+                "return GetNumTalentGroups(), GetActiveTalentGroup(), GetActiveTalentGroup(false, true)"
+            )
+            .unwrap(),
+            (2, 2, 1),
+            "the pet's group is always 1"
+        );
         // Inspect: nothing yet, then two groups, the second active.
         assert_eq!(s.eval::<i64>("return GetNumTalentTabs(true)").unwrap(), 0);
         assert_eq!(

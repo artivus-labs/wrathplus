@@ -361,26 +361,23 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     explicit_item::install_by_name(lua)?;
 
     // ── talents, titles, dev ──
+    // SetActiveTalentGroup(groupIndex) (`0x5c5e70`): the index truncated, less one; the active
+    // group, one at or past the count, or one past the second does nothing (`0x5c5ec4`-`0x5c5eda`),
+    // another casts its activation spell (`0xad05e8`), which the app sends.
     set(lua, "SetActiveTalentGroup", |lua, args| {
-        let g = arg(&args, 0);
-        if !is_number(lua, &g) {
-            return Err(mlua::Error::runtime(
-                "Usage: SetActiveTalentGroup(groupIndex)",
-            ));
-        }
-        let group = lua.coerce_number(g)?.unwrap_or(0.0).round_ties_even() as i64;
-        let ask = |name: &str| -> mlua::Result<i64> {
-            match lua.globals().get::<Value>(name)? {
-                Value::Function(f) => Ok(f.call::<Option<i64>>(())?.unwrap_or(1)),
-                _ => Ok(1),
-            }
-        };
-        let (active, count) = (ask("GetActiveTalentGroup")?, ask("GetNumTalentGroups")?);
-        if group != active && group >= 1 && group <= count.min(2) {
-            call(
-                lua,
-                super::ScriptCall::ActivateTalentGroup { group: group as u8 },
-            );
+        const USAGE: &str = "Usage: SetActiveTalentGroup(groupIndex)";
+        let index = i64::from(super::binding_abi::number_arg(lua, arg(&args, 0), USAGE)?) - 1;
+        let groups = lua
+            .app_data_ref::<Model>()
+            .expect("model app_data")
+            .talent_groups
+            .clone();
+        let index = u32::try_from(index)
+            .ok()
+            .filter(|&i| i != groups.active && i < groups.count && i < 2);
+        if let Some(i) = index {
+            let group = i as u8 + 1;
+            call(lua, super::ScriptCall::ActivateTalentGroup { group });
         }
         none()
     })?;
@@ -715,6 +712,24 @@ mod tests {
         );
         assert!(s.run("ArenaTeamLeave()").is_err());
         assert!(s.run("SetCurrentTitle('x')").is_err());
+        // Two groups, the first active: group 2 casts (2.9 truncates), the active, a third and a
+        // non-number do not.
+        s.set_talent_groups(crate::script::WrathTalentGroups {
+            count: 2,
+            active: 0,
+        });
+        s.model_mut().script_calls.clear();
+        s.run("SetActiveTalentGroup(1) SetActiveTalentGroup(3) SetActiveTalentGroup(2.9)")
+            .unwrap();
+        assert_eq!(
+            s.model_mut().script_calls.clone(),
+            vec![C::ActivateTalentGroup { group: 2 }]
+        );
+        let err = s.run("SetActiveTalentGroup()").unwrap_err().to_string();
+        assert!(
+            err.contains("Usage: SetActiveTalentGroup(groupIndex)"),
+            "{err}"
+        );
     }
 
     #[test]
