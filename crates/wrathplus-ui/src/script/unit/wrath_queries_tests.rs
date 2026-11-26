@@ -74,6 +74,19 @@ fn the_flag_readers_read_their_descriptor_bits() {
              and UnitIsRaidOfficer(true) == nil and UnitPlayerControlled({}) == nil"
         )
         .unwrap());
+    // `0x519df0` over `threatWarning`: 0 off, 1 a party or raid instance, 2 grouped (in a raid
+    // here), else on.
+    let warn = |s: &UiScript, mode: &str| {
+        s.run(&format!("SetCVar('threatWarning', '{mode}')"))
+            .unwrap();
+        s.eval::<Option<i64>>("return IsThreatWarningEnabled()")
+            .unwrap()
+    };
+    let modes = ["0", "1", "2", "3"].map(|m| warn(&s, m));
+    assert_eq!(modes, [None, None, Some(1), Some(1)]);
+    s.set_instance_type(Some(2));
+    s.set_party(PartyState::default());
+    assert_eq!([warn(&s, "1"), warn(&s, "2")], [Some(1), None]);
 }
 
 #[test]
