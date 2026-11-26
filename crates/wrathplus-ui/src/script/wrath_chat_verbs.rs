@@ -85,12 +85,13 @@ fn name_ok(name: &str) -> mlua::Result<()> {
     Ok(())
 }
 
-/// An arena-team slot argument: rounded, 1-based; 0 past the three slots.
+/// An arena-team slot argument: truncated (`fistp` under RC=11, `0x515cc0`-`0x515ff0`), 1-based;
+/// 0 past the three slots.
 fn team(lua: &Lua, v: &Value) -> u8 {
     lua.coerce_number(v.clone())
         .ok()
         .flatten()
-        .map(|n| n.round_ties_even() as i64)
+        .map(|n| n.trunc() as i64)
         .filter(|n| (1..=3).contains(n))
         .map_or(0, |n| n as u8)
 }
@@ -486,15 +487,16 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         if !(1..=3).all(|i| is_number(lua, &arg(&args, i))) {
             return Err(mlua::Error::runtime(USAGE));
         }
+        // The numbers truncate (`fistp` under RC=11); allowFullMatch is `lua_toboolean`.
         let num = |i| {
             lua.coerce_number(arg(&args, i))
                 .ok()
                 .flatten()
                 .unwrap_or(0.0)
-                .round_ties_even() as i64
+                .trunc() as i64
         };
         let (include, exclude, count) = (num(1) as u32, num(2) as u32, num(3).max(0) as usize);
-        let full = super::binding_abi::bool_or_default(args.get(5), false);
+        let full = !matches!(args.get(5), None | Some(Value::Nil | Value::Boolean(false)));
         let model = lua.app_data_ref::<Model>().expect("model app_data");
         let mut seen: Vec<(String, u32)> = Vec::new();
         let mut add = |name: &str, flags: u32| {
@@ -627,7 +629,7 @@ mod tests {
     fn command_intents_split_between_call_order_and_the_outbox() {
         let mut s = vm();
         s.run(
-            "ArenaTeamInviteByName(2, 'Hal') ArenaTeamInviteByName(1, '') ArenaTeamLeave(4) \
+            "ArenaTeamInviteByName(2.9, 'Hal') ArenaTeamInviteByName(1, '') ArenaTeamLeave(4) \
              CancelShapeshiftForm() Dismount() StartAttack() StartAttack('target') StopAttack() \
              TargetLastFriend() TargetNearestEnemyPlayer(1) SetCurrentTitle(42) \
              SetActiveTalentGroup(2) SetTaxiBenchmarkMode()",
@@ -733,6 +735,12 @@ mod tests {
                 .unwrap(),
             vec!["Albin".to_string()],
             "online, not in the group"
+        );
+        assert_eq!(
+            s.eval::<i64>("return select('#', GetAutoCompleteResults('al', 0xFFFFFFFF, 0, 1.9))")
+                .unwrap(),
+            1,
+            "the count truncates (`0x57b3a0`)"
         );
         assert!(s.run("GetAutoCompleteResults('al')").is_err());
     }

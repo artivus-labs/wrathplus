@@ -201,7 +201,8 @@ fn difficulty(lua: &Lua, args: &MultiValue, usage: &str, max: u32) -> mlua::Resu
     let Some(n) = number(lua, &arg(args, 0)) else {
         return Err(mlua::Error::runtime(usage.to_string()));
     };
-    let index = (n - 1.0).round_ties_even() as i64 as u32;
+    // `fsub 1.0`, then truncated (`0x526086`-`0x5260a1`, `0x5261d6`).
+    let index = (n - 1.0).trunc() as i64 as u32;
     Ok((index <= max).then_some(index))
 }
 
@@ -271,14 +272,19 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         one(Value::Integer(i64::from(on)))
     })?;
     set(lua, "SetPVP", |lua, args| {
-        let value = number(lua, &arg(&args, 0)).map_or(0, |n| n.round_ties_even() as i64 as u8);
+        // `0x5168b0` truncates (`fistp` under RC=11).
+        let value = number(lua, &arg(&args, 0)).map_or(0, |n| n.trunc() as i64 as u8);
         push(lua, R::SetPvp { value });
         none()
     })?;
     // SetOptOutOfLoot(flag) (`0x52cf00`): the flag, then OPT_OUT_LOOT_TOGGLE_ON/OFF as a system
     // line. GetOptOutOfLoot reads it back.
     set(lua, "SetOptOutOfLoot", |lua, args| {
-        let on = super::binding_abi::bool_or_default(args.front(), false);
+        // `lua_toboolean` (`0x52cf0a`): 0 and "0" are true.
+        let on = !matches!(
+            args.front(),
+            None | Some(Value::Nil | Value::Boolean(false))
+        );
         lua.app_data_mut::<Model>()
             .expect("model app_data")
             .wrath_unit_popup
@@ -373,7 +379,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     set(lua, "CanComplainChat", |lua, args| {
         let first = arg(&args, 0);
         let (line, name, said) = if let Some(n) = number(lua, &first) {
-            (Some(n.round_ties_even() as i64 as i32), None, None)
+            (Some(n.trunc() as i64 as i32), None, None)
         } else if let Some(name) = text(lua, &first)? {
             (None, Some(name), text(lua, &arg(&args, 1))?)
         } else {
@@ -557,7 +563,7 @@ mod tests {
     #[test]
     fn difficulty_pvp_and_loot_verbs_follow_the_native_gates() {
         let mut s = script();
-        s.run("assert(GetPVPDesired()==1); SetPVP(1); SetPVP(nil); SetDungeonDifficulty(2); SetDungeonDifficulty(3); SetRaidDifficulty(4)").unwrap();
+        s.run("assert(GetPVPDesired()==1); SetPVP(1); SetPVP(nil); SetPVP(1.9); SetDungeonDifficulty(2); SetDungeonDifficulty(3); SetRaidDifficulty(2.9); SetRaidDifficulty(4)").unwrap();
         assert!(s
             .eval::<bool>("local a,b=CanChangePlayerDifficulty(); return a==false and b==true and GetDungeonDifficulty()==2 and GetRaidDifficulty()==4")
             .unwrap(), "ungrouped off a dynamic raid map, no change (`0x52cbc0`)");
@@ -587,7 +593,7 @@ mod tests {
             .unwrap());
         s.set_party(PartyState::default());
         assert!(s.run("SetDungeonDifficulty('x')").is_err());
-        s.run("SEEN=nil local f=CreateFrame('Frame') f:RegisterEvent('CHAT_MSG_SYSTEM') f:SetScript('OnEvent', function(_, _, msg) SEEN=msg end) assert(f:IsEventRegistered('CHAT_MSG_SYSTEM')==1 and f:IsEventRegistered('BAG_UPDATE')==nil) SetOptOutOfLoot(1)").unwrap();
+        s.run("SEEN=nil local f=CreateFrame('Frame') f:RegisterEvent('CHAT_MSG_SYSTEM') f:SetScript('OnEvent', function(_, _, msg) SEEN=msg end) assert(f:IsEventRegistered('CHAT_MSG_SYSTEM')==1 and f:IsEventRegistered('BAG_UPDATE')==nil) SetOptOutOfLoot(0)").unwrap();
         assert!(s
             .eval::<bool>("return GetOptOutOfLoot()==1 and SEEN~=nil")
             .unwrap());
@@ -596,8 +602,11 @@ mod tests {
             vec![
                 R::SetPvp { value: 1 },
                 R::SetPvp { value: 0 },
+                R::SetPvp { value: 1 },
                 R::SetDungeonDifficulty { difficulty: 1 },
+                R::SetRaidDifficulty { difficulty: 1 },
                 R::SetRaidDifficulty { difficulty: 3 },
+                // `lua_toboolean` (`0x52cf0a`): 0 is true.
                 R::SetOptOutOfLoot { on: true },
             ]
         );
@@ -660,6 +669,7 @@ mod tests {
             "CanGrantLevel('Pal')==1",
             "CanGrantLevel('Nobody')==nil",
             "CanComplainChat(7)==1",
+            "CanComplainChat(7.9)==1",
             "CanComplainChat(8)==nil",
             "CanComplainChat('pal','hi')==1",
             "CanComplainChat('Pal','no')==nil",

@@ -212,7 +212,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         let Some(n) = number(lua, &arg(&args, 0)) else {
             return Err(mlua::Error::runtime("Usage: ArenaTeamDisband(team)"));
         };
-        let n = n.round_ties_even() as i64;
+        let n = n.trunc() as i64;
         let team = if (1..=3).contains(&n) { n as u8 } else { 0 };
         push(lua, R::ArenaTeamDisband { team });
         none()
@@ -347,7 +347,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         let request =
             match &first {
                 Value::Integer(_) | Value::Number(_) => R::ComplainChat {
-                    line_id: number(lua, &first).map(|n| n.round_ties_even() as i64 as i32),
+                    line_id: number(lua, &first).map(|n| n.trunc() as i64 as i32),
                     name: None,
                     text: None,
                 },
@@ -401,7 +401,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         let Some(n) = number(lua, &arg(&args, 0)) else {
             return Err(mlua::Error::runtime("Usage: PlaceGlyphInSocket(index)"));
         };
-        let n = n.round_ties_even() as i64;
+        let n = n.trunc() as i64;
         if (1..=6).contains(&n) && has_player(lua) {
             push(lua, R::PlaceGlyphInSocket { socket: n as u8 });
         }
@@ -411,7 +411,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         let Some(n) = number(lua, &arg(&args, 0)) else {
             return Err(mlua::Error::runtime("Usage: RemoveGlyphFromSocket(index)"));
         };
-        let n = n.round_ties_even() as i64;
+        let n = n.trunc() as i64;
         let filled = {
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             (1..=6).contains(&n)
@@ -531,7 +531,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         let Some(n) = number(lua, &arg(&args, 0)) else {
             return Err(mlua::Error::runtime("Usage: LootSlot(slot)"));
         };
-        let slot = n.round_ties_even() as i64;
+        let slot = n.trunc() as i64;
         if let Ok(slot) = u32::try_from(slot) {
             lua.app_data_mut::<Model>()
                 .expect("model app_data")
@@ -549,6 +549,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 r#"Usage: GetText("token" [,gender] [,ordinal])"#,
             ));
         };
+        // `lua_tointeger` (`0x84e070`), which rounds.
         let gender = number(lua, &arg(&args, 1)).map_or(0, |n| n.round_ties_even() as i64);
         let g = lua.globals();
         if gender == 3 {
@@ -579,11 +580,11 @@ mod tests {
     fn dialog_answers_go_to_the_outbox() {
         let mut s = vm();
         s.run(
-            "AcceptArenaTeam() ArenaTeamDisband(2) DeclineLevelGrant() CancelSummon() \
+            "AcceptArenaTeam() ArenaTeamDisband(2.9) DeclineLevelGrant() CancelSummon() \
              RespondInstanceLock(1) SetLFGBootVote() BattlefieldMgrQueueInviteResponse(7, true) \
-             ComplainChat(42) ComplainChat('Bob', 'spam') SetFriendNotes('3.9', 'n') \
+             ComplainChat(42.9) ComplainChat('Bob', 'spam') SetFriendNotes('3.9', 'n') \
              SetFriendNotes(200, 'x') ContainerRefundItemPurchase(0, 4) EndRefund(2) EndRefund(5) \
-             PlaceGlyphInSocket(1) RemoveGlyphFromSocket(2) AddMute('x') BNRemoveFriend(1) \
+             PlaceGlyphInSocket(1.9) RemoveGlyphFromSocket(2) AddMute('x') BNRemoveFriend(1) \
              DeclineInvite('Trade') DeclineInvite('')",
         )
         .unwrap();
@@ -706,7 +707,7 @@ mod tests {
                 .unwrap(),
             (60, true, 2, 5)
         );
-        s.run("RemoveGlyphFromSocket(2)").unwrap();
+        s.run("RemoveGlyphFromSocket(2.9)").unwrap();
         assert_eq!(
             s.take_wrath_popup_requests(),
             vec![R::RemoveGlyphFromSocket { socket: 2 }]
@@ -732,7 +733,11 @@ mod tests {
     #[test]
     fn confirm_loot_slot_confirms() {
         let mut s = vm();
-        s.run("ConfirmLootSlot(2)").unwrap();
-        assert_eq!(s.take_loot_confirms(), vec![2]);
+        s.run("ConfirmLootSlot(2.9)").unwrap();
+        assert_eq!(
+            s.take_loot_confirms(),
+            vec![2],
+            "the slot truncates (`0x589590`)"
+        );
     }
 }
