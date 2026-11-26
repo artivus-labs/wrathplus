@@ -472,9 +472,15 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     // SetActiveVoiceChannel(id) (`0x500ae0`): only a voice-enabled channel activates, and none is
     // with voice off. Labelled: id 0 also writes console line `0x225`, not modelled.
     set(lua, "SetActiveVoiceChannel", |_, _| none())?;
-    // SetActiveVoiceChannelBySessionID(id) (VoiceChat.lua:259): the same with voice off; no
-    // session exists to activate (labelled: its binding is unread).
-    set(lua, "SetActiveVoiceChannelBySessionID", |_, _| none())?;
+    // SetActiveVoiceChannelBySessionID(id) (`0x7db280`): one value. An id at or below 0 clears the
+    // active channel and answers 1 (`0x7db2bc`); any other, or a non-number, finds no session with
+    // voice off and answers nil. Labelled: the clear's `0x225` signal (`0x500030`) is not modelled.
+    set(lua, "SetActiveVoiceChannelBySessionID", |lua, args| {
+        let id = args
+            .front()
+            .and_then(|v| lua.coerce_number(v.clone()).ok().flatten());
+        one(flag(id.is_some_and(|n| super::binding_abi::ftol(n) <= 0)))
+    })?;
 
     // ── Battle.net: never connected ──
     // BNCreateConversation (`0x535ce0`), BNGetConversationMemberInfo (`0x53a150`),
@@ -627,6 +633,16 @@ mod tests {
             "IsMuted('Pal')==nil",
             "UnitIsSilenced('Pal','party')==nil",
             "select('#', GetVoiceSessionMemberInfoBySessionID(1,1))==0",
+            // Voice off: one nil each (`0x4fcbf0`, `0x4fcc60`, `0x4fccb0`, `0x4fbd40`, `0x7db1f0`,
+            // `0x54ef90`); a non-string talker or an unresolved voice unit answers nothing.
+            "select('#', IsVoiceChatEnabled(), IsVoiceChatAllowed(), IsVoiceChatAllowedByServer())==3",
+            "select('#', GetActiveVoiceChannel())==1 and GetActiveVoiceChannel()==nil",
+            "select('#', GetVoiceCurrentSessionID())==1 and select('#', IsStereoVideoAvailable())==1",
+            "select('#', UnitIsTalking('Pal'))==1 and select('#', UnitIsTalking({}))==0",
+            "select('#', GetVoiceStatus('Pal'))==1 and GetVoiceStatus('Pal')==nil",
+            "select('#', GetVoiceStatus('Nobody'))==0 and select('#', GetVoiceStatus())==0",
+            "SetActiveVoiceChannelBySessionID(0)==1 and SetActiveVoiceChannelBySessionID(3)==nil",
+            "select('#', SetActiveVoiceChannelBySessionID(3))==1",
             "IsDisplayChannelOwner()==nil",
             "IsDisplayChannelModerator()==nil",
             "IsSilenced('Pal')==nil",
