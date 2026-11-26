@@ -50,6 +50,7 @@ use crate::net::wrath_calendar_capture::NativeCalendarPackets;
 use crate::net::{ClientCommand, NetCommands, NetHandlerApp};
 use wrathplus_protocol::{SessionEvent, SessionEventKind};
 mod invite_bits;
+mod pending;
 
 /// Wire statuses and ranks.
 const INVITED: u8 = 0;
@@ -297,9 +298,6 @@ fn feed_calendar(
         script.set_wrath_calendar(view.clone());
         state.pushed = Some(view);
     }
-    if clear_pending {
-        script.set_wrath_calendar_action_pending(false);
-    }
     for (event, args) in fired {
         let args = args
             .into_iter()
@@ -311,6 +309,9 @@ fn feed_calendar(
             })
             .collect();
         script.fire_event(event, args);
+    }
+    if clear_pending {
+        script.set_wrath_calendar_action_pending(false);
     }
 }
 
@@ -368,7 +369,7 @@ fn open_of(e: &Event) -> WrathCalendarEvent {
     }
 }
 
-/// Apply one receipt; `true` when it answers a pending action.
+/// Apply one receipt; `true` when it clears the pending bit ([`pending::clears`]).
 fn reduce(
     state: &mut CalendarState,
     packet: Packet,
@@ -386,6 +387,7 @@ fn reduce(
     let invites = |fired: &mut Vec<(&'static str, Vec<V>)>| {
         fired.push(("CALENDAR_UPDATE_INVITE_LIST", vec![]));
     };
+    let clears = pending::clears(&packet, |e| error_key(e).is_some());
     match packet {
         Packet::Calendar(c) => {
             calendar(state, c);
@@ -415,7 +417,7 @@ fn reduce(
                 }
                 fired.push(("CALENDAR_NEW_EVENT", vec![V::Bool(copy)]));
                 list(fired);
-                return true;
+                return clears;
             }
             let asked = state.asked == Some(e.event_id);
             let refresh = state
@@ -433,7 +435,6 @@ fn reduce(
                 fired.push(("CALENDAR_UPDATE_EVENT", vec![]));
                 invites(fired);
             }
-            return true;
         }
         Packet::FilterGuild { members } | Packet::ArenaTeam { members } => {
             if let Some(open) = state.open.as_mut().filter(|o| o.event_id == 0) {
@@ -517,7 +518,6 @@ fn reduce(
                 };
                 fired.push(("CALENDAR_UPDATE_ERROR", vec![V::Str(packed)]));
             }
-            return true;
         }
         Packet::RaidLockoutAdded { lockout, .. } => {
             let reset = state.now_unix() + i64::from(lockout.seconds_left);
@@ -645,9 +645,9 @@ fn reduce(
             state.pending = count;
             fired.push(("CALENDAR_UPDATE_PENDING_INVITES", vec![]));
         }
-        Packet::ClearPendingAction => return true,
+        Packet::ClearPendingAction => {}
     }
-    false
+    clears
 }
 
 fn calendar(state: &mut CalendarState, c: Calendar) {

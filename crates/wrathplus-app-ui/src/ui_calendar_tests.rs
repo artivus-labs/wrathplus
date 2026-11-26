@@ -415,4 +415,38 @@ fn errors_name_their_player_and_lockouts_update() {
     assert_eq!(state.lockouts[0].0.seconds_left, 2 * 86_400);
     reduce(&mut state, Packet::NumPending { count: 3 }, ME, &mut fired);
     assert_eq!(state.pending, 3);
+    // `0x5c3fe0` clears the pending bit after the calendar, never after an invite alert, after an
+    // invite only on its clear byte, and after a result only with an error line (`0x5b9960`).
+    let mut clears = |packet| reduce(&mut state, packet, ME, &mut Vec::new());
+    let invite = |raw_not_signup| Packet::Invite {
+        invitee: 20,
+        event_id: 999,
+        invite_id: 1,
+        level: 80,
+        status: 0,
+        status_time: None,
+        raw_not_signup,
+    };
+    let result = |error| Packet::CommandResult {
+        raw_word: 0,
+        raw_byte: 0,
+        param: String::new(),
+        error,
+    };
+    let alert = Packet::InviteRemovedAlert {
+        event_id: 999,
+        packed_time: 0,
+        flags: 0,
+        status: 0,
+    };
+    assert_eq!(
+        [
+            clears(calendar_packet()),
+            clears(alert),
+            clears(invite(0)),
+            clears(invite(1)),
+            clears(result(15)),
+        ],
+        [true, false, false, true, false]
+    );
 }

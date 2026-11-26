@@ -362,9 +362,12 @@ impl super::UiScript {
         self.model_mut().wrath_calendar.clock = Some(now);
     }
 
-    /// The bit `CalendarIsActionPending` answers; App clears it on the server's reply.
+    /// The bit `CalendarIsActionPending` answers, announced as `CALENDAR_ACTION_PENDING`; App
+    /// clears it after the packets 12340's dispatcher clears it after (`0x5c4037`).
     pub fn set_wrath_calendar_action_pending(&mut self, pending: bool) {
         self.model_mut().wrath_calendar.action_pending = pending;
+        let arg = super::ScriptValue::Bool(pending);
+        self.fire_event("CALENDAR_ACTION_PENDING", vec![arg]);
     }
 
     /// The gestures since the last drain, in call order.

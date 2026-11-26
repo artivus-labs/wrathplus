@@ -132,6 +132,34 @@ fn fire(lua: &Lua, event: &str, args: Vec<ScriptValue>) {
     crate::script::tick::fire_event_into(lua, event, args);
 }
 
+/// `0x5b7e20`: the action-pending bit, announced as `CALENDAR_ACTION_PENDING` (event `0x247`).
+fn pend_if(lua: &Lua, on: bool) {
+    if on {
+        write(lua, |st, _| st.action_pending = true);
+        fire(
+            lua,
+            "CALENDAR_ACTION_PENDING",
+            vec![ScriptValue::Bool(true)],
+        );
+    }
+}
+
+/// `0x5b9960`: `CALENDAR_UPDATE_ERROR` with the key's line, then the pending bit cleared and
+/// announced (`0x5b99d0`).
+fn update_error(lua: &Lua, key: &str) {
+    fire(
+        lua,
+        "CALENDAR_UPDATE_ERROR",
+        vec![ScriptValue::Str(gs(lua, key))],
+    );
+    write(lua, |st, _| st.action_pending = false);
+    fire(
+        lua,
+        "CALENDAR_ACTION_PENDING",
+        vec![ScriptValue::Bool(false)],
+    );
+}
+
 fn set(
     lua: &Lua,
     name: &str,
@@ -750,21 +778,23 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             many(vec![])
         })?;
     }
-    // CalendarAddEvent and CalendarUpdateEvent send the edited fields; both set the pending bit.
+    // CalendarAddEvent and CalendarUpdateEvent send the edited fields; both set the pending bit
+    // (`0x5bbe40`, `0x5bc345`).
     set(lua, "CalendarAddEvent", |lua, _| {
-        write(lua, |st, now| {
+        let sent = write(lua, |st, now| {
             let Some(open) = st.open.as_ref().filter(|o| o.what == Opened::Draft) else {
-                return;
+                return false;
             };
             let fields = open.fields.clone();
             st.push(R::AddEvent(fields));
             st.last_add = Some(now);
-            st.action_pending = true;
+            true
         });
+        pend_if(lua, sent);
         many(vec![])
     })?;
     set(lua, "CalendarUpdateEvent", |lua, _| {
-        write(lua, |st, _| {
+        let sent = write(lua, |st, _| {
             let Some(Open {
                 what:
                     Opened::Event {
@@ -775,7 +805,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 ..
             }) = st.open.clone()
             else {
-                return;
+                return false;
             };
             let invite_id = st.my_invitee().map_or(invite_id, |m| m.invite_id);
             st.push(R::UpdateEvent {
@@ -783,26 +813,30 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 invite_id,
                 fields,
             });
-            st.action_pending = true;
             if let Some(open) = st.open.as_mut() {
                 open.changed = false;
             }
+            true
         });
+        pend_if(lua, sent);
         many(vec![])
     })?;
+    // CalendarRemoveEvent (`0x5ba5a0` → `0x5b96a0`): sets the pending bit at `0x5b96d5`/`0x5b96f6`.
     set(lua, "CalendarRemoveEvent", |lua, _| {
-        write(lua, |st, _| {
-            if let Some((event_id, invite_id)) = open_ids(st).filter(|(e, _)| *e != 0) {
-                let flags = st.open.as_ref().map_or(0, |o| o.fields.flags);
-                let invite_id = st.my_invitee().map_or(invite_id, |m| m.invite_id);
-                st.push(R::RemoveEvent {
-                    event_id,
-                    invite_id,
-                    flags,
-                });
-                st.action_pending = true;
-            }
+        let sent = write(lua, |st, _| {
+            let Some((event_id, invite_id)) = open_ids(st).filter(|(e, _)| *e != 0) else {
+                return false;
+            };
+            let flags = st.open.as_ref().map_or(0, |o| o.fields.flags);
+            let invite_id = st.my_invitee().map_or(invite_id, |m| m.invite_id);
+            st.push(R::RemoveEvent {
+                event_id,
+                invite_id,
+                flags,
+            });
+            true
         });
+        pend_if(lua, sent);
         many(vec![])
     })?;
 
@@ -861,8 +895,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             return many(vec![]);
         }
         if !can {
-            let text = gs(lua, "CALENDAR_ERROR_PERMISSIONS");
-            fire(lua, "CALENDAR_UPDATE_ERROR", vec![ScriptValue::Str(text)]);
+            update_error(lua, "CALENDAR_ERROR_PERMISSIONS");
             return many(vec![]);
         }
         let statuses: &[u8] = if invitee.is_some_and(|i| i.signup) {
@@ -1179,22 +1212,24 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         let (Some(o), Some(d)) = (int_arg(lua, &args, 0), int_arg(lua, &args, 1)) else {
             return usage("Usage: Script_CalendarContextEventPaste([-1.0.1], monthDay)");
         };
-        write(lua, |st, _| {
+        let sent = write(lua, |st, _| {
             let Some((event_id, invite_id, at)) = st.clipboard else {
-                return;
+                return false;
             };
             let Some((y, m, day, _)) = st.slot(o as i32, d, 1) else {
-                return;
+                return false;
             };
             st.push(R::CopyEvent {
                 event_id,
                 invite_id,
                 date: WrathCalendarDate::new(y, m, day, at.hour, at.minute),
             });
-            st.action_pending = true;
+            true
         });
+        pend_if(lua, sent);
         many(vec![])
     })?;
+    // `0x5bd220` → `0x5bc6d0` sets the pending bit without announcing it (`0x5bc787`).
     set(lua, "CalendarContextEventRemove", |lua, _| {
         write(lua, |st, _| {
             if let Some(r) = context_row(st).filter(|r| r.event_id != 0) {

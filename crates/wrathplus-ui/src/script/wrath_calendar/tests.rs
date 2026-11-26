@@ -327,7 +327,11 @@ fn an_opened_event_edits_and_updates() {
 fn a_draft_is_added_with_its_fields() {
     let mut s = vm(base());
     s.run(
-        "CalendarNewGuildEvent() CalendarEventSetTitle('Raid night')
+        "pending = {}
+         local f = CreateFrame('Frame')
+         f:RegisterEvent('CALENDAR_ACTION_PENDING')
+         f:SetScript('OnEvent', function(_, _, on) pending[#pending + 1] = tostring(on) end)
+         CalendarNewGuildEvent() CalendarEventSetTitle('Raid night')
          CalendarEventSetType(1) CalendarEventSetDate(3, 20, 2010) CalendarEventSetLocked()",
     )
     .unwrap();
@@ -353,10 +357,15 @@ fn a_draft_is_added_with_its_fields() {
         ),
         ("Raid night", 0, 20, 0x410)
     );
-    // Pending until App clears it, so a second add waits.
+    // Pending until App clears it, so a second add waits; `0x5b7e20` announces both edges.
     assert!(!s.eval::<bool>("return CalendarCanAddEvent()").unwrap());
     s.set_wrath_calendar_action_pending(false);
     assert!(!s.eval::<bool>("return CalendarCanAddEvent()").unwrap());
+    assert_eq!(
+        s.eval::<String>("return table.concat(pending, ' ')")
+            .unwrap(),
+        "true false"
+    );
     // A player draft carries 0x1 (`0x5f2abd`), which its add sends.
     s.run("CalendarNewEvent()").unwrap();
     assert_eq!(
@@ -396,7 +405,13 @@ fn invites_sort_and_status_options_need_a_moderator() {
          local f = CreateFrame('Frame')
          f:RegisterEvent('CALENDAR_UPDATE_INVITE_LIST')
          f:RegisterEvent('CALENDAR_UPDATE_ERROR')
-         f:SetScript('OnEvent', function(_, e, msg) if e == 'CALENDAR_UPDATE_ERROR' then err = msg else updates = updates + 1 end end)
+         f:RegisterEvent('CALENDAR_ACTION_PENDING')
+         cleared = 0
+         f:SetScript('OnEvent', function(_, e, msg)
+           if e == 'CALENDAR_UPDATE_ERROR' then err = msg
+           elseif e == 'CALENDAR_ACTION_PENDING' then cleared = cleared + (msg == false and 1 or 0)
+           else updates = updates + 1 end
+         end)
          CalendarOpenEvent(0, 15, 1)
          CalendarEventSortInvites('name')",
     )
@@ -423,4 +438,6 @@ fn invites_sort_and_status_options_need_a_moderator() {
     assert!(s
         .eval::<bool>("return err == (CALENDAR_ERROR_PERMISSIONS or 'CALENDAR_ERROR_PERMISSIONS')")
         .unwrap());
+    // `0x5b9960` clears the pending bit after the error line and announces it.
+    assert_eq!(s.eval::<i64>("return cleared").unwrap(), 1);
 }
