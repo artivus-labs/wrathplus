@@ -96,6 +96,18 @@ fn team(lua: &Lua, v: &Value) -> u8 {
         .map_or(0, |n| n as u8)
 }
 
+/// `0x7e1830(text, buf, 0x40, 0x100, 1)`: every `|` dropped (`0x7e17f0`), the text cut at its first
+/// CR, LF or `\n` (`0x7e1640`), then cut at its 64th character (`0x7e189d`-`0x7e18b0`), so 63 stay.
+fn reason_text(s: &str) -> String {
+    let s: String = s.chars().filter(|&c| c != '|').collect();
+    let end = [s.find(['\r', '\n']), s.find("\\n")]
+        .into_iter()
+        .flatten()
+        .min()
+        .unwrap_or(s.len());
+    s[..end].chars().take(63).collect()
+}
+
 fn is_number(lua: &Lua, v: &Value) -> bool {
     lua.coerce_number(v.clone()).ok().flatten().is_some()
 }
@@ -136,7 +148,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     })?;
     // UninviteUnit(unitOrName [, reason]) (`0x51a7a0`): a unit token or a member's name resolves
     // to a guid (`0x60abf0`, ported as `Model::resolve_token`), and one that does sends
-    // `CMSG_GROUP_UNINVITE_GUID` with the reason cut to 64 characters (`0x7e1830(.., 0x40, ..)`).
+    // `CMSG_GROUP_UNINVITE_GUID` with the reason as [`reason_text`] leaves it.
     set(lua, "UninviteUnit", |lua, args| {
         if !has_player(lua) {
             return none();
@@ -144,11 +156,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         let Some(who) = text(lua, &arg(&args, 0))? else {
             return none();
         };
-        let reason: String = text(lua, &arg(&args, 1))?
-            .unwrap_or_default()
-            .chars()
-            .take(64)
-            .collect();
+        let reason = reason_text(&text(lua, &arg(&args, 1))?.unwrap_or_default());
         let mut model = lua.app_data_mut::<Model>().expect("model app_data");
         let guid = super::wrath_unit_popup::guid_of(&model, &who);
         if guid != 0 {
@@ -593,11 +601,23 @@ mod tests {
                 },
                 crate::script::party::PartyRequest::UninviteGuid {
                     guid: 0x20,
-                    reason: "r".repeat(64)
+                    reason: "r".repeat(63)
                 },
             ],
-            "an unresolved name sends nothing; the reason stops at 64 characters"
+            "an unresolved name sends nothing; the reason keeps 63 characters (`0x7e189d`)"
         );
+        drop(model);
+        s.model_mut().party_requests.clear();
+        s.run(r"UninviteUnit('Ann', 'a|b|c\nsecond line')").unwrap();
+        assert_eq!(
+            s.model_mut().party_requests.clone(),
+            [crate::script::party::PartyRequest::UninviteGuid {
+                guid: 0x20,
+                reason: "abc".into()
+            }],
+            "pipes dropped (`0x7e17f0`), cut at a line break (`0x7e1640`)"
+        );
+        let model = s.model_mut();
         assert_eq!(model.guild_requests.len(), 2);
         drop(model);
         s.model_mut()
