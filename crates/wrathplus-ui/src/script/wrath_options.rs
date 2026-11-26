@@ -120,6 +120,30 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             Ok(model.wrath_tutorial.any_seen().then_some(1))
         })?,
     )?;
+    // GetRefreshRates([resolution]) (`0x54f690`): the chosen mode's distinct rates, the first
+    // mode's without a number; nothing past the list (`0x54f721`). No mode here reports a rate,
+    // so a listed one answers the lone 0 stock greys the dropdown on (`VideoOptionsPanels.lua:277`).
+    g.set(
+        "GetRefreshRates",
+        lua.create_function(|lua, args: MultiValue| {
+            let pick = match args.front() {
+                Some(v) if super::binding_abi::is_number(lua, Some(v)) => {
+                    super::binding_abi::number_arg(lua, v.clone(), "")?.wrapping_sub(1) as u32
+                }
+                _ => 0,
+            };
+            let listed = lua
+                .app_data_ref::<Model>()
+                .expect("model")
+                .screen_resolutions
+                .len();
+            Ok(if (pick as usize) < listed {
+                MultiValue::from_vec(vec![Value::Integer(0)])
+            } else {
+                MultiValue::new()
+            })
+        })?,
+    )?;
     g.set("RestoreVideoEffectsDefaults", restore(lua, EFFECTS_CVARS)?)?;
     g.set("RestoreVideoStereoDefaults", restore(lua, STEREO_CVARS)?)?;
     // ── UIParent ──
@@ -194,7 +218,7 @@ mod tests {
 
     #[test]
     fn voice_answers_its_null_manager_and_ui_globals_their_state() {
-        let s = UiScript::new().unwrap();
+        let mut s = UiScript::new().unwrap();
         s.run(
             r##"
             assert(select("#", VoiceEnumerateCaptureDevices(1)) == 0)
@@ -209,6 +233,21 @@ mod tests {
         )
         .unwrap();
         assert!(s.ui_visible());
+        let rates = "return select('#', GetRefreshRates()), GetRefreshRates(1.9), select('#', GetRefreshRates(2))";
+        assert_eq!(
+            s.eval::<(i64, Option<i64>, i64)>(rates).unwrap(),
+            (0, None, 0)
+        );
+        let mode = crate::script::ScreenResolution {
+            width: 1024,
+            height: 768,
+        };
+        s.set_screen_resolutions(vec![mode], None);
+        assert_eq!(
+            s.eval::<(i64, Option<i64>, i64)>(rates).unwrap(),
+            (1, Some(0), 0),
+            "`0x54f721`"
+        );
         s.run("SetUIVisibility(false)").unwrap();
         assert!(!s.ui_visible());
         s.run("SetUIVisibility(true)").unwrap();

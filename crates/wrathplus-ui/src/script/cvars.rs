@@ -587,7 +587,7 @@ pub const VIDEO_DEFAULT_CVARS: &[&str] = &[
 
 /// The Video options window's engine verbs that nothing else here provides. Three run at load,
 /// as `UIDropDownMenu_Initialize` calls its initializer at once (`UIDropDownMenu.lua:48-50`):
-/// `GetScreenResolutions`, `GetCurrentResolution` and `GetRefreshRates`.
+/// `GetScreenResolutions`, `GetCurrentResolution` and `GetRefreshRates` (`wrath_options`).
 ///
 /// Ten names must stay nil so their slider rows fall back to `GetCVar`/`SetCVar`
 /// (`OptionsFrame_Load:110` tries `getglobal("Get"..value.func)`): `Getuiscale`, `Getfarclip`,
@@ -670,15 +670,6 @@ fn install_video_verbs(lua: &Lua) -> mlua::Result<()> {
             model.restart_gx_asks += 1;
             Ok(())
         })?,
-    )?;
-    // ── GetRefreshRates ─────────────────────────────────────────────────────────────────────
-    // No values is the reference's "nothing to offer" (`0x48c136`), an empty but enabled
-    // dropdown. Any argument is accepted; in the reference it picks the resolution, the first
-    // when absent (`0x48c0ec`). Deviation: always empty, because a refresh rate is only
-    // selectable through an exclusive mode-set and WrathPlus has none.
-    lua.globals().set(
-        "GetRefreshRates",
-        lua.create_function(|_, _: mlua::MultiValue| Ok(mlua::MultiValue::new()))?,
     )?;
     // ── GetVideoCaps ─────────────────────────────────────────────────────────────────────────
     // Seven values in `OptionsFrame.lua:59`'s order, never a boolean (`0x48db40`): slots 1-4 and
