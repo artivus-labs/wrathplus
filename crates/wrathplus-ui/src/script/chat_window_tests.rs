@@ -17,8 +17,8 @@ fn every_window_name_is_the_empty_string_not_a_label() {
     }
 }
 
-/// At boot (`0x4982c0`) window 1 is shown and undocked, window 2 shown and docked at 1, and
-/// windows 3 to 7 neither.
+/// The stock records (`0x501f00`): windows 1 and 2 shown and docked at 1 and 2, windows 3 to 7
+/// neither.
 #[test]
 fn hidden_and_undocked_windows_answer_nil_never_zero() {
     let s = UiScript::new().unwrap();
