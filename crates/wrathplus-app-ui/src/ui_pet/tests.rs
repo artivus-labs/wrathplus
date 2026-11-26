@@ -738,6 +738,7 @@ fn a_cooldown_alone_is_pushed_with_no_event_from_the_bar_feed() {
     app.init_resource::<crate::app_core::ui_flags::UiClock>()
         .init_resource::<crate::net::GuidIndex>()
         .init_resource::<crate::app_core::session::SelfGuid>()
+        .init_resource::<crate::names::NameCache>()
         .insert_resource(crate::app_core::state::Spells {
             catalog: wrathplus_formats::SpellCatalog::from_displays(HashMap::from([(
                 CLAW,

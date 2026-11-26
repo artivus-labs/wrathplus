@@ -104,8 +104,10 @@ pub struct PetStats {
 /// The pushed pet state: the bar's slots and bar-wide bits, the stat block, the menu predicates.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct PetBarState {
-    /// `PetHasActionBar()`: there is a bar, even one of ten empty slots.
+    /// A bar exists, even one of ten empty slots; `PetHasActionBar` also needs `!bar_hidden`.
     pub(crate) has_bar: bool,
+    /// `0x5d35b0`'s refusal of the pet's object ([`super::UiScript::set_pet_bar_hidden`]).
+    pub(crate) bar_hidden: bool,
     /// `GetPetActionsUsable()` (`0x4bcf70`): false desaturates the whole bar, and refuses the
     /// drag's bar writes with it (`0x4bc9d0`).
     pub(crate) actions_usable: bool,
@@ -172,6 +174,12 @@ impl super::UiScript {
     /// stores `OsTick() + duration` for each `SMSG_PET_SPELLS` whose duration is not 0, else 0.
     pub fn set_pet_expiry(&mut self, expiry: Option<f64>) {
         self.model_mut().pet_bar.expiry = expiry;
+    }
+
+    /// Push whether `0x5d35b0` refuses the pet (dead, or a template without a pet bar), which
+    /// hides the bar from `PetHasActionBar` (`0x5d3742`) and from nothing else.
+    pub fn set_pet_bar_hidden(&mut self, hidden: bool) {
+        self.model_mut().pet_bar.bar_hidden = hidden;
     }
 
     /// Push the menu's two predicates, which move with the pet's `UNIT_FIELD_FLAGS`.
@@ -292,7 +300,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         "PetHasActionBar",
         lua.create_function(move |lua, ()| {
             let model = lua.app_data_ref::<Model>().expect("model app_data");
-            Ok(flag(model.pet_bar.has_bar))
+            Ok(flag(model.pet_bar.has_bar && !model.pet_bar.bar_hidden))
         })?,
     )?;
 
@@ -812,6 +820,12 @@ mod tests {
         let mut s = UiScript::new().unwrap();
         s.set_pet_actions(true, false, true, slots());
         assert_eq!(s.eval::<i64>("return PetHasActionBar()").unwrap(), 1);
+        // A dead pet's bar: hidden from `PetHasActionBar` alone, so the orders still queue.
+        s.set_pet_bar_hidden(true);
+        assert!(s
+            .eval::<bool>("PetFollow() return PetHasActionBar() == nil")
+            .unwrap());
+        assert_eq!(s.take_pet_orders(), vec![0x0700_0001]);
         assert!(s
             .eval::<bool>("return GetPetActionsUsable() == nil")
             .unwrap());
