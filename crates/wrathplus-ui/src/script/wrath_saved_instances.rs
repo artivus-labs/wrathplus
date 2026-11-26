@@ -10,8 +10,7 @@
 //! - `SetSavedInstanceExtend(index, extend)` takes a boolean, sets the row's extended bit at once,
 //!   prints `RAID_INSTANCE_LOCK_EXTENDED`/`_NOT_EXTENDED` with the instance's name as a system
 //!   line, and sends CMSG `0x292` with the map, difficulty and bit.
-//!
-//! Labelled: `0x4fe070`, called with the row's difficulty before the line, is not traced.
+//! - Both index verbs truncate (`fistp` under a chopping control word, `0x4ff2f8`, `0x50dc4c`).
 
 use std::sync::Arc;
 
@@ -76,6 +75,21 @@ fn global_string(lua: &Lua, key: &str) -> String {
         .unwrap_or_else(|| key.to_string())
 }
 
+/// `0x4fe070`: the Map.dbc name, inside `DUNGEON_NAME_WITH_DIFFICULTY` with the MapDifficulty
+/// string when that key is non-empty (`0x4fe0ad`-`0x4fe0df`); empty for a missing map.
+fn dungeon_name(lua: &Lua, row: &WrathSavedInstance) -> String {
+    use crate::strings::{fill, Arg};
+    let Some(name) = row.name.as_deref() else {
+        return String::new();
+    };
+    if row.difficulty_key.is_empty() {
+        return name.to_string();
+    }
+    let label = global_string(lua, &row.difficulty_key);
+    let template = global_string(lua, "DUNGEON_NAME_WITH_DIFFICULTY");
+    fill(&template, &[Arg::S(name), Arg::S(&label)])
+}
+
 pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     let g = lua.globals();
     g.set(
@@ -109,7 +123,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             };
             let row = {
                 let model = lua.app_data_ref::<Model>().expect("model app_data");
-                usize::try_from(index.round() as i64 - 1)
+                usize::try_from(index as i64 - 1)
                     .ok()
                     .and_then(|i| model.wrath_saved_instances.list.get(i))
                     .filter(|r| r.name.is_some())
@@ -163,7 +177,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             let row = {
                 let mut model = lua.app_data_mut::<Model>().expect("model app_data");
                 let state = &mut model.wrath_saved_instances;
-                let row = usize::try_from(index.round() as i64 - 1)
+                let row = usize::try_from(index as i64 - 1)
                     .ok()
                     .and_then(|i| state.list.get_mut(i));
                 row.map(|r| {
@@ -183,8 +197,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 } else {
                     "RAID_INSTANCE_LOCK_NOT_EXTENDED"
                 };
-                let line =
-                    global_string(lua, key).replacen("%s", row.name.as_deref().unwrap_or(""), 1);
+                let line = global_string(lua, key).replacen("%s", &dungeon_name(lua, &row), 1);
                 super::tick::fire_event_into(lua, "CHAT_MSG_SYSTEM", vec![ScriptValue::Str(line)]);
             }
             Ok(())
@@ -255,6 +268,9 @@ mod tests {
         assert!(s
             .eval::<bool>("return GetSavedInstanceInfo(3) == nil")
             .unwrap());
+        assert!(s
+            .eval::<bool>("return GetSavedInstanceInfo(1.9) == 'Naxxramas'")
+            .unwrap());
         assert!(s.run("GetSavedInstanceInfo()").is_err());
     }
 
@@ -266,7 +282,9 @@ mod tests {
             "SEEN = nil local f = CreateFrame('Frame') f:RegisterEvent('CHAT_MSG_SYSTEM')
              f:SetScript('OnEvent', function(_, _, msg) SEEN = msg end)
              RAID_INSTANCE_LOCK_EXTENDED = 'Your instance lock for %s has been extended.'
-             SetSavedInstanceExtend(1, true) RequestRaidInfo()",
+             DUNGEON_NAME_WITH_DIFFICULTY = '%1$s (%2$s)'
+             RAID_DIFFICULTY_25PLAYER = '25 Player'
+             SetSavedInstanceExtend(1.9, true) RequestRaidInfo()",
         )
         .unwrap();
         assert!(s
@@ -274,7 +292,7 @@ mod tests {
             .unwrap());
         assert_eq!(
             s.eval::<String>("return SEEN").unwrap(),
-            "Your instance lock for Naxxramas has been extended."
+            "Your instance lock for Naxxramas (25 Player) has been extended."
         );
         assert_eq!(
             s.take_wrath_saved_instance_requests(),
