@@ -29,6 +29,31 @@ pub(crate) struct Bowstring {
     pub(crate) from_pivot: [Vec3; 2],
 }
 
+impl Bowstring {
+    /// The string of `owner`'s bow, from the model's `$WTT`/`$WTB` anchors and its baked event
+    /// markers, which hold the same points relative to their bone pivots. Both come from the same
+    /// event records, so a missing marker cannot happen; the model-local point stands in if it did.
+    pub(crate) fn new(
+        owner: Entity,
+        top: (u16, Vec3),
+        bottom: (u16, Vec3),
+        markers: &[wrathplus_assets::ModelMarker],
+    ) -> Self {
+        let from_pivot = |ident: [u8; 4], (_, point): (u16, Vec3)| {
+            markers
+                .iter()
+                .find(|m| m.ident == ident)
+                .map_or(point, |m| m.offset)
+        };
+        Self {
+            owner,
+            top,
+            bottom,
+            from_pivot: [from_pivot(*b"$WTT", top), from_pivot(*b"$WTB", bottom)],
+        }
+    }
+}
+
 /// Draws every visible bow's string, tip to middle to tip, from this frame's joint frames.
 fn draw_bowstrings(
     bows: Query<(
@@ -82,5 +107,39 @@ impl Plugin for BowstringPlugin {
             PostUpdate,
             draw_bowstrings.in_set(wrathplus_world::billboard::BillboardPlace),
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wrathplus_assets::ModelMarker;
+
+    /// The flexed pose takes the tips from the baked markers (pivot-relative), not the model-local
+    /// anchors, which a bone frame at its pivot would offset by the pivot a second time.
+    #[test]
+    fn the_flexed_tips_come_from_the_pivot_relative_markers() {
+        let marker = |ident: [u8; 4], bone: u16, offset: Vec3| ModelMarker {
+            ident,
+            bone,
+            offset,
+        };
+        let markers = [
+            marker(*b"$CSL", 1, Vec3::X),
+            marker(*b"$WTT", 7, Vec3::new(0.0, 0.1, 0.0)),
+            marker(*b"$WTB", 9, Vec3::new(0.0, -0.1, 0.0)),
+        ];
+        let top = (7, Vec3::new(0.2, 0.9, 0.0));
+        let bottom = (9, Vec3::new(0.2, -0.9, 0.0));
+        let string = Bowstring::new(Entity::PLACEHOLDER, top, bottom, &markers);
+        assert_eq!(
+            string.from_pivot,
+            [Vec3::new(0.0, 0.1, 0.0), Vec3::new(0.0, -0.1, 0.0)]
+        );
+        // The rigid frame keeps the model-local points.
+        assert_eq!((string.top, string.bottom), (top, bottom));
+        // A model without the markers falls back to the model-local points.
+        let bare = Bowstring::new(Entity::PLACEHOLDER, top, bottom, &[]);
+        assert_eq!(bare.from_pivot, [top.1, bottom.1]);
     }
 }
