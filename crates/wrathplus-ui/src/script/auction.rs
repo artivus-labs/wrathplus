@@ -7,7 +7,7 @@
 
 use mlua::{Lua, MultiValue, Value};
 
-use super::binding_abi::flag;
+use super::binding_abi::{flag, number_arg};
 use super::cursor::{self, CursorPayload};
 use super::Model;
 
@@ -598,32 +598,45 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // GetAuctionInvTypes(classIndex, subclassIndex) → the fixed 14 inventory-slot GlobalString
-    // keys, or nothing (`0x4cfab0`): nothing without a class (or with its `0x807060` flag 0); a
-    // found subclass needs `Flags & 0x200`, but an index the scan runs past skips that gate (the
-    // exhaust edge at `0x4cfb61` lands past the test at `0x4cfb63`).
+    // GetAuctionInvTypes(classIndex, subClassIndex) (`0x59c590`) → nothing, or the 14 rows as
+    // (GlobalString key, 1/nil shown) pairs, 28 values. Nothing without a class or with its flag
+    // clear (`0xa14f74`); a found subclass needs `Flags & 0x200` (`0x59c675`), but a scan that runs
+    // past the list skips that gate. Only Armor hides rows, by the subclass's menu position.
     g.set(
         "GetAuctionInvTypes",
-        lua.create_function(|lua, (class_index, sub_index): (usize, usize)| {
-            let offers = {
+        lua.create_function(|lua, (class, sub): (Value, Value)| {
+            const USAGE: &str = "Usage: GetAuctionInvTypes(classIndex, subClassIndex)";
+            let class_pos = number_arg(lua, class, USAGE)?.wrapping_sub(1);
+            let sub_pos = number_arg(lua, sub, USAGE)?.wrapping_sub(1);
+            let armor = {
                 let model = lua.app_data_ref::<Model>().expect("model app_data");
-                class_index
-                    .checked_sub(1)
+                let Some(c) = usize::try_from(class_pos)
+                    .ok()
                     .and_then(|i| model.auction_item_classes.get(i))
                     .filter(|c| c.has_subclass_filter)
-                    .is_some_and(|c| {
-                        sub_index
-                            .checked_sub(1)
-                            .and_then(|i| c.subclasses.get(i))
-                            .is_none_or(|s| s.has_inv_types)
-                    })
+                else {
+                    return Ok(MultiValue::new());
+                };
+                let found = usize::try_from(sub_pos)
+                    .ok()
+                    .and_then(|i| c.subclasses.get(i));
+                if found.is_some_and(|s| !s.has_inv_types) {
+                    return Ok(MultiValue::new());
+                }
+                c.class_id == 4
             };
-            if !offers {
-                return Ok(MultiValue::new());
-            }
-            let mut out = Vec::with_capacity(AUCTION_INV_TYPES.len());
-            for (_, key) in AUCTION_INV_TYPES {
+            let mut out = Vec::with_capacity(2 * AUCTION_INV_TYPES.len());
+            for (inv_type, key, misc, off_armor) in AUCTION_INV_TYPES {
+                // `0x59c6b3`-`0x59c6dd`: Miscellaneous by `+0x24`, Cloth adds the cloak, the rest
+                // by `+0x28` clear.
+                let shown = !armor
+                    || match sub_pos {
+                        0 => misc,
+                        1 if inv_type == 16 => true,
+                        _ => !off_armor,
+                    };
                 out.push(Value::String(lua.create_string(key)?));
+                out.push(flag(shown));
             }
             Ok(MultiValue::from_vec(out))
         })?,
@@ -667,7 +680,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
             let inv_type = position(3)
                 .and_then(|i| AUCTION_INV_TYPES.get(i))
-                .map(|&(id, _)| id);
+                .map(|&(id, ..)| id);
             let category = position(4).and_then(|i| model.auction_item_classes.get(i));
             let class = category.map(|c| c.class_id);
             let sub_class = category.and_then(|c| {
@@ -848,23 +861,24 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     Ok(())
 }
 
-/// The `0x8070b0` table's fourteen `{u32 invTypeId; char name[0x20]}` rows, in its order: the id
-/// goes on the wire, the name is a GlobalString key.
-const AUCTION_INV_TYPES: [(u32, &str); 14] = [
-    (1, "INVTYPE_HEAD"),
-    (2, "INVTYPE_NECK"),
-    (3, "INVTYPE_SHOULDER"),
-    (4, "INVTYPE_BODY"),
-    (5, "INVTYPE_CHEST"),
-    (6, "INVTYPE_WAIST"),
-    (7, "INVTYPE_LEGS"),
-    (8, "INVTYPE_FEET"),
-    (9, "INVTYPE_WRIST"),
-    (10, "INVTYPE_HAND"),
-    (11, "INVTYPE_FINGER"),
-    (12, "INVTYPE_TRINKET"),
-    (16, "INVTYPE_CLOAK"),
-    (23, "INVTYPE_HOLDABLE"),
+/// The `0xa14fd0` table's fourteen rows (stride `0x2c`) in its order: the inventory type the wire
+/// carries, the GlobalString key, and the two Armor filter flags `+0x24` (shown under
+/// Miscellaneous) and `+0x28` (hidden under the other armor subclasses).
+const AUCTION_INV_TYPES: [(u32, &str, bool, bool); 14] = [
+    (1, "INVTYPE_HEAD", true, false),
+    (2, "INVTYPE_NECK", true, true),
+    (3, "INVTYPE_SHOULDER", false, false),
+    (4, "INVTYPE_BODY", true, true),
+    (5, "INVTYPE_CHEST", false, false),
+    (6, "INVTYPE_WAIST", false, false),
+    (7, "INVTYPE_LEGS", false, false),
+    (8, "INVTYPE_FEET", false, false),
+    (9, "INVTYPE_WRIST", false, false),
+    (10, "INVTYPE_HAND", false, false),
+    (11, "INVTYPE_FINGER", true, true),
+    (12, "INVTYPE_TRINKET", true, true),
+    (16, "INVTYPE_CLOAK", false, true),
+    (23, "INVTYPE_HOLDABLE", true, true),
 ];
 
 /// Attach the cursor's item to the sell slot, or with an empty cursor pick the attached one back
@@ -1077,7 +1091,11 @@ mod tests {
                 class_id: 4,
                 name: "Armor".into(),
                 has_subclass_filter: true,
-                subclasses: vec![sub(1, "Cloth", true), sub(6, "Shield", false)],
+                subclasses: vec![
+                    sub(0, "Miscellaneous", true),
+                    sub(1, "Cloth", true),
+                    sub(6, "Shield", false),
+                ],
             },
             AuctionCategory {
                 class_id: 0,
@@ -1101,8 +1119,8 @@ mod tests {
         assert_eq!(q.class, Some(2), "Weapon is item class 2, not position 1");
         assert_eq!(q.sub_class, Some(0), "the first weapon subclass is id 0");
 
-        // Armor / its second subclass skips the id gap: Shield is 6, not 2.
-        s.run(r#"QueryAuctionItems("", "", "", 14, 2, 2, 0, nil, -1)"#)
+        // Armor / its third subclass skips the id gap: Shield is 6, not 3.
+        s.run(r#"QueryAuctionItems("", "", "", 14, 2, 3, 0, nil, -1)"#)
             .unwrap();
         let q = s.take_auction_query().expect("queued");
         assert_eq!(
@@ -1127,7 +1145,7 @@ mod tests {
         assert_eq!((q.inv_type, q.class, q.sub_class), (None, Some(2), None));
     }
 
-    /// The gates of `0x4cf9c0` (subclasses) and `0x4cfab0` (inventory types).
+    /// The gates of `0x59c480` (subclasses) and `0x59c590` (inventory types).
     #[test]
     fn subclass_and_inv_type_menus_follow_the_reference_gates() {
         let mut s = UiScript::new().unwrap();
@@ -1138,15 +1156,41 @@ mod tests {
             0,
             "Consumable's flag is 0: no subclass rows"
         );
-        assert_eq!(s.arity("GetAuctionInvTypes(2, 1)").unwrap(), 14, "Cloth");
-        assert_eq!(s.arity("GetAuctionInvTypes(2, 2)").unwrap(), 0, "Shield");
+        // 12340's (token, shown) pairs (`0x59c590`): Armor hides rows by subclass position.
+        let shown = |call: &str| -> String {
+            s.eval(&format!(
+                "local function f(...) local t, n = {{}}, select('#', ...) \
+                 for i = 1, n, 2 do local k, v = select(i, ...) \
+                 if v == 1 then t[#t + 1] = k:sub(9) end end \
+                 return n .. ' ' .. table.concat(t, ',') end return f({call})"
+            ))
+            .unwrap()
+        };
+        assert_eq!(
+            shown("GetAuctionInvTypes(2, 1)"),
+            "28 HEAD,NECK,BODY,FINGER,TRINKET,HOLDABLE",
+            "Miscellaneous"
+        );
+        assert_eq!(
+            shown("GetAuctionInvTypes(2, 2)"),
+            "28 HEAD,SHOULDER,CHEST,WAIST,LEGS,FEET,WRIST,HAND,CLOAK",
+            "Cloth"
+        );
+        assert_eq!(s.arity("GetAuctionInvTypes(2, 3)").unwrap(), 0, "Shield");
         assert_eq!(s.arity("GetAuctionInvTypes(3, 1)").unwrap(), 0, "flag 0");
         assert_eq!(s.arity("GetAuctionInvTypes(11, 1)").unwrap(), 0, "no class");
         assert_eq!(
-            s.arity("GetAuctionInvTypes(1, 9)").unwrap(),
+            shown("GetAuctionInvTypes(1, 9)").split(',').count(),
             14,
-            "an exhausted scan skips the gate"
+            "an exhausted scan skips the gate, and off Armor every row shows"
         );
+        assert_eq!(
+            shown("GetAuctionInvTypes(2, 0)"),
+            "28 HEAD,SHOULDER,CHEST,WAIST,LEGS,FEET,WRIST,HAND",
+            "Armor past both named positions"
+        );
+        let err = s.run("GetAuctionInvTypes(2)").unwrap_err().to_string();
+        assert!(err.contains("Usage: GetAuctionInvTypes(classIndex, subClassIndex)"));
     }
 
     #[test]
