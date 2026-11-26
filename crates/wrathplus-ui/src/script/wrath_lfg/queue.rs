@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use mlua::{Lua, MultiValue, Value};
 
+use super::requests::Gate;
 use super::{Model, UiScript};
 use crate::script::binding_abi::{bool_or_default, number_arg};
 
@@ -183,28 +184,6 @@ pub enum WrathLfgQueueRequest {
     SetComment { text: String },
 }
 
-/// The native verb throttle: three calls, then none until 10 s (`0x9e30cc`) pass, or 2 s
-/// (`0xa4040c`) for the comment.
-#[derive(Clone, Debug, Default)]
-struct Throttle {
-    count: u32,
-    since: f64,
-}
-
-impl Throttle {
-    fn allow(&mut self, now: f64, window: f64) -> bool {
-        self.count += 1;
-        if self.count > 2 {
-            if now - self.since < window {
-                return false;
-            }
-            self.since = now;
-            self.count = 0;
-        }
-        true
-    }
-}
-
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Queue {
     snapshot: Arc<WrathLfgQueueSnapshot>,
@@ -221,13 +200,20 @@ pub(crate) struct Queue {
     sent: bool,
     /// `0xacd883`: the selection or the comment changed, so the next join resends.
     pending: bool,
-    join: Throttle,
-    comment_throttle: Throttle,
-    role_check: Throttle,
-    answer: Throttle,
-    teleport: Throttle,
-    /// `0xacdd5c`. Labelled: per VM, where 12340's counters are process globals that a reload keeps.
-    boot_gate: super::requests::Gate,
+    // The verb throttles (`0xacdd50`-`0xacdd6c`), each seeded 2 and on the OS clock. Labelled: per
+    // VM, where 12340's counters are process globals that a reload keeps.
+    /// `0xacdd6c`.
+    join: Gate,
+    /// `0xacdd50`, 2 s (`0xa4040c`).
+    comment_throttle: Gate,
+    /// `0xacdd54`.
+    role_check: Gate,
+    /// `0xacdd58`.
+    answer: Gate,
+    /// `0xacdd68`.
+    teleport: Gate,
+    /// `0xacdd5c`.
+    boot_gate: Gate,
     /// `0xbea860`, written by `SetLFGBootVote` until a boot update replaces it.
     my_vote: Option<bool>,
     requests: Vec<WrathLfgQueueRequest>,
@@ -365,8 +351,8 @@ fn push(lua: &Lua, r: WrathLfgQueueRequest) {
         .push(r);
 }
 
-fn now(lua: &Lua) -> f64 {
-    crate::script::clock::now(lua)
+fn now() -> u32 {
+    super::requests::now_ms()
 }
 
 fn set(
@@ -404,13 +390,13 @@ fn select(q: &mut Queue, entry: u32, in_party: bool) {
 
 /// The native join send (`0x5572d0`), behind its throttle; nothing without a role past leader.
 fn send_join(lua: &Lua) {
-    let t = now(lua);
+    let t = now();
     let mut m = lua.app_data_mut::<Model>().expect("model app_data");
     let Some(roles) = roles_cvar(&m) else { return };
     if m.wrath_lfg.queue.sent && !m.wrath_lfg.queue.pending {
         return;
     }
-    if !m.wrath_lfg.queue.join.allow(t, 10.0) {
+    if !m.wrath_lfg.queue.join.request(t) {
         return;
     }
     let roles = roles & class_mask(&m);
@@ -467,9 +453,7 @@ pub(crate) fn start_backfill(lua: &Lua) -> bool {
 pub(crate) fn boot_vote(lua: &Lua, yes: bool) -> bool {
     let mut m = lua.app_data_mut::<Model>().expect("model app_data");
     let q = &mut m.wrath_lfg.queue;
-    if !q.snapshot.boot.as_ref().is_some_and(|b| b.in_progress)
-        || !q.boot_gate.request(super::requests::now_ms())
-    {
+    if !q.snapshot.boot.as_ref().is_some_and(|b| b.in_progress) || !q.boot_gate.request(now()) {
         return false;
     }
     q.my_vote = Some(yes);
@@ -917,13 +901,13 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         };
         // Labelled: `0x7e1830` sanitises the text into 0x40 characters; this keeps the first 64.
         let comment: String = comment.chars().take(64).collect();
-        let t = now(lua);
+        let t = now();
         let mut m = lua.app_data_mut::<Model>().expect("model app_data");
         let q = &mut m.wrath_lfg.queue;
         q.comment = comment.clone();
         if !q.sent {
             q.pending = true;
-        } else if q.comment_throttle.allow(t, 2.0) {
+        } else if q.comment_throttle.request_within(t, 2.0) {
             q.requests.push(R::SetComment { text: comment });
         }
         Ok(MultiValue::new())
@@ -959,11 +943,11 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     })?;
     // CompleteLFGRoleCheck(accept) (`0x553e20`) → true when sent, false when refused.
     set(lua, "CompleteLFGRoleCheck", |lua, args| {
-        let t = now(lua);
+        let t = now();
         let accept = bool_or_default(args.front(), false);
         let roles = {
             let mut m = lua.app_data_mut::<Model>().expect("model app_data");
-            if !m.wrath_lfg.queue.role_check.allow(t, 10.0) {
+            if !m.wrath_lfg.queue.role_check.request(t) {
                 return Ok(MultiValue::new());
             }
             let Some(roles) = roles_cvar(&m) else {
@@ -988,14 +972,14 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     // `0x5191c0(9)` (an addon-action check) passes for the trusted UI.
     for (global, accept) in [("AcceptProposal", true), ("RejectProposal", false)] {
         set(lua, global, move |lua, _| {
-            let t = now(lua);
+            let t = now();
             {
                 let mut m = lua.app_data_mut::<Model>().expect("model app_data");
                 let q = &mut m.wrath_lfg.queue;
                 let Some(id) = q.proposal.as_ref().filter(|p| p.dungeon != 0).map(|p| p.id) else {
                     return Ok(MultiValue::new());
                 };
-                if !q.answer.allow(t, 10.0) {
+                if !q.answer.request(t) {
                     return Ok(MultiValue::new());
                 }
                 q.requests.push(R::Proposal { id, accept });
@@ -1022,13 +1006,13 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     // refusals with `0x71afb0`'s combat test, each an error line and false.
     set(lua, "LFGTeleport", |lua, args| {
         use crate::script::wrath_port_gates::{CombatTest, PortGates};
-        let t = now(lua);
+        let t = now();
         let refusal = {
             let mut m = lua.app_data_mut::<Model>().expect("model app_data");
             if m.unit("player").is_none_or(|p| !p.exists) {
                 return Ok(MultiValue::new());
             }
-            if !m.wrath_lfg.queue.teleport.allow(t, 10.0) {
+            if !m.wrath_lfg.queue.teleport.request(t) {
                 return Ok(MultiValue::from_vec(vec![Value::Boolean(false)]));
             }
             let mut gates = PortGates::of(&m);

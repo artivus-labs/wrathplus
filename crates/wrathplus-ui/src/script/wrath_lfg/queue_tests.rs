@@ -5,6 +5,8 @@ use crate::script::{
 };
 
 fn vm() -> UiScript {
+    // The OS clock the throttles read, held still: the lock-gate test installs the same.
+    super::super::set_wrath_lfg_request_clock(Arc::new(|| 1_000_000));
     let mut s = UiScript::new().unwrap();
     s.register_cvars([("lfgSelectedRoles", "0")]);
     s.set_unit(
@@ -353,17 +355,13 @@ fn selection_roles_and_verbs_follow_the_native_gates() {
     assert_eq!(pick(&mut s, "SetLFGDungeon(9)"), (vec![2 << 24 | 9], true));
     s.set_party(PartyState::default());
 
-    // Role check: the third call opens a window (its stamp starts at 0); two more pass, then
-    // nothing until ten seconds after that.
-    s.run("assert(CompleteLFGRoleCheck(true)==true); assert(CompleteLFGRoleCheck(false)==true); for i = 1, 3 do assert(CompleteLFGRoleCheck(true)==true) end; assert(CompleteLFGRoleCheck(true)==nil)").unwrap();
-    s.set_now(109.0);
-    s.run("assert(CompleteLFGRoleCheck(true)==nil)").unwrap();
-    s.set_now(110.0);
-    s.run("assert(CompleteLFGRoleCheck(true)==true)").unwrap();
+    // Role check: the counter starts at 2 (`0xacdd54`), so the first call tests the clock and
+    // resets it; two more pass, then nothing within ten seconds.
+    s.run("assert(CompleteLFGRoleCheck(true)==true); assert(CompleteLFGRoleCheck(false)==true); assert(CompleteLFGRoleCheck(true)==true); assert(CompleteLFGRoleCheck(true)==nil)").unwrap();
     let answers = s.take_wrath_lfg_queue_requests();
-    assert_eq!(answers.len(), 6);
+    assert_eq!(answers.len(), 3);
     assert_eq!(answers[1], R::RoleCheckAnswer { roles: 0 });
-    assert_eq!(answers[5], R::RoleCheckAnswer { roles: 3 });
+    assert_eq!(answers[2], R::RoleCheckAnswer { roles: 3 });
 
     // Proposal: accept marks our row; reject drops it.
     s.set_wrath_lfg_queue(Arc::new(snapshot()));
@@ -397,6 +395,8 @@ fn selection_roles_and_verbs_follow_the_native_gates() {
     s.set_unit("player", Some(player(0x800)));
     s.run("assert(LFGTeleport(false)==false)").unwrap();
     s.set_unit("player", Some(player(0)));
+    // Three calls a window: the next two start a fresh one.
+    s.model_mut().wrath_lfg.queue.teleport = Gate::INITIAL;
     s.model_mut().current_spells = vec![6603];
     s.run("assert(LFGTeleport(false)==false)").unwrap();
     s.model_mut().current_spells.clear();
