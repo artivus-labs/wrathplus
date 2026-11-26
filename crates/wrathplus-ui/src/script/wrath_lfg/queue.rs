@@ -528,16 +528,16 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         out.extend(r.unknown.map(|b| int(b.into())));
         Ok(MultiValue::from_vec(out))
     })?;
-    // GetLFGQueuedList([table]) (`0x557520`) → the table (cleared, or new) keyed by the
-    // record's dungeon ids.
+    // GetLFGQueuedList([table]) (`0x557520`) → the table (cleared, or new for nil or nothing,
+    // `0x557538`-`0x557545`) keyed by the record's dungeon ids; the usage line names it GetLFD.
     set(lua, "GetLFGQueuedList", |lua, args| {
         let table = match arg(&args, 0) {
             Value::Table(t) => {
                 t.clear()?;
                 t
             }
-            Value::Nil if args.is_empty() => lua.create_table()?,
-            _ => return Err(mlua::Error::runtime("Usage: GetLFGQueuedList([table])")),
+            Value::Nil => lua.create_table()?,
+            _ => return Err(mlua::Error::runtime("Usage: GetLFDQueuedList([table])")),
         };
         let m = lua.app_data_ref::<Model>().expect("model app_data");
         if let Some(r) = record(&m) {
@@ -1046,17 +1046,17 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         Ok(MultiValue::from_vec(vec![Value::Boolean(true)]))
     })?;
 
-    // ── the reward tooltips (labelled: `GameTooltip:SetLFGDungeonReward`/`SetLFGCompletionReward`
-    // are unread; they show the item GetLFGDungeonRewardInfo / GetLFGCompletionRewardItem name,
-    // through the id-keyed item render) ──
+    // ── the reward tooltips (`0x630a80`/`0x630b90`: their numbers round through `lua_tointeger`,
+    // `0x630ad8`, `0x630be7`; labelled: the rest is unread, they show the item
+    // GetLFGDungeonRewardInfo / GetLFGCompletionRewardItem name through the id-keyed item render) ──
     let tooltip: mlua::Table =
         lua.named_registry_value(crate::script::tooltip::REG_TOOLTIP_METHODS)?;
     tooltip.set(
         "SetLFGDungeonReward",
         lua.create_function(|lua, (this, id, index): (mlua::Table, Value, Value)| {
-            const USAGE: &str = "Usage: GameTooltip:SetLFGDungeonReward(dungeonID, lootIndex)";
-            let id = number_arg(lua, id, USAGE)?;
-            let index = number_arg(lua, index, USAGE)?;
+            const USAGE: &str = "Usage: Tooltip:SetLFGDungeonReward(dungeonID, lootIndex)";
+            let id = tointeger_arg(lua, id, USAGE)?;
+            let index = tointeger_arg(lua, index, USAGE)?;
             let item = {
                 let m = lua.app_data_ref::<Model>().expect("model app_data");
                 let state = &m.wrath_lfg;
@@ -1078,10 +1078,10 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     tooltip.set(
         "SetLFGCompletionReward",
         lua.create_function(|lua, (this, index): (mlua::Table, Value)| {
-            let index = number_arg(
+            let index = tointeger_arg(
                 lua,
                 index,
-                "Usage: GameTooltip:SetLFGCompletionReward(lootIndex)",
+                "Usage: Tooltip:SetLFGCompletionReward(lootIndex)",
             )?;
             let item = {
                 let m = lua.app_data_ref::<Model>().expect("model app_data");

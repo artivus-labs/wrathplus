@@ -169,7 +169,7 @@ fn getters_read_the_snapshot_in_native_shapes() {
         "select(13, GetLFGQueueStats())==5",
         "select('#', GetLFGInfoServer())==10 and select(1, GetLFGInfoServer())==false",
         "select(6, GetLFGInfoServer())=='hi' and select(7, GetLFGInfoServer())==2",
-        "GetLFGQueuedList()[7]==true and GetLFGQueuedList()[9]==true",
+        "GetLFGQueuedList()[7]==true and GetLFGQueuedList(nil)[9]==true",
         "IsListedInLFR()==true",
         "select(1, GetLFGRoleUpdate())==true and select(2, GetLFGRoleUpdate())==1 and select(3, GetLFGRoleUpdate())==2",
         "select(1, GetLFGRoleUpdateSlot(1))==1 and select(2, GetLFGRoleUpdateSlot(1))==7",
@@ -194,18 +194,29 @@ fn getters_read_the_snapshot_in_native_shapes() {
         assert!(s.eval::<bool>(&format!("return {check}")).unwrap(), "{check}");
     }
     s.run("local p = CreateFrame('Frame') local t = CreateFrame('GameTooltip', 'LfgTip', p) t:SetOwner(p, 'ANCHOR_NONE') t:SetLFGCompletionReward(1) t:SetLFGCompletionReward(9) t:SetLFGDungeonReward(7, 1)").unwrap();
-    assert!(
-        s.run("LfgTip:SetLFGDungeonReward(7)").is_err()
-            && s.run("LfgTip:SetLFGCompletionReward()").is_err()
-    );
     for usage in [
         "GetLFGRoleUpdateSlot()",
         "GetLFGRoleUpdateMember()",
         "GetLFGProposalEncounter('x')",
         "GetLFGCompletionRewardItem()",
-        "GetLFGQueuedList(1)",
     ] {
         assert!(s.run(usage).is_err(), "{usage}");
+    }
+    for (call, usage) in [
+        ("GetLFGQueuedList(1)", "Usage: GetLFDQueuedList([table])"),
+        (
+            "LfgTip:SetLFGDungeonReward(7)",
+            "Usage: Tooltip:SetLFGDungeonReward(",
+        ),
+        (
+            "LfgTip:SetLFGCompletionReward()",
+            "Usage: Tooltip:SetLFGCompletionReward(",
+        ),
+    ] {
+        assert!(
+            s.run(call).unwrap_err().to_string().contains(usage),
+            "{call}"
+        );
     }
     // Grouped: the party record, which is absent.
     s.set_party(PartyState {
