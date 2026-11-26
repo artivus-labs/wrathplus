@@ -130,8 +130,8 @@ struct Record {
     name: String,
     /// Free text, empty on vmangos.
     body_text: String,
-    /// Signatures required, the record's `+0x1118`: signed, as the binding pushes it with
-    /// `fild DWORD`. The Request-Signature button and `CanSignPetition` (`0x4f4634`) test it.
+    /// Signatures required, the record's `+0x1110`: signed, as the binding pushes it with
+    /// `fild DWORD`. The Request-Signature button tests it; `CanSignPetition` tests the cap.
     required: i32,
     /// The record's `+0x1110` bit 0, set for a guild charter: it picks `GetPetitionInfo`'s first
     /// return and gates `CanSignPetition`'s guild-member and full-list refusals.
