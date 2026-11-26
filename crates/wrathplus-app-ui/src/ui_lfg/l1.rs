@@ -63,6 +63,17 @@ pub(crate) struct LfgL1 {
 
 /// The OS boot-relative millisecond count as `u32`, the reference's `GetTickCount` input to the
 /// request gates (`0x86d400`); a process-relative clock would reject the first call.
+#[cfg(windows)]
+pub(super) fn boot_clock_ms() -> u32 {
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetTickCount() -> u32;
+    }
+    // SAFETY: `GetTickCount` takes no arguments and only reads the system tick count.
+    unsafe { GetTickCount() }
+}
+
+#[cfg(not(windows))]
 pub(super) fn boot_clock_ms() -> u32 {
     let mut ts = libc::timespec {
         tv_sec: 0,
