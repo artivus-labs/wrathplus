@@ -136,7 +136,15 @@ fn arg(args: &MultiValue, i: usize) -> Value {
     args.get(i).cloned().unwrap_or(Value::Nil)
 }
 
-/// A rounded number argument, `None` when not a number.
+/// A tab or talent index, truncated (`fistp` under RC=11), `None` when not a number.
+fn index(lua: &Lua, v: &Value) -> Option<i64> {
+    lua.coerce_number(v.clone())
+        .ok()
+        .flatten()
+        .map(|n| n.trunc() as i64)
+}
+
+/// A group argument, rounded as `lua_tointeger` (`0x5c57d0`) reads it; `None` when not a number.
 fn number(lua: &Lua, v: &Value) -> Option<i64> {
     lua.coerce_number(v.clone())
         .ok()
@@ -178,7 +186,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     g.set(
         "GetTalentTabInfo",
         lua.create_function(|lua, args: MultiValue| {
-            let Some(tab) = number(lua, &arg(&args, 0)) else {
+            let Some(tab) = index(lua, &arg(&args, 0)) else {
                 return Err(mlua::Error::runtime(
                     "Usage: GetTalentTabInfo(tabIndex[, isInspect[, isPet[, groupIndex]]])",
                 ));
@@ -213,7 +221,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     g.set(
         "GetNumTalents",
         lua.create_function(|lua, args: MultiValue| {
-            let Some(tab) = number(lua, &arg(&args, 0)) else {
+            let Some(tab) = index(lua, &arg(&args, 0)) else {
                 return Err(mlua::Error::runtime(
                     "Usage: GetNumTalents(tabIndex[, isInspect[, isPet]])",
                 ));
@@ -233,7 +241,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     g.set(
         "GetTalentInfo",
         lua.create_function(|lua, args: MultiValue| {
-            let (Some(tab), Some(i)) = (number(lua, &arg(&args, 0)), number(lua, &arg(&args, 1)))
+            let (Some(tab), Some(i)) = (index(lua, &arg(&args, 0)), index(lua, &arg(&args, 1)))
             else {
                 return Err(mlua::Error::runtime(
                     "Usage: GetTalentInfo(tabIndex, talentIndex[, isInspect[, isPet[, groupIndex]]])",
@@ -287,7 +295,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     g.set(
         "GetTalentPrereqs",
         lua.create_function(|lua, args: MultiValue| {
-            let (Some(tab), Some(i)) = (number(lua, &arg(&args, 0)), number(lua, &arg(&args, 1)))
+            let (Some(tab), Some(i)) = (index(lua, &arg(&args, 0)), index(lua, &arg(&args, 1)))
             else {
                 return Err(mlua::Error::runtime(
                     "Usage: GetTalentPrereqs(tabIndex, talentIndex[, isInspect[, isPet[, groupIndex]]])",
@@ -381,7 +389,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     g.set(
         "GetTalentLink",
         lua.create_function(|lua, args: MultiValue| {
-            let (Some(tab), Some(i)) = (number(lua, &arg(&args, 0)), number(lua, &arg(&args, 1)))
+            let (Some(tab), Some(i)) = (index(lua, &arg(&args, 0)), index(lua, &arg(&args, 1)))
             else {
                 return Err(mlua::Error::runtime(
                     "Usage: GetTalentLink(tabIndex, talentIndex[, isInspect[, isPet[, groupIndex[, isPreview]]]])",
@@ -565,5 +573,19 @@ mod tests {
             0
         );
         assert!(s.run("GetTalentInfo(1)").is_err());
+        for call in [
+            "GetTalentTabInfo()",
+            "GetNumTalents()",
+            "GetTalentPrereqs()",
+            "GetTalentLink()",
+        ] {
+            assert!(s.run(call).is_err(), "{call}");
+        }
+        // Tab and index truncate (`fistp` under RC=11, `0x5c783d`, `0x5c7863`).
+        assert_eq!(
+            s.eval::<i64>("return select(5, GetTalentInfo(1.9, 1.9, true))")
+                .unwrap(),
+            3
+        );
     }
 }
