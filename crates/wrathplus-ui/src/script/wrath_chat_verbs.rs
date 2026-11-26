@@ -157,15 +157,23 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         }
         none()
     })?;
-    // PromoteToLeader(name) (`0x573e10`).
+    // PromoteToLeader(unitOrName) (`0x573e10`): with the player object (`0x520198`), the token or
+    // member name through `0x60abf0` (`0x5201e5`), as UninviteUnit. Labelled: an unresolved name
+    // goes to the app's roster match, where 12340 searches the group and the visible units by
+    // prefix unless argument 2 is set (`0x52027e`); the player type test (`0x52022a`) is not run.
     set(lua, "PromoteToLeader", |lua, args| {
-        let Some(name) = text(lua, &arg(&args, 0))? else {
+        let Some(who) = text(lua, &arg(&args, 0))? else {
             return Err(mlua::Error::runtime("Usage: PromoteToLeader(name)"));
         };
-        lua.app_data_mut::<Model>()
-            .expect("model app_data")
-            .party_requests
-            .push(PartyRequest::PromoteName(name));
+        if !has_player(lua) {
+            return none();
+        }
+        let mut model = lua.app_data_mut::<Model>().expect("model app_data");
+        let request = match super::wrath_unit_popup::guid_of(&model, &who) {
+            0 => PartyRequest::PromoteName(who),
+            guid => PartyRequest::PromoteGuid(guid),
+        };
+        model.party_requests.push(request);
         none()
     })?;
 
@@ -597,10 +605,11 @@ mod tests {
                 name: "Ann".into(),
                 guid: 0x20,
             });
+        s.model_mut().unit_guids.party[0] = 0x20;
         s.run(&format!(
             "InviteUnit('Bob') UninviteUnit('ann', 'afk') UninviteUnit('Nobody') \
                UninviteUnit('Ann', '{}') PromoteToLeader('Cid') GuildInvite('Dee') \
-               GuildSetLeader('Eve') GuildPromote()",
+               GuildSetLeader('Eve') GuildPromote() PromoteToLeader('party1') PromoteToLeader('ann')",
             "r".repeat(70)
         ))
         .unwrap();
@@ -608,8 +617,22 @@ mod tests {
             s.run(&format!("InviteUnit('{}')", "x".repeat(49))).is_err(),
             "Name too long"
         );
+        assert!(
+            s.run("PromoteToLeader()").is_err(),
+            "Usage: PromoteToLeader(name)"
+        );
         let model = s.model_mut();
-        assert_eq!(model.party_requests.len(), 4);
+        assert_eq!(model.party_requests.len(), 6);
+        use crate::script::party::PartyRequest as P;
+        assert_eq!(
+            model.party_requests[3..],
+            [
+                P::PromoteName("Cid".into()),
+                P::PromoteGuid(0x20),
+                P::PromoteGuid(0x20)
+            ],
+            "a token or member name promotes by guid; an unresolved name keeps the roster match"
+        );
         assert_eq!(
             model.party_requests[1..3],
             [
