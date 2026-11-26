@@ -66,7 +66,6 @@ fn hunter_pet_stats() -> PetStats {
     PetStats {
         icon: Some(r"Interface\Icons\Ability_Hunter_Pet_Boar".into()),
         hunter_pet: true,
-        loyalty: Some("(Loyalty Level 6) Best Friend".into()),
         family: Some("Boar".into()),
         ..PetStats::default()
     }

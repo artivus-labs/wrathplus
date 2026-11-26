@@ -69,24 +69,18 @@ pub(crate) struct StoredPetAction {
     pub(crate) cooldown: Option<(f64, f64, bool)>,
 }
 
-/// The pet stat block: the four hunter stat bindings and `HasPetUI`'s second return
-/// (`0x4be670`), plus the family word, icon and diet. The stats share one hunter-pet gate
-/// (`0x6116e0`) and fail their own ways: loyalty to nil, the pairs to `(0, 0)`, happiness to
-/// `(nil, 100.0, 0.0)`. The family word has no gate (`0x51a310`); the diet shares the stats'.
+/// The pet stat block: `HasPetUI`'s second return (`0x5d3960`), the happiness and experience
+/// bindings, the family word, icon and diet. The stats share the hunter-pet test (`0x71b630`) and
+/// fail their own ways: the pair to `(0, 0)`, happiness to `(nil, 100.0)`. The family word has no
+/// gate; the icon and diet share the stats' (`0x5d3d1c`, `0x5d3bd0`).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PetStats {
     /// `HasPetUI`'s second return; false makes every gated binding answer its failure form.
     pub hunter_pet: bool,
-    /// `GetPetHappiness`'s first return, bucketed `0..=3` by the client; `Some(0)` is not nil.
+    /// `GetPetHappiness`'s first return, the bucket `1..=3` (`0x5d3b53`).
     pub happiness: Option<u32>,
     /// Return 2: the damage percentage, already scaled by 100.
     pub damage_percentage: f32,
-    /// Return 3: the loyalty rate, unscaled and possibly negative.
-    pub loyalty_rate: f32,
-    /// `GetPetLoyalty`: the `PetLoyalty.dbc` name verbatim, `"(Loyalty Level N) "` prefix included.
-    pub loyalty: Option<String>,
-    /// `GetPetTrainingPoints`: `(totalPoints, spent)`, high word first.
-    pub training_points: (u16, u16),
     /// `GetPetExperience`: `(currXP, nextXP)`.
     pub experience: (u32, u32),
     /// `UnitCreatureFamily("pet")`: the localized `CreatureFamily.dbc` word off the cached creature
@@ -94,8 +88,7 @@ pub struct PetStats {
     /// 18 and 22 have none). `PetPaperDollFrame.lua:68-70` guards its level line on it.
     pub family: Option<String>,
     /// `GetPetIcon()`: the family row's `CreatureFamily.dbc` icon, `None` on the family word's
-    /// misses. Ungated like the family word; whether the reference gates it (`0x4beb10`) is
-    /// untraced, and no warlock reaches its stock callers (`PetStable.lua:51`, `161-162`).
+    /// misses and for a pet the hunter-pet test refuses (`0x5d3d1c`), which the app applies.
     pub icon: Option<String>,
     /// `GetPetFoodTypes()`: the diet names the family's food mask selects, in record order
     /// (`0x4bea10`: bit `1 << (id - 1)` of `CreatureFamily` column 7, names from `ItemPetFood`).
@@ -414,55 +407,17 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // The client buckets return 1 off `PetPersonality.dbc` (`0x4be900`), and bucket 0 is the
-    // number 0; only the gate failure is nil, and even then returns 2 and 3 are `(100.0, 0.0)`.
+    // Two returns on both paths (`0x5d3b90`, `0x5d3bb7`): the bucket and its damage percentage,
+    // else nil and 100.0. Build 12340 has no GetPetLoyalty or GetPetTrainingPoints.
     g.set(
         "GetPetHappiness",
         lua.create_function(move |lua, ()| {
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             let s = &model.pet_bar.stats;
-            let happiness = match s.happiness.filter(|_| s.hunter_pet) {
-                Some(b) => Value::Integer(i64::from(b)),
-                None => Value::Nil,
-            };
-            let (dmg, rate) = if happiness == Value::Nil {
-                (100.0, 0.0)
-            } else {
-                (s.damage_percentage, s.loyalty_rate)
-            };
-            Ok(MultiValue::from_vec(vec![
-                happiness,
-                Value::Number(f64::from(dmg)),
-                Value::Number(f64::from(rate)),
-            ]))
-        })?,
-    )?;
-
-    // The one stat binding that fails to nil, level 0 included.
-    g.set(
-        "GetPetLoyalty",
-        lua.create_function(move |lua, ()| {
-            let model = lua.app_data_ref::<Model>().expect("model app_data");
-            let s = &model.pet_bar.stats;
-            Ok(match s.loyalty.as_deref().filter(|_| s.hunter_pet) {
-                Some(name) => Value::String(lua.create_string(name)?),
-                None => Value::Nil,
+            Ok(match s.happiness.filter(|_| s.hunter_pet) {
+                Some(b) => (Value::Integer(i64::from(b)), f64::from(s.damage_percentage)),
+                None => (Value::Nil, 100.0),
             })
-        })?,
-    )?;
-
-    // The high then low word of one packed dword; a gate failure is (0, 0), not nil.
-    g.set(
-        "GetPetTrainingPoints",
-        lua.create_function(move |lua, ()| {
-            let model = lua.app_data_ref::<Model>().expect("model app_data");
-            let s = &model.pet_bar.stats;
-            let (total, spent) = if s.hunter_pet {
-                s.training_points
-            } else {
-                (0, 0)
-            };
-            Ok((f64::from(total), f64::from(spent)))
         })?,
     )?;
 
@@ -919,9 +874,6 @@ mod tests {
             icon: Some("Interface\\Icons\\Ability_Hunter_Pet_Boar".into()),
             happiness: Some(3),
             damage_percentage: 125.0,
-            loyalty_rate: 20.0,
-            loyalty: Some("(Loyalty Level 6) Best Friend".into()),
-            training_points: (170, 130),
             experience: (4200, 8000),
             family: Some("Boar".into()),
             food_types: vec![
@@ -943,19 +895,14 @@ mod tests {
         s.set_pet_stats(true, hunter_stats());
 
         assert!(s
-            .eval::<bool>(
-                "local h, dmg, rate = GetPetHappiness() \
-                 return h == 3 and dmg == 125 and rate == 20"
-            )
+            .eval::<bool>("local h, dmg = GetPetHappiness() return h == 3 and dmg == 125")
             .unwrap());
-        assert_eq!(
-            s.eval::<String>("return GetPetLoyalty()").unwrap(),
-            "(Loyalty Level 6) Best Friend",
-            "the shipped prefix is pushed verbatim — the client does no stripping"
+        assert_eq!(s.arity("GetPetHappiness()").unwrap(), 2);
+        assert!(
+            s.eval::<bool>("return GetPetLoyalty == nil and GetPetTrainingPoints == nil")
+                .unwrap(),
+            "1.12 names, absent from 12340"
         );
-        assert!(s
-            .eval::<bool>("local t, sp = GetPetTrainingPoints() return t == 170 and sp == 130")
-            .unwrap());
         assert!(s
             .eval::<bool>("local c, n = GetPetExperience() return c == 4200 and n == 8000")
             .unwrap());
@@ -976,17 +923,11 @@ mod tests {
         );
 
         assert!(
-            s.eval::<bool>(
-                "local h, dmg, rate = GetPetHappiness() \
-                 return h == nil and dmg == 100 and rate == 0"
-            )
-            .unwrap(),
-            "happiness is nil but its two numbers are still numbers"
+            s.eval::<bool>("local h, dmg = GetPetHappiness() return h == nil and dmg == 100")
+                .unwrap(),
+            "happiness is nil but its damage is still a number"
         );
-        assert!(s.eval::<bool>("return GetPetLoyalty() == nil").unwrap());
-        assert!(s
-            .eval::<bool>("local t, sp = GetPetTrainingPoints() return t == 0 and sp == 0")
-            .unwrap());
+        assert_eq!(s.arity("GetPetHappiness()").unwrap(), 2);
         assert!(s
             .eval::<bool>("local c, n = GetPetExperience() return c == 0 and n == 0")
             .unwrap());
@@ -995,26 +936,21 @@ mod tests {
             .unwrap());
     }
 
+    /// The bucket is a number from 1 (`0x5d3b53` pushes the index plus one), never 0.
     #[test]
-    fn happiness_bucket_zero_is_not_the_failure_case() {
+    fn happiness_bucket_one_is_a_number() {
         let mut s = UiScript::new().unwrap();
         s.set_pet_stats(
             true,
             PetStats {
-                happiness: Some(0),
-                damage_percentage: 100.0,
-                loyalty_rate: 0.0,
+                happiness: Some(1),
+                damage_percentage: 75.0,
                 ..hunter_stats()
             },
         );
         assert!(s
-            .eval::<bool>("local h = GetPetHappiness() return h == 0 and h ~= nil")
+            .eval::<bool>("local h, dmg = GetPetHappiness() return h == 1 and dmg == 75")
             .unwrap());
-        assert!(
-            s.eval::<bool>("return not GetPetHappiness() == false")
-                .unwrap(),
-            "0 is truthy in Lua, so the reference's `not happiness` hide-test does NOT fire"
-        );
     }
 
     #[test]
@@ -1023,7 +959,6 @@ mod tests {
         assert!(s
             .eval::<bool>("local ui, hunter = HasPetUI() return ui == nil and hunter == nil")
             .unwrap());
-        assert!(s.eval::<bool>("return GetPetLoyalty() == nil").unwrap());
         assert!(s
             .eval::<bool>("local h, dmg = GetPetHappiness() return h == nil and dmg == 100")
             .unwrap());
@@ -1139,7 +1074,6 @@ mod tests {
                 .unwrap(),
             "Imp"
         );
-        assert!(s.eval::<bool>("return GetPetLoyalty() == nil").unwrap());
         assert_eq!(s.arity("GetPetFoodTypes()").unwrap(), 0);
     }
 }
