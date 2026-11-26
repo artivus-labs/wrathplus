@@ -162,22 +162,11 @@ impl ArenaState {
         }
     }
 
-    /// `0x5a2e80`: move `key` to the head, or flip the head's direction if it is there.
+    /// `0x5a2e80`: the score list's move (`0x5a2ec4`-`0x5a2edf`).
     fn choose_sort(&mut self, key: u8) {
-        let Some(i) = self.sort.iter().position(|&(k, _)| k == key) else {
-            return;
-        };
-        if i == 0 {
-            self.sort[0].1 = !self.sort[0].1;
-            return;
+        if let Some(i) = self.sort.iter().position(|&(k, _)| k == key) {
+            super::battlefield_score::choose(&mut self.sort, i);
         }
-        // As the reference shifts: the head's direction is overwritten with the chosen entry's
-        // before the shift copies it down, so the old head moves down carrying that direction.
-        self.sort[0].1 = self.sort[i].1;
-        for j in (1..=i).rev() {
-            self.sort[j] = self.sort[j - 1];
-        }
-        self.sort[0].0 = key;
     }
 }
 
@@ -626,10 +615,10 @@ mod tests {
         assert_eq!(first(&s), "Cyd");
         s.run("SortArenaTeamRoster('played')").unwrap();
         assert_eq!(first(&s), "Cyd");
-        // The old head (rating, reversed) moved down carrying played's forward direction.
+        // The old head (rating, reversed) moves down with its own direction (`0x5a2ec4`).
         assert_eq!(
             s.model_mut().wrath_arena.sort[..4],
-            [(2, false), (6, false), (0, false), (1, false)]
+            [(2, false), (6, true), (0, false), (1, false)]
         );
         s.run("SetArenaTeamRosterShowOffline(false)").unwrap();
         assert_eq!(first(&s), "Bo");

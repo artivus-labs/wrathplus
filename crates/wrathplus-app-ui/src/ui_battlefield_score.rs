@@ -195,6 +195,7 @@ pub(crate) fn feed_battlefield_score(
             columns,
         })
     });
+    script.set_battlefield_score_names_pending(board.log.is_some() && fresh.is_none());
     let last = last.get(&script);
     let status_rebuild = queue.take_score_dirty();
     if status_rebuild {
