@@ -1216,10 +1216,8 @@ fn action_commands_parse() {
 }
 
 fn emote(text_id: u32, arg: Option<&str>) -> ParsedChat {
-    ParsedChat::TextEmote {
-        text_id,
-        arg: arg.map(str::to_string),
-    }
+    let (arg, unit) = (arg.map(str::to_string), None);
+    ParsedChat::TextEmote { text_id, arg, unit }
 }
 
 #[test]

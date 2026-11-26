@@ -122,6 +122,7 @@ fn engine_verbs(
                 ParsedChat::TextEmote {
                     text_id,
                     arg: e.target,
+                    unit: e.target_guid,
                 },
             )),
             None => warn!(
@@ -689,7 +690,7 @@ pub(super) fn drain_chat_input(
                 }
             }
             // `DoEmote` (`0x5ef560`): the gates in the client's order, then posture and packet.
-            ParsedChat::TextEmote { text_id, arg } => {
+            ParsedChat::TextEmote { text_id, arg, unit } => {
                 let (stand_state, flags) = self_player
                     .single()
                     .map_or((0, 0), |(_, m, _)| (m.stand_state, m.flags));
@@ -784,12 +785,14 @@ pub(super) fn drain_chat_input(
                         });
                     }
                 }
-                let target = emote_target(
-                    arg.as_deref(),
-                    &selection,
-                    |name| chat_out.players.find(&names, name),
-                    self_player.single().ok().map(|(entity, _, _)| entity),
-                );
+                let target = unit.unwrap_or_else(|| {
+                    emote_target(
+                        arg.as_deref(),
+                        &selection,
+                        |name| chat_out.players.find(&names, name),
+                        self_player.single().ok().map(|(entity, _, _)| entity),
+                    )
+                });
                 match commands
                     .0
                     .send(ClientCommand::TextEmote { text_id, target })

@@ -51,8 +51,13 @@ pub(in crate::ui_chat) enum ParsedChat {
     Reaction { name: Option<String> },
     /// `/help`.
     Help,
-    /// An `EmotesText` command (`/wave` is 101), sent as `CMSG_TEXT_EMOTE` at the selection.
-    TextEmote { text_id: u32, arg: Option<String> },
+    /// An `EmotesText` command (`/wave` is 101), sent as `CMSG_TEXT_EMOTE` at the selection, or
+    /// at `unit`, the guid `DoEmote` resolved a unit-token argument to.
+    TextEmote {
+        text_id: u32,
+        arg: Option<String>,
+        unit: Option<u64>,
+    },
     /// A channel verb the stock handler parsed and the VM queued; never from [`parse_line`].
     Channel(wrathplus_ui::script::ChannelCommand),
     /// `/castvis`: a locally synthesized [`crate::creature_anim::CastEvent`], at the selection
@@ -131,6 +136,7 @@ pub(in crate::ui_chat) fn parse_line(table: &SlashCommands, line: &str) -> Parse
         Some(Command::Emote { text_id }) => ParsedChat::TextEmote {
             text_id,
             arg: (!args.is_empty()).then(|| args.to_string()),
+            unit: None,
         },
         Some(Command::Dev(dev)) => dev_command(dev, args),
         // `HELP_TEXT_SIMPLE`'s case, after the drain offers the line to `SlashCmdList`.
