@@ -342,7 +342,8 @@ pub use chat_misc::EmoteRequest;
 pub use chat_send::ChatSend;
 pub use chat_types::ChatTypeColor;
 pub use chat_window::{
-    message_group_index, ChatWindowLook, COMBAT_LOG_GROUPS_START, MESSAGE_GROUPS,
+    message_group_index, ChatWindowGeometry, ChatWindowLook, COMBAT_LOG_GROUPS_START,
+    MESSAGE_GROUPS,
 };
 pub use container::{
     BagAutoStore, ContainerMove, ContainerSlot, ContainerState, EnchantView, PendingWrap,

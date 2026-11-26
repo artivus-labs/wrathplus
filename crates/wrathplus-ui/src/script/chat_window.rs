@@ -17,6 +17,7 @@ use mlua::{Lua, MultiValue, Value};
 use super::binding_abi::{bool_or_default, coerced_number, ftol, is_number, is_string};
 use super::channel::ZoneChannelRow;
 use super::Model;
+use crate::layout::Point;
 
 /// The reference's record slots (`0xbcf0b0`), one per `ChatFrame1`..`ChatFrame10`.
 pub(super) const ENGINE_CHAT_WINDOW_SLOTS: usize = 10;
@@ -85,8 +86,45 @@ pub fn message_group_index(name: &str) -> Option<usize> {
         .position(|(n, _, _)| n.eq_ignore_ascii_case(name))
 }
 
+/// A window's saved geometry, record `+0xe8..+0xfc`: the anchor `0x814ed0` names, x and y as
+/// screen ratios, width and height, and the `+0xf4` flag that `SetChatWindowSavedPosition` and
+/// either cache line set (`0x4fc97c`, `0x50907d`, `0x509104`); the cache writes both lines only
+/// under it (`0x4fd870`). The default is the static zeros (`0x9c9360`).
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct ChatWindowGeometry {
+    pub saved: bool,
+    pub point: Point,
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
+impl ChatWindowGeometry {
+    const ZERO: Self = Self {
+        saved: false,
+        point: Point::TopLeft,
+        x: 0.0,
+        y: 0.0,
+        width: 0.0,
+        height: 0.0,
+    };
+
+    /// The anchor's name, as `0x814f20` turns the enum back.
+    pub fn point_name(&self) -> &'static str {
+        super::object::point_name(self.point)
+    }
+
+    /// The anchor `name` names, case-folded (`0x814ed0`); false, changing nothing, for none.
+    pub fn set_point(&mut self, name: &str) -> bool {
+        super::object::point_from_str(name)
+            .map(|p| self.point = p)
+            .is_some()
+    }
+}
+
 /// One window's record as `chat-cache.txt` persists it, in the reference's own field types.
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Debug)]
 pub struct ChatWindowLook {
     /// Background tint, one byte per channel.
     pub r: u8,
@@ -111,6 +149,8 @@ pub struct ChatWindowLook {
     pub channels: Vec<(String, u32)>,
     /// `+0xe4`, `SetChatWindowUninteractable`; `GetChatWindowInfo`'s tenth value.
     pub uninteractable: bool,
+    /// `+0xe8..+0xfc`, the `POSITION` and `DIMENSIONS` lines.
+    pub geometry: ChatWindowGeometry,
 }
 
 impl Default for ChatWindowLook {
@@ -134,6 +174,7 @@ impl ChatWindowLook {
         messages: Vec::new(),
         channels: Vec::new(),
         uninteractable: false,
+        geometry: ChatWindowGeometry::ZERO,
     };
 
     /// Window `index`'s (0-based) stock record, what ResetChatWindows (`0x501f00`) leaves and a
