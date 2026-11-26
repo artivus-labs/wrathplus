@@ -830,12 +830,9 @@ impl GameTime {
     /// The packed login date as `(years since 2000, month 1..=12, day 1..=31)`, decoded from
     /// [`Self::base_day`]'s `year·372 + month·31 + day`. No day rollover is applied.
     pub fn date(&self) -> (u32, u32, u32) {
-        let rem = self.base_day % 372;
-        (
-            self.base_day / 372,
-            (rem.max(1) - 1) / 31,
-            (rem.max(1) - 1) % 31 + 1,
-        )
+        // Month and day are 1-based, so a year's serials run from 32 (1 January) to 403.
+        let x = self.base_day.saturating_sub(32);
+        (x / 372, x % 372 / 31 + 1, x % 31 + 1)
     }
 
     /// Current minute of the game day (`0..1440`).
@@ -2764,5 +2761,14 @@ mod tests {
             .unwrap();
         assert_eq!(listed, [(ME, me, Some(256)), (BOAR, boar, Some(40))]);
         assert_eq!(player, Some(me));
+    }
+
+    /// December's serial reaches the next year's multiple of 372: it is month 12, not month 0.
+    #[test]
+    fn the_login_date_decodes_every_month() {
+        let date = |y: u32, m: u32, d: u32| GameTime::new(0, 0, y * 372 + m * 31 + d, 1.0).date();
+        assert_eq!(date(26, 11, 27), (26, 11, 27));
+        assert_eq!(date(26, 12, 31), (26, 12, 31));
+        assert_eq!(date(27, 1, 1), (27, 1, 1));
     }
 }
