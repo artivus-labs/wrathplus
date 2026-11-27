@@ -149,6 +149,8 @@ pub(crate) fn keyed_line_s(script: &UiScript, key: &'static str, args: &[&str]) 
 /// macro compiler's `ERR_UNKNOWN_MACRO_OPTION_S` with its `%s`), which `wrathplus_ui` cannot put
 /// on [`UiErrorKeys`], then the system lines its bindings print with no catalog row
 /// (`0x509dd0(text, 0)`), raised as chat lines so the stock handler gets every argument.
+/// Labelled: 12340 prints each at its call, so within one frame the order across the two queues
+/// is lost.
 pub(crate) fn engine_lines(script: &mut UiScript) -> Vec<Shown> {
     let keys = script.take_ui_errors().into_iter().map(UiError::key);
     let errors: Vec<UiError> = keys

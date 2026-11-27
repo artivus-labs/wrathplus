@@ -83,7 +83,7 @@ fn a_system_line_prints_verbatim() {
     // A binding's unkeyed system line (`0x509dd0(text, 0)`) and a chat-kind refusal (`0x50`) reach
     // the frame through the engine drain, where a bare `CHAT_MSG_SYSTEM` raised in the handler.
     let mut s = printing_vm();
-    s.run("SendSystemMessage('An invented line') SetLootMethod('group')")
+    s.run("SetLootMethod('group') SendSystemMessage('An invented line')")
         .unwrap();
     s.tick(0.0);
     let mut windows = super::frames::ChatWindows::default();
