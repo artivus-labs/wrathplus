@@ -1,5 +1,5 @@
 //! The game clock's date (`0xd37f98`, what `CalendarGetDate` reads): the `SMSG_LOGIN_SETTIMESPEED`
-//! date, rolled a day at each game midnight as the minute tick `0x76d740` does (`0x76c280(1, 1)`).
+//! date, rolled a day at each game midnight as the minute tick `0x76d740` does (`0x76c280(1, 0)`).
 
 use wrathplus_ui::script::WrathCalendarDate;
 
