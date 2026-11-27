@@ -115,6 +115,14 @@ fn the_calendar_lists_events_lockouts_and_holiday_days() {
     assert_eq!(view.raid_resets[0].first, 1_135_814_400 + 7200);
     // `0x5c2cd9`: the unanswered invite to a later, unlocked event is pending.
     assert_eq!(event.bits, 1);
+    assert_eq!(
+        event.alarm,
+        Some(WrathCalendarDate::new(2010, 3, 16, 18, 45))
+    );
+    // Against the game clock (`0xd37f98`), not the calendar packet's: past the event, no pip.
+    state.game_now = Some(WrathCalendarDate::new(2010, 3, 17, 0, 0));
+    let view = build(&state, &catalog, None, &net(), None, ME);
+    assert_eq!(view.entries[4].bits, 0);
 }
 
 /// `0x5c2cd9`-`0x5c2f8d`'s invite bits, row by row.

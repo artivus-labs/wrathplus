@@ -146,7 +146,13 @@ fn a_day_lists_events_holidays_and_projected_resets() {
         WrathCalendarEntry {
             invite: Some((1, 0)),
             bits: 0,
+            alarm: Some(WrathCalendarDate::new(2010, 3, 21, 18, 45)),
             ..event_row(21, 19, 0)
+        },
+        WrathCalendarEntry {
+            invite: Some((3, 0)),
+            bits: 0,
+            ..event_row(22, 19, 0)
         },
     ];
     // Weekly from Tuesday 2 March 2010 05:00: Tuesday the 16th.
@@ -253,7 +259,12 @@ fn a_day_lists_events_holidays_and_projected_resets() {
     .unwrap();
     s.set_game_date(WrathCalendarDate::new(2010, 3, 21, 18, 44));
     s.set_game_date(WrathCalendarDate::new(2010, 3, 21, 18, 45));
-    assert_eq!(s.eval::<String>("return alarm").unwrap(), "Naxx 19:0");
+    s.set_game_date(WrathCalendarDate::new(2010, 3, 22, 18, 45));
+    assert_eq!(
+        s.eval::<String>("return alarm").unwrap(),
+        "Naxx 19:0",
+        "only an alarm the calendar packet armed"
+    );
     // `0x5bec70`: the pending invites listed with an inviter, here more than the server's 0.
     assert_eq!(
         s.eval::<i64>("return CalendarGetNumPendingInvites()")
@@ -462,6 +473,17 @@ fn an_opened_event_edits_and_updates() {
     s.run("CalendarEventSetTitle('Naxx 10') CalendarUpdateEvent()")
         .unwrap();
     assert_eq!(s.take_wrath_calendar_requests().len(), 1);
+    // `0x5f1130` compares the raw argument: an over-long title differs from its capped self.
+    for _ in 0..2 {
+        s.set_wrath_calendar_action_pending(false);
+        s.run("CalendarEventSetTitle(('y'):rep(40)) CalendarUpdateEvent()")
+            .unwrap();
+        assert_eq!(s.take_wrath_calendar_requests().len(), 1);
+    }
+    s.set_wrath_calendar_action_pending(false);
+    s.run("CalendarEventSetTitle('Naxx 10') CalendarUpdateEvent()")
+        .unwrap();
+    s.take_wrath_calendar_requests();
     // Nothing opens while an action is pending.
     s.run("CalendarOpenEvent(0, 15, 1)").unwrap();
     assert_eq!(s.take_wrath_calendar_requests(), []);
@@ -648,6 +670,22 @@ fn a_draft_is_added_with_its_fields() {
     s.set_wrath_calendar(Arc::new(echo));
     let size = "return (select(6, CalendarGetEventInfo()))";
     assert_eq!(s.eval::<i64>(size).unwrap(), 100);
+    // `0x5b7b30`: nothing past 31 December 2030, though in 2030 the create window reaches 2031.
+    let mut late = vm(base());
+    late.set_game_date(WrathCalendarDate::new(2030, 6, 15, 12, 0));
+    late.set_guild(crate::script::GuildState {
+        in_guild: true,
+        ..Default::default()
+    });
+    late.run(
+        "CalendarNewGuildEvent() CalendarEventSetTitle('Raid night')
+         CalendarEventSetDate(1, 5, 2031) CalendarAddEvent()",
+    )
+    .unwrap();
+    let sent = late.take_wrath_calendar_requests();
+    assert!(!sent
+        .iter()
+        .any(|r| matches!(r, WrathCalendarRequest::AddEvent(_))));
 }
 
 /// The invite list sorts locally and fires its update; a non-moderator is refused the status

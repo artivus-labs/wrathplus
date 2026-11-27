@@ -37,12 +37,14 @@ pub(super) fn edit_right(st: &State, guild_right: bool) -> bool {
     }
 }
 
-/// `0x5b7c00`: a creatable day, today to `CalendarGetMaxCreateDate`'s.
+/// `0x5b7c00`: a creatable day, today to `CalendarGetMaxCreateDate`'s, inside `0x5b7b30`'s 24
+/// November 2004 to 31 December 2030.
 pub(super) fn creatable(st: &State, date: WrathCalendarDate) -> bool {
     let today = st.today();
     let day = |d: WrathCalendarDate| (d.year, d.month, d.day);
     let last = super::dates::max_create(today);
-    (2004, 11, 24) <= day(date) && day(today) <= day(date) && day(date) <= day(last)
+    let span = (2004, 11, 24) <= day(date) && day(date) <= (2030, 12, 31);
+    span && day(today) <= day(date) && day(date) <= day(last)
 }
 
 pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
@@ -213,6 +215,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             if invitees.len() >= 100 {
                 return Outcome::RefusedWith("CALENDAR_ERROR_INVITES_EXCEEDED", "100".into());
             }
+            // Labelled: `0x5f2070` first copies the name into 48 bytes (`0x7e2040`, `0x5f20c8`).
             if invitees
                 .iter()
                 .any(|i| i.name.as_deref() == Some(name.as_str()))

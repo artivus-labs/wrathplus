@@ -55,22 +55,34 @@ fn numbers<const N: usize>(
 
 pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     // CalendarEventSetTitle / SetDescription (`0x5bb210`, `0x5bb280` → `0x5f1130`, `0x5f1180`): a
-    // string only; a different text goes through `0x7e1830` with 32 code points and 128 bytes for
-    // the title (`0x5f1159`), 256 and 1024 for the description. Labelled: the title's flag 1
-    // (`0x7e1640`) is not modelled.
+    // string only; a text unlike the stored one (`0x76e760` on the raw argument, so an over-long
+    // one always differs) goes through `0x7e1830` with 32 code points and 128 bytes for the title
+    // (`0x5f1159`), 256 and 1024 for the description, and marks the settings changed. Labelled:
+    // the title's flag 1 (`0x7e1640`) is not modelled.
     for (name, chars, bytes, title) in [
         ("CalendarEventSetTitle", 0x20, 0x80, true),
         ("CalendarEventSetDescription", 0x100, 0x400, false),
     ] {
         set(lua, name, move |lua, args| {
             if let Some(t) = text_arg(lua, &args, 0) {
-                let t = cap(&t, chars, bytes);
-                edit(lua, |f| {
-                    *if title {
+                let right = guild_event_right(lua);
+                write(lua, |st, _| {
+                    if !edit_right(st, right) {
+                        return;
+                    }
+                    let Some(open) = st.open.as_mut() else {
+                        return;
+                    };
+                    let f = &mut open.fields;
+                    let field = if title {
                         &mut f.title
                     } else {
                         &mut f.description
-                    } = t
+                    };
+                    if *field != t {
+                        *field = cap(&t, chars, bytes);
+                        open.changed = true;
+                    }
                 });
             }
             many(vec![])

@@ -94,6 +94,8 @@ struct Listed {
     row: EventRow,
     /// Invite id, wire status, rank, type.
     invite: Option<(u64, u8, u8, u8)>,
+    /// The alarm minute, 15 before the event, armed only by the calendar packet (`0x5c2dc3`).
+    alarm: Option<WrathCalendarDate>,
 }
 
 #[derive(Resource, Default)]
@@ -109,6 +111,8 @@ pub(crate) struct CalendarState {
     raid_resets: Vec<RaidReset>,
     holidays: Vec<wrathplus_protocol::wrath_calendar::Holiday>,
     pending: u32,
+    /// The game clock (`0xd37f98`) at this feed, what the pending bit compares against.
+    game_now: Option<WrathCalendarDate>,
     /// The event or draft the VM opened.
     open: Option<WrathCalendarEvent>,
     /// The id a `CalendarOpenEvent` asked for, until its event lands.
@@ -222,6 +226,7 @@ fn feed_calendar(
     names: Option<Res<NameCache>>,
     commands: Res<NetCommands>,
     maps: Option<Res<wrathplus_assets::MapCatalogRes>>,
+    time: Option<Res<crate::net::ServerTime>>,
     self_q: Query<(&crate::net::Guid, &ObjectStore), With<SelfPlayer>>,
 ) {
     let Some(mut script) = script else {
@@ -245,6 +250,7 @@ fn feed_calendar(
     for command in sent {
         let _ = commands.0.send(ClientCommand::NativeCalendar(command));
     }
+    state.game_now = time.and_then(|t| t.0.as_ref().map(|g| g.date_now()));
     let view = Arc::new(build(
         &state,
         &catalog,
@@ -366,6 +372,7 @@ fn reduce(
                         creator: e.creator,
                     },
                     invite: mine.map(|i| (i.invite_id, i.status, i.rank, i.guild_member)),
+                    alarm: None,
                 });
                 let copy = e.send_type == SEND_COPY;
                 if !copy && state.open.as_ref().is_some_and(|o| o.event_id == 0) {
@@ -530,6 +537,7 @@ fn reduce(
                     creator,
                 },
                 invite: Some((invite_id, status, rank, 0)),
+                alarm: None,
             });
             list(fired);
         }
@@ -624,7 +632,9 @@ fn calendar(state: &mut CalendarState, c: Calendar) {
                 .iter()
                 .find(|i| i.event_id == row.event_id)
                 .map(|i| (i.invite_id, i.status, i.rank, i.guild_event));
-            Listed { row, invite }
+            let alarm = WrathCalendarDate::from_packed(row.packed_time)
+                .map(|t| WrathCalendarDate::from_seconds(t.seconds() - 15 * 60));
+            Listed { row, invite, alarm }
         })
         .collect();
     state.lockouts = c
@@ -942,7 +952,9 @@ fn build(
         }
     }
     let mut rest = Vec::new();
-    let now = state.local(state.now_unix());
+    let now = state
+        .game_now
+        .unwrap_or_else(|| state.local(state.now_unix()));
     for l in &state.events {
         let bits = invite_bits::invite_bits(&l.row, l.invite.map(|i| (i.1, i.2, i.3)), me, now);
         let (Some(date), Some(bits)) = (WrathCalendarDate::from_packed(l.row.packed_time), bits)
@@ -963,6 +975,7 @@ fn build(
             texture: texture_of(l.row.flags, l.row.dungeon),
             invite: l.invite.map(|i| (i.1, i.2)),
             bits,
+            alarm: l.alarm,
             ..Default::default()
         });
     }

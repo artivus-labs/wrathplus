@@ -102,6 +102,8 @@ pub struct WrathCalendarEntry {
     pub holiday_description: String,
     /// A raid row's map, instance id and difficulty, with the difficulty's string key.
     pub raid: Option<WrathCalendarRaid>,
+    /// The alarm minute `SMSG_CALENDAR_SEND_CALENDAR` armed (`0x5c2dc3`); no other path arms one.
+    pub alarm: Option<WrathCalendarDate>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -531,8 +533,8 @@ impl State {
             let o = match c {
                 0 => text(&a.name, &b.name),
                 1 => a.level.cmp(&b.level),
-                // Labelled: 12340 compares the class's ChrClasses name with `0x76ec80`, which also
-                // folds accents.
+                // Labelled: 12340 compares the class's ChrClasses name, as the notes below, with
+                // `0x76ec80`, which also folds accents.
                 2 => text(&a.class_name, &b.class_name),
                 3 => {
                     WEIGHT[usize::from(a.status.min(8))].cmp(&WEIGHT[usize::from(b.status.min(8))])
@@ -554,11 +556,12 @@ impl State {
     /// reaches: the calendar's arrival arms one on the game clock 15 minutes before each event
     /// (`0x5c2dc3`, `0x76db30`), and at that minute `0x5b7910` fires event `0x245` ("%s%d%d") for an
     /// accepted or confirmed invite (`+0xa8` 1 or 3, `0x5b7944`). Cost: one pass over the list per
-    /// game minute.
+    /// game minute. Labelled: a minute the host never pushes (a long stall) skips its alarm.
     fn alarms(&self, now: WrathCalendarDate) -> Vec<(String, i64, i64)> {
-        let at = now.seconds() + 15 * 60;
         let due = |e: &&WrathCalendarEntry| {
-            e.event_id != 0 && e.date.seconds() == at && matches!(e.invite, Some((1 | 3, _)))
+            e.event_id != 0
+                && e.alarm.is_some_and(|a| a.seconds() == now.seconds())
+                && matches!(e.invite, Some((1 | 3, _)))
         };
         let rows = self.view.entries.iter().filter(due);
         rows.map(|e| {
