@@ -2,6 +2,7 @@
 //! server clocks, reputations and the player's login-scoped stores. Registered ahead of every
 //! window plugin, so the teardown runs before the windows' own `Disconnected` listeners.
 
+mod game_clock;
 mod teleport;
 use teleport::teleport;
 

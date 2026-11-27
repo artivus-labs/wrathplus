@@ -875,8 +875,8 @@ fn feed_minimap_player_facing(
     script.set_minimap_player_facing(player.facing().rem_euclid(std::f32::consts::TAU));
 }
 
-/// Push the game clock `GetGameTime()` answers when the minute ticks, the API's own resolution.
-/// Before the first `SMSG_LOGIN_SETTIMESPEED` it reads 0:00.
+/// Push the game clock `GetGameTime()` and `CalendarGetDate()` answer when the minute ticks, the
+/// APIs' own resolution. Before the first `SMSG_LOGIN_SETTIMESPEED` it reads 0:00.
 fn feed_game_time(
     script: Option<bevy::ecs::system::NonSendMut<wrathplus_ui::script::UiScript>>,
     time: Res<crate::net::ServerTime>,
@@ -885,12 +885,14 @@ fn feed_game_time(
     let Some(mut script) = script else { return };
     let last = last.get(&script);
     let Some(gt) = time.0 else { return };
-    let minute = gt.minute_of_day();
+    let now = gt.date_now();
+    let minute = u32::from(now.hour) * 60 + u32::from(now.minute);
     if *last == Some(minute) {
         return;
     }
     *last = Some(minute);
     script.set_game_time(minute / 60, minute % 60);
+    script.set_game_date(now);
 }
 
 /// The app half of the `<Minimap>` widget. The zone label feed is `crate::area`'s; the stock
