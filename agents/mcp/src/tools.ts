@@ -26,17 +26,17 @@ It is the stock World of Warcraft 3.3.5a (build 12340) API as an addon sees it: 
 A bare expression (\`UnitLevel("player")\`) returns its values; otherwise use \`return a, b\`. The answer is JSON {ok, values, output}, output being what print()ed, or {ok:false, error, output} on a Lua error.
 A chunk runs to completion inside one game frame: never loop waiting for the world to change. Return, then call again or wait on the events tool.
 ${HELPERS}
-Search before writing a helper: lua_search finds what exists (built-ins, your modules, the API's names) and lua_doc reads one.
+Search before writing a helper or deciding something can't be done: lua_search finds what exists (built-ins, your modules, the stock API with its docs, the stock UI's code) and lua_doc reads one.
 For code that runs by itself every frame, save a module (save_module) and require("name") it (AgentReload("name") after a change; one named autoexec runs on entering the world). Frames work as in addons: CreateFrame("Frame"):SetScript("OnUpdate", fn) ticks, :RegisterEvent(...) reacts.
 Also: AgentPoint(u, v[, frame]) (what is at a pixel of a screenshot: {x, y, z, hit, distance, bearing, turn}, or nil, why and the bearing; see the point tool), AgentFindNpc(service[, yards]) (the nearest "repair", "vendor", "classtrainer", "innkeeper"... in sight), AgentServices([kinds[, radius]]) (where services are on your map, from the realm: {pending = true} first, then after AGENT_SERVICES_READY the places with their distance, nearest first, a game-event spawn marked event = true with event_active saying whether its event has it out, an auctioneer with house = "alliance", "horde" or "neutral", mailboxes too (kinds "auctioneer", "mailbox"); 2000 yd and 20 places by default; the answer is reused for 120 s within 100 yd), AgentPath (a route preview; {pending = true} first when the realm routes, then the route after AGENT_PATH_READY), Rotation.list (what Combat casts), Agent.intent(name, {when, run}) and Agent.decide(name, {question, options, on}) for a fast decision loop when one runs, Agent.ask(question, context, on[, {timeout, default}]) to hand a messy moment (someone talking, an odd mechanic, a hard choice) to you, the planner: it signals AGENT_ASK(id, question, context, digest of recent events), so wait on AGENT_ASK in events and answer with Agent.answer(id, value), which calls on(value); Agent.open_asks() lists the unanswered ones, require("wp.engine") (a Playerbots-style decision engine) and require("wp.values") (health, power, auras, cooldowns, range, threat, bags).`;
 
-const LUA_SEARCH_DESCRIPTION = `Search the Lua you can call (built-ins, your modules, API names) before writing your own.
-builtin: the built-in modules' functions (Quests.pick_up, Goals.push, wp.values.health...) and the Agent* functions, each with its signature, doc and file:line. own: your saved modules, the lines that match. api: the names of the global functions in the game's Lua (the stock 3.3.5a addon API and anything defined since), names only.
-Case-insensitive; names that match come first, then docs, then source lines. Read one in full with lua_doc.`;
+const LUA_SEARCH_DESCRIPTION = `Search the Lua you can call before writing your own or deciding it can't be done.
+builtin: the built-in modules' functions (Quests.pick_up, Goals.push, wp.values.health...) and the Agent* functions, each with its signature, doc and file:line. own: your saved modules, the lines that match. api: the global functions in the game's Lua (the stock 3.3.5a addon API and anything defined since); a stock function WrathPlus binds carries the note above its binding (what it returns, from the 3.3.5a client) and where it is bound, and matches on that note too. framexml: lines of the stock interface's own Lua and XML, read from your install (FrameXML and the Blizzard_* addons), each with its file:line and the lines around it: how the stock UI calls the API.
+Case-insensitive; names that match come first, then docs, then source lines; framexml hits last. All four kinds by default. Read one in full with lua_doc.`;
 
-const LUA_DOC_DESCRIPTION = `Read one Lua function or module in full: signature, doc and source.
-For a built-in, its signature, doc and source; for one of your modules, its source.
-Give the name lua_search returned (Quests.pick_up, AgentMoveTo, grind.loop); a bare function name works when only one function has it. A stock API name only says it exists: WrathPlus ships no stock API docs. Nothing by that name: an error with the nearest names.`;
+const LUA_DOC_DESCRIPTION = `Read one Lua function or module in full.
+For a built-in, its signature, doc and source; for one of your modules, its source; for a stock API function WrathPlus binds, the note above its binding (its returns), where it is bound and the binding's Rust source (a binding with no note says so). From the stock UI: a function it defines (QuestLog_Update: its source), a file (QuestLogFrame.lua: its functions with their lines) or a line (QuestLogFrame.lua:195: the lines around it).
+Give the name lua_search returned (Quests.pick_up, AgentMoveTo, grind.loop, GetQuestLogTitle); a bare function name works when only one function has it. Nothing by that name: an error with the nearest names.`;
 
 const MODULES_DESCRIPTION = `List your saved Lua modules, or read one when \`name\` is given (dotted names like grind.loop). Modules persist across reloads and restarts of the client.`;
 
@@ -256,7 +256,7 @@ export function registerTools(server: McpServer, client: AgentClient, options: T
         kinds: z
           .array(z.enum(["builtin", "own", "api"]))
           .optional()
-          .describe("Where to look (default all three)."),
+          .describe("Where to look (default all four)."),
         limit: z.number().int().min(1).max(200).optional().describe("Most results (default 20)."),
       },
       annotations: { readOnlyHint: true },
@@ -270,7 +270,7 @@ export function registerTools(server: McpServer, client: AgentClient, options: T
       title: "Read a Lua function or module",
       description: LUA_DOC_DESCRIPTION,
       inputSchema: {
-        name: z.string().min(1).describe("A name from lua_search: Quests.pick_up, AgentMoveTo, grind.loop."),
+        name: z.string().min(1).describe("A name from lua_search (Quests.pick_up, AgentMoveTo, grind.loop, GetQuestLogTitle, QuestLog_Update) or a stock UI file[:line]."),
       },
       annotations: { readOnlyHint: true },
     },

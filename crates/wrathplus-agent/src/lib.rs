@@ -46,6 +46,7 @@
 
 mod env;
 mod events;
+mod framexml;
 mod look;
 mod lua;
 mod nav;
@@ -54,6 +55,9 @@ mod point;
 mod quest_poi;
 mod search;
 mod server;
+mod stock_api;
+#[cfg(test)]
+mod stock_extract;
 mod world;
 mod zones;
 

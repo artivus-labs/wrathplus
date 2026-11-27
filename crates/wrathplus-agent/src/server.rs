@@ -401,7 +401,7 @@ fn lua_search(shared: &Port, q: &str, kind: Option<&str>, limit: Option<usize>) 
             if let Some(bad) = asked.iter().find(|k| !crate::search::KINDS.contains(k)) {
                 return json_response(
                     400,
-                    &json!({"error": format!("unknown kind {bad:?}: builtin, own or api")}),
+                    &json!({"error": format!("unknown kind {bad:?}: builtin, own, api or framexml")}),
                 );
             }
             asked
