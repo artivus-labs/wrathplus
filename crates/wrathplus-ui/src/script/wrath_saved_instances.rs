@@ -282,8 +282,8 @@ mod tests {
             "SEEN = nil local f = CreateFrame('Frame') f:RegisterEvent('CHAT_MSG_SYSTEM')
              f:SetScript('OnEvent', function(_, _, msg) SEEN = msg end)
              RAID_INSTANCE_LOCK_EXTENDED = 'Kept: %s.'
-             DUNGEON_NAME_WITH_DIFFICULTY = '%1$s (%2$s)'
-             RAID_DIFFICULTY_25PLAYER = '25 Player'
+             DUNGEON_NAME_WITH_DIFFICULTY = '%1$s [%2$s]'
+             RAID_DIFFICULTY_25PLAYER = 'Big'
              SetSavedInstanceExtend(1.9, true) RequestRaidInfo()",
         )
         .unwrap();
@@ -292,7 +292,7 @@ mod tests {
             .unwrap());
         assert_eq!(
             s.eval::<String>("return SEEN").unwrap(),
-            "Kept: Naxxramas (25 Player)."
+            "Kept: Naxxramas [Big]."
         );
         assert_eq!(
             s.take_wrath_saved_instance_requests(),
