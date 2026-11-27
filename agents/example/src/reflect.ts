@@ -7,13 +7,17 @@
 // Lua errors) and a scoreboard to judge changes by. Two checks point at the agent's own work: a
 // built-in that keeps ending as a no-op (AGENT_NOOP) is named with the modules the agent has
 // loaded, and a note in MEMORY.md that says there is nothing left to do is set against the live
-// facts that say otherwise.
+// facts that say otherwise. The rules the agent set itself (rule_set, `-- rule:` module headers)
+// are listed with what has happened since each was set; and when experience or quests have been
+// flat for several reviews (agents/mcp/src/rules.ts), the review states it and asks for a decision:
+// a change, or a recorded reason to keep things as they are. Which change is never suggested.
 
 import type { Change, ModuleVersions } from "./modules.ts";
 import { line as changeLine } from "./modules.ts";
 import type { Decision, HoldDecision, TimeShares } from "./policy.ts";
 import { shares } from "./policy.ts";
 import type { GameEvent } from "./watch.ts";
+import { type Cost, decisionRequest, type Rule, ruleLine, StallWatch, type StallOptions } from "../../mcp/src/rules.ts";
 
 /** The character's experience at a moment, read from the client (`XP_LUA`). */
 export interface XpSample {
@@ -57,11 +61,20 @@ export interface ReflectOptions {
   versions?: ModuleVersions;
   /** The agent's MEMORY.md, read at each review. */
   memory?: () => string;
+  /** The rules the agent set itself (its rule tools, its modules' `-- rule:` lines), read at each review. */
+  rules?: () => Rule[];
+  /** What happened since a time (in-world hours, XP, quests, deaths), for each rule's cost line;
+   *  called once a review, returning the measure for that review. */
+  measure?: () => (from: number) => Cost | undefined;
+  /** When a flat objective asks for a decision (agents/mcp/src/rules.ts STALL_DEFAULTS). */
+  stall?: Partial<StallOptions>;
 }
 
 /** The scoreboard: this window (since the last review) and the session. */
 export interface Score {
   window_minutes: number;
+  /** Experience gained this window. */
+  xp: number;
   xp_per_hour: number | null;
   session_xp_per_hour: number | null;
   level: number | null;
@@ -105,6 +118,9 @@ interface Window {
   /** The latest Professions.digest() sample, set as the review is built. */
   trade?: XpSample["trade"];
   xp: number;
+  /** Experience samples this window, and those taken in the world (a level above 0). */
+  samples: number;
+  inWorld: number;
   time: TimeShares;
 }
 
@@ -130,6 +146,7 @@ export class Reflection {
   #combat = false;
   #timeAtReview: TimeShares = zeroTime();
   #facts: Record<string, unknown> | undefined;
+  #stalls: StallWatch;
   reviews = 0;
 
   constructor(readonly options: ReflectOptions) {
@@ -138,6 +155,7 @@ export class Reflection {
     this.#lastProgress = now;
     this.#session = { since: now, xp: 0, deaths: 0, quests: 0 };
     this.#window = this.#fresh(now);
+    this.#stalls = new StallWatch(options.stall);
   }
 
   #now(): number {
@@ -164,6 +182,8 @@ export class Reflection {
       rests: 0,
       foodBought: 0,
       xp: 0,
+      samples: 0,
+      inWorld: 0,
       time: zeroTime(),
     };
   }
@@ -291,9 +311,14 @@ export class Reflection {
 
   /** The character's experience now (sampled every minute or so). */
   sample(xp: XpSample): void {
+    this.#window.samples++;
+    // Out of the world (the login screen, a loading screen) the level reads 0: not a sample. Kept,
+    // it made the next one in the world count every level from 1 as gained (XP/h in the millions).
+    if (!(xp.level > 0)) return;
+    this.#window.inWorld++;
     const last = this.#xp;
     this.#xp = xp;
-    if (!last || !(xp.level > 0)) return;
+    if (!last) return;
     let gained = 0;
     if (xp.level === last.level) gained = xp.xp - last.xp;
     // A level gained: the rest of the old level, then this one's (a skipped level counts its max).
@@ -338,6 +363,7 @@ export class Reflection {
     const perHour = (xp: number, h: number) => (h > 0 && this.#xp ? Math.round(xp / h) : null);
     return {
       window_minutes: Math.round((now - w.since) / 60_000),
+      xp: w.xp,
       xp_per_hour: perHour(w.xp, hours),
       session_xp_per_hour: perHour(this.#session.xp, sessionHours),
       level: this.#xp?.level ?? null,
@@ -367,9 +393,17 @@ export class Reflection {
     const reasons = this.#pending.size ? [...this.#pending] : ["asked for"];
     const score = this.score();
     this.#window.trade = this.#xp?.trade;
-    const text = digest(reasons, this.#window, score, this.options.fast?.(), this.options.versions?.changelog(undefined, 200) ?? [], {
+    const w = this.#window;
+    // A window spent mostly out of the world (the client at the login screen) neither counts toward
+    // a stall nor ends one.
+    const stall = this.#stalls.add({ minutes: score.window_minutes, xp: w.xp, quests: w.quests, counted: w.inWorld > 0 && w.inWorld * 2 >= w.samples });
+    const rules = this.options.rules?.() ?? [];
+    const measure = rules.length ? this.options.measure?.() : undefined;
+    const text = digest(reasons, w, score, this.options.fast?.(), this.options.versions?.changelog(undefined, 200) ?? [], {
       memory: this.options.memory?.() ?? "",
       ...(this.#facts ? { facts: this.#facts } : {}),
+      rules: rules.map((r) => ruleLine(r, r.setAt === undefined ? undefined : measure?.(r.setAt))),
+      ...(stall ? { decision: decisionRequest(stall, KEEP, rules.length) } : {}),
     });
     this.reviews++;
     this.#pending.clear();
@@ -399,7 +433,7 @@ export function digest(
   score: Score,
   fast: FastTier | undefined,
   changes: Change[],
-  notes: { memory?: string; facts?: Record<string, unknown> } = {},
+  notes: { memory?: string; facts?: Record<string, unknown>; rules?: string[]; decision?: string } = {},
 ): string {
   const out: string[] = [];
   out.push(`Reflection (${reasons.join("; ")}). Since your last review, ${score.window_minutes} min ago:`);
@@ -417,6 +451,7 @@ export function digest(
       `- Failed actions: ${score.action_failures}`,
     ].join("\n"),
   );
+  if (notes.rules?.length) out.push(`${RULES_HEAD}\n${notes.rules.map((r) => `- ${r}`).join("\n")}`);
   if (w.deaths.length) out.push(`Deaths:\n${w.deaths.map((d) => `- ${clock(d.at)} ${d.cause ?? "cause not reported (no fight review)"}`).join("\n")}`);
   if (w.levels.length) out.push(`Levels reached: ${w.levels.join(", ")}.`);
   const trade = unusedTrade(w);
@@ -463,7 +498,44 @@ export function digest(
     );
   }
   out.push(stall ? STALL_GUIDANCE : GUIDANCE);
+  if (notes.decision) out.push(notes.rules?.length ? notes.decision : `${notes.decision} ${NO_RULES}`);
   return out.join("\n\n");
+}
+
+export const RULES_HEAD = "Rules you set yourself, and what has happened since each was set:";
+
+/** How a reasoned keep is recorded here, for the decision a stall asks for. */
+export const KEEP =
+  "rule_keep(id, because) for each rule you keep, and a MEMORY.md line starting \"keep: because\" for anything else you keep";
+
+/** Said with a stall when no rule is recorded. */
+export const NO_RULES =
+  "You have no rules recorded: if MEMORY.md, a module or a fact override holds a limit you set yourself (a road, an area, a mob, a quest you avoid), record it with rule_set so its cost is shown here.";
+
+/** What happened since `from`, from the reflection windows in reflections.jsonl (each line
+ *  { at, score }): the fallback when the scorecard's samples are not there. Windows logged before
+ *  Score had its window XP are skipped. */
+export function costFromReflections(jsonl: string, from: number): Cost | undefined {
+  let minutes = 0;
+  const cost: Cost = { hours: 0, xp: 0, quests: 0, deaths: 0 };
+  let windows = 0;
+  for (const line of jsonl.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      const { at, score } = JSON.parse(line) as { at: string; score: Partial<Score> };
+      if (Date.parse(at) <= from || typeof score.xp !== "number") continue;
+      windows++;
+      minutes += score.window_minutes ?? 0;
+      cost.xp += score.xp;
+      cost.quests += score.quests_done ?? 0;
+      cost.deaths += score.deaths ?? 0;
+    } catch {
+      // A torn line.
+    }
+  }
+  if (!windows) return undefined;
+  cost.hours = minutes / 60;
+  return cost;
 }
 
 /** A built-in that ended as a no-op this many times in a window gets a line of its own. */

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ModuleVersions } from "../src/modules.ts";
 import type { Decision, HoldDecision, TimeShares } from "../src/policy.ts";
-import { GUIDANCE, Reflection, STALL_GUIDANCE, stalled, unusedTrade, type ReflectOptions, type Score } from "../src/reflect.ts";
+import { costFromReflections, GUIDANCE, KEEP, NO_RULES, Reflection, STALL_GUIDANCE, stalled, unusedTrade, type ReflectOptions, type Score } from "../src/reflect.ts";
 
 const event = (name: string, args: unknown[] = []) => ({ seq: 1, time: 0, event: name, args });
 const MIN = 60_000;
@@ -234,4 +234,91 @@ test("resting a lot with meat and cloth in the bags and no profession is pointed
   expect(unusedTrade({ ...w, trade: { professions: 0, reagents: 0, food: 0 } })).toBeNull();
   expect(unusedTrade({ rests: 1, foodBought: 2, trade: { professions: 0, reagents: 9, food: 0 } })).toBeNull();
   expect(unusedTrade({ ...w, trade: undefined })).toBeNull();
+});
+
+test("a sample out of the world (level 0) is not a sample: the next one in the world gains nothing", () => {
+  const { clock, r } = setup();
+  r.sample({ level: 14, xp: 65, max: 12_300 });
+  clock.now = 5 * MIN;
+  r.sample({ level: 0, xp: 0, max: 0 });
+  clock.now = 10 * MIN;
+  r.sample({ level: 14, xp: 65, max: 12_300 });
+  expect(r.score()).toMatchObject({ xp: 0, xp_per_hour: 0, level: 14 });
+});
+
+const ROCKJAW = { id: "1", rule: "no walk south of y -1000", why: "2 deaths on the Rockjaw road", set: "2026-11-26 14:10Z", setAt: 1_000, where: "paladin.zonehold" };
+
+/** Thirty minutes in the world at level 14, gaining `xp`. */
+function window(clock: { now: number }, r: Reflection, xp = 0) {
+  const start = clock.now;
+  r.sample({ level: 14, xp: 65, max: 12_300 });
+  for (let m = 1; m <= 30; m++) {
+    clock.now = start + m * MIN;
+    r.sample({ level: 14, xp: 65 + (xp * m) / 30, max: 12_300 });
+  }
+  return r.reflect();
+}
+
+test("every review lists the agent's own rules with what has happened since each was set", () => {
+  const froms: number[] = [];
+  const { clock, r } = setup({
+    rules: () => [ROCKJAW, { rule: "skip Rockjaw quests", where: "paladin.skipquest" }],
+    measure: () => (from) => (froms.push(from), { hours: 9, xp: 0, quests: 0, deaths: 0 }),
+  });
+  const text = window(clock, r, 600);
+  expect(text).toContain(
+    'Rules you set yourself, and what has happened since each was set:\n- #1 rule "no walk south of y -1000" (set 2026-11-26 14:10Z; why: 2 deaths on the Rockjaw road; in paladin.zonehold) · since: 0 XP over 9.0 h, 0 quests, 0 deaths\n- rule "skip Rockjaw quests" (in paladin.skipquest) · since: not known (no set date)',
+  );
+  expect(froms).toEqual([1_000]);
+  // Experience came in: no stall, no decision asked for.
+  expect(text).not.toContain("STALL:");
+  expect(text).toContain(GUIDANCE);
+});
+
+test("experience flat for three reviews asks for a decision, naming the rules; experience ends it", () => {
+  const { clock, r } = setup({ rules: () => [ROCKJAW], measure: () => () => ({ hours: 1.5, xp: 0, quests: 0, deaths: 0 }) });
+  expect(window(clock, r)).not.toContain("STALL:");
+  expect(window(clock, r)).not.toContain("STALL:");
+  const third = window(clock, r);
+  expect(third).toContain("STALL: no experience in your last 3 reviews (1.5 h).");
+  expect(third).toContain("revise or drop one of your own rules listed above");
+  expect(third).toContain(KEEP);
+  expect(third).toContain('"No change" without a reason is not an answer.');
+  expect(third).not.toContain(NO_RULES);
+  // It is asked again while the stall lasts, and the count grows.
+  expect(window(clock, r)).toContain("STALL: no experience in your last 4 reviews (2.0 h).");
+  expect(window(clock, r, 500)).not.toContain("STALL:");
+});
+
+test("a stall with no rules recorded says how to record one; windows out of the world do not count", () => {
+  const { clock, r } = setup({ stall: { xpWindows: 2 } });
+  window(clock, r);
+  // Logged out for a review: level 0 every minute.
+  for (let m = 1; m <= 30; m++) {
+    clock.now += MIN;
+    r.sample({ level: 0, xp: 0, max: 0 });
+  }
+  expect(r.reflect()).not.toContain("STALL:");
+  const text = window(clock, r);
+  expect(text).toContain("STALL: no experience in your last 2 reviews");
+  expect(text).toContain(NO_RULES);
+});
+
+test("no quest handed in for the quest span is a stall even while experience comes in", () => {
+  const { clock, r } = setup({ stall: { questHours: 1 } });
+  expect(window(clock, r, 300)).not.toContain("STALL:");
+  expect(window(clock, r, 300)).toContain("STALL: no quest handed in for 1.0 h.");
+});
+
+test("without the scorecard, a rule's cost comes from the reflection windows logged since", () => {
+  const line = (at: string, score: Record<string, unknown>) => JSON.stringify({ at, score });
+  const log = [
+    line("2026-11-26T13:00:00Z", { window_minutes: 30, xp: 900, quests_done: 1, deaths: 1 }),
+    line("2026-11-26T15:00:00Z", { window_minutes: 30, xp_per_hour: 1_919_247 }),
+    line("2026-11-26T15:30:00Z", { window_minutes: 30, xp: 0, quests_done: 0, deaths: 0 }),
+    "torn",
+    line("2026-11-26T16:00:00Z", { window_minutes: 30, xp: 20, quests_done: 0, deaths: 1 }),
+  ].join("\n");
+  expect(costFromReflections(log, Date.parse("2026-11-26T14:10:00Z"))).toEqual({ hours: 1, xp: 20, quests: 0, deaths: 1 });
+  expect(costFromReflections(log, Date.parse("2026-11-27T00:00:00Z"))).toBeUndefined();
 });

@@ -9,7 +9,9 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { AgentClient } from "../../mcp/src/client.ts";
+import { judgeFolder, latestSamplesFile, readSamples } from "../../mcp/src/rules.ts";
 import { digestLines, flushNotices, NOTICED, NoticeBatch, passedLua } from "./notice.ts";
+import { readRules, type Review, Reviewer } from "./rules.ts";
 import { type Frame, OmpRpc } from "./rpc.ts";
 import { ompCli, ompEnv, prepareWorkDir, type Settings, settingsFromEnv, trialRunning } from "./setup.ts";
 import { appendJsonl, totals, usageFromFrame } from "./usage.ts";
@@ -24,6 +26,10 @@ class Player {
   readonly evidence = new Evidence();
   readonly repeats: Repeats;
   readonly notices: NoticeBatch;
+  /** The rules the agent set itself and their cost, and stalls, for check-ins (`rules.ts`). */
+  readonly reviewer: Reviewer;
+  /** The client's modules folder (GET /files), once known. */
+  folder: string | undefined;
   /** Notice.passed's cursor: where the next check-in's digest reads from. */
   noticeCursor = 0;
   readonly usagePath: string;
@@ -46,6 +52,9 @@ class Player {
     this.client = new AgentClient(s.agentUrl, s.token);
     this.repeats = new Repeats(s.repeatMinutes * MINUTE);
     this.notices = new NoticeBatch(s.noticeSeconds * 1000);
+    // A gap between samples longer than this is time away, as the MCP server's judge counts it.
+    const maxGapMs = Math.max(3 * s.scorecardSeconds * 1000, 90_000);
+    this.reviewer = new Reviewer({ xpWindows: s.stallXpCheckins, questHours: s.stallQuestHours }, Date.now(), maxGapMs);
     this.usagePath = join(s.stateDir, "usage.jsonl");
     this.logPath = join(s.stateDir, "launcher.log");
     mkdirSync(s.stateDir, { recursive: true, mode: 0o700 });
@@ -181,7 +190,33 @@ class Player {
     }
     const evidence =
       reason === "checkin" || reason === "reflect" ? [...this.repeats.take(), ...this.evidence.take(), ...(await this.passed())] : [];
-    return wakeMessage(reason, lines, status, this.s.checkinMinutes, evidence);
+    const review = reason === "checkin" || reason === "reflect" ? await this.review() : undefined;
+    return wakeMessage(reason, lines, status, this.s.checkinMinutes, evidence, review);
+  }
+
+  async modulesFolder(): Promise<string | undefined> {
+    if (this.folder) return this.folder;
+    try {
+      const listing = (await this.client.modules()) as { folder?: unknown };
+      if (typeof listing.folder === "string") this.folder = listing.folder;
+    } catch {
+      // The client may be restarting.
+    }
+    return this.folder;
+  }
+
+  /** The rules (module headers, notes/rules.md) with their cost since each was set, from the
+   *  scorecard's samples, and the decision a stall asks for. */
+  async review(): Promise<Review> {
+    try {
+      const folder = await this.modulesFolder();
+      const dir = this.s.judgeDir ?? (folder ? judgeFolder(folder) : undefined);
+      const path = dir ? latestSamplesFile(dir) : undefined;
+      return this.reviewer.review(path ? readSamples(path) : [], readRules(folder, this.s.workDir), Date.now());
+    } catch (error) {
+      this.log(`review: ${(error as Error).message}`);
+      return { rules: [] };
+    }
   }
 
   // -- The game's events -------------------------------------------------------------------------
@@ -244,10 +279,10 @@ class Player {
     try {
       let dir = this.s.judgeDir;
       if (!dir) {
-        const listing = (await this.client.modules()) as { folder?: unknown };
-        if (typeof listing.folder !== "string") return true;
+        const folder = await this.modulesFolder();
+        if (!folder) return true;
         // The MCP server's default: `judge` beside the modules folder (agents/mcp/src/monitor.ts).
-        dir = join(listing.folder, "..", "judge");
+        dir = judgeFolder(folder);
       }
       const path = join(dir, "ledger.jsonl");
       return existsSync(path) && trialRunning(readFileSync(path, "utf8"));

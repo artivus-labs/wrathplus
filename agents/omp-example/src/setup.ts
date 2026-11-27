@@ -39,6 +39,13 @@ export interface Settings {
   /** Passed as --max-cost when set (USD per session). */
   maxCost?: number;
   judgeDir?: string;
+  /** A stall asks the planner for a decision after this many check-ins in a row with no
+   *  experience (0: never)... */
+  stallXpCheckins: number;
+  /** ...or this many hours in a row with no quest handed in (0: never). */
+  stallQuestHours: number;
+  /** The scorecard's sampling interval (WRATHPLUS_SCORECARD_SECONDS, as the MCP server reads it). */
+  scorecardSeconds: number;
   /** Start a fresh session rather than continue the last one (on the first start only). */
   fresh: boolean;
 }
@@ -74,6 +81,9 @@ export function settingsFromEnv(env: Record<string, string | undefined>, example
     noticeSeconds: number(env.WRATHPLUS_OMP_NOTICE_SECONDS, 15),
     maxCost: maxCost && maxCost > 0 ? maxCost : undefined,
     judgeDir: env.WRATHPLUS_JUDGE_DIR?.trim() || undefined,
+    stallXpCheckins: number(env.WRATHPLUS_OMP_STALL_XP_CHECKINS, 3),
+    stallQuestHours: number(env.WRATHPLUS_OMP_STALL_QUEST_HOURS, 4),
+    scorecardSeconds: number(env.WRATHPLUS_SCORECARD_SECONDS, 30),
     fresh: env.WRATHPLUS_OMP_FRESH === "1",
   };
 }

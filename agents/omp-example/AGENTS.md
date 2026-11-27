@@ -208,6 +208,16 @@ Four places, each for one kind of knowledge:
 - **OMP memory: facts and lessons across sessions.** Your sessions are summarised into memory
   automatically when they end, and the summary is put in front of you at the next start. Treat it
   as a hint and check it against the game.
+- **Rules you set yourself.** A limit you put on your own play (a zone you skip, a mob family
+  you refuse, a quest you abandon, a road you will not take) gets a line in the header comment of
+  the module that enforces it: `-- rule: skip Redridge Mountains | why: 5 deaths in 2 h to
+  Black Dragon Whelps | set: 2026-11-27 16:25` (the `why:` and `set:` fields mark it as yours; a
+  rule no module enforces: a `rule:` line in `notes/rules.md`). Every check-in and reflection lists your rules with what has happened since
+  each was set (XP, quests, deaths, new places, from the scorecard). When experience has been
+  flat for three check-ins, or no quest handed in for four hours, the check-in says so and asks
+  you to decide: make a concrete change (revising or dropping one of your rules is a change), or
+  keep things and record why (`| kept: <date> because <reason>` on the rule's line, or a dated
+  `keep: because ...` line in `notes/journal.md`).
 - **`notes/`**: your working notes: `notes/plan.md` (current goals and why), `notes/journal.md`
   (dated, short lines: what happened, what you changed). Keep them short; rewrite rather than
   append forever.

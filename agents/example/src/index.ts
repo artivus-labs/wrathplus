@@ -9,7 +9,7 @@
 //
 // Runs on the Claude Code login of this machine (a Claude subscription works); no API key needed.
 
-import { appendFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,12 +18,13 @@ import { controlLua } from "./goals.ts";
 import { Jev } from "./jev.ts";
 import { controlFiles, ModuleVersions } from "./modules.ts";
 import { claudeAuth, loadEnv } from "./env.ts";
-import { Notes } from "./notes.ts";
+import { Notes, sharedRule } from "./notes.ts";
 import { outsideNote, tailNotes } from "./outside.ts";
 import { haikuSpeak } from "./say.ts";
 import { Policy } from "./policy.ts";
 import { kickoff } from "./prompt.ts";
-import { FACTS_LUA, Reflection, XP_LUA, type XpSample } from "./reflect.ts";
+import { costFromReflections, FACTS_LUA, Reflection, XP_LUA, type XpSample } from "./reflect.ts";
+import { costFromSamples, judgeFolder, latestSamplesFile, readSamples, rulesInFolder } from "../../mcp/src/rules.ts";
 import { RunnerLock } from "./runner.ts";
 import { SmallTalk, Triage } from "./triage.ts";
 import { HoldGate, idleWakeRefusal } from "./waits.ts";
@@ -140,6 +141,20 @@ export async function runAgent(config: Config, options: RunOptions): Promise<voi
   // Every module the planner saves is kept as a version in its notes, for rollback (`modules.ts`).
   const versions = new ModuleVersions(notes.home);
   const files = controlFiles(config.url, config.token);
+  // Where the client keeps the agent's modules (GET /files): their `-- rule:` header lines are rules
+  // too, and the scorecard's samples (kept by the MCP server) are beside them, in judge/.
+  let folder: string | undefined;
+  const locate = async () => {
+    if (folder) return;
+    try {
+      const response = await fetch(`${config.url}/files`, { headers: { Authorization: `Bearer ${config.token}` }, signal: AbortSignal.timeout(3_000) });
+      const listing = (await response.json()) as { folder?: unknown };
+      if (typeof listing.folder === "string") folder = listing.folder;
+    } catch {
+      // The client may be starting; next minute.
+    }
+  };
+  const reflections = join(notes.home, "reflections.jsonl");
   // The reflection loop (`reflect.ts`): a review of how it is doing, between the planner's turns.
   let inTurn = false;
   const reflection =
@@ -147,7 +162,7 @@ export async function runAgent(config: Config, options: RunOptions): Promise<voi
       ? undefined
       : new Reflection({
           onReflect: (text, score) => {
-            appendFileSync(join(notes.home, "reflections.jsonl"), `${JSON.stringify({ at: new Date().toISOString(), score })}\n`);
+            appendFileSync(reflections, `${JSON.stringify({ at: new Date().toISOString(), score })}\n`);
             console.log(`[reflection] ${JSON.stringify(score)}`);
             tell("reflection", text);
           },
@@ -155,6 +170,22 @@ export async function runAgent(config: Config, options: RunOptions): Promise<voi
           fast: () => (policy ? { decisions: policy.decisions, holds: policy.holds, time: policy.time } : undefined),
           versions,
           memory: () => notes.memory(),
+          rules: () => [...notes.rules().map(sharedRule), ...(folder ? rulesInFolder(folder) : [])],
+          // What each rule has cost: from the scorecard's samples when the MCP server keeps them
+          // (every 30 s; a gap over 90 s is time away), else from the reflection windows.
+          measure: () => {
+            const path = folder ? latestSamplesFile(judgeFolder(folder, process.env.WRATHPLUS_JUDGE_DIR)) : undefined;
+            if (path) {
+              const samples = readSamples(path);
+              return (from) => costFromSamples(samples, from, 90_000);
+            }
+            const log = existsSync(reflections) ? readFileSync(reflections, "utf8") : "";
+            return (from) => costFromReflections(log, from);
+          },
+          stall: {
+            ...(process.env.WRATHPLUS_AGENT_STALL_XP_REVIEWS ? { xpWindows: Number(process.env.WRATHPLUS_AGENT_STALL_XP_REVIEWS) } : {}),
+            ...(process.env.WRATHPLUS_AGENT_STALL_QUEST_HOURS ? { questHours: Number(process.env.WRATHPLUS_AGENT_STALL_QUEST_HOURS) } : {}),
+          },
           periodMs: Number(process.env.WRATHPLUS_AGENT_REFLECT_MINUTES ?? 30) * 60_000,
         });
   if (reflection) {
@@ -162,6 +193,7 @@ export async function runAgent(config: Config, options: RunOptions): Promise<voi
     let ticks = 0;
     const timer = setInterval(() => {
       if (ticks++ % 4 === 0) {
+        void locate();
         void lua(XP_LUA)
           .then((r) => {
             const xp = r.ok ? (r.values?.[0] as XpSample | undefined) : undefined;
