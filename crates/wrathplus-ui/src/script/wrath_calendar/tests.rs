@@ -407,6 +407,29 @@ fn an_opened_event_edits_and_updates() {
         s.eval::<String>("return (CalendarGetEventInfo())").unwrap(),
         "Naxx 10"
     );
+    // `0x5f2070` refuses a name already on the list; `0x5bc3a6` throttles a second invite.
+    s.set_wrath_calendar_action_pending(false);
+    s.run(
+        "CALENDAR_ERROR_ALREADY_INVITED_TO_EVENT_S = '%s is already invited.'
+         local e = CreateFrame('Frame')
+         e:RegisterEvent('CALENDAR_UPDATE_ERROR')
+         e:SetScript('OnEvent', function(_, _, msg) err = msg end)
+         CalendarEventInvite('Me')",
+    )
+    .unwrap();
+    assert_eq!(
+        s.eval::<String>("return err").unwrap(),
+        "Me is already invited."
+    );
+    s.run("CalendarEventInvite('Bob')").unwrap();
+    s.set_wrath_calendar_action_pending(false);
+    s.run("CalendarEventInvite('Cid')").unwrap();
+    assert_eq!(
+        s.eval::<String>("return err").unwrap(),
+        "CALENDAR_ERROR_INVITE_THROTTLED"
+    );
+    let sent = s.take_wrath_calendar_requests();
+    assert!(matches!(&sent[..], [WrathCalendarRequest::Invite { name, .. }] if name == "Bob"));
 }
 
 /// A draft begins with the gesture, takes its fields and is added once.
@@ -479,6 +502,19 @@ fn a_draft_is_added_with_its_fields() {
         "(CALENDAR_ERROR_EVENT_THROTTLED or 'CALENDAR_ERROR_EVENT_THROTTLED')"
     ));
     assert_eq!(s.take_wrath_calendar_requests(), []);
+    // `0x5bc1be`: only a player draft takes a guild mass invite, its rank less one unclamped.
+    s.run("CalendarMassInviteGuild(1, 80, 1)").unwrap();
+    assert_eq!(s.take_wrath_calendar_requests(), []);
+    s.run("CalendarNewEvent() CalendarMassInviteGuild(1, 80, 0)")
+        .unwrap();
+    assert_eq!(
+        s.take_wrath_calendar_requests()[1..],
+        [WrathCalendarRequest::MassInviteGuild {
+            min_level: 1,
+            max_level: 80,
+            min_rank: u32::MAX
+        }]
+    );
     // `0x5b8a50`: an announcement needs the guild right, even as a draft.
     s.run("CalendarNewGuildAnnouncement()").unwrap();
     assert!(!s.eval::<bool>("return CalendarEventCanEdit()").unwrap());

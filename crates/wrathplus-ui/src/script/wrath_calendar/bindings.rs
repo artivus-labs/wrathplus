@@ -906,31 +906,6 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             None => many((0..6).map(|_| i(0)).collect()),
         }
     })?;
-    // CalendarEventInvite(name) (`0x5bcf00` → `0x5bc360`): a draft's invite is a pre-invite.
-    set(lua, "CalendarEventInvite", |lua, args| {
-        let Some(name) = text_arg(lua, &args, 0).filter(|n| !n.is_empty()) else {
-            return many(vec![]);
-        };
-        write(lua, |st, now| {
-            let Some((event_id, invite_id)) = open_ids(st) else {
-                return;
-            };
-            let guild_event = st
-                .open
-                .as_ref()
-                .is_some_and(|o| o.fields.flags & GUILD_EVENT != 0);
-            let invite_id = st.my_invitee().map_or(invite_id, |m| m.invite_id);
-            st.push(R::Invite {
-                event_id,
-                invite_id,
-                name,
-                pre_invite: event_id == 0,
-                guild_event,
-            });
-            st.last_invite = Some(now);
-        });
-        many(vec![])
-    })?;
     set(lua, "CalendarEventRemoveInvite", |lua, args| {
         invite_request(lua, &args, |event_id, t, owner| R::RemoveInvite {
             event_id,
@@ -1038,34 +1013,6 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })
         .unwrap_or(("", false));
         many(vec![s(lua, c)?, Value::Boolean(r)])
-    })?;
-    // CalendarMassInviteGuild(minLevel, maxLevel, minRank) (`0x5bccb0` → `0x5bc160`).
-    set(lua, "CalendarMassInviteGuild", |lua, args| {
-        let (Some(lo), Some(hi), Some(rank)) = (
-            int_arg(lua, &args, 0),
-            int_arg(lua, &args, 1),
-            int_arg(lua, &args, 2),
-        ) else {
-            return usage("Usage: CalendarMassInviteGuild(minLevel, maxLevel, minRank)");
-        };
-        write(lua, |st, now| {
-            st.push(R::MassInviteGuild {
-                min_level: lo.max(0) as u32,
-                max_level: hi.max(0) as u32,
-                min_rank: (rank - 1).max(0) as u32,
-            });
-            st.last_invite = Some(now);
-        });
-        many(vec![])
-    })?;
-    set(lua, "CalendarMassInviteArenaTeam", |lua, args| {
-        if let Some(slot) = int_arg(lua, &args, 0).and_then(|s| u8::try_from(s).ok()) {
-            write(lua, |st, now| {
-                st.push(R::MassInviteArenaTeam { slot });
-                st.last_invite = Some(now);
-            });
-        }
-        many(vec![])
     })?;
     // CalendarDefaultGuildFilter (`0x5bcda0`): the level cap twice, then the guild's rank count.
     set(lua, "CalendarDefaultGuildFilter", |lua, _| {
