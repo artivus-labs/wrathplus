@@ -13,8 +13,30 @@ use super::model::Model;
 /// Catalog id `0x7e`'s GlobalStrings key ("You can't do that when you're dead.").
 const NOT_WHILE_DEAD_KEY: &str = "ERR_PLAYER_DEAD";
 
+/// The system lines a binding prints with no catalog row, `0x509dd0(text, 0)`, for the app to
+/// raise as full `CHAT_MSG_SYSTEM` events: the stock handler reads more than `arg1`.
+#[derive(Default)]
+struct SystemLines(Vec<String>);
+
+/// Queue one already-resolved system line.
+pub(super) fn system_line(lua: &Lua, text: String) {
+    if let Some(mut q) = lua.app_data_mut::<SystemLines>() {
+        q.0.push(text);
+    }
+}
+
+impl super::UiScript {
+    /// Drain the system lines bindings printed since the last call.
+    pub fn take_system_lines(&mut self) -> Vec<String> {
+        self.lua
+            .app_data_mut::<SystemLines>()
+            .map_or_else(Vec::new, |mut q| std::mem::take(&mut q.0))
+    }
+}
+
 /// Register the error-display globals.
 pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
+    lua.set_app_data(SystemLines::default());
     lua.globals().set(
         "NotWhileDeadError",
         lua.create_function(|lua, ()| {

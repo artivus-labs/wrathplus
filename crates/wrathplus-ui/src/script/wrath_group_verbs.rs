@@ -24,21 +24,6 @@ fn officer(m: &Model) -> bool {
         .any(|r| me != 0 && r.guid == me && r.rank > 0)
 }
 
-/// A message table entry (`0x5216f0`, table `0xac8af0`) of kind 0: a system chat line, `%s`
-/// filled with `arg`.
-fn system_line(lua: &Lua, key: &str, arg: &str) -> mlua::Result<()> {
-    let text = match lua.globals().get::<Value>(key)? {
-        Value::String(s) => s.to_string_lossy().replacen("%s", arg, 1),
-        _ => key.to_string(),
-    };
-    crate::script::tick::fire_event_into(
-        lua,
-        "CHAT_MSG_SYSTEM",
-        vec![crate::script::ScriptValue::Str(text)],
-    );
-    Ok(())
-}
-
 /// The loot methods `SetLootMethod` matches whole and case-insensitively (`0x52dcae`-`0x52dd25`),
 /// in their wire order.
 const METHODS: [&str; 5] = [
@@ -106,7 +91,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
     // SetLootMethod("method" [, master [, exactMatch]]) (`0x52dc20`), in its order: not grouped is
-    // ERR_NOT_IN_GROUP (`0x50`) and not leading ERR_NOT_LEADER (`0x54`), both system lines;
+    // ERR_NOT_IN_GROUP (`0x50`) and not leading ERR_NOT_LEADER (`0x54`), both chat-kind messages;
     // `lua_isstring(1)` else `Usage:`; a method no whole compare matches raises "Invalid loot
     // method"; `master` wants a non-empty name (else ERR_SPECIFY_MASTER_LOOTER, `0xfc`) naming us
     // or a member (`0x520190`, then `0x52c680`/`0x5726f0`; else ERR_TARGET_NOT_IN_GROUP_S, `0x51`).
@@ -121,11 +106,17 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 let grouped = !m.party.members.is_empty() || !m.party.raid.is_empty();
                 (grouped, leads(&m))
             };
-            if !grouped {
-                return system_line(lua, "ERR_NOT_IN_GROUP", "");
-            }
-            if !leader {
-                return system_line(lua, "ERR_NOT_LEADER", "");
+            if !grouped || !leader {
+                let key = if grouped {
+                    "ERR_NOT_LEADER"
+                } else {
+                    "ERR_NOT_IN_GROUP"
+                };
+                lua.app_data_mut::<Model>()
+                    .expect("model")
+                    .ui_errors
+                    .push(key);
+                return Ok(());
             }
             let usage = r#"Usage: SetLootMethod("method" [,master])"#;
             let method = crate::script::binding_abi::string_arg(lua, method, usage)?;
@@ -148,7 +139,9 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                         || m.party.raid.iter().any(|p| is(&p.name))
                 };
                 if !found {
-                    return system_line(lua, "ERR_TARGET_NOT_IN_GROUP_S", &name);
+                    let mut m = lua.app_data_mut::<Model>().expect("model");
+                    m.ui_errors_s.push(("ERR_TARGET_NOT_IN_GROUP_S", name));
+                    return Ok(());
                 }
                 master_name = Some(name);
             }

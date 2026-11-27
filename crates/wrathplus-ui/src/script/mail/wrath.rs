@@ -146,7 +146,7 @@ fn install_family(lua: &mlua::Lua) -> mlua::Result<()> {
     )?;
 
     // ComplainInboxItem(index): a sender already reported prints COMPLAINT_ADDED as a system
-    // line; otherwise the sender is recorded, App sends the complaint, and CLOSE_INBOX_ITEM fires
+    // line (`0x56fb97`, no catalog row); otherwise the sender is recorded, App sends the complaint, and CLOSE_INBOX_ITEM fires
     // with the 1-based index.
     g.set(
         "ComplainInboxItem",
@@ -175,16 +175,9 @@ fn install_family(lua: &mlua::Lua) -> mlua::Result<()> {
                 }
             };
             if reported {
-                let text: Value = lua.globals().get("COMPLAINT_ADDED")?;
-                let text = match text {
-                    Value::String(s) => s.to_str()?.to_string(),
-                    _ => "COMPLAINT_ADDED".to_string(),
-                };
-                super::super::tick::fire_event_into(
-                    lua,
-                    "CHAT_MSG_SYSTEM",
-                    vec![ScriptValue::Str(text)],
-                );
+                let key = "COMPLAINT_ADDED";
+                let text = crate::strings::global(lua, key).unwrap_or_else(|| key.to_string());
+                super::super::ui_errors::system_line(lua, text);
             } else {
                 super::super::tick::fire_event_into(
                     lua,
@@ -596,11 +589,9 @@ mod family_tests {
         .unwrap();
         assert_eq!(
             s.eval::<Vec<String>>("return SEEN").unwrap(),
-            vec![
-                "CLOSE_INBOX_ITEM:1".to_string(),
-                "CHAT_MSG_SYSTEM:added".to_string()
-            ]
+            vec!["CLOSE_INBOX_ITEM:1".to_string()]
         );
+        assert_eq!(s.take_system_lines(), ["added"]);
         assert_eq!(
             s.take_wrath_mail_requests(),
             vec![WrathMailRequest::Complain {

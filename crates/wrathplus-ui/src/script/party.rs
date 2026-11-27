@@ -958,8 +958,8 @@ mod tests {
         assert!(s.take_party_requests().is_empty());
     }
 
-    /// `0x52dc20`'s order: not grouped (`0x50`) and not leading (`0x54`) are system lines and
-    /// queue nothing; then the `Usage:` gate and the whole-string method ("Invalid loot method");
+    /// `0x52dc20`'s order: not grouped (`0x50`) and not leading (`0x54`) are chat-kind messages
+    /// and queue nothing; then the `Usage:` gate and the whole-string method ("Invalid loot method");
     /// `master` needs a non-empty name (`0xfc`, a UI error) of us or a member (`0x51`). The send
     /// carries the current threshold; a third argument is `exactMatch`, never a threshold.
     #[test]
@@ -971,8 +971,11 @@ mod tests {
         s.run(r#"SetLootMethod("freeforall") SetLootThreshold()"#)
             .unwrap();
         assert!(s.take_party_requests().is_empty(), "solo, then not leading");
-        // `SetLootThreshold` (`0x52de60`) raises its two refusals as messages (`0x50`, `0x54`).
-        assert_eq!(s.take_ui_errors(), ["ERR_NOT_IN_GROUP", "ERR_NOT_LEADER"]);
+        // Both verbs raise the two refusals by key (`0x52dc3d`, `0x52dc68`; `0x52de60`).
+        let refusals = ["ERR_NOT_IN_GROUP", "ERR_NOT_LEADER"]
+            .map(|k| [k; 2])
+            .concat();
+        assert_eq!(s.take_ui_errors(), refusals);
         let mut party = two_member_party();
         (party.leader_guid, party.loot_threshold) = (party.own_guid, 3);
         s.set_party(party);
@@ -986,6 +989,8 @@ mod tests {
         s.run(r#"SetLootMethod("master", "") SetLootMethod("master", "Zed")"#)
             .unwrap();
         assert_eq!(s.take_ui_errors(), ["ERR_SPECIFY_MASTER_LOOTER"]);
+        let not_in_group = ("ERR_TARGET_NOT_IN_GROUP_S", "Zed".to_string());
+        assert_eq!(s.take_ui_errors_s(), [not_in_group]);
         s.run(r#"SetLootMethod("GROUP", nil, 4) SetLootMethod("master", "bob")"#)
             .unwrap();
         let req = |method: &str, master_name: Option<&str>| PartyRequest::LootMethod {

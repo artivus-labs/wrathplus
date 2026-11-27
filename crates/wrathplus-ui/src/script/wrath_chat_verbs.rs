@@ -9,7 +9,7 @@
 
 use mlua::{Lua, MultiValue, Value};
 
-use super::{Model, ScriptValue};
+use super::Model;
 
 /// One 12340 command intent for App, in call order. Capture-only.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -461,13 +461,14 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         push(lua, WrathChatVerbRequest::RestartSoundSystem);
         none()
     })?;
+    // SendSystemMessage("message") (`0x50d8a0`): `lua_isstring`, then `0x509dd0(text, 0)`.
     set(lua, "SendSystemMessage", |lua, args| {
         let Some(message) = text(lua, &arg(&args, 0))? else {
             return Err(mlua::Error::runtime(
                 r#"Usage: SendSystemMessage("message")"#,
             ));
         };
-        super::tick::fire_event_into(lua, "CHAT_MSG_SYSTEM", vec![ScriptValue::Str(message)]);
+        super::ui_errors::system_line(lua, message);
         none()
     })?;
     // GetClickFrame(name) (`0x564130`) → the named frame, nil when none. Labelled: native looks in
@@ -711,7 +712,7 @@ mod tests {
 
     #[test]
     fn battle_net_is_inert_and_lookups_answer_truthfully() {
-        let s = vm();
+        let mut s = vm();
         assert_eq!(
             s.eval::<i64>("return select('#', BNIsFriend(1)) + select('#', BNSendWhisper())")
                 .unwrap(),
@@ -722,7 +723,8 @@ mod tests {
                f:SetScript('OnEvent', function(_, _, m) SEEN = m end) SendSystemMessage('hi')",
         )
         .unwrap();
-        assert_eq!(s.eval::<String>("return SEEN").unwrap(), "hi");
+        assert!(s.eval::<Option<String>>("return SEEN").unwrap().is_none());
+        assert_eq!(s.take_system_lines(), ["hi"]);
     }
 
     #[test]
