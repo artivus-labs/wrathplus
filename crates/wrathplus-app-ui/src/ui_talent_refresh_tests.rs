@@ -32,7 +32,8 @@ fn talent_app() -> App {
     let mut app = App::new();
     // Offline net plugin registers the production TalentsInfo handler; it opens no socket.
     app.add_plugins(crate::net::NetPlugin { connect: false });
-    app.init_resource::<PlayerActions>();
+    app.init_resource::<PlayerActions>()
+        .init_resource::<LastTalentGroups>();
     let talent = Talent {
         id: 10,
         tab: 161,
@@ -196,7 +197,8 @@ fn player_rank_uses_active_spec_not_pet_or_delayed_spellbook() {
 fn the_talents_packet_sets_the_group_count_and_active_group() {
     let mut app = App::new();
     app.add_plugins(crate::net::NetPlugin { connect: false });
-    app.init_resource::<PlayerActions>();
+    app.init_resource::<PlayerActions>()
+        .init_resource::<LastTalentGroups>();
     app.insert_non_send_resource(UiScript::new().unwrap());
     let mut schedule = Schedule::default();
     schedule.add_systems(feed_talents);
@@ -217,18 +219,30 @@ fn the_talents_packet_sets_the_group_count_and_active_group() {
 /// (`0x5c9ed7`-`0x5c9f00`), each 1-based, or 0 while there are no groups.
 #[test]
 fn a_new_active_group_fires_active_talent_group_changed() {
+    use bevy::ecs::system::RunSystemOnce;
     let mut app = App::new();
     app.add_plugins(crate::net::NetPlugin { connect: false });
-    app.init_resource::<PlayerActions>();
-    let script = UiScript::new().unwrap();
-    script
-        .run(
-            "seen = {} local f = CreateFrame('Frame') \
-             f:RegisterEvent('ACTIVE_TALENT_GROUP_CHANGED') \
-             f:SetScript('OnEvent', function(_, _, new, old) seen[#seen + 1] = new .. ':' .. old end)",
-        )
-        .unwrap();
-    app.insert_non_send_resource(script);
+    app.init_resource::<PlayerActions>()
+        .init_resource::<LastTalentGroups>();
+    let watch = |app: &mut App| {
+        let script = UiScript::new().unwrap();
+        script
+            .run(
+                "seen = {} local f = CreateFrame('Frame') \
+                 f:RegisterEvent('ACTIVE_TALENT_GROUP_CHANGED') \
+                 f:SetScript('OnEvent', function(_, _, new, old) seen[#seen + 1] = new .. ':' .. old end)",
+            )
+            .unwrap();
+        app.insert_non_send_resource(script);
+    };
+    let seen = |app: &mut App| {
+        let mut script = app.world_mut().non_send_resource_mut::<UiScript>();
+        script.tick(0.0);
+        script
+            .eval::<String>("return table.concat(seen, ' ')")
+            .unwrap()
+    };
+    watch(&mut app);
     let mut schedule = Schedule::default();
     schedule.add_systems(feed_talents);
     schedule.run(app.world_mut());
@@ -236,15 +250,24 @@ fn a_new_active_group_fires_active_talent_group_changed() {
         packet_groups(&mut app, 0, active, &[&[], &[]]);
         schedule.run(app.world_mut());
     }
-    let mut script = app.world_mut().non_send_resource_mut::<UiScript>();
-    script.tick(0.0);
     assert_eq!(
-        script
-            .eval::<String>("return table.concat(seen, ' ')")
-            .unwrap(),
+        seen(&mut app),
         "2:0 1:2",
         "the first packet moves from no groups; a repeat fires nothing"
     );
+    // The previous pair is an engine global (`[0xc20ff4]`): a `/reload` fires nothing, and a new
+    // session's first packet on group 2 fires (2, 0) into a VM it meets for the first time.
+    watch(&mut app);
+    schedule.run(app.world_mut());
+    assert_eq!(seen(&mut app), "", "a reloaded VM");
+    let end = SessionEvent::LoggedOut;
+    app.world_mut()
+        .run_system_once_with(on_session_end, end)
+        .unwrap();
+    watch(&mut app);
+    packet_groups(&mut app, 0, 1, &[&[], &[]]);
+    schedule.run(app.world_mut());
+    assert_eq!(seen(&mut app), "2:0", "a login on group 2");
 }
 
 /// The other group reads its own packet record, its unspent points the active group's spent
