@@ -11,8 +11,7 @@
 //! server owns comes from App; gestures leave as [`WrathCalendarRequest`]s.
 //!
 //! Labelled: the day list's order (`0x5b9260`) is App's (holidays, then by time); a holiday's
-//! sequence split, the raid-reset projection and the status-option filter (`0x5f26f0`) are not
-//! traced.
+//! sequence split and the raid-reset projection are not traced.
 
 mod bindings;
 mod date;
