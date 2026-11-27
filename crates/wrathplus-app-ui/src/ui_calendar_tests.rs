@@ -149,6 +149,18 @@ fn invite_bits_follow_the_receipt() {
 /// The asked-for event opens with its type; a resend refreshes it.
 #[test]
 fn an_asked_event_opens_then_refreshes() {
+    // `0x5f1a40`: the open event waits until its invitees' names are all back.
+    let mut held = Vec::new();
+    let opened = vec![
+        ("CALENDAR_OPEN_EVENT", vec![V::Str("PLAYER".into())]),
+        ("CALENDAR_UPDATE_EVENT_LIST", vec![]),
+    ];
+    let now = release(&mut held, opened, false);
+    assert_eq!(events(&now), ["CALENDAR_UPDATE_EVENT_LIST"]);
+    assert_eq!(
+        events(&release(&mut held, vec![], true)),
+        ["CALENDAR_OPEN_EVENT"]
+    );
     let mut state = CalendarState::default();
     let draft = R::NewDraft {
         flags: 1,

@@ -50,8 +50,11 @@ use crate::net::wrath_calendar_capture::NativeCalendarPackets;
 use crate::net::{ClientCommand, NetCommands, NetHandlerApp};
 use wrathplus_protocol::{SessionEvent, SessionEventKind};
 mod draft_list;
+mod errors;
 mod invite_bits;
 mod pending;
+
+use errors::{error_key, error_line, ErrorArg};
 
 /// Wire statuses and ranks.
 const INVITED: u8 = 0;
@@ -62,57 +65,6 @@ const ANNOUNCEMENT: u32 = 0x40;
 /// `SMSG_CALENDAR_SEND_EVENT`'s send types.
 const SEND_ADD: u8 = 1;
 const SEND_COPY: u8 = 2;
-
-/// What `SMSG_CALENDAR_COMMAND_RESULT`'s line formats its key with (`0x5b9960`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ErrorArg {
-    /// The bare template.
-    None,
-    /// A constant the client passes for its `%d` (the limits it knows).
-    Count(u32),
-    /// The result's name, for its `%s`.
-    Name,
-}
-
-/// Build 12340's error switch (`0x6cd380`): AzerothCore's `CalendarError` to the GlobalStrings key
-/// and the argument `0x5b9960` formats it with; codes it has no arm for raise nothing.
-fn error_key(error: u32) -> Option<(&'static str, ErrorArg)> {
-    use ErrorArg::{Count, Name, None as Bare};
-    Some(match error {
-        1 => ("CALENDAR_ERROR_GUILD_EVENTS_EXCEEDED", Count(100)),
-        2 => ("CALENDAR_ERROR_EVENTS_EXCEEDED", Count(30)),
-        3 => ("CALENDAR_ERROR_SELF_INVITES_EXCEEDED", Bare),
-        4 => ("CALENDAR_ERROR_OTHER_INVITES_EXCEEDED", Name),
-        5 => ("CALENDAR_ERROR_PERMISSIONS", Bare),
-        6 => ("CALENDAR_ERROR_EVENT_INVALID", Bare),
-        7 => ("CALENDAR_ERROR_NOT_INVITED", Bare),
-        8 => ("CALENDAR_ERROR_INTERNAL", Bare),
-        9 => ("ERR_GUILD_PLAYER_NOT_IN_GUILD", Bare),
-        10 => ("CALENDAR_ERROR_ALREADY_INVITED_TO_EVENT_S", Name),
-        11 => ("PLAYER_NOT_FOUND", Bare),
-        12 => ("CALENDAR_ERROR_NOT_ALLIED", Bare),
-        13 => ("ERR_IGNORING_YOU_S", Name),
-        14 => ("CALENDAR_ERROR_INVITES_EXCEEDED", Count(100)),
-        16 => ("CALENDAR_ERROR_INVALID_DATE", Bare),
-        17 => ("CALENDAR_ERROR_INVALID_TIME", Bare),
-        19 => ("CALENDAR_ERROR_NEEDS_TITLE", Bare),
-        20 => ("CALENDAR_ERROR_EVENT_PASSED", Bare),
-        21 => ("CALENDAR_ERROR_EVENT_LOCKED", Bare),
-        22 => ("CALENDAR_ERROR_DELETE_CREATOR_FAILED", Bare),
-        24 => ("ERR_SYSTEM_DISABLED", Bare),
-        25 => ("ERR_RESTRICTED_ACCOUNT", Bare),
-        26 => ("CALENDAR_ERROR_ARENA_EVENTS_EXCEEDED", Bare),
-        27 => ("CALENDAR_ERROR_RESTRICTED_LEVEL", Bare),
-        28 => ("ERR_USER_SQUELCHED", Bare),
-        29 => ("CALENDAR_ERROR_NO_INVITE", Bare),
-        36 => ("CALENDAR_ERROR_EVENT_WRONG_SERVER", Bare),
-        37 => ("CALENDAR_ERROR_INVITE_WRONG_SERVER", Bare),
-        38 => ("CALENDAR_ERROR_NO_GUILD_INVITES", Bare),
-        39 => ("CALENDAR_ERROR_INVALID_SIGNUP", Bare),
-        40 => ("CALENDAR_ERROR_NO_MODERATOR", Bare),
-        _ => return None,
-    })
-}
 
 /// The `LFGDungeons` texture lists, the raid difficulty keys and the holidays, loaded once.
 #[derive(Resource, Default)]
@@ -162,6 +114,8 @@ pub(crate) struct CalendarState {
     /// The id a `CalendarOpenEvent` asked for, until its event lands.
     asked: Option<u64>,
     pushed: Option<Arc<WrathCalendarView>>,
+    /// The open or new event held until the event's invitees have names.
+    held: Vec<(&'static str, Vec<V>)>,
 }
 
 impl CalendarState {
@@ -299,6 +253,11 @@ fn feed_calendar(
         maps.as_deref(),
         my_guid,
     ));
+    let named = view
+        .event
+        .as_ref()
+        .is_none_or(|e| e.invitees.iter().all(|i| i.name.is_some()));
+    let fired = release(&mut state.held, fired, named);
     if state.pushed.as_ref() != Some(&view) {
         script.set_wrath_calendar(view.clone());
         state.pushed = Some(view);
@@ -320,26 +279,18 @@ fn feed_calendar(
     }
 }
 
-/// `key`'s template, its `%s` or `%d` filled with the argument after a NUL when there is one (a
-/// bare key is the template as is, `0x5b9960`'s no-argument leg). Labelled: the `|4one:many;`
-/// plural escapes are left to the text renderer.
-fn error_line(script: &UiScript, packed: &str) -> String {
-    let (key, arg) = match packed.split_once('\0') {
-        Some((key, arg)) => (key, Some(arg)),
-        None => (packed, None),
-    };
-    let template = script
-        .lua()
-        .globals()
-        .get::<Option<String>>(key)
-        .ok()
-        .flatten()
-        .unwrap_or_else(|| key.to_string());
-    match arg {
-        Some(arg) if template.contains("%d") => template.replacen("%d", arg, 1),
-        Some(arg) => template.replacen("%s", arg, 1),
-        None => template,
-    }
+/// `0x5f1a40`: an event's `CALENDAR_OPEN_EVENT` or `_NEW_EVENT` fires once its invitees' names
+/// have all come back (`+0x548` counts the rest down, `0x5f1b10`); held ones go first.
+fn release(
+    held: &mut Vec<(&'static str, Vec<V>)>,
+    fired: Vec<(&'static str, Vec<V>)>,
+    named: bool,
+) -> Vec<(&'static str, Vec<V>)> {
+    let waits = |e: &str| !named && matches!(e, "CALENDAR_OPEN_EVENT" | "CALENDAR_NEW_EVENT");
+    let all = std::mem::take(held).into_iter().chain(fired);
+    let (now, later) = all.partition(|(e, _)| !waits(e));
+    *held = later;
+    now
 }
 
 fn invitee(i: &EventInvitee) -> WrathCalendarInvitee {
