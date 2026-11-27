@@ -462,14 +462,17 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         push(lua, WrathChatVerbRequest::RestartSoundSystem);
         none()
     })?;
-    // SendSystemMessage("message") (`0x50d8a0`): `lua_isstring`, then `0x509dd0(text, 0)`.
+    // SendSystemMessage("message") (`0x50d8a0`): `lua_isstring`, then `0x509dd0(text, 0)`, which
+    // drops text that is not valid UTF-8 (`0x7e0ec0` at `0x50a10d`).
     set(lua, "SendSystemMessage", |lua, args| {
-        let Some(message) = text(lua, &arg(&args, 0))? else {
+        let Some(message) = lua.coerce_string(arg(&args, 0))? else {
             return Err(mlua::Error::runtime(
                 r#"Usage: SendSystemMessage("message")"#,
             ));
         };
-        super::ui_errors::system_line(lua, message);
+        if let Ok(message) = message.to_str() {
+            super::ui_errors::system_line(lua, message.to_string());
+        }
         none()
     })?;
     // GetClickFrame(name) (`0x564130`) → the named frame, nil when none. Labelled: native looks in
@@ -721,7 +724,7 @@ mod tests {
         );
         s.run(
             "SEEN = nil local f = CreateFrame('Frame') f:RegisterEvent('CHAT_MSG_SYSTEM') \
-               f:SetScript('OnEvent', function(_, _, m) SEEN = m end) SendSystemMessage('hi')",
+               f:SetScript('OnEvent', function(_, _, m) SEEN = m end) SendSystemMessage('hi') SendSystemMessage('\\255')",
         )
         .unwrap();
         assert!(s.eval::<Option<String>>("return SEEN").unwrap().is_none());

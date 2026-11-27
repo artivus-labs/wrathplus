@@ -183,7 +183,8 @@ pub fn load_talent_catalog(chain: &mut Chain) -> Result<TalentCatalog> {
         .read_file(TALENT_TAB)
         .context("reading TalentTab.dbc")?;
     let tab_set = parse(&tab_bytes, talent_tab_schema(), "TalentTab.dbc")?;
-    let icons = crate::dbc::load_spell_icon_map(chain)?;
+    // A missing `SpellIcon.dbc` costs the icons, not the talents.
+    let icons = crate::dbc::load_spell_icon_map(chain).unwrap_or_default();
     let mut tabs = Vec::new();
     for r in tab_set.records() {
         let Some(id) = u32_at(r, 0) else { continue };
