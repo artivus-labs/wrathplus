@@ -281,8 +281,8 @@ fn feed_calendar(
         clear_pending |= reduce(&mut state, packet, my_guid, &mut fired);
     }
     for request in script.take_wrath_calendar_requests() {
-        if draft_list::redraws(&request) {
-            fired.push(("CALENDAR_UPDATE_INVITE_LIST", vec![]));
+        if let Some(args) = draft_list::redraws(&request) {
+            fired.push(("CALENDAR_UPDATE_INVITE_LIST", args));
         }
         let store = me.map(|(_, s)| s);
         for command in apply(&mut state, request, my_guid, store) {

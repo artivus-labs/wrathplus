@@ -247,7 +247,25 @@ fn a_draft_adds_with_its_invites() {
         invite_id: 0,
         owner_invite_id: 0,
     };
-    assert!(draft_list::redraws(&removal(0)) && !draft_list::redraws(&removal(100)));
+    assert_eq!(
+        [
+            draft_list::redraws(&removal(0)),
+            draft_list::redraws(&removal(100))
+        ],
+        [Some(vec![]), None]
+    );
+    // A new player draft fires the list event with true (`0x5bbf05`), a guild draft nothing.
+    let draft = |flags| R::NewDraft {
+        flags,
+        arena_slot: None,
+    };
+    assert_eq!(
+        [
+            draft_list::redraws(&draft(1)),
+            draft_list::redraws(&draft(0x400))
+        ],
+        [Some(vec![V::Bool(true)]), None]
+    );
     let mut fired = Vec::new();
     reduce(
         &mut state,

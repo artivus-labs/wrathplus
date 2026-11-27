@@ -502,6 +502,13 @@ fn a_draft_is_added_with_its_fields() {
         "(CALENDAR_ERROR_NEEDS_TITLE or 'CALENDAR_ERROR_NEEDS_TITLE')"
     ));
     s.take_wrath_calendar_requests();
+    // `0x5bc065`: outside a guild a guild draft is refused and none begins.
+    s.run("CalendarNewGuildEvent()").unwrap();
+    assert!(refused(
+        &s,
+        "(ERR_GUILD_PLAYER_NOT_IN_GUILD or 'ERR_GUILD_PLAYER_NOT_IN_GUILD')"
+    ));
+    assert_eq!(s.take_wrath_calendar_requests(), []);
     s.set_guild(crate::script::GuildState {
         in_guild: true,
         ..Default::default()

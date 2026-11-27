@@ -588,7 +588,17 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         ("CalendarNewGuildAnnouncement", ANNOUNCEMENT),
     ] {
         set(lua, name, move |lua, _| {
-            new_draft(lua, flags, None);
+            // `0x5bbf4c` / `0x5bc065`: a guild draft needs a guild; the open event stays.
+            let in_guild = lua
+                .app_data_ref::<Model>()
+                .expect("model app_data")
+                .guild
+                .in_guild;
+            if flags != PLAYER && !in_guild {
+                update_error(lua, "ERR_GUILD_PLAYER_NOT_IN_GUILD");
+            } else {
+                new_draft(lua, flags, None);
+            }
             many(vec![])
         })?;
     }
