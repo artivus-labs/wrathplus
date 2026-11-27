@@ -67,6 +67,9 @@ pub struct LootState {
     /// `LootFrame_Update` hides its button in place, and counted by `GetNumLootItems` while an
     /// occupied slot follows it (`0x588190`).
     pub rows: Vec<Option<LootRow>>,
+    /// The window opened with money: a taken coin is -1, not 0 (`0xbfa8d0`), so its slot still
+    /// counts (`0x5881f5`).
+    pub coin_slot: bool,
     /// `IsFishingLoot` (wire `loot_type` 3): the reel-in sound and portrait (`LootFrame.lua:137`).
     pub fishing: bool,
     /// The names `GetMasterLootCandidate(i)` answers by 1-based slot, from `SMSG_LOOT_MASTER_LIST`.
@@ -353,6 +356,7 @@ mod tests {
         LootState {
             source_unit: false,
             master_candidates: Vec::new(),
+            coin_slot: true,
             rows: vec![
                 Some(LootRow {
                     item_id: 0,

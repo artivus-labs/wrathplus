@@ -133,8 +133,9 @@ struct Record {
     /// Signatures required, the record's `+0x1110`: signed, as the binding pushes it with
     /// `fild DWORD`. The Request-Signature button tests it; `CanSignPetition` tests the cap.
     required: i32,
-    /// The record's `+0x1110` bit 0, set for a guild charter: it picks `GetPetitionInfo`'s first
-    /// return and gates `CanSignPetition`'s guild-member and full-list refusals.
+    /// The record's type `[+0x13bc]` is 0, a guild charter: it picks `GetPetitionInfo`'s first
+    /// return ("guild", `0x5cecf5`) and gates `CanSignPetition`'s guild-member and full-list
+    /// refusals.
     is_charter: bool,
     /// An arena-team charter (build 12340, `wrath_petition`'s `flags` bit 1).
     is_arena: bool,

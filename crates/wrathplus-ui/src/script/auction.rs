@@ -139,7 +139,7 @@ pub struct AuctionCategory {
     /// The wire's `mainCategory`: an item class id, not the menu position.
     pub class_id: u32,
     pub name: String,
-    /// The `0x807060` table's second column. False (Consumable, Trade Goods, Reagent,
+    /// The `0xa14f70` table's second column (`0xa14f74`). False (Consumable, Trade Goods, Reagent,
     /// Miscellaneous) empties `GetAuctionItemSubClasses` and `GetAuctionInvTypes`, but
     /// `QueryAuctionItems` never reads it.
     pub has_subclass_filter: bool,
@@ -168,7 +168,7 @@ pub struct AuctionState {
 }
 
 /// A drained `QueryAuctionItems`, the `CMSG_AUCTION_LIST_ITEMS` filters: each is already a wire id,
-/// mapped from the Lua's menu position as `0x4ce980` does.
+/// mapped from the Lua's menu position as `0x59bcf0` does.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AuctionQuery {
     pub name: String,
@@ -546,8 +546,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // GetAuctionItemSubClasses(classIndex) → the subclass names; an out-of-range index or a class
-    // whose `0x807060` flag is 0 returns nothing, without an error (`0x4cfa00`, `0x4cfa0e`).
+    // GetAuctionItemSubClasses(classIndex) (`0x59c480`) → the subclass names; an out-of-range
+    // index or a class whose `0xa14f74` flag is 0 returns nothing, without an error (`0x59c4db`).
     g.set(
         "GetAuctionItemSubClasses",
         lua.create_function(|lua, class_index: usize| {
@@ -614,9 +614,9 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     )?;
 
     // QueryAuctionItems(name, minLevel, maxLevel, invTypeIndex, classIndex, subclassIndex, page,
-    // isUsable, qualityIndex): nine arguments, no `exactMatch` in 1.12. Each filter is a 1-based
-    // menu position mapped to the wire id as `0x4ce980` does: invType through the `0x8070b0` rows,
-    // class through `0x807060`, subclass as the class's Nth non-excluded row (a scan that never
+    // isUsable, qualityIndex, getAll) (`0x59bcf0`); the tenth, `getAll`, is not read here. Each
+    // filter is a 1-based menu position mapped to the wire id: invType through the `0xa14fd0` rows,
+    // class through `0xa14f70`, subclass as the class's Nth non-excluded row (a scan that never
     // reads the class's filter flag). Anything unresolved is the wire's "any".
     g.set(
         "QueryAuctionItems",

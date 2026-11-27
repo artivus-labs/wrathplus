@@ -42,9 +42,6 @@ fn text_color(quads: &[ExtractedQuad], t: &str) -> Option<[f32; 4]> {
 
 fn coin_and_two_items() -> LootState {
     LootState {
-        source_unit: false,
-        fishing: false,
-        master_candidates: Vec::new(),
         rows: vec![
             Some(LootRow {
                 item_id: 0,
@@ -80,6 +77,8 @@ fn coin_and_two_items() -> LootState {
                 locked: false,
             }),
         ],
+        coin_slot: true,
+        ..LootState::default()
     }
 }
 
@@ -285,10 +284,8 @@ fn loot_empty_roll_plays_the_empty_open_kit() {
     assert!(s.take_sounds().is_empty(), "loot close is silent (C-side)");
 
     s.set_loot(Some(LootState {
-        source_unit: false,
-        fishing: false,
-        master_candidates: Vec::new(),
         rows: vec![],
+        ..LootState::default()
     }));
     s.fire_event("LOOT_OPENED", vec![]);
     assert!(s.errors().is_empty(), "script errors: {:?}", s.errors());
@@ -384,10 +381,8 @@ fn shipped_loot_frame_pages_five_items() {
         })
         .collect();
     s.set_loot(Some(LootState {
-        source_unit: false,
-        fishing: false,
-        master_candidates: Vec::new(),
         rows: rows.clone(),
+        ..LootState::default()
     }));
     s.fire_event("LOOT_OPENED", vec![]);
     assert!(s.errors().is_empty(), "script errors: {:?}", s.errors());
@@ -425,10 +420,8 @@ fn shipped_loot_frame_pages_five_items() {
     cleared[1] = None;
     cleared[2] = None;
     s.set_loot(Some(LootState {
-        source_unit: false,
-        fishing: false,
-        master_candidates: Vec::new(),
         rows: cleared,
+        ..LootState::default()
     }));
     for row in 1..=3 {
         s.fire_event(
@@ -589,9 +582,6 @@ fn ctrl_and_shift_on_a_loot_row_preview_and_post_without_looting() {
     }
 
     s.set_loot(Some(LootState {
-        source_unit: false,
-        fishing: false,
-        master_candidates: Vec::new(),
         rows: vec![
             Some(LootRow {
                 item_id: 0,
@@ -616,6 +606,8 @@ fn ctrl_and_shift_on_a_loot_row_preview_and_post_without_looting() {
                 locked: false,
             }),
         ],
+        coin_slot: true,
+        ..LootState::default()
     }));
     s.fire_event("LOOT_OPENED", vec![]);
     s.resolve();
@@ -725,10 +717,9 @@ fn shipped_loot_frame_hands_a_master_row_to_a_candidate() {
         })
     };
     s.set_loot(Some(LootState {
-        source_unit: false,
-        fishing: false,
         master_candidates: vec![Some("Thrall".into()), Some("Cairne".into())],
         rows: vec![row("Wool Cloth", 2), row("Thunderfury", 4)],
+        ..LootState::default()
     }));
     s.fire_event("LOOT_OPENED", vec![]);
     assert!(s.errors().is_empty(), "script errors: {:?}", s.errors());
@@ -866,8 +857,6 @@ fn the_master_loot_menu_groups_raid_candidates_by_subgroup() {
     candidates[1] = Some("Cairne".to_string());
     candidates[10] = Some("Sylvanas".to_string());
     s.set_loot(Some(LootState {
-        source_unit: false,
-        fishing: false,
         master_candidates: candidates,
         rows: vec![Some(LootRow {
             item_id: 17182,
@@ -880,6 +869,7 @@ fn the_master_loot_menu_groups_raid_candidates_by_subgroup() {
             random_property_id: 0,
             locked: false,
         })],
+        ..LootState::default()
     }));
     s.fire_event("LOOT_OPENED", vec![]);
     let (x, y) = s
@@ -1049,9 +1039,6 @@ fn loot_row_awaiting_its_template_opens_clean() {
 
     // One row in flight: the wire gives the icon (by display id) and the count, nothing else.
     s.set_loot(Some(LootState {
-        source_unit: false,
-        fishing: false,
-        master_candidates: Vec::new(),
         rows: vec![Some(LootRow {
             item_id: 2582,
             name: None,
@@ -1063,6 +1050,7 @@ fn loot_row_awaiting_its_template_opens_clean() {
             random_property_id: 0,
             locked: false,
         })],
+        ..LootState::default()
     }));
     s.fire_event("LOOT_OPENED", vec![]);
     assert!(
@@ -1111,9 +1099,6 @@ fn loot_row_awaiting_its_template_opens_clean() {
     // (`0x4c2ac0`) fires `LOOT_OPENED` as the pending count falls to zero.
     s.fire_event("LOOT_CLOSED", vec![]);
     s.set_loot(Some(LootState {
-        source_unit: false,
-        fishing: false,
-        master_candidates: Vec::new(),
         rows: vec![Some(LootRow {
             item_id: 2582,
             name: Some("Thin Cloth Gloves".into()),
@@ -1125,6 +1110,7 @@ fn loot_row_awaiting_its_template_opens_clean() {
             random_property_id: 0,
             locked: false,
         })],
+        ..LootState::default()
     }));
     s.fire_event("LOOT_OPENED", vec![]);
     assert!(s.errors().is_empty(), "script errors: {:?}", s.errors());

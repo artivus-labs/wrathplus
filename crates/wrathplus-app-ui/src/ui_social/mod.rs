@@ -232,19 +232,20 @@ mod tests {
             result: friend_result::ONLINE,
             guid: 7,
             online: Some(FriendOnline {
-                status: friend_status::AFK,
+                status: friend_status::AFK | 0x08,
                 area: 1519,
                 level: 42,
                 class: 8,
             }),
         });
-        assert_eq!(social.friends[0].status, friend_status::AFK);
+        assert_eq!(social.friends[0].status, friend_status::AFK | 0x08);
         assert_eq!(social.friends[0].area, 1519);
 
         social.apply_friend_status(status(friend_result::OFFLINE, 7));
         assert!(!social.friends[0].is_online());
         let f = &social.friends[0];
         assert_eq!((f.area, f.level, f.class), (1519, 42, 8));
+        assert_eq!(f.status & 0x08, 0x08, "the RAF bit outlives the logout");
     }
 
     #[test]

@@ -14,6 +14,7 @@ use std::collections::BTreeSet;
 use bevy::prelude::*;
 
 use wrathplus_formats::{Talent, TalentCatalog};
+use wrathplus_protocol::{SessionEvent, SessionEventKind};
 use wrathplus_ui::script::{
     ScriptValue, TalentPrereqView, TalentTabView, TalentUiState, TalentView, UiScript,
     WrathTalentGroups,
@@ -27,7 +28,7 @@ use crate::app_core::session::SelfPlayer;
 use crate::app_core::state::PlayerActions;
 use crate::app_core::state::Spells;
 use crate::net::wrath_notices::WrathProgress;
-use crate::net::{ClientCommand, NetCommands};
+use crate::net::{ClientCommand, NetCommands, NetHandlerApp};
 use crate::ui_script::gate;
 use wrathplus_assets::{AssetSet, LockRecover, WorldAssets};
 
@@ -41,7 +42,10 @@ pub struct UiTalentPlugin;
 
 impl Plugin for UiTalentPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, load_talents.after(AssetSet::Open))
+        app.init_resource::<LastTalentGroups>()
+            .net_handler(SessionEventKind::Disconnected, on_session_end)
+            .net_handler(SessionEventKind::LoggedOut, on_session_end)
+            .add_systems(Startup, load_talents.after(AssetSet::Open))
             .add_systems(
                 Update,
                 (
@@ -69,6 +73,28 @@ fn load_talents(mut commands: Commands, assets: Option<Res<WorldAssets>>) {
     }
 }
 
+/// 12340's previous `(count, active)` (`[0xc20ff8]`, `[0xc20ff4]`): engine globals that a
+/// `/reload` keeps and only the world-leave reset (`0x529160` → `0x5c9dc0`) clears.
+#[derive(Resource, Default)]
+pub(crate) struct LastTalentGroups(u32, u32);
+
+fn on_session_end(
+    In(event): In<SessionEvent>,
+    mut last: ResMut<LastTalentGroups>,
+    progress: Option<ResMut<WrathProgress>>,
+) {
+    if matches!(
+        event,
+        SessionEvent::Disconnected { .. } | SessionEvent::LoggedOut
+    ) {
+        *last = LastTalentGroups::default();
+        // Dropped too: the packet record outlives a logout and would seed the next character's pair.
+        if let Some(mut progress) = progress {
+            progress.talents.clear();
+        }
+    }
+}
+
 /// The last pushed snapshot, and the points pair `CHARACTER_POINTS_CHANGED`'s deltas come from.
 #[derive(Default)]
 struct FeedMemory {
@@ -88,6 +114,7 @@ fn feed_talents(
     self_q: Query<&ObjectStore, With<SelfPlayer>>,
     changed_self: Query<(), (With<SelfPlayer>, Changed<ObjectStore>)>,
     mut memory: Local<crate::app_core::vm_memo::VmMemo<FeedMemory>>,
+    mut last: ResMut<LastTalentGroups>,
 ) {
     let Some(mut script) = script else {
         return;
@@ -124,14 +151,12 @@ fn feed_talents(
     }
     let mut groups = player_groups(progress.as_deref());
     // `0x5c9ed7`: a packet that moves the active group fires (new, old), each 1-based or 0 without
-    // groups (`0x5c9edb`-`0x5c9ef2`); a reloaded VM is seeded silently.
+    // groups (`0x5c9edb`-`0x5c9ef2`), against the session's previous pair, so a login on group 2
+    // fires (2, 0) and a `/reload` nothing.
     let packet = progress
         .as_ref()
         .is_some_and(|p| p.talents.contains_key(&false));
-    let group_change = (packet && !vm_reset && groups.active != memory.groups.active).then(|| {
-        let n = |g: &WrathTalentGroups| (g.count > 0).then_some(i64::from(g.active) + 1);
-        (n(&groups).unwrap_or(0), n(&memory.groups).unwrap_or(0))
-    });
+    let group_change = talent_group_change(&mut last, packet, &groups);
     'pages: {
         let (Some(talents), Some(spells)) = (talents.as_deref(), spells.as_deref()) else {
             break 'pages;
@@ -223,6 +248,20 @@ fn feed_talents(
         let args = vec![ScriptValue::Int(new), ScriptValue::Int(old)];
         script.fire_event("ACTIVE_TALENT_GROUP_CHANGED", args);
     }
+}
+
+/// The `(new, old)` pair a packet's move fires, recording the packet's groups as the previous.
+fn talent_group_change(
+    last: &mut LastTalentGroups,
+    packet: bool,
+    groups: &WrathTalentGroups,
+) -> Option<(i64, i64)> {
+    if !packet {
+        return None;
+    }
+    let n = |count: u32, active: u32| if count > 0 { i64::from(active) + 1 } else { 0 };
+    let old = std::mem::replace(last, LastTalentGroups(groups.count, groups.active));
+    (groups.active != old.1).then(|| (n(groups.count, groups.active), n(old.0, old.1)))
 }
 
 /// AzerothCore's BuildPlayerTalentsInfoData supplies the active spec and unspent points.

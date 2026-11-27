@@ -262,7 +262,12 @@ fn friend_rows(
                         .unwrap_or_default()
                         .to_string(),
                     connected: entry.is_online(),
-                    status: away(entry.status),
+                    // The away bits are read online only (`0x6b42ff`).
+                    status: if entry.online {
+                        away(entry.status)
+                    } else {
+                        String::new()
+                    },
                     note: social.notes.get(&entry.guid).cloned(),
                     refer_a_friend: entry.status & FRIEND_STATUS_RAF != 0,
                 },
@@ -629,6 +634,7 @@ mod tests {
             let entry = wrathplus_protocol::types::FriendEntry {
                 guid,
                 status,
+                online: status != friend_status::OFFLINE,
                 ..Default::default()
             };
             social.friends.push(entry);
@@ -721,7 +727,8 @@ mod tests {
             friends: vec![
                 wrathplus_protocol::types::FriendEntry {
                     guid: 7,
-                    status: friend_status::OFFLINE,
+                    status: friend_status::AFK,
+                    online: false,
                     area: 87,
                     level: 60,
                     class: 4,
@@ -729,6 +736,7 @@ mod tests {
                 wrathplus_protocol::types::FriendEntry {
                     guid: 8,
                     status: friend_status::AFK | FRIEND_STATUS_RAF,
+                    online: true,
                     area: 999,
                     level: 1,
                     class: 0,

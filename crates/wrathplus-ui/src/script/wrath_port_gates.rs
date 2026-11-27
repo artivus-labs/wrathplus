@@ -9,7 +9,9 @@ use super::Model;
 pub(crate) struct PortGates {
     /// `UNIT_FIELD_FLAGS & 0x800`, which AzerothCore sets on an owner whose pet is in combat.
     pub pet_in_combat: bool,
-    /// An auto-attack target (`[obj+0xa20]`), read by `0x71afb0` alone. Not modelled: false.
+    /// An auto-attack target (`[obj+0xa20]`), read by `0x71afb0` alone. [`Self::of`] leaves it
+    /// false; `LFGTeleport`, the `FlagOrAttacking` caller, sets it from Attack (6603) being current.
+    /// Inferred: ours turns on when the server starts the attack, 12340's when the swing is sent.
     pub attacking: bool,
     /// Vtable `+0x128` [inferred: the unit is dead]; read as health at 0 (`UnitIsDead`).
     pub dead: bool,

@@ -124,6 +124,12 @@ fn carrier_side(own_race: Option<u8>, raid_member: bool, viewer_race: Option<u8>
     }
 }
 
+/// `0x549670`: a guid in the raid roster (`0xbeb568`, count `0xbeb608`), so never a party's.
+fn raid_member(group: &GroupState, guid: u64) -> bool {
+    group.group_type == crate::app_core::state::GROUPTYPE_RAID
+        && group.members.iter().any(|m| m.guid == guid)
+}
+
 pub(crate) fn feed_battlefield_positions(
     script: Option<NonSendMut<UiScript>>,
     mut state: ResMut<BattlefieldPositions>,
@@ -204,7 +210,7 @@ pub(crate) fn feed_battlefield_positions(
         .iter()
         .map(|c| {
             let (x, y) = live_or_packet(c, &guids, &unit_pos);
-            let member = group.members.iter().any(|m| m.guid == c.guid);
+            let member = raid_member(&group, c.guid);
             BattlefieldFlagView {
                 uv: project(x, y),
                 token: flag_token(carrier_side(race(c.guid), member, viewer_race), map)
@@ -312,6 +318,18 @@ mod tests {
         assert_eq!(carrier_side(None, true, Some(1)), 1);
         assert_eq!(carrier_side(None, false, Some(1)), 0);
         assert_eq!(carrier_side(None, false, Some(2)), 1);
+        let mut group = crate::app_core::group::GroupState {
+            members: vec![wrathplus_protocol::types::GroupMemberEntry {
+                name: String::new(),
+                guid: 7,
+                status: 1,
+                flags: 0,
+            }],
+            ..Default::default()
+        };
+        assert!(!raid_member(&group, 7), "a party is no raid roster");
+        group.group_type = crate::app_core::state::GROUPTYPE_RAID;
+        assert!(raid_member(&group, 7) && !raid_member(&group, 8));
     }
 
     #[test]

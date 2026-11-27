@@ -70,12 +70,14 @@ pub struct WrathCurrencySnapshot {
     pub list: WrathCurrencyList,
 }
 
-/// A one-based bit as a mask; 0 and anything past 64 mark nothing.
+/// A one-based bit as a mask (`0x5b047b`): a signed index, nothing at or below 0, and past 32 the
+/// second word's bit `(i - 0x21) & 0x1f`, as `shl` keeps the count's low five bits.
 fn bit(index: u32) -> u64 {
-    index
-        .checked_sub(1)
-        .and_then(|i| 1u64.checked_shl(i))
-        .unwrap_or(0)
+    match index as i32 {
+        i if i <= 0 => 0,
+        i @ 1..=32 => 1 << (i - 1),
+        i => 1 << (32 + ((i - 0x21) & 0x1f)),
+    }
 }
 
 const UNUSED: [&str; 2] = ["currencyTokensUnused1", "currencyTokensUnused2"];
