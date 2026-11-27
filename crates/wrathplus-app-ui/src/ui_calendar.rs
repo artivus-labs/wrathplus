@@ -24,8 +24,8 @@
 //! Labelled: the error id → key table is AzerothCore's `CalendarError` names matched to
 //! GlobalStrings (the client's own table is not traced); the guild-filter and arena-team member
 //! lists fill a draft at level 0, their byte uninterpreted (an open server event ignores them);
-//! before the first calendar, today is the host's UTC clock; `0x0442`/`0x0460`/`0x0461` never arrive (AzerothCore sends none), so
-//! no status alert, invite note or `CALENDAR_EVENT_ALARM` exists; a holiday lasts its first
+//! `0x0442`/`0x0460`/`0x0461` never arrive (AzerothCore sends none), so
+//! no status alert or invite note exists; a holiday lasts its first
 //! duration from each start date; system events are never sent.
 
 use std::collections::HashMap;
@@ -49,6 +49,12 @@ use crate::names::NameCache;
 use crate::net::wrath_calendar_capture::NativeCalendarPackets;
 use crate::net::{ClientCommand, NetCommands, NetHandlerApp};
 use wrathplus_protocol::{SessionEvent, SessionEventKind};
+mod draft_list;
+mod errors;
+mod invite_bits;
+mod pending;
+
+use errors::{error_key, error_line, ErrorArg};
 
 /// Wire statuses and ranks.
 const INVITED: u8 = 0;
@@ -60,62 +66,13 @@ const ANNOUNCEMENT: u32 = 0x40;
 const SEND_ADD: u8 = 1;
 const SEND_COPY: u8 = 2;
 
-/// What `SMSG_CALENDAR_COMMAND_RESULT`'s line formats its key with (`0x5b9960`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ErrorArg {
-    /// The bare template.
-    None,
-    /// A constant the client passes for its `%d` (the limits it knows).
-    Count(u32),
-    /// The result's name, for its `%s`.
-    Name,
-}
-
-/// Build 12340's error switch (`0x6cd380`): AzerothCore's `CalendarError` to the GlobalStrings key
-/// and the argument `0x5b9960` formats it with; codes it has no arm for raise nothing.
-fn error_key(error: u32) -> Option<(&'static str, ErrorArg)> {
-    use ErrorArg::{Count, Name, None as Bare};
-    Some(match error {
-        1 => ("CALENDAR_ERROR_GUILD_EVENTS_EXCEEDED", Count(100)),
-        2 => ("CALENDAR_ERROR_EVENTS_EXCEEDED", Count(30)),
-        3 => ("CALENDAR_ERROR_SELF_INVITES_EXCEEDED", Bare),
-        4 => ("CALENDAR_ERROR_OTHER_INVITES_EXCEEDED", Name),
-        5 => ("CALENDAR_ERROR_PERMISSIONS", Bare),
-        6 => ("CALENDAR_ERROR_EVENT_INVALID", Bare),
-        7 => ("CALENDAR_ERROR_NOT_INVITED", Bare),
-        8 => ("CALENDAR_ERROR_INTERNAL", Bare),
-        9 => ("ERR_GUILD_PLAYER_NOT_IN_GUILD", Bare),
-        10 => ("CALENDAR_ERROR_ALREADY_INVITED_TO_EVENT_S", Name),
-        11 => ("PLAYER_NOT_FOUND", Bare),
-        12 => ("CALENDAR_ERROR_NOT_ALLIED", Bare),
-        13 => ("ERR_IGNORING_YOU_S", Name),
-        14 => ("CALENDAR_ERROR_INVITES_EXCEEDED", Count(100)),
-        16 => ("CALENDAR_ERROR_INVALID_DATE", Bare),
-        17 => ("CALENDAR_ERROR_INVALID_TIME", Bare),
-        19 => ("CALENDAR_ERROR_NEEDS_TITLE", Bare),
-        20 => ("CALENDAR_ERROR_EVENT_PASSED", Bare),
-        21 => ("CALENDAR_ERROR_EVENT_LOCKED", Bare),
-        22 => ("CALENDAR_ERROR_DELETE_CREATOR_FAILED", Bare),
-        24 => ("ERR_SYSTEM_DISABLED", Bare),
-        25 => ("ERR_RESTRICTED_ACCOUNT", Bare),
-        26 => ("CALENDAR_ERROR_ARENA_EVENTS_EXCEEDED", Bare),
-        27 => ("CALENDAR_ERROR_RESTRICTED_LEVEL", Bare),
-        28 => ("ERR_USER_SQUELCHED", Bare),
-        29 => ("CALENDAR_ERROR_NO_INVITE", Bare),
-        36 => ("CALENDAR_ERROR_EVENT_WRONG_SERVER", Bare),
-        37 => ("CALENDAR_ERROR_INVITE_WRONG_SERVER", Bare),
-        38 => ("CALENDAR_ERROR_NO_GUILD_INVITES", Bare),
-        39 => ("CALENDAR_ERROR_INVALID_SIGNUP", Bare),
-        40 => ("CALENDAR_ERROR_NO_MODERATOR", Bare),
-        _ => return None,
-    })
-}
-
 /// The `LFGDungeons` texture lists, the raid difficulty keys and the holidays, loaded once.
 #[derive(Resource, Default)]
 pub(crate) struct CalendarCatalog {
     holidays: HolidayCatalog,
     textures: [Vec<WrathCalendarTexture>; 2],
+    /// Every `LFGDungeons` row's texture by id, a listed event's icon (`0x5c1040`).
+    dungeons: HashMap<i32, String>,
     difficulty_keys: HashMap<(i32, i32), String>,
     max_players: HashMap<(i32, i32), i32>,
 }
@@ -135,8 +92,10 @@ impl CalendarCatalog {
 #[derive(Clone, Debug, PartialEq)]
 struct Listed {
     row: EventRow,
-    /// Invite id, wire status, rank.
-    invite: Option<(u64, u8, u8)>,
+    /// Invite id, wire status, rank, type.
+    invite: Option<(u64, u8, u8, u8)>,
+    /// The alarm minute, 15 before the event, armed only by the calendar packet (`0x5c2dc3`).
+    alarm: Option<WrathCalendarDate>,
 }
 
 #[derive(Resource, Default)]
@@ -152,11 +111,15 @@ pub(crate) struct CalendarState {
     raid_resets: Vec<RaidReset>,
     holidays: Vec<wrathplus_protocol::wrath_calendar::Holiday>,
     pending: u32,
+    /// The game clock (`0xd37f98`) at this feed, what the pending bit compares against.
+    game_now: Option<WrathCalendarDate>,
     /// The event or draft the VM opened.
     open: Option<WrathCalendarEvent>,
     /// The id a `CalendarOpenEvent` asked for, until its event lands.
     asked: Option<u64>,
     pushed: Option<Arc<WrathCalendarView>>,
+    /// The open or new event held until the event's invitees have names.
+    held: Vec<(&'static str, Vec<V>)>,
 }
 
 impl CalendarState {
@@ -224,6 +187,8 @@ fn load(mut catalog: ResMut<CalendarCatalog>, assets: Option<Res<wrathplus_asset
                     .or_insert(d.max_players());
             }
             catalog.textures = textures(&lfg, &catalog.difficulty_keys);
+            let rows = lfg.dungeons.rows().iter();
+            catalog.dungeons = rows.map(|d| (d.id() as i32, d.texture.clone())).collect();
         }
         Err(error) => warn!("calendar dungeons: {error:#}"),
     }
@@ -261,6 +226,7 @@ fn feed_calendar(
     names: Option<Res<NameCache>>,
     commands: Res<NetCommands>,
     maps: Option<Res<wrathplus_assets::MapCatalogRes>>,
+    time: Option<Res<crate::net::ServerTime>>,
     self_q: Query<(&crate::net::Guid, &ObjectStore), With<SelfPlayer>>,
 ) {
     let Some(mut script) = script else {
@@ -269,17 +235,22 @@ fn feed_calendar(
     let me = self_q.single().ok();
     let my_guid = me.map_or(0, |(g, _)| g.0);
     let mut fired: Vec<(&'static str, Vec<V>)> = Vec::new();
-    let mut clear_pending = false;
+    let (mut clear_pending, mut sent) = (false, Vec::new());
     for packet in packets.0.drain(..) {
+        sent.extend(pending::follow_up(&packet));
         clear_pending |= reduce(&mut state, packet, my_guid, &mut fired);
     }
     for request in script.take_wrath_calendar_requests() {
-        let store = me.map(|(_, s)| s);
-        for command in apply(&mut state, request, my_guid, store) {
-            let _ = commands.0.send(ClientCommand::NativeCalendar(command));
+        if let Some(args) = draft_list::redraws(&request) {
+            fired.push(("CALENDAR_UPDATE_INVITE_LIST", args));
         }
+        let store = me.map(|(_, s)| s);
+        sent.extend(apply(&mut state, request, my_guid, store));
     }
-
+    for command in sent {
+        let _ = commands.0.send(ClientCommand::NativeCalendar(command));
+    }
+    state.game_now = time.and_then(|t| t.0.as_ref().map(|g| g.date_now()));
     let view = Arc::new(build(
         &state,
         &catalog,
@@ -288,12 +259,14 @@ fn feed_calendar(
         maps.as_deref(),
         my_guid,
     ));
+    let named = view
+        .event
+        .as_ref()
+        .is_none_or(|e| e.invitees.iter().all(|i| i.name.is_some()));
+    let fired = release(&mut state.held, fired, named);
     if state.pushed.as_ref() != Some(&view) {
         script.set_wrath_calendar(view.clone());
         state.pushed = Some(view);
-    }
-    if clear_pending {
-        script.set_wrath_calendar_action_pending(false);
     }
     for (event, args) in fired {
         let args = args
@@ -307,28 +280,23 @@ fn feed_calendar(
             .collect();
         script.fire_event(event, args);
     }
+    if clear_pending {
+        script.set_wrath_calendar_action_pending(false);
+    }
 }
 
-/// `key`'s template, its `%s` or `%d` filled with the argument after a NUL when there is one (a
-/// bare key is the template as is, `0x5b9960`'s no-argument leg). Labelled: the `|4one:many;`
-/// plural escapes are left to the text renderer.
-fn error_line(script: &UiScript, packed: &str) -> String {
-    let (key, arg) = match packed.split_once('\0') {
-        Some((key, arg)) => (key, Some(arg)),
-        None => (packed, None),
-    };
-    let template = script
-        .lua()
-        .globals()
-        .get::<Option<String>>(key)
-        .ok()
-        .flatten()
-        .unwrap_or_else(|| key.to_string());
-    match arg {
-        Some(arg) if template.contains("%d") => template.replacen("%d", arg, 1),
-        Some(arg) => template.replacen("%s", arg, 1),
-        None => template,
-    }
+/// `0x5f1a40`: an event's `CALENDAR_OPEN_EVENT` or `_NEW_EVENT` fires once its invitees' names
+/// have all come back (`+0x548` counts the rest down, `0x5f1b10`); held ones go first.
+fn release(
+    held: &mut Vec<(&'static str, Vec<V>)>,
+    fired: Vec<(&'static str, Vec<V>)>,
+    named: bool,
+) -> Vec<(&'static str, Vec<V>)> {
+    let waits = |e: &str| !named && matches!(e, "CALENDAR_OPEN_EVENT" | "CALENDAR_NEW_EVENT");
+    let all = std::mem::take(held).into_iter().chain(fired);
+    let (now, later) = all.partition(|(e, _)| !waits(e));
+    *held = later;
+    now
 }
 
 fn invitee(i: &EventInvitee) -> WrathCalendarInvitee {
@@ -363,7 +331,7 @@ fn open_of(e: &Event) -> WrathCalendarEvent {
     }
 }
 
-/// Apply one receipt; `true` when it answers a pending action.
+/// Apply one receipt; `true` when it clears the pending bit ([`pending::clears`]).
 fn reduce(
     state: &mut CalendarState,
     packet: Packet,
@@ -381,6 +349,7 @@ fn reduce(
     let invites = |fired: &mut Vec<(&'static str, Vec<V>)>| {
         fired.push(("CALENDAR_UPDATE_INVITE_LIST", vec![]));
     };
+    let clears = pending::clears(&packet, |e| error_key(e).is_some());
     match packet {
         Packet::Calendar(c) => {
             calendar(state, c);
@@ -402,7 +371,8 @@ fn reduce(
                         dungeon: e.dungeon,
                         creator: e.creator,
                     },
-                    invite: mine.map(|i| (i.invite_id, i.status, i.rank)),
+                    invite: mine.map(|i| (i.invite_id, i.status, i.rank, i.guild_member)),
+                    alarm: None,
                 });
                 let copy = e.send_type == SEND_COPY;
                 if !copy && state.open.as_ref().is_some_and(|o| o.event_id == 0) {
@@ -410,7 +380,7 @@ fn reduce(
                 }
                 fired.push(("CALENDAR_NEW_EVENT", vec![V::Bool(copy)]));
                 list(fired);
-                return true;
+                return clears;
             }
             let asked = state.asked == Some(e.event_id);
             let refresh = state
@@ -428,7 +398,6 @@ fn reduce(
                 fired.push(("CALENDAR_UPDATE_EVENT", vec![]));
                 invites(fired);
             }
-            return true;
         }
         Packet::FilterGuild { members } | Packet::ArenaTeam { members } => {
             if let Some(open) = state.open.as_mut().filter(|o| o.event_id == 0) {
@@ -512,7 +481,6 @@ fn reduce(
                 };
                 fired.push(("CALENDAR_UPDATE_ERROR", vec![V::Str(packed)]));
             }
-            return true;
         }
         Packet::RaidLockoutAdded { lockout, .. } => {
             let reset = state.now_unix() + i64::from(lockout.seconds_left);
@@ -568,7 +536,8 @@ fn reduce(
                     dungeon,
                     creator,
                 },
-                invite: Some((invite_id, status, rank)),
+                invite: Some((invite_id, status, rank, 0)),
+                alarm: None,
             });
             list(fired);
         }
@@ -636,13 +605,15 @@ fn reduce(
                 }
             }
         }
+        // `0x5b7ce0` announces the server's count only when it changes.
         Packet::NumPending { count } => {
-            state.pending = count;
-            fired.push(("CALENDAR_UPDATE_PENDING_INVITES", vec![]));
+            if std::mem::replace(&mut state.pending, count) != count {
+                fired.push(("CALENDAR_UPDATE_PENDING_INVITES", vec![]));
+            }
         }
-        Packet::ClearPendingAction => return true,
+        Packet::ClearPendingAction => {}
     }
-    false
+    clears
 }
 
 fn calendar(state: &mut CalendarState, c: Calendar) {
@@ -660,8 +631,10 @@ fn calendar(state: &mut CalendarState, c: Calendar) {
                 .invites
                 .iter()
                 .find(|i| i.event_id == row.event_id)
-                .map(|i| (i.invite_id, i.status, i.rank));
-            Listed { row, invite }
+                .map(|i| (i.invite_id, i.status, i.rank, i.guild_event));
+            let alarm = WrathCalendarDate::from_packed(row.packed_time)
+                .map(|t| WrathCalendarDate::from_seconds(t.seconds() - 15 * 60));
+            Listed { row, invite, alarm }
         })
         .collect();
     state.lockouts = c
@@ -690,17 +663,10 @@ fn apply(
 ) -> Vec<Command> {
     match request {
         R::GetCalendar => vec![Command::GetCalendar],
+        // The open event stays until the asked one arrives, as 12340's `0xc207ec` does.
         R::GetEvent { event_id } => {
             state.asked = Some(event_id);
-            if state.open.as_ref().is_some_and(|o| o.event_id != event_id) {
-                state.open = None;
-            }
             vec![Command::GetEvent { event_id }]
-        }
-        R::CloseEvent => {
-            state.open = None;
-            state.asked = None;
-            vec![]
         }
         R::NewDraft { flags, arena_slot } => {
             state.asked = None;
@@ -922,10 +888,9 @@ fn name_of(names: Option<&NameCache>, guid: u64, net: &NetCommands) -> Option<St
     names?.resolve(guid, net).map(str::to_string)
 }
 
+/// A lockout or reset's title, `Map.dbc`'s name or "" (`0x5c117f`).
 fn map_name(maps: Option<&wrathplus_assets::MapCatalogRes>, map: u32) -> String {
-    maps.and_then(|m| m.0.name(map))
-        .filter(|n| !n.is_empty())
-        .map_or_else(|| map.to_string(), str::to_string)
+    maps.and_then(|m| m.0.name(map)).unwrap_or("").to_string()
 }
 
 /// The view from the reduced state.
@@ -937,16 +902,10 @@ fn build(
     maps: Option<&wrathplus_assets::MapCatalogRes>,
     me: u64,
 ) -> WrathCalendarView {
-    let texture_of = |kind: u32, dungeon: i32| -> String {
-        let list = match kind {
-            0 => &catalog.textures[0],
-            1 => &catalog.textures[1],
-            _ => return String::new(),
-        };
-        list.iter()
-            .find(|t| t.dungeon == dungeon)
-            .map(|t| t.texture.clone())
-            .unwrap_or_default()
+    // `0x5c0fb0`: a player, guild or announcement row (flags `0x543`) shows its dungeon's texture.
+    let texture_of = |flags: u32, dungeon: i32| -> String {
+        let found = (flags & 0x543 != 0).then(|| catalog.dungeons.get(&dungeon));
+        found.flatten().cloned().unwrap_or_default()
     };
     let mut entries = Vec::new();
     // Holidays first on their days, then the rest by time.
@@ -975,18 +934,17 @@ fn build(
             let days = ((end.seconds() - first) / 86_400 + 1).max(1) as u32;
             for k in 0..days {
                 let day = WrathCalendarDate::from_seconds(first + i64::from(k) * 86_400);
-                let (sequence, at) = match (days, k) {
-                    (1, _) => ("INFO", from),
-                    (_, 0) => ("START", from),
-                    (n, k) if k + 1 == n => ("END", end),
-                    _ => ("ONGOING", day),
+                let at = match k {
+                    0 => from,
+                    k if k + 1 == days => end,
+                    _ => day,
                 };
                 entries.push(WrathCalendarEntry {
                     kind: WrathCalendarKind::Holiday,
                     date: WrathCalendarDate::new(day.year, day.month, day.day, at.hour, at.minute),
                     title: name.clone(),
                     texture: texture.clone(),
-                    sequence: (k + 1, days, sequence),
+                    sequence: (k, days),
                     holiday_description: description.clone(),
                     ..Default::default()
                 });
@@ -994,8 +952,13 @@ fn build(
         }
     }
     let mut rest = Vec::new();
+    let now = state
+        .game_now
+        .unwrap_or_else(|| state.local(state.now_unix()));
     for l in &state.events {
-        let Some(date) = WrathCalendarDate::from_packed(l.row.packed_time) else {
+        let bits = invite_bits::invite_bits(&l.row, l.invite.map(|i| (i.1, i.2, i.3)), me, now);
+        let (Some(date), Some(bits)) = (WrathCalendarDate::from_packed(l.row.packed_time), bits)
+        else {
             continue;
         };
         rest.push(WrathCalendarEntry {
@@ -1009,8 +972,10 @@ fn build(
             flags: l.row.flags,
             event_type: l.row.kind as u8,
             dungeon: l.row.dungeon,
-            texture: texture_of(l.row.kind, l.row.dungeon),
+            texture: texture_of(l.row.flags, l.row.dungeon),
             invite: l.invite.map(|i| (i.1, i.2)),
+            bits,
+            alarm: l.alarm,
             ..Default::default()
         });
     }
@@ -1060,7 +1025,6 @@ fn build(
     });
     WrathCalendarView {
         me,
-        today: state.clock.map(|_| state.local(state.now_unix())),
         entries,
         raid_resets,
         pending_invites: state.pending,

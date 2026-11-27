@@ -210,3 +210,138 @@ fn steps_further_afield_keep_out_of_a_zone_below_us_when_another_way_goes_on() {
     assert_eq!(text(&script, "return doing()"), "goal:seek_mobs");
     assert_eq!(text(&script, "return table.concat(moves, ' ')"), "-100,0");
 }
+
+/// Seen live: a level 13 dwarf at (-5500, -750) in Dun Morogh (levels 5-10), its quest log empty,
+/// its hubs all in Dun Morogh and Thelsamar 2200 yards off, beyond the realm's services radius.
+/// The level 8-10 troggs still give XP, so zone_fit read "ok" and it ground there for good.
+const OUTLEVELLED: &str = r#"
+lvl = 13
+zone = "Dun Morogh"
+pos = { x = -500, y = 0, z = 0, map = 0 }
+AgentZones = function() return {
+  { id = 1, name = "Dun Morogh", map = 0, faction = "Alliance", city = false, min = 5, max = 10, x = -500, y = 0 },
+  { id = 38, name = "Loch Modan", map = 0, faction = "Alliance", city = false, min = 10, max = 20, x = 1000, y = 0 },
+  { id = 40, name = "Westfall", map = 0, faction = "Alliance", city = false, min = 10, max = 20, x = -500, y = -4000 },
+} end
+function trogg(n, level, distance)
+  return { guid = "0xT" .. n, name = "Rockjaw Trogg", kind = "unit", reaction = "hostile", level = level,
+    x = -500 + distance, y = 0, z = 0, distance = distance, dead = false }
+end
+units = { trogg(1, 8, 25), trogg(2, 9, 40), trogg(3, 10, 55) }
+assert(Goals.learn_places({
+  { kind = "questgiver-hub", name = "Kharanos Giver", x = -450, y = 0, z = 0, map = 0, zone = "Dun Morogh" },
+}) == 1)
+"#;
+
+fn outlevelled() -> UiScript {
+    let script = border();
+    script.run(OUTLEVELLED).unwrap();
+    script
+}
+
+#[test]
+fn an_outlevelled_zone_with_no_quest_work_is_left_for_one_that_fits() {
+    let mut script = outlevelled();
+    // The troggs give XP (grey is 7 at level 13), so the zone still fits by them, but its band is
+    // below us and their median (9) is within near_grey (3) of grey: outlevelled.
+    assert_eq!(text(&script, "return Goals.facts().zone_fit"), "ok");
+    assert!(script
+        .eval::<bool>("return Goals.facts().zone_outlevelled")
+        .unwrap());
+    assert!(script
+        .eval::<bool>("return Goals.facts().mobs_for_xp")
+        .unwrap());
+    assert!(!script
+        .eval::<bool>("return Goals.facts().quest_hub_known")
+        .unwrap());
+    assert_eq!(
+        text(&script, "return plan_of('progress')"),
+        "travel_to_zone grind"
+    );
+    script.run("Goals.on = true").unwrap();
+    ticks(&mut script, 0.75);
+    assert_eq!(text(&script, "return doing()"), "goal:travel_to_zone");
+    // The nearest zone that fits, to its middle (no hub known there yet).
+    assert_eq!(
+        text(&script, "return Goals.current.args.going"),
+        "Loch Modan"
+    );
+    assert_eq!(text(&script, "return table.concat(moves, ' ')"), "1000,0");
+}
+
+#[test]
+fn quest_work_here_comes_before_leaving_an_outlevelled_zone() {
+    let script = outlevelled();
+    // An open objective on the troggs in sight: worked first, though the zone is outlevelled.
+    script
+        .run(
+            "LOG = { { id = 9, title = 'The Troll Cave', level = 10, \
+               objectives = { { 'Rockjaw Trogg slain: 2/6', 'monster', false } } } }",
+        )
+        .unwrap();
+    assert!(script
+        .eval::<bool>("return Goals.facts().zone_outlevelled")
+        .unwrap());
+    assert_eq!(
+        text(&script, "return plan_of('progress')"),
+        "work_objective"
+    );
+    // Done with it but not handed in: the hand-in still comes first.
+    script
+        .run(
+            "LOG[1].complete = true LOG[1].objectives[1] = { 'Rockjaw Trogg slain: 6/6', 'monster', true } \
+             units[#units + 1] = { guid = '0xG', name = 'Senir', kind = 'unit', reaction = 'friendly', \
+               npc = { 'questgiver' }, quest = 'reward', x = -490, y = 0, z = 0, distance = 10, dead = false }",
+        )
+        .unwrap();
+    assert_eq!(
+        text(&script, "return plan_of('progress')"),
+        "hand_in_quests"
+    );
+}
+
+#[test]
+fn a_zone_that_fits_or_a_pocket_of_higher_mobs_is_not_left() {
+    let script = outlevelled();
+    // Loch Modan suits level 13: grinding there, as before.
+    script
+        .run("zone = 'Loch Modan' pos = { x = 1000, y = 0, z = 0, map = 0 }")
+        .unwrap();
+    assert!(!script
+        .eval::<bool>("return Goals.facts().zone_outlevelled")
+        .unwrap());
+    assert_eq!(text(&script, "return plan_of('progress')"), "grind");
+    // In Dun Morogh, but among level 11-12 mobs (a cave of higher ones, spread out
+    // so none is a crowd): not outlevelled.
+    script
+        .run(
+            "zone = 'Dun Morogh' pos = { x = -500, y = 0, z = 0, map = 0 } \
+             units = { trogg(1, 11, 25), trogg(2, 11, 55), trogg(3, 12, 85) }",
+        )
+        .unwrap();
+    assert!(!script
+        .eval::<bool>("return Goals.facts().zone_outlevelled")
+        .unwrap());
+    assert_eq!(text(&script, "return plan_of('progress')"), "grind");
+}
+
+#[test]
+fn an_outlevelled_zone_with_no_route_out_is_still_ground_in() {
+    let mut script = outlevelled();
+    // No route out: travel fails and backs off for each zone that fits, and the troggs are ground
+    // meanwhile rather than nothing done.
+    script
+        .run(
+            "AgentMoveTo = function() calls[#calls + 1] = 'move' return nil, 'no route' end \
+             Goals.on = true",
+        )
+        .unwrap();
+    ticks(&mut script, 3.0);
+    assert!(text(&script, "return heard('ACTION_FAILED')")
+        .contains("ACTION_FAILED progress travel_to_zone"));
+    assert!(script
+        .eval::<bool>("return Goals.cooling('travel_to_zone:Loch Modan') and Goals.cooling('travel_to_zone:Westfall')")
+        .unwrap());
+    assert_eq!(text(&script, "return plan_of('progress')"), "grind");
+    assert_eq!(text(&script, "return doing()"), "goal:grind");
+}

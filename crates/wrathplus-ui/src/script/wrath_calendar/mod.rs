@@ -11,15 +11,17 @@
 //! server owns comes from App; gestures leave as [`WrathCalendarRequest`]s.
 //!
 //! Labelled: the day list's order (`0x5b9260`) is App's (holidays, then by time); a holiday's
-//! sequence split, the raid-reset projection and the status-option filter (`0x5f26f0`) are not
-//! traced; `CalendarGetMaxCreateDate` (`0x5b7a80`) answers the first of the month thirteen months on.
+//! sequence split and the raid-reset projection are not traced.
 
 mod bindings;
 mod date;
 
+use std::cmp::Ordering;
 use std::sync::Arc;
 
 pub use date::WrathCalendarDate;
+
+use super::ScriptValue as V;
 
 /// What a day row is, `0x5b7fd0`'s calendar-type string.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -33,6 +35,8 @@ pub enum WrathCalendarKind {
     Holiday,
     RaidLockout,
     RaidReset,
+    /// "": an event whose flags `0x5b7fd0` names nothing (an event created with flags 0).
+    Blank,
 }
 
 impl WrathCalendarKind {
@@ -45,18 +49,28 @@ impl WrathCalendarKind {
             Self::Holiday => "HOLIDAY",
             Self::RaidLockout => "RAID_LOCKOUT",
             Self::RaidReset => "RAID_RESET",
+            Self::Blank => "",
         }
     }
 
-    /// An event's type by its flags: `CALENDAR_FLAG_WITHOUT_INVITES` 0x40, `_GUILD_EVENT` 0x400.
+    /// An event's type by its flags, `0x5b7fd0`'s tests in its order: the player-allowed bit 0x1
+    /// first, so a guild flag on a player event still reads PLAYER.
     pub fn of_flags(flags: u32) -> Self {
-        if flags & 0x40 != 0 {
-            Self::GuildAnnouncement
-        } else if flags & 0x400 != 0 {
-            Self::GuildEvent
-        } else {
-            Self::Player
-        }
+        const ORDER: [(u32, WrathCalendarKind); 9] = [
+            (0x1, WrathCalendarKind::Player),
+            (0x40, WrathCalendarKind::GuildAnnouncement),
+            (0x400, WrathCalendarKind::GuildEvent),
+            (0x4, WrathCalendarKind::System),
+            (0x8, WrathCalendarKind::Holiday),
+            (0x80, WrathCalendarKind::RaidLockout),
+            (0x200, WrathCalendarKind::RaidReset),
+            (0x2, WrathCalendarKind::Player),
+            (0x100, WrathCalendarKind::Player),
+        ];
+        ORDER
+            .iter()
+            .find(|(bit, _)| flags & bit != 0)
+            .map_or(Self::Blank, |&(_, kind)| kind)
     }
 }
 
@@ -81,11 +95,15 @@ pub struct WrathCalendarEntry {
     pub texture: String,
     /// The player's invite: wire status 0..8 and rank 0..2; `None` without an invite.
     pub invite: Option<(u8, u8)>,
-    /// A holiday's day: 1-based index, day count, `START`/`ONGOING`/`END`/`INFO`.
-    pub sequence: (u32, u32, &'static str),
+    /// `+0x9c`: 1 pending, 2 moderator, 4 creator, 8 sign-up (`0x5c2cd9`).
+    pub bits: u8,
+    /// A holiday's day: its 0-based place and the holiday's day count (`+0xc4`, `+0xc8`).
+    pub sequence: (u32, u32),
     pub holiday_description: String,
     /// A raid row's map, instance id and difficulty, with the difficulty's string key.
     pub raid: Option<WrathCalendarRaid>,
+    /// The alarm minute `SMSG_CALENDAR_SEND_CALENDAR` armed (`0x5c2dc3`); no other path arms one.
+    pub alarm: Option<WrathCalendarDate>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -164,7 +182,6 @@ pub struct WrathCalendarTexture {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct WrathCalendarView {
     pub me: u64,
-    pub today: Option<WrathCalendarDate>,
     /// Every listed row, each on its own day, in App's order.
     pub entries: Vec<WrathCalendarEntry>,
     pub raid_resets: Vec<WrathCalendarRaidReset>,
@@ -184,7 +201,6 @@ pub enum WrathCalendarRequest {
     GetEvent {
         event_id: u64,
     },
-    CloseEvent,
     /// `CalendarNew*`: a draft with these flags; an arena event names the team slot.
     NewDraft {
         flags: u32,
@@ -289,12 +305,11 @@ impl WrathCalendarFields {
 /// A day row's place: absolute year, month, day and 0-based index.
 type Slot = (i32, u8, u8, usize);
 
+/// The open event (`0xc207ec`), kept until another arrives or a `CalendarNew*` replaces it.
 #[derive(Clone, Debug, PartialEq)]
 enum Opened {
-    /// A server event, awaiting or holding its `SMSG_CALENDAR_SEND_EVENT`.
+    /// A server event, from its `SMSG_CALENDAR_SEND_EVENT`.
     Event { event_id: u64, invite_id: u64 },
-    /// A holiday or raid row, opened from the day list.
-    Row(Box<WrathCalendarEntry>),
     /// A `CalendarNew*` draft.
     Draft,
 }
@@ -306,6 +321,28 @@ struct Open {
     /// The view's revision the fields came from.
     synced: Option<(u64, u32)>,
     changed: bool,
+    /// The selected invite's id (`+0x20`), 0 at construction (`0x5f106a`).
+    selected_invite: u64,
+    /// The sort criterion (`+0x544`, status at construction, `0x5f10fd`) and each criterion's
+    /// reverse byte (`+0x518 + 8i`), with the group as it stood at the last sort.
+    criterion: usize,
+    reverse: [bool; 6],
+    group: Vec<u64>,
+}
+
+impl Open {
+    fn new(what: Opened, fields: WrathCalendarFields) -> Self {
+        Self {
+            what,
+            fields,
+            synced: None,
+            changed: false,
+            selected_invite: 0,
+            criterion: 3,
+            reverse: [false; 6],
+            group: Vec::new(),
+        }
+    }
 }
 
 /// `CalendarEventSortInvites`' criteria, `0x5b8570` order.
@@ -314,15 +351,19 @@ const CRITERIA: [&str; 6] = ["name", "level", "class", "status", "party", "notes
 #[derive(Default)]
 pub(crate) struct State {
     view: Arc<WrathCalendarView>,
+    /// The game clock (`0xd37f98`) the host pushes, as `GetGameTime`'s; `None` before the first.
+    clock: Option<WrathCalendarDate>,
     shown: Option<(i32, u8)>,
+    /// The selection record (`0xc20f78`) `CalendarGetEventIndex` answers.
     selected: Option<Slot>,
+    /// The event and invite a `CalendarOpenEvent` asked for, until it arrives.
+    asked: Option<(u64, u64)>,
     context: Option<Slot>,
     clipboard: Option<(u64, u64, WrathCalendarDate)>,
     open: Option<Open>,
-    /// `None` sorts by status, the criterion an unknown name also falls to.
-    sort: Option<(usize, bool)>,
-    selected_invite: Option<usize>,
     action_pending: bool,
+    /// `OpenCalendar` has asked (`0xc207f1`).
+    calendar_asked: bool,
     last_invite: Option<f64>,
     last_add: Option<f64>,
     requests: Vec<WrathCalendarRequest>,
@@ -339,12 +380,30 @@ impl super::UiScript {
         let mut model = self.model_mut();
         let state = &mut model.wrath_calendar;
         state.view = view;
+        state.arrive();
         state.sync_open();
     }
 
-    /// The bit `CalendarIsActionPending` answers; App clears it on the server's reply.
+    /// Push the game clock's date and time, what `CalendarGetDate` (`0x5b8160`) reads.
+    pub fn set_game_date(&mut self, now: WrathCalendarDate) {
+        let alarms = {
+            let mut model = self.model_mut();
+            let st = &mut model.wrath_calendar;
+            st.clock = Some(now);
+            st.alarms(now)
+        };
+        for (title, hour, minute) in alarms {
+            let args = vec![V::Str(title), V::Int(hour), V::Int(minute)];
+            self.fire_event("CALENDAR_EVENT_ALARM", args);
+        }
+    }
+
+    /// The bit `CalendarIsActionPending` answers, announced as `CALENDAR_ACTION_PENDING`; App
+    /// clears it after the packets 12340's dispatcher clears it after (`0x5c4037`).
     pub fn set_wrath_calendar_action_pending(&mut self, pending: bool) {
         self.model_mut().wrath_calendar.action_pending = pending;
+        let arg = super::ScriptValue::Bool(pending);
+        self.fire_event("CALENDAR_ACTION_PENDING", vec![arg]);
     }
 
     /// The gestures since the last drain, in call order.
@@ -370,9 +429,7 @@ impl super::UiScript {
 
 impl State {
     fn today(&self) -> WrathCalendarDate {
-        self.view
-            .today
-            .unwrap_or_else(WrathCalendarDate::system_now)
+        self.clock.unwrap_or_else(WrathCalendarDate::system_now)
     }
 
     fn shown(&self) -> (i32, u8) {
@@ -382,10 +439,10 @@ impl State {
         })
     }
 
-    /// The shown month moved by `offset` months.
+    /// The shown month moved by `offset` months, clamped as `0x5b8ec0` does.
     fn month(&self, offset: i32) -> (i32, u8) {
         let (y, m) = self.shown();
-        date::add_months(y, m, offset)
+        date::offset_month(y, m, offset)
     }
 
     /// The rows of a day: App's entries on it, then the raid resets that fall on it, by time.
@@ -429,12 +486,15 @@ impl State {
         self.day(slot.0, slot.1, slot.2).into_iter().nth(slot.3)
     }
 
-    /// A day addressed the reference's way: a month offset from the shown month and a 1-based day.
+    /// A day addressed the reference's way, as `0x5b91a0` accepts it: a month offset -1..1 from the
+    /// shown month and a day 1..31 of a date between 24 November 2004 and 31 December 2030.
     fn slot(&self, offset: i32, day: i64, index: i64) -> Option<Slot> {
-        let (y, m) = self.month(offset);
-        let d = u8::try_from(day).ok().filter(|&d| d >= 1)?;
+        let (y, m) = Some(offset)
+            .filter(|o| (-1..=1).contains(o))
+            .map(|o| self.month(o))?;
+        let d = u8::try_from(day).ok().filter(|d| (1..=31).contains(d))?;
         let i = usize::try_from(index - 1).ok()?;
-        Some((y, m, d, i))
+        ((2004, 11, 24) <= (y, m, d) && (y, m, d) <= (2030, 12, 31)).then_some((y, m, d, i))
     }
 
     /// The offset of `(y, m)` from the shown month.
@@ -453,25 +513,78 @@ impl State {
         }
     }
 
-    /// The open event's invitees in the chosen sort.
+    /// The open event's invitees in its sort (`0x5f1720`): the criterion, negated by its reverse
+    /// byte, then the name (`0x5f18fe`). Labelled: 12340 sorts the list in place at each sort
+    /// with an unstable qsort; here it is sorted, stably, on each read.
     fn invitees(&self) -> Vec<WrathCalendarInvitee> {
-        let mut list = self.event().map(|e| e.invitees.clone()).unwrap_or_default();
-        let (criterion, reverse) = self.sort();
-        let key = |i: &WrathCalendarInvitee| -> (u32, String) {
-            match criterion {
-                0 => (0, i.name.clone().unwrap_or_default().to_lowercase()),
-                1 => (u32::from(i.level), String::new()),
-                2 => (0, i.class_file.clone().unwrap_or_default()),
-                5 => (0, i.notes.to_lowercase()),
-                // Labelled: party membership is not held here; it sorts as status.
-                _ => (u32::from(i.status), String::new()),
-            }
+        let Some(open) = self.open.as_ref() else {
+            return Vec::new();
         };
-        list.sort_by_key(|a| key(a));
-        if reverse {
-            list.reverse();
-        }
+        let mut list = self.event().map(|e| e.invitees.clone()).unwrap_or_default();
+        // `0xad16cc`: the status order, confirmed first and invited last.
+        const WEIGHT: [u8; 9] = [9, 3, 6, 1, 7, 4, 2, 8, 5];
+        let text = |a: &Option<String>, b: &Option<String>| match (a, b) {
+            (Some(a), Some(b)) => date::fold_cmp(a, b),
+            _ => Ordering::Equal,
+        };
+        let grouped = |i: &WrathCalendarInvitee| open.group.contains(&i.guid);
+        let c = open.criterion;
+        list.sort_by(|a, b| {
+            let o = match c {
+                0 => text(&a.name, &b.name),
+                1 => a.level.cmp(&b.level),
+                // Labelled: 12340 compares the class's ChrClasses name, as the notes below, with
+                // `0x76ec80`, which also folds accents.
+                2 => text(&a.class_name, &b.class_name),
+                3 => {
+                    WEIGHT[usize::from(a.status.min(8))].cmp(&WEIGHT[usize::from(b.status.min(8))])
+                }
+                4 => grouped(b).cmp(&grouped(a)),
+                _ => date::fold_cmp(&a.notes, &b.notes),
+            };
+            let o = if open.reverse[c] { o.reverse() } else { o };
+            if o == Ordering::Equal && c != 0 {
+                text(&a.name, &b.name)
+            } else {
+                o
+            }
+        });
         list
+    }
+
+    /// `CALENDAR_EVENT_ALARM`'s (title, hour, minute) for each listed event whose alarm the clock
+    /// reaches: the calendar's arrival arms one on the game clock 15 minutes before each event
+    /// (`0x5c2dc3`, `0x76db30`), and at that minute `0x5b7910` fires event `0x245` ("%s%d%d") for an
+    /// accepted or confirmed invite (`+0xa8` 1 or 3, `0x5b7944`). Cost: one pass over the list per
+    /// game minute. Labelled: a minute the host never pushes (a long stall) skips its alarm.
+    fn alarms(&self, now: WrathCalendarDate) -> Vec<(String, i64, i64)> {
+        let due = |e: &&WrathCalendarEntry| {
+            e.event_id != 0
+                && e.alarm.is_some_and(|a| a.seconds() == now.seconds())
+                && matches!(e.invite, Some((1 | 3, _)))
+        };
+        let rows = self.view.entries.iter().filter(due);
+        rows.map(|e| {
+            (
+                e.title.clone(),
+                i64::from(e.date.hour),
+                i64::from(e.date.minute),
+            )
+        })
+        .collect()
+    }
+
+    /// `0x5bd850`: the open event is on the pending-invite list, which the calendar's arrival
+    /// prunes to unanswered invites to unlocked events still ahead (`0x5c2f1d`).
+    fn pending_invite(&self) -> bool {
+        let id = match self.open.as_ref().map(|o| &o.what) {
+            Some(Opened::Event { event_id, .. }) => *event_id,
+            _ => return false,
+        };
+        self.view
+            .entries
+            .iter()
+            .any(|e| e.event_id == id && e.bits & 1 != 0)
     }
 
     fn my_invitee(&self) -> Option<WrathCalendarInvitee> {
@@ -494,12 +607,47 @@ impl State {
         }
     }
 
+    /// The asked-for event arrived: it is the open event, and its row the selection (`0x5bef85`).
+    fn arrive(&mut self) {
+        let Some((event_id, invite_id)) = self.asked else {
+            return;
+        };
+        if self
+            .view
+            .event
+            .as_ref()
+            .is_none_or(|e| e.event_id != event_id)
+        {
+            return;
+        }
+        let what = Opened::Event {
+            event_id,
+            invite_id,
+        };
+        self.open = Some(Open::new(what, WrathCalendarFields::default()));
+        self.asked = None;
+        self.selected = self
+            .view
+            .entries
+            .iter()
+            .find(|e| e.event_id == event_id)
+            .and_then(|e| {
+                let (y, m, d) = (e.date.year, e.date.month, e.date.day);
+                let n = self
+                    .day(y, m, d)
+                    .iter()
+                    .position(|r| r.event_id == event_id)?;
+                Some((y, m, d, n))
+            });
+    }
+
     /// Refresh untouched fields from a newer server copy of the open event.
     fn sync_open(&mut self) {
         let fresh = self
             .event()
             .map(|e| (e.event_id, e.revision, WrathCalendarFields::of(e)));
-        let Some(open) = self.open.as_mut() else {
+        // A draft's fields are its constructor's and its setters': App's copy holds its invitees.
+        let Some(open) = self.open.as_mut().filter(|o| o.what != Opened::Draft) else {
             return;
         };
         if let Some((id, revision, fields)) = fresh {
@@ -508,10 +656,6 @@ impl State {
                 open.synced = Some((id, revision));
             }
         }
-    }
-
-    fn sort(&self) -> (usize, bool) {
-        self.sort.unwrap_or((3, false))
     }
 
     fn push(&mut self, request: WrathCalendarRequest) {
