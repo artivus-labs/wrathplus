@@ -79,27 +79,28 @@ pub(crate) fn feed_equipment_sets(
             let _ = commands.0.send(ClientCommand::NativeInventory(command));
         }
     }
-    let views: Vec<EquipmentSetView> = sets
-        .sets
-        .values()
-        .map(|set| EquipmentSetView {
-            name: set.name.clone(),
-            icon: set.icon.clone(),
-            items: set.items.map(|item| match item {
-                0 => 0,
-                IGNORED => EQUIPMENT_SET_IGNORED_SLOT,
-                guid => objects
-                    .object(guid)
-                    .and_then(|o| o.object_entry())
-                    .unwrap_or(0),
-            }),
-            locked: false,
-        })
-        .collect();
+    let entry = |guid| objects.object(guid).and_then(|o| o.object_entry());
+    let views: Vec<EquipmentSetView> = sets.sets.values().map(|s| set_view(s, &entry)).collect();
     let (last, reset) = last.get_reset(&script);
     if reset || last.as_ref() != Some(&views) {
         *last = Some(views.clone());
         script.set_equipment_sets(views);
+    }
+}
+
+/// One set as the VM reads it: the server's index is 12340's record id (`[rec+0x10]`), and each
+/// worn item is its entry, 0 while unknown.
+fn set_view(set: &EquipmentSet, entry: &dyn Fn(u64) -> Option<u32>) -> EquipmentSetView {
+    EquipmentSetView {
+        id: set.index,
+        name: set.name.clone(),
+        icon: set.icon.clone(),
+        items: set.items.map(|item| match item {
+            0 => 0,
+            IGNORED => EQUIPMENT_SET_IGNORED_SLOT,
+            guid => entry(guid).unwrap_or(0),
+        }),
+        locked: false,
     }
 }
 

@@ -4,7 +4,7 @@
 //! it ([`UiScript::take_socket_requests`]). With no session every query keeps the closed shapes:
 //! no item, no sockets, nil gems, and nothing queued.
 
-use super::{ScriptValue, UiScript};
+use super::{binding_abi, ScriptValue, UiScript};
 use mlua::{Lua, MultiValue, ObjectLike, Table, Value};
 
 /// A gem in a socket, existing or newly placed.
@@ -111,11 +111,8 @@ fn gem_info(lua: &Lua, gem: Option<&SocketGemView>) -> mlua::Result<MultiValue> 
         Some(g) => MultiValue::from_vec(vec![
             text(lua, g.name.as_deref())?,
             text(lua, g.icon.as_deref())?,
-            if g.matches {
-                Value::Boolean(true)
-            } else {
-                Value::Nil
-            },
+            // The number 1 (`fld1`, `0x5c4cb2`, `0x5c52ea`), not a boolean.
+            binding_abi::flag(g.matches),
         ]),
         None => MultiValue::from_vec(vec![Value::Nil, Value::Nil, Value::Nil]),
     })
@@ -169,11 +166,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                         s.bound_tradeable
                     }
                 });
-                Ok(if set {
-                    Value::Boolean(true)
-                } else {
-                    Value::Nil
-                })
+                // 1 or nil (`fld1` at `0x5c547c` and `0x5c4eac`).
+                Ok(binding_abi::flag(set))
             })?,
         )?;
     }

@@ -30,9 +30,6 @@ pub struct PetitionRecordView {
     pub title: String,
     /// The record's `char[0x1000]` body at `+0x110`; empty on every 1.12 server.
     pub body_text: String,
-    /// The record's signature cap (`+0x1118`), which `CanSignPetition` tests (`0x4f4634`), not the
-    /// nine name rows; pushed signed (`fild DWORD`).
-    pub max_signatures: i32,
     /// The owner's name from the `NameCache`, nil while uncached (`0x4f446d`), never `""`.
     pub originator: Option<String>,
     /// Whether the active player owns the record (`0x4f447a`, `0x4f4481`).
@@ -325,7 +322,6 @@ mod tests {
             petition_type: PETITION_TYPE_CHARTER.into(),
             title: "Legacy".into(),
             body_text: String::new(),
-            max_signatures: 9,
             originator: Some("Founder".into()),
             is_originator: false,
             max_named: 9,

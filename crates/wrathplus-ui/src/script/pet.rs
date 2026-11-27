@@ -910,16 +910,6 @@ mod tests {
     }
 
     #[test]
-    fn has_full_control_follows_the_hosts_flag() {
-        let mut s = UiScript::new().unwrap();
-        assert_eq!(s.eval::<i64>("return HasFullControl()").unwrap(), 1);
-        s.set_player_control(false);
-        assert!(s.eval::<bool>("return HasFullControl() == nil").unwrap());
-        s.set_player_control(true);
-        assert_eq!(s.eval::<i64>("return HasFullControl()").unwrap(), 1);
-    }
-
-    #[test]
     fn the_pet_icon_answers_a_path_or_a_real_nil() {
         let mut s = UiScript::new().unwrap();
         assert!(s.eval::<bool>("return GetPetIcon() == nil").unwrap());

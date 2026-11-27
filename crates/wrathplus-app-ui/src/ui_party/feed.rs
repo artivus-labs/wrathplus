@@ -316,7 +316,8 @@ pub(super) fn feed_party(
                 u32::from(loot.threshold),
             )
         }
-        None => ("group".to_string(), None, 0, 0),
+        // Ungrouped, 12340's boot and group-clear values (`0x52d8a3`-`0x52d8b7`).
+        None => ("group".to_string(), None, 0, 2),
     };
     // The raid roster, the one list `GetNumRaidMembers`, `GetRaidRosterInfo` and `UnitInRaid` read.
     let me = self_pair.map(|(_, g, store)| RaidSelf {
@@ -1972,6 +1973,15 @@ mod tests {
             .resource_mut::<GroupState>()
             .apply_list(0, 0, vec![], 0, None, Some(ME));
         assert_eq!(changed(&mut app), 1, "the leave list");
+        let script = app.world_mut().non_send_resource_mut::<UiScript>();
+        let loot: (String, f64) = script
+            .eval("local m = GetLootMethod() return m, GetLootThreshold()")
+            .unwrap();
+        assert_eq!(
+            loot,
+            ("group".into(), 2.0),
+            "12340's cleared values (`0x52d8a3`)"
+        );
         app.world_mut()
             .resource_mut::<GroupState>()
             .apply_list(0, 0, vec![], 0, None, Some(ME));
