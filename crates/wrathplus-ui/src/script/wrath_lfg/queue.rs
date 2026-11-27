@@ -642,9 +642,13 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         match &member.name {
             Some(name) => {
                 out.push(text(lua, name)?);
-                // Labelled: 12340 answers the name-cache record's gendered ChrClasses name
-                // (`0x72aab0` → `0x7159e0`); this reads the member's unit, "" without one.
-                let class = m.unit_by_guid(member.guid).and_then(|u| u.class.as_deref());
+                // The name-cache record's class (`0x67d770`, `0x72aab0` → `0x7159e0`), "" with no
+                // row. Labelled: the record holds one class name, not ChrClasses' gendered pair,
+                // and a guid it lacks (our own, never queried) reads the member's unit.
+                let class = match m.player_names.get(&member.guid) {
+                    Some(r) => r.class.as_ref().map(|c| c.0.as_str()),
+                    None => m.unit_by_guid(member.guid).and_then(|u| u.class.as_deref()),
+                };
                 out.push(text(lua, class.unwrap_or_default())?);
             }
             None => out.extend([Value::Nil, Value::Nil]),

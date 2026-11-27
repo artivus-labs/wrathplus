@@ -195,6 +195,19 @@ fn getters_read_the_snapshot_in_native_shapes() {
     ] {
         assert!(s.eval::<bool>(&format!("return {check}")).unwrap(), "{check}");
     }
+    // `0x554820`: the name-cache record's class wins over the unit's; a record with no class row
+    // answers "".
+    for (class, want) in [(Some(("Invented", "INVENTED")), "Invented"), (None, "")] {
+        let class = class.map(|(a, b): (&str, &str)| (a.into(), b.into()));
+        let rec = crate::script::PlayerNameInfo {
+            name: "Me".into(),
+            class,
+            ..Default::default()
+        };
+        s.set_player_names(Arc::new([(1, rec)].into()));
+        let got = s.eval::<String>("return (select(4, GetLFGRoleUpdateMember(1)))");
+        assert_eq!(got.unwrap(), want);
+    }
     s.run("local p = CreateFrame('Frame') local t = CreateFrame('GameTooltip', 'LfgTip', p) t:SetOwner(p, 'ANCHOR_NONE') t:SetLFGCompletionReward(1) t:SetLFGCompletionReward(9) t:SetLFGDungeonReward(7, 1)").unwrap();
     for usage in [
         "GetLFGRoleUpdateSlot()",
