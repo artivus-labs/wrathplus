@@ -231,7 +231,7 @@ fn who_lines(rows: &[WhoInfo], total: u32, get: &dyn Fn(&str) -> Option<String>)
     lines
 }
 
-/// The friend rows sorted by name, and their guids in the same order for the drain.
+/// The friend rows in 12340's order, and their guids in the same order for the drain.
 fn friend_rows(
     social: &SocialState,
     names: &NameCache,
@@ -247,25 +247,21 @@ fn friend_rows(
                 .resolve(entry.guid, commands)
                 .map(str::to_string)
                 .unwrap_or_default();
-            let online = entry.is_online();
             (
                 entry.guid,
                 FriendInfo {
                     name,
                     level: entry.level,
-                    // An offline friend has no class or zone on the wire; empty, the frame prints
-                    // its Offline template.
-                    class: online
-                        .then(|| class_names(entry.class as u8))
-                        .flatten()
+                    // 12340 reads both whatever the online byte (`0x6b4210`-`0x6b42d4`): an offline
+                    // friend keeps the last ones sent, or none, which the binding shows as UNKNOWN.
+                    class: class_names(entry.class as u8)
                         .map(|(display, _)| display.to_string())
                         .unwrap_or_default(),
-                    area: online
-                        .then(|| areas.and_then(|a| a.name(entry.area)))
-                        .flatten()
+                    area: areas
+                        .and_then(|a| friend_zone(a, entry.area))
                         .unwrap_or_default()
                         .to_string(),
-                    connected: online,
+                    connected: entry.is_online(),
                     status: away(entry.status),
                     note: social.notes.get(&entry.guid).cloned(),
                     refer_a_friend: entry.status & FRIEND_STATUS_RAF != 0,
@@ -274,14 +270,26 @@ fn friend_rows(
         })
         .collect();
 
-    // By name, unresolved rows last, so a pending name query parks no empty row on top.
+    // 12340's `0x6b3960`: online first (`0x6b3a00`), a pending name after the named, then
+    // `0x76ec80`.
     rows.sort_by(|(_, a), (_, b)| {
-        a.name
-            .is_empty()
-            .cmp(&b.name.is_empty())
-            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+        b.connected
+            .cmp(&a.connected)
+            .then_with(|| a.name.is_empty().cmp(&b.name.is_empty()))
+            .then_with(|| wrathplus_ui::strings::collate(&a.name, &b.name))
     });
     rows.into_iter().map(|(guid, row)| (row, guid)).unzip()
+}
+
+/// A friend's zone name: the area's parent when it has a row (12340's `0x6b42aa`-`0x6b42c6`, one
+/// level), else the area itself.
+fn friend_zone(areas: &AreaTableCatalog, id: u32) -> Option<&str> {
+    let row = areas.get(id)?;
+    let row = areas
+        .get(row.zone_id)
+        .filter(|_| row.zone_id != 0)
+        .unwrap_or(row);
+    Some(&row.name)
 }
 
 /// The ignore rows: names only, same ordering rule.
@@ -395,14 +403,14 @@ pub fn drain_social(
             SocialRequest::RefreshFriends => {
                 let _ = commands.0.send(ClientCommand::FriendListRequest);
             }
-            SocialRequest::AddFriend(name) => {
-                // `0x5ae67c`: the Friends tutorial is acknowledged just before the send.
+            SocialRequest::AddFriend { name, note } => {
+                // `0x6b5409`: the Friends tutorial is acknowledged just before the send.
                 if let Some(t) = tutorials.as_mut() {
                     t.write(crate::app_core::state::TutorialEvent::Acknowledge {
                         id: crate::app_core::tutorial::id::FRIENDS,
                     });
                 }
-                let _ = commands.0.send(ClientCommand::AddFriend { name });
+                let _ = commands.0.send(ClientCommand::AddFriend { name, note });
             }
             SocialRequest::RemoveFriendIndex(index) => {
                 if let Some(guid) = row_guid(&social.display_order, index) {
@@ -580,9 +588,8 @@ mod tests {
         assert_eq!(lines[2], "2 |4player:players; total");
     }
 
-    /// The comparator ties on an unresolved name (`0x5adbb2`). The reference's `GetWhoInfo`
-    /// (`0x5ad6e0`) shows `UNKNOWN` where WrathPlus shows an empty cell; adopting it must carry the
-    /// miss to the comparator some other way than the string.
+    /// The comparator skips a key whose row is missing (12340's `0x6b4c80`, `0x6b4d5c`), so the row
+    /// carries the miss as an empty name and `GetWhoInfo` (`0x6b4a80`) shows it as `UNKNOWN`.
     #[test]
     fn an_unresolvable_id_leaves_the_name_empty_for_the_comparator() {
         let row = who_row(
@@ -600,6 +607,36 @@ mod tests {
             (row.class.as_str(), row.race.as_str(), row.zone.as_str()),
             ("", "", "")
         );
+    }
+
+    /// 12340's comparator `0x6b3960`: online before offline, a pending name after the named, then
+    /// `0x76ec80`, which folds `É` to `E`.
+    #[test]
+    fn friend_rows_put_online_first_then_collate_the_names() {
+        let mut social = SocialState::default();
+        let mut names = NameCache::default();
+        let (tx, _rx) = crossbeam_channel::unbounded();
+        let commands = NetCommands(tx);
+        for (guid, name, status) in [
+            (1, Some("Alpha"), friend_status::OFFLINE),
+            (2, Some("Emma"), friend_status::ONLINE),
+            (3, None, friend_status::ONLINE),
+            (4, Some("Élise"), friend_status::AFK),
+        ] {
+            if let Some(name) = name {
+                names.insert_player(guid, name.into(), None);
+            }
+            let entry = wrathplus_protocol::types::FriendEntry {
+                guid,
+                status,
+                ..Default::default()
+            };
+            social.friends.push(entry);
+        }
+        let (rows, order) = friend_rows(&social, &names, &commands, None, &|_| String::new());
+        let shown: Vec<&str> = rows.iter().map(|r| r.name.as_str()).collect();
+        assert_eq!(shown, ["Élise", "Emma", "", "Alpha"]);
+        assert_eq!(order, [4, 2, 3, 1], "the drain's order follows");
     }
 
     #[test]
@@ -663,126 +700,58 @@ mod tests {
         );
     }
 
+    /// 12340's `GetFriendInfo` reads class and zone whatever the online byte (`0x6b4210`-`0x6b42d4`),
+    /// the zone one parent up (`0x6b42aa`); the away tag tests DND, then AFK (`0x6b4307`, `0x6b4325`).
     #[test]
-    fn an_offline_row_carries_no_class_or_zone() {
-        let entry = wrathplus_protocol::types::FriendEntry {
-            guid: 7,
-            status: friend_status::OFFLINE,
-            area: 12,
-            level: 60,
-            class: 4,
+    fn friend_rows_resolve_class_parent_zone_and_away_bits() {
+        let area = |zone_id, name: &str| wrathplus_formats::AreaTableRow {
+            map_id: 0,
+            zone_id,
+            explore_flag: 0,
+            flags: 0,
+            faction_group_mask: 0,
+            exploration_level: 0,
+            name: name.into(),
         };
-        // The class resolution `friend_rows` uses.
-        let online = entry.is_online();
-        assert!(!online);
-        let class = online
-            .then(|| class_names(entry.class as u8))
-            .flatten()
-            .map(|(d, _)| d.to_string())
-            .unwrap_or_default();
-        assert_eq!(class, "");
+        let areas = AreaTableCatalog::from_rows(vec![
+            (12, area(0, "Elwynn Forest")),
+            (87, area(12, "Goldshire")),
+        ]);
+        let social = SocialState {
+            friends: vec![
+                wrathplus_protocol::types::FriendEntry {
+                    guid: 7,
+                    status: friend_status::OFFLINE,
+                    area: 87,
+                    level: 60,
+                    class: 4,
+                },
+                wrathplus_protocol::types::FriendEntry {
+                    guid: 8,
+                    status: friend_status::AFK | FRIEND_STATUS_RAF,
+                    area: 999,
+                    level: 1,
+                    class: 0,
+                },
+            ],
+            ..Default::default()
+        };
+        let (tx, _rx) = crossbeam_channel::unbounded();
+        let away = |s: u8| status_flag_key(s).unwrap_or_default().to_string();
+        let names = NameCache::default();
+        let (rows, _) = friend_rows(&social, &names, &NetCommands(tx), Some(&areas), &away);
+        let got: Vec<_> = rows
+            .iter()
+            .map(|r| (r.class.as_str(), r.area.as_str(), r.status.as_str()))
+            .collect();
+        assert_eq!(
+            got,
+            [("", "", "CHAT_FLAG_AFK"), ("Rogue", "Elwynn Forest", "")],
+            "no row stays empty for the binding's UNKNOWN"
+        );
     }
 }
 
 #[cfg(any(test, feature = "test-support"))]
-pub mod native_tests {
-    use super::*;
-
-    #[cfg(test)]
-    use crate::net::wrath_who_capture::NativeWhoPackets;
-    use wrathplus_protocol::wrath_who::Entry;
-    #[cfg(test)]
-    use wrathplus_protocol::wrath_who::Packet;
-    pub fn entries(name: &str, race: u32) -> Vec<Entry> {
-        vec![Entry {
-            name: name.as_bytes().to_vec(),
-            guild: vec![],
-            level: 80,
-            class: 6,
-            race,
-            gender: 1,
-            zone: 12,
-        }]
-    }
-    #[test]
-    fn native_feed_publishes_each_receipt_before_its_event_and_clears_on_reset() {
-        let (tx, _rx) = crossbeam_channel::unbounded();
-        let mut app = App::new();
-        app.init_resource::<SocialState>()
-            .init_resource::<NativeWhoPackets>()
-            .init_resource::<NameCache>()
-            .init_resource::<crate::app_core::chat::ChatLog>()
-            .init_resource::<crate::sound::MessageSounds>()
-            .insert_resource(NetCommands(tx))
-            .add_systems(
-                Update,
-                (super::super::native_who::drain, feed_social).chain(),
-            );
-        let script = UiScript::new().unwrap();
-        script
-            .run(
-                r#"
-            received = {}
-            local f = CreateFrame('Frame')
-            f:RegisterEvent('WHO_LIST_UPDATE')
-            f:SetScript('OnEvent', function()
-                local name, guild, level, race, class = GetWhoInfo(1)
-                local count, total = GetNumWhoResults()
-                table.insert(received, name .. ':' .. race .. ':' .. class .. ':' .. total)
-            end)
-        "#,
-            )
-            .unwrap();
-        app.insert_non_send_resource(script);
-        app.world_mut().resource_mut::<SocialState>().who_to_ui = true;
-        for (name, race, total) in [("First", 10, 123), ("Second", 11, 456)] {
-            app.world_mut()
-                .resource_mut::<NativeWhoPackets>()
-                .0
-                .push_back(Packet::Who {
-                    total,
-                    entries: entries(name, race),
-                });
-        }
-        app.update();
-        let vm = app.world().non_send_resource::<UiScript>();
-        let got: String = vm
-            .lua()
-            .load("return table.concat(received, '|')")
-            .eval()
-            .unwrap();
-        assert_eq!(
-            got,
-            "First:Blood Elf:Death Knight:123|Second:Draenei:Death Knight:456"
-        );
-        assert!(app
-            .world()
-            .resource::<SocialState>()
-            .pending_native_who
-            .is_empty());
-        app.world_mut()
-            .resource_mut::<SocialState>()
-            .clear_session();
-        app.update();
-        let vm = app.world().non_send_resource::<UiScript>();
-        let count: u32 = vm.lua().load("return GetNumWhoResults()").eval().unwrap();
-        assert_eq!(count, 0);
-    }
-    #[test]
-    fn native_chat_rows_and_summary_use_raw_count_not_total() {
-        let mut social = SocialState::default();
-        super::super::native_who::apply(&mut social, 999, entries("Synthetic", 10));
-        let rows = who_wire_rows(&social, None);
-        assert_eq!(rows[0].class, "Death Knight");
-        assert_eq!(rows[0].race, "Blood Elf");
-        assert_eq!(who_summary_count(&social), 1);
-        let lines = who_lines(&rows, who_summary_count(&social), &|key| match key {
-            "WHO_LIST_FORMAT" => Some("%s %d %s %s %s".into()),
-            "WHO_NUM_RESULTS" => Some("%d player total".into()),
-            _ => None,
-        });
-        assert_eq!(lines.last().unwrap().text(), "1 player total");
-        assert!(lines[0].text().contains("Death Knight"));
-        assert!(lines[0].text().contains("Blood Elf"));
-    }
-}
+#[path = "feed_native_tests.rs"]
+pub mod native_tests;

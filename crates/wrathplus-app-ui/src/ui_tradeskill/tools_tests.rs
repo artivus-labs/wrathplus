@@ -78,3 +78,17 @@ fn a_carried_hammer_meets_its_totem_category() {
     );
     assert_eq!(bare[0], ("Blacksmith Hammer".to_string(), false));
 }
+
+/// `GetTradeSkillLine`'s rank and max carry the permanent skill bonus on each nonzero half
+/// (`0x51a28a`); the difficulty and the trade link take the raw rank.
+#[test]
+fn the_rank_bar_adds_the_permanent_bonus() {
+    let base = Field::PlayerSkillInfo11.index();
+    let store = crate::app_core::session::ObjectStore(ObjectFields::from_pairs(&[
+        (base, 171),
+        (base + 1, 150 << 16 | 120),
+        (base + 2, 10 << 16),
+    ]));
+    assert_eq!(super::super::skill_rank(&store, 171, false), (120, 150));
+    assert_eq!(super::super::skill_rank(&store, 171, true), (130, 160));
+}

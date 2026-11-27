@@ -1217,7 +1217,7 @@ fn seat_a_session(script: &mut UiScript) {
     }
 }
 
-/// The 1.12 auction browse tree, read once off the player's chain by the builder the live client
+/// The auction browse tree, read once off the player's chain by the builder the live client
 /// uses (`ui_auction::categories`); empty with no install.
 fn auction_item_classes() -> Vec<wrathplus_ui::script::AuctionCategory> {
     use std::sync::OnceLock;
@@ -3733,8 +3733,8 @@ mod dependency_tests {
                      return table.getn(c)"
                 )
                 .ok(),
-            Some(10),
-            "the browse tree is the reference's ten auctionable classes"
+            Some(12),
+            "the browse tree is build 12340's twelve auctionable classes"
         );
         // KLHThreatMeter's line, reduced: a positional read and arithmetic on the rank.
         assert_eq!(

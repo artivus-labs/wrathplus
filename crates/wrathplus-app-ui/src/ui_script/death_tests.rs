@@ -25,7 +25,7 @@ fn death_popup_counts_down_and_release_queues_repop() {
     wrathplus_formats::wow_data_or_skip!();
     let mut s = setup();
     s.set_death(DeathUiState {
-        release_remaining: Some(300.0),
+        release_remaining: 300,
         ..Default::default()
     });
     s.fire_event("PLAYER_DEAD", vec![]);
@@ -76,7 +76,7 @@ fn death_popup_offers_the_self_resurrect_and_spends_it() {
     wrathplus_formats::wow_data_or_skip!();
     let mut s = setup();
     s.set_death(DeathUiState {
-        release_remaining: Some(300.0),
+        release_remaining: 300,
         self_res_label: Some("Use Soulstone".into()),
         ..Default::default()
     });
@@ -112,7 +112,7 @@ fn death_popup_button2_is_decided_at_show_time() {
     wrathplus_formats::wow_data_or_skip!();
     let mut s = setup();
     s.set_death(DeathUiState {
-        release_remaining: Some(300.0),
+        release_remaining: 300,
         ..Default::default()
     });
     s.fire_event("PLAYER_DEAD", vec![]);
@@ -121,7 +121,7 @@ fn death_popup_button2_is_decided_at_show_time() {
         .unwrap());
 
     s.set_death(DeathUiState {
-        release_remaining: Some(300.0),
+        release_remaining: 300,
         self_res_label: Some("Reincarnation".into()),
         ..Default::default()
     });
@@ -150,7 +150,7 @@ fn death_popup_no_timer_shows_the_static_text() {
     wrathplus_formats::wow_data_or_skip!();
     let mut s = setup();
     s.set_death(DeathUiState {
-        release_remaining: None,
+        release_remaining: -1,
         ..Default::default()
     });
     s.fire_event("PLAYER_DEAD", vec![]);
@@ -173,7 +173,7 @@ fn resurrect_request_picks_variant_and_answers() {
     s.set_death(DeathUiState {
         resurrect_sickness: false,
         resurrect_has_timer: true,
-        recovery_delay: 0.0,
+        recovery_delay: 0,
         ..Default::default()
     });
     s.fire_event("RESURRECT_REQUEST", vec![ScriptValue::Str("Healer".into())]);
@@ -199,7 +199,7 @@ fn resurrect_request_picks_variant_and_answers() {
     s.set_death(DeathUiState {
         resurrect_sickness: true,
         resurrect_has_timer: true,
-        release_remaining: Some(200.0),
+        release_remaining: 200,
         ..Default::default()
     });
     s.set_unit(
@@ -370,6 +370,23 @@ fn the_ghost_predicates() {
             .unwrap(),
         1
     );
+    // So do the resurrect and spirit-healer ones (`0x5159c0`, `0x515a00`, `0x51b6e0`).
+    let both = "return ResurrectHasSickness() == nil and ResurrectHasTimer() == nil \
+                and CheckSpiritHealerDist() == nil";
+    assert!(s.eval::<bool>(both).unwrap());
+    s.set_death(DeathUiState {
+        resurrect_sickness: true,
+        resurrect_has_timer: true,
+        spirit_healer_in_range: true,
+        ..Default::default()
+    });
+    let ones = "return ResurrectHasSickness(), ResurrectHasTimer(), CheckSpiritHealerDist()";
+    assert_eq!(s.eval::<(i64, i64, i64)>(ones).unwrap(), (1, 1, 1));
+    s.set_instance_type(Some(4));
+    assert!(
+        s.eval::<bool>("return ResurrectHasTimer() == nil").unwrap(),
+        "an arena"
+    );
     assert!(s.errors().is_empty(), "script errors: {:?}", s.errors());
 }
 
@@ -379,7 +396,7 @@ fn corpse_range_events_drive_recover_corpse() {
     wrathplus_formats::wow_data_or_skip!();
     let mut s = setup();
     s.set_death(DeathUiState {
-        recovery_delay: 2.0,
+        recovery_delay: 2,
         ..Default::default()
     });
     s.fire_event("CORPSE_IN_RANGE", vec![]);
@@ -442,7 +459,13 @@ fn corpse_map_position_binding() {
         .eval::<(f64, f64)>("return GetCorpseMapPosition()")
         .unwrap();
     assert_eq!((x, y), (0.0, 0.0), "no corpse ⇒ the (0,0) hide sentinel");
-    s.set_world_map_feed(None, None, 0.0, Some((0.25, 0.75)), Vec::new(), Vec::new());
+    s.set_world_map_projection(|_, p| Some((p.x, p.y)));
+    let corpse = wrathplus_ui::script::MapPos {
+        x: 0.25,
+        y: 0.75,
+        ..Default::default()
+    };
+    s.set_world_map_feed(None, None, 0.0, Some(corpse), Vec::new());
     let (x, y) = s
         .eval::<(f64, f64)>("return GetCorpseMapPosition()")
         .unwrap();

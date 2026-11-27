@@ -6,6 +6,9 @@ use std::collections::HashMap;
 
 use wrathplus_ui::script::*;
 
+#[path = "wrath_census_fixtures_lfg.rs"]
+mod lfg;
+
 /// The player's guid in the fixtures.
 const ME: u64 = 0x0100_0000_0000_0001;
 /// The target, a creature on whose threat table the player sits.
@@ -325,28 +328,28 @@ pub(super) fn seed(s: &mut UiScript) {
         ..Default::default()
     }));
 
+    s.set_cvar_host("currencyTokensBackpack1", "268435456"); // bit 29, Emblem of Frost
     s.set_wrath_currency_snapshot(WrathCurrencySnapshot {
-        entries: vec![
-            WrathCurrencyEntry {
-                name: Some("Dungeon and Raid".into()),
-                category_id: 22,
-                is_header: true,
-                is_expanded: true,
-                ..Default::default()
-            },
-            WrathCurrencyEntry {
-                name: Some("Emblem of Frost".into()),
-                category_id: 22,
-                is_watched: true,
-                count: 12,
-                icon: Some(r"Interface\Icons\INV_Misc_Frostemblem_01".into()),
-                item_id: 49426,
-                ..Default::default()
-            },
-        ],
+        categories: vec![WrathCurrencyCategory {
+            id: 22,
+            name: "Dungeon and Raid".into(),
+            is_expanded: true,
+            ..Default::default()
+        }],
+        entries: vec![WrathCurrencyEntry {
+            name: Some("Emblem of Frost".into()),
+            category_id: 22,
+            bit_index: 29,
+            count: 12,
+            icon: Some(r"Interface\Icons\INV_Misc_Frostemblem_01".into()),
+            item_id: 49426,
+            ..Default::default()
+        }],
+        known: 1 << 28,
         honor_current: Some(100),
         arena_current: Some(10),
         token_stacks: vec![(49426, 12)],
+        ..Default::default()
     });
 
     // The player's cast and channel.
@@ -408,108 +411,7 @@ pub(super) fn seed(s: &mut UiScript) {
         }),
     );
 
-    // The dungeon finder: a catalog row, a queue and a proposal.
-    s.set_wrath_lfg_catalog(
-        std::sync::Arc::new(WrathLfgCatalog {
-            dungeons: vec![
-                WrathLfgDungeon {
-                    id: 1,
-                    name: "Ragefire Chasm".into(),
-                    dungeon_type: 1,
-                    min_level: 15,
-                    target_min_level: 15,
-                    target_max_level: 21,
-                    ..Default::default()
-                },
-                WrathLfgDungeon {
-                    id: 2,
-                    name: s.eval("return LFG_TYPE_RANDOM_DUNGEON").unwrap_or_default(),
-                    dungeon_type: 6,
-                    min_level: 15,
-                    target_min_level: 15,
-                    target_max_level: 80,
-                    ..Default::default()
-                },
-            ],
-            ..Default::default()
-        }),
-        Some(2),
-    );
-    s.set_wrath_lfg_lock_snapshot(std::sync::Arc::new(WrathLfgLockSnapshot {
-        player: Some(WrathLfgPlayerLocks {
-            locks: vec![WrathLfgLock {
-                entry: 0x0100_0001,
-                reason: 2,
-            }],
-            // The reward preview sits on the random row, the rows `GetLFGDungeonRewardInfo` reads.
-            previews: vec![WrathLfgPreview {
-                entry: 0x0600_0002,
-                money_base: 100,
-                xp_base: 1000,
-                items: vec![WrathLfgRewardItem {
-                    item: 6948,
-                    display: 1,
-                    count: 1,
-                }],
-                ..Default::default()
-            }],
-        }),
-        party: None,
-    }));
-    s.set_wrath_lfg_queue(std::sync::Arc::new(WrathLfgQueueSnapshot {
-        player: Some(WrathLfgUpdate {
-            update_type: 5,
-            joined: true,
-            queued: true,
-            dungeons: vec![0x0100_0001],
-            ..Default::default()
-        }),
-        role_check: Some(WrathLfgRoleCheck {
-            state: 2,
-            is_beginning: false,
-            dungeons: vec![0x0100_0001],
-            members: vec![WrathLfgRoleCheckMember {
-                guid: ME,
-                ready: true,
-                roles: 2,
-                level: 80,
-                name: Some("Benchone".into()),
-            }],
-        }),
-        completion: Some(WrathLfgCompletion {
-            dungeon: 0x0100_0001,
-            strangers: 2,
-            money_base: 100,
-            xp_base: 1000,
-            items: vec![WrathLfgCompletionItem {
-                item: 6948,
-                display: 1,
-                count: 1,
-            }],
-            ..Default::default()
-        }),
-        queue: Some(WrathLfgQueueStatus {
-            dungeon: 0x0100_0001,
-            avg_wait: 300,
-            my_wait: 120,
-            tank_needs: 1,
-            healer_needs: 1,
-            dps_needs: 3,
-            ..Default::default()
-        }),
-        proposal: Some(WrathLfgProposal {
-            dungeon: 0x0100_0001,
-            state: 1,
-            id: 7,
-            rows: vec![WrathLfgProposalRow {
-                roles: 2,
-                is_self: true,
-                ..Default::default()
-            }],
-            ..Default::default()
-        }),
-        ..Default::default()
-    }));
+    lfg::seed(s);
 
     // A merchant row with an extended cost, and a world-state line.
     s.set_merchant(Some(MerchantState {
@@ -656,13 +558,6 @@ pub(super) fn seed(s: &mut UiScript) {
         criteria: std::collections::BTreeMap::from([(1, 10.into())]),
         faction: 1,
         received: true,
-    });
-
-    // An LFG party that can backfill.
-    s.set_wrath_group(WrathGroup {
-        lfg_dungeon_entry: 0x0100_0001,
-        lfg_status: 2,
-        ..Default::default()
     });
 
     // The barber's chair, a refundable purchase, a socketed item, a sanctuary and a comparison.
@@ -908,6 +803,7 @@ fn glyphs(s: &mut UiScript) {
         icon: Some(r"Interface\Icons\INV_Glyph_MajorWarrior".into()),
     });
     s.set_glyph_sockets(Some(sockets));
+    s.set_talent_groups(WrathTalentGroups::single());
 }
 
 /// The player tanks the target.

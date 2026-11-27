@@ -123,6 +123,20 @@ fn members_changed_owed(applied: u32, seen: u32, fresh_vm: bool) -> u32 {
     }
 }
 
+/// The LFG events a list signals ahead of its `PARTY_MEMBERS_CHANGED`: every list first zeroes the
+/// group's LFG entry and restricted flag (`0x52d6e0(0)` at `0x6d8b43`), so `0x52c0a0` fires
+/// `LFG_UPDATE` and `0x52c0d0` `PARTY_LFG_RESTRICTED` whenever the list sets them.
+fn lfg_list_events(roster: Option<&wrathplus_protocol::wrath_group::Roster>) -> Vec<&'static str> {
+    let Some(r) = roster else { return Vec::new() };
+    [
+        ("LFG_UPDATE", r.lfg.is_some_and(|l| l.1 != 0)),
+        ("PARTY_LFG_RESTRICTED", r.group_type & 4 != 0),
+    ]
+    .into_iter()
+    .filter_map(|(event, on)| on.then_some(event))
+    .collect()
+}
+
 /// The `RAID_ROSTER_UPDATE`s the lists applied since the feed's last look owe: one each, as the
 /// reference signals once per list (`0x4babef`, `0x4ba57b`). A fresh VM is owed none, since the
 /// roster edge gives the raid it finds its one catch-up; a count that ran backwards is a new
@@ -316,7 +330,8 @@ pub(super) fn feed_party(
                 u32::from(loot.threshold),
             )
         }
-        None => ("group".to_string(), None, 0, 0),
+        // Ungrouped, 12340's boot and group-clear values (`0x52d8a3`-`0x52d8b7`).
+        None => ("group".to_string(), None, 0, 2),
     };
     // The raid roster, the one list `GetNumRaidMembers`, `GetRaidRosterInfo` and `UnitInRaid` read.
     let me = self_pair.map(|(_, g, store)| RaidSelf {
@@ -379,10 +394,10 @@ pub(super) fn feed_party(
             wrathplus_ui::script::WrathGroup {
                 members,
                 // The difficulties are `ui_native::wrath_difficulty`'s, grouped or solo.
-                // `SMSG_GROUP_LIST`'s LFG block (group type `0x08`): its status byte and entry.
-                // Labelled: `lfg_flags` and `lfg_restricted` have no traced source and stay 0.
-                lfg_status: r.lfg.map_or(0, |l| l.0),
+                // `SMSG_GROUP_LIST`'s LFG block (group type `0x08`): its byte and entry.
+                lfg_flags: r.lfg.map_or(0, |l| l.0),
                 lfg_dungeon_entry: r.lfg.map_or(0, |l| l.1),
+                lfg_restricted: r.group_type & 4 != 0,
                 ..Default::default()
             }
         })
@@ -561,6 +576,10 @@ pub(super) fn feed_party(
         gate.audit("feed_party", "a group list");
     }
     for _ in 0..owed {
+        // Labelled: lists landing in one frame all read the latest roster's LFG state.
+        for event in lfg_list_events(group.wrath_roster.as_ref()) {
+            script.fire_event(event, vec![]);
+        }
         script.fire_event("PARTY_MEMBERS_CHANGED", vec![]);
     }
     if group.leader != fed.leader {
@@ -1104,6 +1123,9 @@ pub(super) fn drain_party(
                     let _ = commands.0.send(ClientCommand::GroupSetLeader { guid });
                 }
             }
+            PartyRequest::PromoteGuid(guid) => {
+                let _ = commands.0.send(ClientCommand::GroupSetLeader { guid });
+            }
             PartyRequest::AssistantLeader { name, grant } => {
                 if let Some(guid) = raid_guid_for_name(&group, self_guid, &names, &name) {
                     let _ = commands
@@ -1184,6 +1206,7 @@ fn test_apply_local(
             | PartyRequest::SwapSubgroup { .. }
             | PartyRequest::UninviteRaid(_)
             | PartyRequest::PromoteName(_)
+            | PartyRequest::PromoteGuid(_)
             | PartyRequest::AssistantLeader { .. }
     ) {
         group.count_list();
@@ -1328,6 +1351,12 @@ fn apply_test_intent(
                 .find(|m| m.name.eq_ignore_ascii_case(name))
             {
                 group.leader = m.guid;
+            }
+            true
+        }
+        PartyRequest::PromoteGuid(guid) => {
+            if group.members.iter().any(|m| m.guid == *guid) {
+                group.leader = *guid;
             }
             true
         }
@@ -1962,6 +1991,15 @@ mod tests {
             .resource_mut::<GroupState>()
             .apply_list(0, 0, vec![], 0, None, Some(ME));
         assert_eq!(changed(&mut app), 1, "the leave list");
+        let script = app.world_mut().non_send_resource_mut::<UiScript>();
+        let loot: (String, f64) = script
+            .eval("local m = GetLootMethod() return m, GetLootThreshold()")
+            .unwrap();
+        assert_eq!(
+            loot,
+            ("group".into(), 2.0),
+            "12340's cleared values (`0x52d8a3`)"
+        );
         app.world_mut()
             .resource_mut::<GroupState>()
             .apply_list(0, 0, vec![], 0, None, Some(ME));

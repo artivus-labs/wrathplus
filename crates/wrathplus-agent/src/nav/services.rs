@@ -24,10 +24,13 @@
 //! is the gameobject's, and it has no faction. `nil, why` when it cannot be asked.
 //!
 //! The realm's defaults: every place within 2000 yards, at most 20 (its `AgentNav.ServiceRadius`
-//! and `AgentNav.MaxServices`; a smaller radius may be asked for). An answer is given back,
-//! without asking again, for [`FRESH`] seconds while the character stays within [`NEAR`] yards
-//! of where it asked and on the same map; the order is kept nearest first from where it stands
-//! at each call.
+//! and `AgentNav.MaxServices`; a smaller radius may be asked for). Trainers are the exception:
+//! the nearest two of your class trainers, and of the Cooking and First Aid trainers, on the map
+//! (not hostile, not a game event's that is off) are told whenever those kinds are asked for,
+//! however far and whatever the cap, so a character in a quiet zone still knows where to train
+//! (their `distance` says how far). An answer is given back, without asking again, for
+//! [`FRESH`] seconds while the character stays within [`NEAR`] yards of where it asked and on the
+//! same map; the order is kept nearest first from where it stands at each call.
 
 use super::realm::{Ask, Purpose, Realm, NO_SERVICES};
 use super::{level, Handles};

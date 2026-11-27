@@ -45,26 +45,28 @@ const TIME_LEFT_LONG_MS: u32 = 8 * 60 * 60 * 1000;
 /// (`AuctionHouseMgr.cpp:838`) and sweeps expiry every 60 s, and no auction runs past 24 h.
 const TIME_LEFT_IMPLAUSIBLE_MS: u32 = 7 * 24 * 60 * 60 * 1000;
 
-/// `ItemSubClass.dbc` `DisplayFlags` bit 1: left out of the auction category filter (`0x4cf9c0`).
+/// `ItemSubClass.dbc` `DisplayFlags` bit 1: left out of the auction category filter (`0x59c532`).
 const SUBCLASS_HIDDEN_FROM_AUCTIONS: u32 = 0x2;
 
-/// The reference's `0x807060` rows `{itemClassId, hasSubclassFilter}` in menu order; a class with
-/// the flag clear offers no subclass or slot rows. The names come from `ItemClass.dbc`.
-const AUCTION_CLASSES: [(u32, bool); 10] = [
+/// Build 12340's `0xa14f70` `{itemClassId, hasSubclassFilter}` rows in menu order (`0x59c420`); a
+/// clear flag offers no subclass or slot rows (`0x59c4e3`). Names come from `ItemClass.dbc`.
+const AUCTION_CLASSES: [(u32, bool); 12] = [
     (2, true),   // Weapon
     (4, true),   // Armor
     (1, true),   // Container
-    (0, false),  // Consumable
-    (7, false),  // Trade Goods
+    (0, true),   // Consumable
+    (16, true),  // Glyph
+    (7, true),   // Trade Goods
     (6, true),   // Projectile
     (11, true),  // Quiver
     (9, true),   // Recipe
-    (5, false),  // Reagent
-    (15, false), // Miscellaneous
+    (3, true),   // Gem
+    (15, true),  // Miscellaneous
+    (12, false), // Quest
 ];
 
 /// `ItemSubClass.dbc` `Flags` bit `0x200`: the subclass offers the inventory-slot rows beneath it
-/// (`GetAuctionInvTypes`, `0x4cfb63`). Set on Armor 0 to 4 only, not Shield, Libram, Idol or Totem.
+/// (`GetAuctionInvTypes`, `0x59c675`). Set on Armor 0 to 4 only, not Shield, Libram, Idol or Totem.
 const SUBCLASS_OFFERS_INV_TYPES: u32 = 0x200;
 
 /// The `AuctionHouse.dbc` catalog; without it the sell pane shows no deposit.
@@ -992,8 +994,7 @@ fn send_next_stack(auction: &mut AuctionOpen, commands: &NetCommands) {
 mod tests {
     use super::*;
 
-    /// The reference's gates: the `0x807060` class flag, and `Flags & 0x200` (`0x4cfb63`), which
-    /// Shield lacks though it is Armor.
+    /// The `0xa14f74` class flag, and `Flags & 0x200` (`0x59c675`), which Shield lacks.
     #[test]
     fn the_tree_carries_the_reference_gates() {
         let data = wrathplus_formats::wow_data_or_skip!();
@@ -1034,9 +1035,8 @@ mod tests {
             "not Shield, Libram, Idol, Totem"
         );
 
-        // Consumable's flag is 0, yet its subclass list stays for the query's own scan.
-        assert!(!tree[3].has_subclass_filter);
-        assert!(!tree[3].subclasses.is_empty());
+        assert!(!tree[11].has_subclass_filter, "Quest");
+        assert!(!tree[11].subclasses.is_empty());
     }
 
     #[test]

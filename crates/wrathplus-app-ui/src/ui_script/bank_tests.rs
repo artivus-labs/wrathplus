@@ -352,9 +352,20 @@ fn purchase_flow_shows_popup_queues_the_intent_and_the_row_hides_when_full() {
     );
     assert!(!s.take_bank_purchase(), "drained");
 
-    // Six is full. A successful buy has no reply packet: `PLAYERBANKBAGSLOTS_CHANGED` repaints.
+    // A successful buy has no reply packet: `PLAYERBANKBAGSLOTS_CHANGED` repaints. Six of 12340's
+    // seven slots still sells the seventh (`0x57bafb cmp esi,0x7`); seven is full.
     s.set_bank(Some(BankState {
         num_purchased: 6,
+        next_cost: 250_000,
+    }));
+    s.fire_event("PLAYERBANKBAGSLOTS_CHANGED", vec![]);
+    assert!(
+        s.eval::<bool>("return BankFramePurchaseInfo:IsShown()")
+            .unwrap(),
+        "six purchased: the seventh slot is still for sale"
+    );
+    s.set_bank(Some(BankState {
+        num_purchased: 7,
         next_cost: 999_999_999,
     }));
     s.fire_event("PLAYERBANKBAGSLOTS_CHANGED", vec![]);
@@ -362,7 +373,7 @@ fn purchase_flow_shows_popup_queues_the_intent_and_the_row_hides_when_full() {
     assert!(
         !s.eval::<bool>("return BankFramePurchaseInfo:IsShown()")
             .unwrap(),
-        "the purchase row hides once full (6 purchased)"
+        "the purchase row hides once full (7 purchased)"
     );
 }
 

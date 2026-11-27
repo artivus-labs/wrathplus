@@ -18,7 +18,20 @@ fn quest_status_bytes_read_as_markers() {
     assert_eq!(quest_marker(8), Some("available"));
     assert_eq!(quest_marker(5), Some("incomplete"));
     assert_eq!(quest_marker(10), Some("reward"));
+    // A quest only far below us: the grey "!", kept apart from "available".
+    assert_eq!(quest_marker(2), Some("available_low"));
+    assert_eq!(quest_marker(4), Some("available_low"));
+    assert_eq!(quest_marker(1), None);
     assert_eq!(quest_marker(0), None);
+}
+
+#[test]
+fn a_lock_reads_as_its_cursor_word() {
+    assert_eq!(lock_word(Some("GatherHerbs")), Some("GatherHerbs"));
+    assert_eq!(lock_word(Some("Mine")), Some("Mine"));
+    assert_eq!(lock_word(Some("PickLock")), Some("PickLock"));
+    assert_eq!(lock_word(Some("")), None);
+    assert_eq!(lock_word(None), None);
 }
 
 #[test]
@@ -47,6 +60,15 @@ fn lua_reads_the_snapshot_and_sends_orders() {
                 distance: 80.0,
                 ..Default::default()
             },
+            Seen {
+                guid: 0x30,
+                kind: "gameobject",
+                name: Some("Copper Vein".into()),
+                distance: 90.0,
+                go_type: Some(3),
+                lock: Some("Mine"),
+                ..Default::default()
+            },
         ];
     }
     let lua = Lua::new();
@@ -63,6 +85,8 @@ fn lua_reads_the_snapshot_and_sends_orders() {
         ("Deputy Willem", "available", 1)
     );
     assert_eq!(facing, 1.5);
+    let lock: String = lua.load("return AgentNearby()[3].lock").eval().unwrap();
+    assert_eq!(lock, "Mine");
     let sent: bool = lua
         .load("return AgentInteract('0x0000000000000010')")
         .eval()

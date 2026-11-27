@@ -534,6 +534,10 @@ pub(crate) fn drive(
             }
             continue;
         }
+        if request == WrathPopupRequest::DeclineLevelGrant {
+            lock.granter = None;
+            continue;
+        }
         let look = Lookups {
             team_id: &team_id,
             summoner: summon.pending(),

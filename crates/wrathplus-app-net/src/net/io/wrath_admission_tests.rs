@@ -113,7 +113,13 @@ fn every_wrath_writer_route_is_admitted() {
         ),
         ("SelfRes", ClientCommand::SelfRes),
         ("FriendListRequest", ClientCommand::FriendListRequest),
-        ("AddFriend", ClientCommand::AddFriend { name: "Bob".into() }),
+        (
+            "AddFriend",
+            ClientCommand::AddFriend {
+                name: "Bob".into(),
+                note: "tank".into(),
+            },
+        ),
         ("DelFriend", ClientCommand::DelFriend { guid: 1 }),
         ("AddIgnore", ClientCommand::AddIgnore { name: "Bob".into() }),
         ("DelIgnore", ClientCommand::DelIgnore { guid: 1 }),

@@ -56,6 +56,16 @@ pub(crate) fn ftol_arg(lua: &Lua, v: Value, usage: &'static str) -> mlua::Result
     }
 }
 
+/// [`number_arg`] for the bindings that convert with `lua_tointeger` (`0x84e070`): a bare `fistp`
+/// (`0x84e0a4`) under the default control word, so the argument rounds half to even; NaN or past
+/// `i32` is `i32::MIN`.
+pub(crate) fn tointeger_arg(lua: &Lua, v: Value, usage: &'static str) -> mlua::Result<i32> {
+    match lua.coerce_number(v)? {
+        Some(n) => Ok(super::item_arg::tointeger(n) as i32),
+        None => Err(mlua::Error::RuntimeError(usage.into())),
+    }
+}
+
 /// Shape D: an `is-number`-gated flag whose failure keeps its zero instead of raising. The value
 /// must be strictly `> 0.0` (`0x53303f`), so 0, a negative and NaN are false and `0.5` or `"1"`
 /// true; `SetInventoryItem`'s `nameOnly` is one.

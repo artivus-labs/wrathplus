@@ -201,7 +201,8 @@ fn difficulty(lua: &Lua, args: &MultiValue, usage: &str, max: u32) -> mlua::Resu
     let Some(n) = number(lua, &arg(args, 0)) else {
         return Err(mlua::Error::runtime(usage.to_string()));
     };
-    let index = (n - 1.0).round_ties_even() as i64 as u32;
+    // `fsub 1.0`, then truncated (`0x526086`-`0x5260a1`, `0x5261d6`).
+    let index = (n - 1.0).trunc() as i64 as u32;
     Ok((index <= max).then_some(index))
 }
 
@@ -209,11 +210,20 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     use WrathUnitPopupRequest as R;
 
     // ── difficulty, PvP, loot ──
-    // CanChangePlayerDifficulty() (`0x52d000`) → two booleans: may change (labelled: `0x52cbc0`
-    // unread, taken as ungrouped or leader, the gate SetDungeonDifficulty applies) and not locked.
+    // CanChangePlayerDifficulty() (`0x52d000`) → two booleans: may change, and not locked. May
+    // change (`0x52cbc0`) is a raid map (`Map.dbc` `InstanceType` 2, `0x52cbe6`) with the dynamic
+    // flag `0x100` (`0x519640`), a raid roster (`[0xbeb608]`, the count `0x520190` walks it by) and
+    // the leader's guid ours (`[0xbd1968]`, `0x52cc00`-`0x52cc1b`). Labelled: that `[0xbd1968]` is
+    // the leader guid is inferred from SetDungeonDifficulty's `ERR_NOT_LEADER` gate on it.
     set(lua, "CanChangePlayerDifficulty", |lua, _| {
         let m = lua.app_data_ref::<Model>().expect("model app_data");
-        let may = !grouped(&m) || m.party.leader_guid == player_guid(&m);
+        let raid_map = m
+            .wrath_state
+            .instance
+            .as_ref()
+            .is_some_and(|i| i.instance_type == 2 && i.is_dynamic);
+        let leader = m.party.leader_guid;
+        let may = raid_map && !m.party.raid.is_empty() && leader != 0 && leader == player_guid(&m);
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_secs() as i64);
@@ -262,14 +272,19 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         one(Value::Integer(i64::from(on)))
     })?;
     set(lua, "SetPVP", |lua, args| {
-        let value = number(lua, &arg(&args, 0)).map_or(0, |n| n.round_ties_even() as i64 as u8);
+        // `0x5168b0` truncates (`fistp` under RC=11).
+        let value = number(lua, &arg(&args, 0)).map_or(0, |n| n.trunc() as i64 as u8);
         push(lua, R::SetPvp { value });
         none()
     })?;
     // SetOptOutOfLoot(flag) (`0x52cf00`): the flag, then OPT_OUT_LOOT_TOGGLE_ON/OFF as a system
     // line. GetOptOutOfLoot reads it back.
     set(lua, "SetOptOutOfLoot", |lua, args| {
-        let on = super::binding_abi::bool_or_default(args.front(), false);
+        // `lua_toboolean` (`0x52cf0a`): 0 and "0" are true.
+        let on = !matches!(
+            args.front(),
+            None | Some(Value::Nil | Value::Boolean(false))
+        );
         lua.app_data_mut::<Model>()
             .expect("model app_data")
             .wrath_unit_popup
@@ -364,7 +379,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     set(lua, "CanComplainChat", |lua, args| {
         let first = arg(&args, 0);
         let (line, name, said) = if let Some(n) = number(lua, &first) {
-            (Some(n.round_ties_even() as i64 as i32), None, None)
+            (Some(n.trunc() as i64 as i32), None, None)
         } else if let Some(name) = text(lua, &first)? {
             (None, Some(name), text(lua, &arg(&args, 1))?)
         } else {
@@ -472,9 +487,15 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     // SetActiveVoiceChannel(id) (`0x500ae0`): only a voice-enabled channel activates, and none is
     // with voice off. Labelled: id 0 also writes console line `0x225`, not modelled.
     set(lua, "SetActiveVoiceChannel", |_, _| none())?;
-    // SetActiveVoiceChannelBySessionID(id) (VoiceChat.lua:259): the same with voice off; no
-    // session exists to activate (labelled: its binding is unread).
-    set(lua, "SetActiveVoiceChannelBySessionID", |_, _| none())?;
+    // SetActiveVoiceChannelBySessionID(id) (`0x7db280`): one value. An id at or below 0 clears the
+    // active channel and answers 1 (`0x7db2bc`); any other, or a non-number, finds no session with
+    // voice off and answers nil. Labelled: the clear's `0x225` signal (`0x500030`) is not modelled.
+    set(lua, "SetActiveVoiceChannelBySessionID", |lua, args| {
+        let id = args
+            .front()
+            .and_then(|v| lua.coerce_number(v.clone()).ok().flatten());
+        one(flag(id.is_some_and(|n| super::binding_abi::ftol(n) <= 0)))
+    })?;
 
     // ── Battle.net: never connected ──
     // BNCreateConversation (`0x535ce0`), BNGetConversationMemberInfo (`0x53a150`),
@@ -542,12 +563,37 @@ mod tests {
     #[test]
     fn difficulty_pvp_and_loot_verbs_follow_the_native_gates() {
         let mut s = script();
-        s.run("assert(GetPVPDesired()==1); SetPVP(1); SetPVP(nil); SetDungeonDifficulty(2); SetDungeonDifficulty(3); SetRaidDifficulty(4)").unwrap();
+        s.run("assert(GetPVPDesired()==1); SetPVP(1); SetPVP(nil); SetPVP(1.9); SetDungeonDifficulty(2); SetDungeonDifficulty(3); SetRaidDifficulty(2.9); SetRaidDifficulty(4)").unwrap();
         assert!(s
-            .eval::<bool>("local a,b=CanChangePlayerDifficulty(); return a==true and b==true and GetDungeonDifficulty()==2 and GetRaidDifficulty()==4")
+            .eval::<bool>("local a,b=CanChangePlayerDifficulty(); return a==false and b==true and GetDungeonDifficulty()==2 and GetRaidDifficulty()==4")
+            .unwrap(), "ungrouped off a dynamic raid map, no change (`0x52cbc0`)");
+        // A dynamic raid map, in a raid, as its leader: the one case that may change.
+        s.set_wrath_instance_info(Some(crate::script::WrathInstanceInfo {
+            instance_type: 2,
+            is_dynamic: true,
+            ..Default::default()
+        }));
+        let raid = vec![crate::script::party::RaidMemberInfo {
+            guid: 1,
+            ..Default::default()
+        }];
+        let party = |leader_guid| PartyState {
+            raid: raid.clone(),
+            leader_guid,
+            own_guid: 1,
+            ..Default::default()
+        };
+        s.set_party(party(1));
+        assert!(s
+            .eval::<bool>("return (CanChangePlayerDifficulty())")
             .unwrap());
+        s.set_party(party(2));
+        assert!(!s
+            .eval::<bool>("return (CanChangePlayerDifficulty())")
+            .unwrap());
+        s.set_party(PartyState::default());
         assert!(s.run("SetDungeonDifficulty('x')").is_err());
-        s.run("SEEN=nil local f=CreateFrame('Frame') f:RegisterEvent('CHAT_MSG_SYSTEM') f:SetScript('OnEvent', function(_, _, msg) SEEN=msg end) assert(f:IsEventRegistered('CHAT_MSG_SYSTEM')==1 and f:IsEventRegistered('BAG_UPDATE')==nil) SetOptOutOfLoot(1)").unwrap();
+        s.run("SEEN=nil local f=CreateFrame('Frame') f:RegisterEvent('CHAT_MSG_SYSTEM') f:SetScript('OnEvent', function(_, _, msg) SEEN=msg end) assert(f:IsEventRegistered('CHAT_MSG_SYSTEM')==1 and f:IsEventRegistered('BAG_UPDATE')==nil) SetOptOutOfLoot(0)").unwrap();
         assert!(s
             .eval::<bool>("return GetOptOutOfLoot()==1 and SEEN~=nil")
             .unwrap());
@@ -556,8 +602,11 @@ mod tests {
             vec![
                 R::SetPvp { value: 1 },
                 R::SetPvp { value: 0 },
+                R::SetPvp { value: 1 },
                 R::SetDungeonDifficulty { difficulty: 1 },
+                R::SetRaidDifficulty { difficulty: 1 },
                 R::SetRaidDifficulty { difficulty: 3 },
+                // `lua_toboolean` (`0x52cf0a`): 0 is true.
                 R::SetOptOutOfLoot { on: true },
             ]
         );
@@ -620,6 +669,7 @@ mod tests {
             "CanGrantLevel('Pal')==1",
             "CanGrantLevel('Nobody')==nil",
             "CanComplainChat(7)==1",
+            "CanComplainChat(7.9)==1",
             "CanComplainChat(8)==nil",
             "CanComplainChat('pal','hi')==1",
             "CanComplainChat('Pal','no')==nil",
@@ -627,6 +677,16 @@ mod tests {
             "IsMuted('Pal')==nil",
             "UnitIsSilenced('Pal','party')==nil",
             "select('#', GetVoiceSessionMemberInfoBySessionID(1,1))==0",
+            // Voice off: one nil each (`0x4fcbf0`, `0x4fcc60`, `0x4fccb0`, `0x4fbd40`, `0x7db1f0`,
+            // `0x54ef90`); a non-string talker or an unresolved voice unit answers nothing.
+            "select('#', IsVoiceChatEnabled(), IsVoiceChatAllowed(), IsVoiceChatAllowedByServer())==3",
+            "select('#', GetActiveVoiceChannel())==1 and GetActiveVoiceChannel()==nil",
+            "select('#', GetVoiceCurrentSessionID())==1 and select('#', IsStereoVideoAvailable())==1",
+            "select('#', UnitIsTalking('Pal'))==1 and select('#', UnitIsTalking({}))==0",
+            "select('#', GetVoiceStatus('Pal'))==1 and GetVoiceStatus('Pal')==nil",
+            "select('#', GetVoiceStatus('Nobody'))==0 and select('#', GetVoiceStatus())==0",
+            "SetActiveVoiceChannelBySessionID(0)==1 and SetActiveVoiceChannelBySessionID(3)==nil",
+            "select('#', SetActiveVoiceChannelBySessionID(3))==1",
             "IsDisplayChannelOwner()==nil",
             "IsDisplayChannelModerator()==nil",
             "IsSilenced('Pal')==nil",

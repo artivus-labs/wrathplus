@@ -13,15 +13,19 @@ use wrathplus_ui::script::{PetActionView, UiScript};
 
 use crate::app_core::session::ObjectStore;
 use crate::app_core::state::Spells;
+use crate::names::NameCache;
 use crate::target::UNIT_FLAG_POSSESSED;
 
 use super::{PetBar, PetUnit};
+
+/// `(bar_signals, has_bar, hidden, attacking, usable, pickup_allowed, slots)` as last pushed.
+type BarKey = (u32, bool, bool, bool, bool, bool, Vec<PetActionView>);
 
 /// What the feed last pushed, so `PET_BAR_UPDATE` fires on a change; the key's leading `u32` is
 /// [`PetBar::bar_signals`], so a press that changes nothing still repaints.
 #[derive(Default)]
 pub struct PetBarMemory {
-    pushed: Option<(u32, bool, bool, bool, Vec<PetActionView>)>,
+    pushed: Option<BarKey>,
     /// The ten cooldown triples as last pushed, so a cooldown alone is pushed with no event: its
     /// events are [`fire_pet_cooldown_events`]'s.
     cooldowns: Vec<Option<(i64, u32, bool)>>,
@@ -177,6 +181,7 @@ pub fn feed_pet_bar(
     spells: Option<Res<Spells>>,
     clock: Res<crate::app_core::ui_flags::UiClock>,
     pet: PetUnit,
+    names: Res<NameCache>,
     mut memory: Local<crate::app_core::vm_memo::VmMemo<PetBarMemory>>,
 ) {
     let Some(mut script) = script else {
@@ -207,6 +212,11 @@ pub fn feed_pet_bar(
     let pet_auras = pet_store.map(|_| pet.auras_of(bar.guid()));
     let pet_flags = pet_store.map(|s| s.0.unit_flags());
     let usable = pet.actions_usable(&bar);
+    let type_flags = pet_store
+        .and_then(|s| s.0.object_entry())
+        .and_then(|e| names.creature_record(e))
+        .map(|r| r.type_flags);
+    let hidden = has_bar && !pet_bar_shows(pet_store, type_flags);
     // `PickupPetAction`'s gate alone: the pet's object must resolve (`0x4be1f7`) and not be
     // possessed (`0x4be20a`). A possessed unit's bar cannot be rearranged but its buttons work,
     // so possession stays out of `usable`; an unstreamed pet has no flags to test and lifts nothing.
@@ -279,24 +289,48 @@ pub fn feed_pet_bar(
             s
         })
         .collect();
-    let key = (bar.bar_signals, has_bar, usable, pickup_allowed, content);
+    let key = (
+        bar.bar_signals,
+        has_bar,
+        hidden,
+        pet_attacking,
+        usable,
+        pickup_allowed,
+        content,
+    );
     let bar_changed = memory.pushed.as_ref() != Some(&key);
     let cooldowns_changed = memory.cooldowns != cooldowns;
     if bar_changed || cooldowns_changed {
         script.set_pet_actions(has_bar, usable, pickup_allowed, fresh);
+        script.set_pet_bar_hidden(hidden);
+        script.set_pet_attacking(pet_attacking);
         memory.cooldowns = cooldowns;
     }
     if bar_changed {
         debug!(
             "ui_pet: bar {} ({} occupied slot(s), {}{})",
-            if key.1 { "shown" } else { "hidden" },
-            key.4.iter().filter(|s| s.name.is_some()).count(),
-            if key.2 { "usable" } else { "disabled" },
-            if key.3 { "" } else { ", possessed" },
+            if key.1 && !key.2 { "shown" } else { "hidden" },
+            key.6.iter().filter(|s| s.name.is_some()).count(),
+            if key.4 { "usable" } else { "disabled" },
+            if key.5 { "" } else { ", possessed" },
         );
         memory.pushed = Some(key);
         script.fire_event("PET_BAR_UPDATE", vec![]);
     }
+}
+
+/// `CREATURE_TYPE_FLAG_NO_PET_BAR`, the template flag `0x7226b0` refuses (`0x7226c3`).
+const CREATURE_TYPE_FLAG_NO_PET_BAR: u32 = 0x2000;
+
+/// `PetHasActionBar`'s `0x5d35b0` past the count and guid: an unresolved pet passes (`0x5d35e4`);
+/// a resolved one needs a template without `NO_PET_BAR` and health above 0 (`0x5d35f9`).
+/// Labelled, not built: `[0xc1e5a0]` bit 0 (our mover is the pet, `0x5d4ad0`), whose bonus-bar
+/// takeover (`0x5ab800`) is not built either; `0x7226b0`'s leg for a pet we ride as a vehicle
+/// (`VehicleSeat` `VehicleAbilityDisplay`); and the possess latch (`0x5d35ff`-`0x5d3613`).
+pub(crate) fn pet_bar_shows(pet: Option<&ObjectStore>, type_flags: Option<u32>) -> bool {
+    let Some(pet) = pet else { return true };
+    type_flags.unwrap_or(0) & CREATURE_TYPE_FLAG_NO_PET_BAR == 0
+        && pet.0.unit_health().unwrap_or(0) > 0
 }
 
 /// The flush behind every mutation of the pet's cooldown list: `0x4b31b0` fires

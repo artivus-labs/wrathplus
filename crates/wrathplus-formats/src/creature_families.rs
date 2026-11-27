@@ -127,6 +127,13 @@ impl CreatureFamilies {
     }
 }
 
+/// A table from `(id, row)` pairs; for fixtures.
+impl FromIterator<(u32, CreatureFamily)> for CreatureFamilies {
+    fn from_iter<I: IntoIterator<Item = (u32, CreatureFamily)>>(rows: I) -> Self {
+        Self(rows.into_iter().collect())
+    }
+}
+
 /// `ItemPetFood.dbc`: food-type id → its localized name.
 #[derive(Debug, Default, Clone)]
 pub struct PetFoodNames(HashMap<u32, String>);

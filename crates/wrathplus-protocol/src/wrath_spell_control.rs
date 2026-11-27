@@ -442,29 +442,28 @@ pub fn decode(opcode: u16, body: &[u8]) -> io::Result<Vec<SessionEvent>> {
     Ok(vec![event])
 }
 
-/// `u64 caster, u32 nameLength` (the name plus its terminator), the name, AC's extra terminator,
-/// `u8 sickness`, then an optional `u32 0` that overrides the resurrect delay
-/// (`SPELL_ATTR3_NO_RES_TIMER`). A player caster's name is empty: the client looks it up.
+/// `u64 caster`, `u32 nameLength`, then build 12340's read (`0x6dbd00`): exactly that many name
+/// bytes (`0x47b6b0`), a byte into `[0xc9eac0]` (`ResurrectHasSickness`) and one into
+/// `[0xc9eac4]` (`ResurrectHasTimer`); what follows is never read. AzerothCore sends the name with
+/// its terminator, a 0, then its caster-is-not-a-player byte and an optional `u32` delay override
+/// (`Spell.cpp:5240-5250`), so there the first flag is always 0. A player caster's name is empty:
+/// the client looks it up.
 fn resurrect_request(r: &mut Cursor<&[u8]>) -> io::Result<SessionEvent> {
     let caster = u64_le(r)?;
     let length = u32_le(r)? as usize;
-    let name = read_cstring(r)?;
-    if length != name.len() + 1 {
-        return Err(invalid("resurrect name length mismatch"));
-    }
-    if u8_le(r)? != 0 {
-        return Err(invalid("resurrect name second terminator"));
-    }
+    let body = *r.get_ref();
+    let start = r.position() as usize;
+    let raw = body
+        .get(start..start + length)
+        .ok_or_else(|| invalid("resurrect name past the body"))?;
+    let name = String::from_utf8_lossy(raw.split(|&b| b == 0).next().unwrap_or_default()).into();
+    r.set_position((start + length) as u64);
     let sickness = u8_le(r)? != 0;
-    let left = r.get_ref().len() - r.position() as usize;
-    let has_timer = match left {
-        0 => false,
-        4 => {
-            let _delay = u32_le(r)?;
-            true
-        }
-        _ => return Err(invalid("resurrect delay override is not one word")),
-    };
+    let has_timer = u8_le(r)? != 0;
+    // AzerothCore's delay word, unread by the client, is the only tail its framing allows.
+    if body.len() - r.position() as usize == 4 {
+        u32_le(r)?;
+    }
     Ok(SessionEvent::ResurrectRequest {
         caster,
         name,

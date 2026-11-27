@@ -13,9 +13,8 @@
 //! a list from anywhere else `PVPQUEUE_ANYWHERE_SHOW`; otherwise `BATTLEFIELDS_SHOW` for a
 //! battlemaster's list, and `BATTLEFIELDS_CLOSED` then `BATTLEFIELDS_SHOW` for none (`0x5496d0`).
 //!
-//! Unresolved, labelled: the battlemaster session opened by `0x51fce0` and closed by `0x518d50`
-//! is modelled as the leash below, closing at 5.5556 yd. The receipts this reducer does not consume
-//! go on to [`NativeBattlegroundRest`]; opcodes `0x14b`, `0x4e5` and `0x4e8` are not decoded.
+//! A battlemaster's window is leashed to it ([`crate::ui_battlefield_leash`]). Receipts this
+//! reducer leaves go on to [`NativeBattlegroundRest`]; `0x14b`, `0x4e5`, `0x4e8` are undecoded.
 //! AzerothCore drops `CMSG_BATTLEFIELD_MGR_QUEUE_REQUEST` (`STATUS_NEVER`), so that request is
 //! sent and never answered.
 //!
@@ -39,7 +38,6 @@ use wrathplus_ui::script::{
 };
 
 use crate::app_core::group::GroupState;
-use crate::app_core::player::Player;
 use crate::app_core::schedule::UiFeed;
 use crate::app_core::schedule::UiInput;
 use crate::app_core::session::EnteredWorldMessage;
@@ -53,9 +51,6 @@ use crate::net::{ClientCommand, NetCommands};
 use crate::ui_battlefield_positions::BattlefieldPositions;
 use crate::ui_battlefield_score::BattlefieldScoreboard;
 use crate::ui_dialog_verbs::{BattlefieldQueue, QueueSlot};
-
-/// The leash radius, kept from the 1.12 battlemaster window.
-const LEASH_RADIUS_YD: f32 = 5.555_555_3;
 
 /// The world states the queue getters read (`0x543600`, `0x5435a0`, `0x5a2a40`, `0x5a2a70`).
 const WS_WINTERGRASP_QUEUE: u32 = 0x1117;
@@ -107,8 +102,8 @@ pub struct Battlefield {
     /// Events the last lists owe, in order.
     events: Vec<&'static str>,
     dirty: bool,
-    /// Where a battlemaster's list opened; `None` once the leash fired.
-    anchor: Option<Vec3>,
+    /// A battlemaster's window is open and leashed to it (`0x51fce0`).
+    leashed: bool,
     /// The group-join verdicts, `(result, guid)`.
     verdicts: Vec<(i32, Option<u64>)>,
     /// Joined (`true`) or left guids awaiting a name.
@@ -137,10 +132,10 @@ impl Battlefield {
         self.dirty = true;
     }
 
-    /// `CloseBattlefield` (`0x549b40`): the battlemaster clears; the VM fires the event.
-    fn close(&mut self) {
+    /// `CloseBattlefield` (`0x549b40`) or a broken leash (`0x518d50`): the battlemaster clears.
+    pub(crate) fn close(&mut self) {
         self.battlemaster = 0;
-        self.anchor = None;
+        self.leashed = false;
     }
 
     pub(crate) fn apply_verdict(&mut self, result: i32, guid: Option<u64>) {
@@ -158,7 +153,7 @@ impl Battlefield {
         self.bg_type = 0;
         self.battlemaster = 0;
         self.dirty = true;
-        self.anchor = None;
+        self.leashed = false;
         self.events.clear();
         self.verdicts.clear();
         self.players.clear();
@@ -166,6 +161,18 @@ impl Battlefield {
 
     pub fn battlemaster(&self) -> Option<u64> {
         (self.battlemaster != 0).then_some(self.battlemaster)
+    }
+
+    /// The events owed; a battlemaster's window leashes to it (`0x54970f`, `0x54e52e`).
+    fn take_events(&mut self) -> Vec<&'static str> {
+        let window = |e: &&str| matches!(*e, "BATTLEFIELDS_SHOW" | "NPC_PVPQUEUE_ANYWHERE");
+        self.leashed |= self.battlemaster != 0 && self.events.iter().any(window);
+        std::mem::take(&mut self.events)
+    }
+
+    /// The battlemaster a window is leashed to.
+    pub(crate) fn leashed(&self) -> Option<u64> {
+        self.battlemaster().filter(|_| self.leashed)
     }
 
     /// The listed battleground type, `CMSG_BATTLEMASTER_JOIN`'s `bgTypeId` (0 before a list).
@@ -532,6 +539,14 @@ pub(crate) fn drain_native(
     }
 }
 
+/// `0x54ccc5`-`0x54ccd9`: the type's `MaxGroupSize` below the party without the player
+/// (`0x52bd10`) or the raid with the player (`[0xbeb608]`, 0 outside a raid).
+fn join_too_large(group: Option<&GroupState>, max: u32) -> bool {
+    let Some(g) = group else { return false };
+    let raid = usize::from(g.group_type == 1) * (g.members.len() + 1);
+    (max as usize) < g.party_slots().count() || (max as usize) < raid
+}
+
 /// Runs before the dialog and score feeds fire `UPDATE_BATTLEFIELD_STATUS` and
 /// `UPDATE_BATTLEFIELD_SCORE`, so their handlers read this frame's list and slots.
 #[allow(clippy::too_many_arguments)]
@@ -546,7 +561,6 @@ fn feed_battlefield(
     states: Res<WorldStates>,
     world: wrathplus_world::world_point::WorldPoint,
     me: Query<&ObjectStore, With<SelfPlayer>>,
-    player: Res<Player>,
     names: Res<NameCache>,
     commands: Res<NetCommands>,
     mut sink: crate::ui_action::MessageSink,
@@ -582,6 +596,7 @@ fn feed_battlefield(
         queue.active_instance_type() == 4,
         queue.active_rated(),
     );
+    script.set_battlefield_arena_faction(queue.arena_faction != 0);
     let zone_name = areas
         .as_deref()
         .and_then(|a| a.0.name(world_pvp.zone))
@@ -603,18 +618,8 @@ fn feed_battlefield(
         subzone_pvp_poi: poi,
     });
 
-    for event in std::mem::take(&mut state.events) {
+    for event in state.take_events() {
         script.fire_event(event, vec![]);
-        if event == "BATTLEFIELDS_SHOW" && state.battlemaster != 0 {
-            state.anchor = Some(player.pos);
-        }
-    }
-    if let Some(anchor) = state.anchor {
-        if player.pos.distance_squared(anchor) > LEASH_RADIUS_YD * LEASH_RADIUS_YD {
-            state.anchor = None;
-            state.battlemaster = 0;
-            script.fire_event("BATTLEFIELDS_CLOSED", vec![]);
-        }
     }
 
     let mut lines = Vec::new();
@@ -701,6 +706,7 @@ fn drain_battlefield(
                 let flags = store.and_then(|s| s.0.get(Field::PlayerFlags)).unwrap_or(0);
                 let can_gain_xp = u8::from(level < cap && flags >> 25 & 1 != 0);
                 state.bg_type = bg_type;
+                state.list.iter_mut().for_each(|l| l.instances.clear()); // `0x54e6a8`
                 send(Bg::List {
                     bg_type,
                     from_where: 1,
@@ -714,21 +720,10 @@ fn drain_battlefield(
             } => {
                 let ty = bm.and_then(|t| t.get(state.bg_type));
                 let arena = ty.is_some_and(|t| t.instance_type == 4);
-                // `0x54cc70`: a group larger than the type's maximum, by party or raid count.
-                if let (true, Some(t)) = (as_group, ty) {
-                    let (party, raid) = group.as_deref().map_or((0, 0), |g| {
-                        let raid = if g.group_type == 1 {
-                            g.members.len()
-                        } else {
-                            0
-                        };
-                        (g.party_slots().count() + 1, raid)
-                    });
-                    let max = t.max_group_size as usize;
-                    if max < party || max < raid {
-                        errors.push("ERR_GROUP_JOIN_BATTLEGROUND_TOO_MANY");
-                        continue;
-                    }
+                let max = ty.map(|t| t.max_group_size);
+                if as_group && max.is_some_and(|m| join_too_large(group.as_deref(), m)) {
+                    errors.push("ERR_GROUP_JOIN_BATTLEGROUND_TOO_MANY");
+                    continue;
                 }
                 // Not from inside a battleground, except into an arena.
                 let here = current_map
@@ -888,6 +883,10 @@ impl Plugin for BattlefieldPlugin {
                         .before(crate::ui_battlefield_score::feed_battlefield_score)
                         .before(crate::ui_dialog_verbs::feed_dialog_verbs)
                         .in_set(UiFeed),
+                    crate::ui_battlefield_leash::leash_battlemaster
+                        .after(feed_battlefield)
+                        .in_set(UiFeed)
+                        .run_if(crate::app_core::ui_state::ingame_ui_up),
                     drain_battlefield.after(UiInput),
                 ),
             );

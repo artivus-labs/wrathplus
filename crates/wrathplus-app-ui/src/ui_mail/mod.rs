@@ -397,6 +397,7 @@ fn feed_mail(
                     .ok()
                     .and_then(|(store, _)| store.0.unit_level()),
                 &get_text,
+                auction_houses.as_deref(),
             )
         };
         let changed = native != *last_wrath;

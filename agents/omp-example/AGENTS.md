@@ -44,8 +44,8 @@ The MCP tools appear as `mcp__wrathplus_<name>`. Each is one HTTP call to the cl
 | `status` | Client state: `{state, in_world, ui_ready, cinematic, time, player, nav}`. Call it first. |
 | `lua(code)` | Run a Lua chunk in the game's UI VM (the stock 3.3.5a addon API plus the agent helpers). A bare expression returns its value; otherwise `return a, b`. A chunk runs inside one frame: never loop waiting. |
 | `events(since, names, exclude, wait_ms, limit)` | Read game events after a cursor; long-polls up to 25 s. |
-| `lua_search(query, kinds)` | Find what exists to call: built-ins (`builtin`), your modules (`own`), stock API names (`api`). |
-| `lua_doc(name)` | One function's signature, doc and source, or a module's source. |
+| `lua_search(query, kinds)` | Find what exists to call: built-ins (`builtin`), your modules (`own`), the stock API with its docs (`api`), the stock UI's code (`framexml`). |
+| `lua_doc(name)` | One function in full (a built-in, a stock function's binding, a stock UI function), a module's source, or a stock UI `File.lua:line`. |
 | `modules(name?)` | List your saved modules, or read one. |
 | `save_module(name, source)` | Save a module (dotted name). Saving does not load it: `require("name")` the first time, `AgentReload("name")` after a change. |
 | `propose_module(name, source, claim)` | Have a change trialled by the judge before it is kept (see below). |
@@ -79,67 +79,31 @@ something you start: read `next` first, start it with `lua`, then
 `AGENT_SERVICES_READY`...). `names` and `exclude` take whole names or prefixes ending in `_` or
 `*`. `since: 0` reads the whole retained buffer, mostly combat-log noise: filter it.
 
-### Read the SDK before writing code
+### Discover before you write
 
-Before you write a helper, search for it: `lua_search` finds the built-ins with their signatures
-and docs, and your own modules' lines; `lua_doc` reads one in full. The built-in globals:
+**Before you decide something can't be done, or write it yourself, search for it.** `lua_search`
+looks across the built-ins (`builtin`), your own modules (`own`), the stock API (`api`: each
+function WrathPlus binds, with the notes on what it returns) and the stock UI's own code
+(`framexml`, read from your install: how Blizzard's windows call that API). `lua_doc` anything
+unfamiliar before you call it: a built-in's source, a stock function's returns, a stock UI
+function or `File.lua:line`. Missing from the built-ins but present in the stock API means you can
+build it, and the stock UI shows how. For example, `lua_search("taxi")` may turn up no built-in
+that takes a flight, but it finds `TakeTaxiNode` in the stock API and `TaxiFrame.xml` calling it.
 
-- **`AgentNearby([yards])`**, nearest first: `{guid, name, kind, distance, level, health, dead,
-  reaction, quest, npc, lootable, ...}`. `AgentPosition()`, `AgentTarget(guid)`,
-  `AgentInteract(guid)` (talk to, loot, use or attack; walks there itself).
-- **`AgentMoveTo(x, y[, z] | guid)`** walks a navmesh route (the realm routes it on the beta:
-  `routing`, then `walking`); `AgentWalk()` says how it is going; ends as `AGENT_WALK_DONE`.
-  `Move.to(unit | x, y)`, `Move.follow(unit)`, `Move.free()`.
-- **`Combat.engage(guid)`** chases, fights and loots, casting `Rotation.list`; ends as
-  `AGENT_COMBAT_DONE(guid, killed|lost|stopped|died|fled|no_progress[, why])`. `no_progress`: in
-  reach, the target never lost health, the game refused your actions on it and you lost health;
-  `why` says what it saw and who else is attacking you. Combat stops there and leaves that unit
-  alone a minute (`Combat.no_progress_hold`): whether to fight another, run or retry is yours.
-  `Survive.pull_ok(u)` decides whether a pull is safe; a refused pull says why
-  (`AGENT_PULL_REFUSED`).
-- **`Rotation`**: what Combat casts, as a priority list. `Rotation.list` is **nil until you set
-  it**; until then a short default for your class is used (`Rotation.defaults()`, rebuilt as you
-  learn spells). `Rotation.describe()` names what is cast now. Your own list is entries
-  `{spell, when = function(c) ... end}` with a context `c` (power, mana, hp, target_hp, distance,
-  buff, debuff, enemies, attackers, fight_seconds, usable...); set it in a module (from
-  `autoexec`) so it survives restarts. **`Rotation.stats`** counts casts and failures per spell
-  since `Rotation.reset_stats()`, and every few fights (and after a death) Combat signals
-  `AGENT_COMBAT_REVIEW` with a summary. `Combat.history` keeps the last fights. As a caster you
-  fight from range.
-- **`Quests.pick_up()`, `Quests.hand_in()`**: visit the quest givers in reach;
-  `AGENT_QUESTS_DONE`. `Quests.list()`.
-- **`Goals`**: a goal-oriented planner and runner. `Goals.on = true` levels by itself (hand in,
-  pick up, work objectives, train, sell and repair, rest, walk to a known quest hub, grind, travel
-  to a fitting zone).
-  `Goals.push{name, why, priority, want, done, data}`, `Goals.drop(name)`, `Goals.list()`,
-  `Goals.facts()`, `Goals.state`, `Goals.log`; teach facts (`Goals.fact(name, fn)`) and actions
-  (`Goals.action{name, pre, effects, run, done, cost}`); pause with `Goals.hold{reason, seconds}`.
-  `Goals.zones()` lists the zones that fit your level.
-- **Walks and the runner.** A walk you start by hand (`AgentMoveTo`, `Move.to`, `AgentInteract`
-  from afar) already holds the runner until the walk ends; it needs no `Goals.hold`. A hold you
-  set yourself lasts its `seconds` whatever the walk does, unless you give
-  `Goals.hold{reason, seconds, until_walk = true}`: then it also ends when the walk under way (or
-  the next one) arrives or fails, as `AGENT_HOLD_EXPIRED(reason, waited, "walk arrived" | ...)`.
-  For somewhere the built-ins already go (a quest hub, a zone), a goal hands the destination to
-  the runner instead: `data.zone` for `travel_to_zone`, or `Goals.learn_places` for a hub.
-  A walk's end is an event too: `AGENT_WALK_DONE(status)` (`arrived`, `failed`, `stuck`) on the
-  event stream, which does not wake you; in Lua, `AgentWalk().status` says the same. So arrival
-  can be (a) a reflex in your own Lua: a frame that watches `AgentWalk().status` and calls
-  `Goals.release()` or starts the next step, with no model call; or (b) a wake-up when arrival
-  needs judgement: that watcher calls `Agent.ask(...)`, and `AGENT_ASK` wakes you at once.
-  Which is yours to choose.
-- **`AgentServices([kinds[, radius]])`**: where vendors, trainers, flight masters, auctioneers
-  (with the `house` they serve), mailboxes and the like are on your map, from the realm:
-  `{pending = true}` first, then the list after `AGENT_SERVICES_READY`. `AgentFindNpc(service)`
-  finds the nearest one in sight.
-- **`Upkeep`** (equips upgrades, bags, sells junk, repairs, trains), **`Professions`** (Cooking and
-  First Aid: learnt, levelled and used), **`Revive`** (release, run back, resurrect),
-  **`Avoid`** (routes around hostile mobs), **`Survive`** (eat, drink, flee bands).
-- **`require("wp.engine")`**: a Playerbots-style decision engine (values, triggers, actions,
-  strategies) for controllers you write. **`require("wp.values")`**: health, power, auras,
-  cooldowns, range, threat, bags.
-- **`Agent.ask(question, context, on[, {timeout, default}])`**: hand a moment up to you (below).
-- `StopCinematic()` skips a cinematic (`status.cinematic`); a new character starts in one.
+The built-ins, each documented in its own source (`lua_doc("Goals.push")`,
+`lua_doc("Combat.engage")`):
+
+- **`Agent*`** (Rust): `AgentNearby`, `AgentPosition`, `AgentTarget`, `AgentInteract` (walks there
+  itself), `AgentMoveTo` / `AgentWalk` (navmesh walks, ending as `AGENT_WALK_DONE`),
+  `AgentServices` / `AgentFindNpc` (vendors, trainers, flight masters, mailboxes...).
+- **`Combat`** (chase, fight, loot; `AGENT_COMBAT_DONE`), **`Rotation`** (what Combat casts; nil
+  until you set your own list), **`Quests`**, **`Move`**, **`Goals`** (the planner and runner:
+  `Goals.on = true` levels by itself; push goals, teach facts and actions, hold it), **`Upkeep`**,
+  **`Professions`**, **`Revive`**, **`Avoid`**, **`Survive`**, **`Agent`** (`Agent.ask`, below),
+  `require("wp.engine")` (a Playerbots-style decision engine) and `require("wp.values")`.
+- A walk you start by hand already holds the goal runner until it ends. Its arrival can be a
+  reflex in your own Lua (watch `AgentWalk().status`, then `Goals.release()` or the next step) or
+  a wake-up when it needs judgement (`Agent.ask`): which is yours to choose.
 
 Each built-in exposes its thresholds and switches as fields (`Combat.safe`, `Survive` bands,
 `Upkeep.sell`, `Revive.release_after`...): tune them as named numbers rather than replacing a
@@ -252,6 +216,16 @@ Every turn of yours costs money; the Lua runs for free.
   are counted in the next check-in's evidence. Do not sit in a loop of `events` calls waiting
   for something to happen: each call re-sends your whole context. Spend the turns you are given
   on improving the controller (above), not on waiting.
+- **What you pass.** `wp.notice` (`Notice`) signals `AGENT_NOTICED(kind, name, guid, distance, x,
+  y, extra)` the first time this character comes within 60 yd of a quest giver ("!", or a grey "!"
+  with `trivial`), a hand-in, a trainer, vendor, repairer, flight master, innkeeper, banker,
+  auctioneer or mailbox, a rare or elite, a herb or vein, a chest, another player, or enters a new
+  subzone. The launcher batches them into one wake per `WRATHPLUS_OMP_NOTICE_SECONDS` (15), nearest
+  first, and every check-in lists all that was passed since the last. Mute what your goal has no use
+  for: `Notice.mute("player")`, or with a filter, `Notice.mute("quest_available", "n.trivial")`
+  (muted notices are still in `Notice.recent` and the check-in digest); `Notice.unmute(kind)`. A
+  Lua reflex can handle the common cases without waking you (`Notice.listen(name, fn)`; returning
+  true takes the notice in hand, e.g. a detour to a "!" in reach): that is your choice to make.
 - When you do wait inside a turn (for a walk you started, an answer), use long waits
   (`wait_ms: 25000`) with a `names` filter, a few at most.
 - Let Lua do the real-time work: if you find yourself calling `lua` to do the same thing every

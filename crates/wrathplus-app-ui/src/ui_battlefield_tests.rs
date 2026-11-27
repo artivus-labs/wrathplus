@@ -47,8 +47,15 @@ fn a_list_fires_by_its_shape_and_keeps_the_battlemaster() {
     assert_eq!((v.bg_type, v.instances.as_slice()), (3, &[4, 9][..]));
     assert_eq!(v.holiday.win_arena, 25);
     assert!(!v.random.has_win);
+    assert_eq!(
+        s.leashed(),
+        None,
+        "leashed once its window's event goes out"
+    );
+    assert_eq!(s.take_events().len(), 5);
+    assert_eq!(s.leashed(), Some(0x88));
     s.close();
-    assert_eq!(s.battlemaster(), None);
+    assert_eq!((s.battlemaster(), s.leashed()), (None, None));
 }
 
 #[test]
@@ -310,4 +317,28 @@ fn world_enter_asks_for_the_status_on_the_native_wire() {
         wrathplus_protocol::wrath_battleground::encode(&Bg::Status),
         (0x02d3, Vec::new())
     );
+}
+
+#[test]
+fn the_group_size_gate_counts_the_party_without_and_the_raid_with_the_player() {
+    use wrathplus_protocol::types::GroupMemberEntry;
+    let member = |guid| GroupMemberEntry {
+        name: String::new(),
+        guid,
+        status: 1,
+        flags: 0,
+    };
+    let mut g = GroupState {
+        members: vec![member(1), member(2)],
+        ..Default::default()
+    };
+    // A party of three at a 2v2 battlemaster: two others, not too many (the server answers).
+    assert!(!join_too_large(Some(&g), 2));
+    assert!(join_too_large(Some(&g), 1));
+    // A raid of three: the player counts.
+    g.group_type = 1;
+    g.own_flags = 1;
+    assert!(join_too_large(Some(&g), 2));
+    assert!(!join_too_large(Some(&g), 3));
+    assert!(!join_too_large(None, 0));
 }

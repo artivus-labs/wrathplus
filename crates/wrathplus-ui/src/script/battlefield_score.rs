@@ -76,6 +76,8 @@ pub(crate) struct ScoreBoard {
     pub(crate) order: Vec<usize>,
     /// The filtered count (`0xbea580`).
     pub(crate) filtered: usize,
+    /// A newer board waits on names (`0xbea590`): the rebuild and the sort do nothing.
+    pub(crate) names_pending: bool,
 }
 
 impl Default for ScoreBoard {
@@ -86,6 +88,7 @@ impl Default for ScoreBoard {
             sort: std::array::from_fn(|k| (k as u8, false)),
             order: Vec::new(),
             filtered: 0,
+            names_pending: false,
         }
     }
 }
@@ -138,21 +141,12 @@ impl ScoreBoard {
         self.order = order;
     }
 
-    /// `0x54cee0`: move `key` to the head, or flip the head's direction if it is there. The
-    /// head's direction is overwritten with the chosen entry's before the shift copies it down.
+    /// `0x54cee0`: move `key` to the head with its own direction, each entry above it shifting
+    /// down with its own (`0x54cf30`-`0x54cf4c`), or flip the head's direction if it is there.
     fn choose_sort(&mut self, key: u8) {
-        let Some(i) = self.sort.iter().position(|&(k, _)| k == key) else {
-            return;
-        };
-        if i == 0 {
-            self.sort[0].1 = !self.sort[0].1;
-            return;
+        if let Some(i) = self.sort.iter().position(|&(k, _)| k == key) {
+            choose(&mut self.sort, i);
         }
-        self.sort[0].1 = self.sort[i].1;
-        for j in (1..=i).rev() {
-            self.sort[j] = self.sort[j - 1];
-        }
-        self.sort[0].0 = key;
     }
 
     fn row(&self, index_1based: i64) -> Option<&BattlefieldScoreRow> {
@@ -169,6 +163,11 @@ impl super::UiScript {
         let mut model = self.model_mut();
         model.battlefield_board.scores = scores;
         model.battlefield_board.rebuild();
+    }
+
+    /// A newer board is held for its names (`0xbea590` non-zero).
+    pub fn set_battlefield_score_names_pending(&mut self, pending: bool) {
+        self.model_mut().battlefield_board.names_pending = pending;
     }
 
     /// The status-3 reset of the filter (`0x54ae40` writes `-1`), followed by the app's rebuild.
@@ -194,18 +193,32 @@ impl super::UiScript {
     }
 }
 
-/// `lua_isnumber` then the rounded value.
+/// `lua_isnumber` then `fistp` under chop, its low dword (`0x54bee8`).
 fn number(lua: &Lua, v: &Value) -> mlua::Result<Option<i64>> {
     Ok(lua
         .coerce_number(v.clone())?
-        .map(|n| n.round_ties_even() as i64))
+        .map(|n| i64::from(n as i64 as i32)))
 }
 
 fn index_arg(lua: &Lua, v: &Value, usage: &'static str) -> mlua::Result<i64> {
     number(lua, v)?.ok_or_else(|| mlua::Error::RuntimeError(usage.into()))
 }
 
+/// The key-list move both lists share (`0x54cee0`, `0x5a2e80`): entry `i` to the head with its
+/// own direction, the entries above it shifting down with theirs; the head itself flips.
+pub(super) fn choose(sort: &mut [(u8, bool)], i: usize) {
+    if i == 0 {
+        sort[0].1 = !sort[0].1;
+    } else {
+        sort[..=i].rotate_right(1);
+    }
+}
+
 fn rebuild_and_fire(model: &mut Model) {
+    // `0x54aa39`: nothing while names are pending.
+    if model.battlefield_board.names_pending {
+        return;
+    }
     model.battlefield_board.rebuild();
     model
         .pending_events
@@ -292,7 +305,9 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     g.set(
         "SetBattlefieldScoreFaction",
         lua.create_function(|lua, faction: Value| {
-            let f = number(lua, &faction)?.map_or(-1, |n| n as i32);
+            let f = lua
+                .coerce_number(faction)?
+                .map_or(-1, super::binding_abi::ftol); // `0x54c145`
             if f != -1 && (f as u32) > 1 {
                 return Ok(());
             }
@@ -405,7 +420,9 @@ pub(super) fn install_wrath(lua: &Lua) -> mlua::Result<()> {
                 Some(t) => Value::String(lua.create_string(&t.name)?),
                 None => Value::Nil,
             }];
-            out.extend((0..3).map(|k| Value::Integer(team.map_or(0, |t| i64::from(t.ratings[k])))));
+            // Signed (`fild`, `0x54a20b`-`0x54a25f`).
+            let word = |k: usize| team.map_or(0, |t| i64::from(t.ratings[k] as i32));
+            out.extend((0..3).map(|k| Value::Integer(word(k))));
             Ok(MultiValue::from_vec(out))
         })?,
     )?;
@@ -449,7 +466,10 @@ pub(super) fn install_wrath(lua: &Lua) -> mlua::Result<()> {
                 None => 0,
             };
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-            model.battlefield_board.choose_sort(key as u8);
+            // `0x54cee3`: no key moves while names are pending.
+            if !model.battlefield_board.names_pending {
+                model.battlefield_board.choose_sort(key as u8);
+            }
             rebuild_and_fire(&mut model);
             Ok(())
         })?,
@@ -521,6 +541,9 @@ mod tests {
         assert_eq!(names(&s), "Dana,Alice,Carl,Bob");
         assert_eq!(s.arity("GetBattlefieldScore(1)").unwrap(), 12);
         assert_eq!(s.arity("GetBattlefieldScore(9)").unwrap(), 12);
+        assert!(s
+            .eval::<bool>("return GetBattlefieldScore(1.9) == 'Dana'")
+            .unwrap());
         let got = s
             .eval::<String>(
                 "local n, kb, hk, d, h, f, rank, race, class, token, dmg, heal = \
@@ -545,6 +568,10 @@ mod tests {
         assert!(s
             .eval::<bool>("return GetBattlefieldTeamInfo(2) == nil")
             .unwrap());
+        s.model_mut().battlefield_board.scores.teams[1].ratings[0] = u32::MAX;
+        assert!(s
+            .eval::<bool>("return select(2, GetBattlefieldTeamInfo(1)) == -1")
+            .unwrap());
         assert_eq!(
             s.eval::<i64>("return GetBattlefieldStatData(1, 1)")
                 .unwrap(),
@@ -566,6 +593,17 @@ mod tests {
         assert_eq!(names(&s), "Dana,Carl,Bob,Alice");
         s.run("SortBattlefieldScoreData('stat1')").unwrap();
         assert_eq!(names(&s), "Dana,Alice,Carl,Bob");
+        // The old head (name, reversed) moves down with its own direction (`0x54cf30`).
+        assert_eq!(
+            s.model_ref().battlefield_board.sort[..2],
+            [(9, false), (3, true)]
+        );
+        // `0xbea590`: while a board waits on names, no key moves and nothing rebuilds or fires.
+        s.set_battlefield_score_names_pending(true);
+        s.run("SortBattlefieldScoreData('kills') SetBattlefieldScoreFaction(0)")
+            .unwrap();
+        assert_eq!(s.model_ref().battlefield_board.sort[0], (9, false));
+        s.set_battlefield_score_names_pending(false);
         // stat9 is key 17, past the list: refused, no event.
         s.run("SortBattlefieldScoreData('stat9')").unwrap();
         s.run("SetBattlefieldScoreFaction(1)").unwrap();

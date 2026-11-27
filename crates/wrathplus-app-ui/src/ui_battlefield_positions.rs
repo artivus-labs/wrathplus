@@ -2,7 +2,7 @@
 //! resolved into the view behind `GetBattlefieldPosition`, `GetBattlefieldFlagPosition` and
 //! `GetBattlefieldMapIconScale`, which `WorldMapFrame.lua` and the battlefield minimap poll.
 //!
-//! The reference's getter (`0x4abf90`) does the work per call: it skips the player, the party and
+//! The reference's getter (`0x54c2e0`) does the work per call: it skips the player, the party and
 //! the raid roster, prefers a streamed object's live position, and projects under the active queue
 //! slot's map, answering `(0, 0)` off it. The app resolves the list that way each frame. A name
 //! landing fires `WORLD_MAP_NAME_UPDATE`, as in the reference.
@@ -26,28 +26,31 @@ use crate::net::{ClientCommand, GuidIndex, NetCommands, NetEntity};
 use crate::ui_dialog_verbs::BattlefieldQueue;
 use crate::ui_world_map::{project_on_displayed, WorldMapUiData};
 
-/// `RequestBattlefieldPositions` (`0x4aa5c0`) sends at most once per 5000 ms (stamp
-/// `[0xb6ebe0]`), and only with an active queue slot; without one it clears the list.
+/// `RequestBattlefieldPositions` (`0x54dcb0` → `0x54cf60`) sends at most once per 5000 ms (stamp
+/// `[0xbea5b4]`), and only with an active queue slot; without one it clears the list.
 pub(crate) const REQUEST_THROTTLE: Duration = Duration::from_millis(5000);
 
 /// The last positions packet and the request stamp.
 #[derive(Resource, Default)]
 pub(crate) struct BattlefieldPositions {
     packet: Option<PositionsPacket>,
+    /// The carrier slots (`0xbea170`) in Lua index order.
+    carriers: Vec<BattlefieldPosition>,
     last_request: Option<Instant>,
     /// Guids whose name the cache has not answered yet.
     pending_names: Vec<u64>,
 }
 
 impl BattlefieldPositions {
-    /// `MSG_BATTLEGROUND_PLAYER_POSITIONS` in: kept as sent, as the handler (`0x4aad40`) does.
-    pub(crate) fn apply(&mut self, packet: PositionsPacket) {
+    /// `MSG_BATTLEGROUND_PLAYER_POSITIONS` in: kept as sent.
+    pub(crate) fn apply(&mut self, mut packet: PositionsPacket) {
+        self.carriers = packet.carrier.take().into_iter().collect();
         self.packet = Some(packet);
     }
 
     /// Build 12340's `MSG_BATTLEGROUND_PLAYER_POSITIONS` (`0x54b3f0`), from the native reducer.
-    /// Unresolved, labelled: the reference keeps two flag carriers (`0xbea170`); the view keeps
-    /// the first.
+    /// The carriers fill the slots from the last down (`0x54b480`-`0x54b4be`), so the last wire
+    /// carrier is index 1; past two the reference writes beyond its pair, here dropped.
     pub(crate) fn apply_wrath(
         &mut self,
         players: Vec<(u64, f32, f32)>,
@@ -56,12 +59,14 @@ impl BattlefieldPositions {
         let at = |(guid, x, y): (u64, f32, f32)| BattlefieldPosition { guid, x, y };
         self.apply(PositionsPacket {
             players: players.into_iter().map(at).collect(),
-            carrier: carriers.into_iter().next().map(at),
+            carrier: None,
         });
+        self.carriers = carriers.into_iter().rev().take(2).map(at).collect();
     }
 
     fn clear(&mut self) {
         self.packet = None;
+        self.carriers.clear();
         self.pending_names.clear();
     }
 
@@ -77,7 +82,7 @@ impl BattlefieldPositions {
     }
 }
 
-/// The getter's position source (`0x4abf90`): a streamed object's live position, else the
+/// The getter's position source (`0x54c2e0`): a streamed object's live position, else the
 /// packet's, as wow `(x, y)`.
 fn live_or_packet(
     p: &BattlefieldPosition,
@@ -93,12 +98,29 @@ fn live_or_packet(
     }
 }
 
-/// The flag texture token: the friendly carrier holds the other side's flag.
-fn flag_token(faction: Option<&str>) -> Option<&'static str> {
-    match faction {
-        Some("Alliance") => Some("HordeFlag"),
-        Some("Horde") => Some("AllianceFlag"),
-        _ => None,
+/// `0x54d010`'s token from the carrier's side (`0x6d6e90`: 0 Horde, 1 Alliance): a Horde
+/// carrier holds `AllianceFlag` (`0xacd310`), the pair swapped on Eye of the Storm (map 566).
+fn flag_token(side: i8, map: u32) -> Option<&'static str> {
+    let side = match side {
+        0 | 1 if map == 566 => 1 - side,
+        0 | 1 => side,
+        _ => return None,
+    };
+    Some(["AllianceFlag", "HordeFlag"][side as usize])
+}
+
+/// The carrier's side: its own race when streamed, else the viewer's for a raid member and the
+/// other side for anyone else (`0x549670`).
+fn carrier_side(own_race: Option<u8>, raid_member: bool, viewer_race: Option<u8>) -> i8 {
+    use crate::ui_unit::race_pvp_team;
+    if let Some(race) = own_race {
+        return race_pvp_team(race);
+    }
+    let viewer = viewer_race.map_or(-1, race_pvp_team);
+    match (raid_member, viewer) {
+        (true, side) => side,
+        (false, 0) => 1,
+        (false, _) => 0,
     }
 }
 
@@ -114,6 +136,7 @@ pub(crate) fn feed_battlefield_positions(
     unit_pos: Query<&GlobalTransform, With<NetEntity>>,
     names: Res<NameCache>,
     commands: Res<NetCommands>,
+    objects: crate::net::Objects,
     // The last empty push: with no list the engine is told on change, with one every frame.
     mut last_empty: Local<crate::app_core::vm_memo::VmMemo<Option<(bool, u32)>>>,
 ) {
@@ -128,6 +151,7 @@ pub(crate) fn feed_battlefield_positions(
         .map_or(1.0, |b| b.minimap_icon_scale);
     let BattlefieldPositions {
         packet,
+        carriers,
         pending_names,
         ..
     } = &mut *state;
@@ -174,18 +198,22 @@ pub(crate) fn feed_battlefield_positions(
             name,
         });
     }
-    let flag = packet.carrier.as_ref().map(|c| {
-        let (x, y) = live_or_packet(c, &guids, &unit_pos);
-        let faction = script
-            .eval::<Option<String>>(r#"return (UnitFactionGroup("player"))"#)
-            .ok()
-            .flatten();
-        BattlefieldFlagView {
-            uv: project(x, y),
-            token: flag_token(faction.as_deref()).map(str::to_string),
-        }
-    });
-    script.set_battlefield_positions(players, flag, icon_scale);
+    let race = |guid: u64| objects.object(guid).and_then(|o| o.unit_race());
+    let viewer_race = me.0.and_then(race);
+    let flags = carriers
+        .iter()
+        .map(|c| {
+            let (x, y) = live_or_packet(c, &guids, &unit_pos);
+            let member = group.members.iter().any(|m| m.guid == c.guid);
+            BattlefieldFlagView {
+                uv: project(x, y),
+                token: flag_token(carrier_side(race(c.guid), member, viewer_race), map)
+                    .map(str::to_string),
+            }
+        })
+        .collect();
+    script.set_battlefield_positions(players, None, icon_scale);
+    script.set_battlefield_flag_carriers(flags);
     if name_landed {
         script.fire_event("WORLD_MAP_NAME_UPDATE", Vec::new());
     }
@@ -273,9 +301,26 @@ mod tests {
     }
 
     #[test]
-    fn the_flag_token_is_the_other_sides() {
-        assert_eq!(flag_token(Some("Alliance")), Some("HordeFlag"));
-        assert_eq!(flag_token(Some("Horde")), Some("AllianceFlag"));
-        assert_eq!(flag_token(None), None);
+    fn the_flag_token_follows_the_carriers_side() {
+        // A Horde carrier (side 0) holds the Alliance flag; Eye of the Storm swaps the pair.
+        assert_eq!(flag_token(0, 489), Some("AllianceFlag"));
+        assert_eq!(flag_token(1, 489), Some("HordeFlag"));
+        assert_eq!(flag_token(0, 566), Some("HordeFlag"));
+        assert_eq!(flag_token(-1, 489), None);
+        // Streamed: its own race (a Tauren); else the viewer's side in the raid, the other out.
+        assert_eq!(carrier_side(Some(6), true, Some(1)), 0);
+        assert_eq!(carrier_side(None, true, Some(1)), 1);
+        assert_eq!(carrier_side(None, false, Some(1)), 0);
+        assert_eq!(carrier_side(None, false, Some(2)), 1);
+    }
+
+    #[test]
+    fn the_last_wire_carrier_is_slot_one() {
+        let mut s = BattlefieldPositions::default();
+        s.apply_wrath(Vec::new(), vec![(7, 1.0, 2.0), (8, 3.0, 4.0)]);
+        let guids: Vec<u64> = s.carriers.iter().map(|c| c.guid).collect();
+        assert_eq!(guids, [8, 7]);
+        s.apply_wrath(Vec::new(), vec![(7, 1.0, 2.0)]);
+        assert_eq!(s.carriers.len(), 1);
     }
 }

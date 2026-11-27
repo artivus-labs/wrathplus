@@ -403,3 +403,25 @@ fn a_bought_learn_wrapper_goes_used_and_the_default_filter_hides_it() {
     assert_ne!(wrapper, taught);
     buy_on_real_data(wrapper, taught);
 }
+
+/// `GetTrainerServiceSkillLine` (`0x5952f0`): a `SKILL_STEP`'s misc line first, else the taught
+/// spell's line; an Alchemy apprentice row names "Alchemy", not its trainer header.
+#[test]
+fn the_service_skill_line_is_the_spells_own() {
+    let lines = skill_lines(&[(2259, 171, "Alchemy"), (3101, 164, "Blacksmithing")]);
+    let step = SpellDisplay {
+        effects: [wrathplus_formats::SPELL_EFFECT_SKILL_STEP, 0, 0],
+        effect_misc_value: [171, 0, 0],
+        ..Default::default()
+    };
+    let learn = SpellDisplay {
+        effects: [wrathplus_formats::SPELL_EFFECT_LEARN_SPELL, 0, 0],
+        effect_trigger_spell: [3101, 0, 0],
+        ..Default::default()
+    };
+    let spells = catalog(vec![(1, step), (2, learn), (3, SpellDisplay::default())]);
+    let line = |id| super::law::service_skill_line(id, &spells, Some(&lines));
+    assert_eq!(line(1).as_deref(), Some("Alchemy"));
+    assert_eq!(line(2).as_deref(), Some("Blacksmithing"));
+    assert_eq!(line(3), None, "no effect, no line");
+}

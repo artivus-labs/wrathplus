@@ -2121,7 +2121,7 @@ fn the_ding_block_is_printed_once() {
 }
 
 /// On `CHARACTER_POINTS_CHANGED` with `arg2 > 0`, stock `ChatFrame_OnEvent` prints
-/// `LEVEL_UP_SKILL_POINTS` (`ChatFrame.lua:1324-1334`).
+/// `LEVEL_UP_SKILL_POINTS` from the active player's `UnitCharacterPoints` (`ChatFrame.lua:1324`).
 #[test]
 fn the_free_professions_line_is_printed_once() {
     let _data = wrathplus_formats::wow_data_or_skip!();
@@ -2130,13 +2130,15 @@ fn the_free_professions_line_is_printed_once() {
         points: (0, 2),
         ..Default::default()
     });
+    s.set_unit_guids(&wrathplus_ui::script::UnitGuids {
+        player: 7,
+        ..Default::default()
+    });
     s.run(
         r#"
-        SkillLines = {}
-        local add = ChatFrame1.AddMessage
+        SkillLines = {} local add = ChatFrame1.AddMessage
         ChatFrame1.AddMessage = function(self, text, ...)
-            table.insert(SkillLines, text)
-            return add(self, text, ...)
+            table.insert(SkillLines, text) return add(self, text, ...)
         end
         "#,
     )

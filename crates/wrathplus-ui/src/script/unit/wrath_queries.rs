@@ -26,8 +26,7 @@
 //! `0x5727b0`) and the summon spell's writer (`0x53ec40`) are not decompiled.
 //! `UnitInBattleground`'s battleground test (`0x572f50`) reads the map's `InstanceType` 3, and its
 //! slot is the 0-based raid index. The units carry no realm, so `UnitIsSameServer` answers 1 for
-//! any pair. `IsThreatWarningEnabled` (`0x517d30`, the flag at `0xbd08c0` that `0x519df0` writes)
-//! reads the `threatWarning` CVar.
+//! any pair.
 
 use mlua::{Lua, MultiValue, Value};
 
@@ -206,10 +205,9 @@ pub(crate) fn install(lua: &Lua) -> mlua::Result<()> {
     g.set(
         "UnitSelectionColor",
         lua.create_function(|lua, token: Value| {
-            let Value::String(token) = token else {
-                return Err(mlua::Error::runtime("Usage: UnitSelectionColor(\"unit\")"));
-            };
-            let token = token.to_str()?.to_string();
+            // `lua_isstring` (`0x60da0d`): a number names a unit by its text, as any token.
+            let usage = "Usage: UnitSelectionColor(\"unit\")";
+            let token = crate::script::binding_abi::string_arg(lua, token, usage)?;
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             let (r, g, b) = selection_color(model.unit(&token));
             Ok((r, g, b, 1.0))
@@ -238,7 +236,8 @@ pub(crate) fn install(lua: &Lua) -> mlua::Result<()> {
                     "Usage: FillLocalizedClassList(classTable[, isFemale])",
                 ));
             };
-            let female = !matches!(female, Value::Nil | Value::Boolean(false));
+            // `0x815500(L, 2, 0)` (`0x60a53f`): 0 and "0" are male.
+            let female = crate::script::binding_abi::bool_or_default(Some(&female), false);
             if let Some(names) = lua.app_data_ref::<ClassNames>() {
                 for (file, male_name, female_name) in &names.0 {
                     table.set(
@@ -410,15 +409,20 @@ pub(crate) fn install(lua: &Lua) -> mlua::Result<()> {
             Ok((bits & 2 != 0, bits & 4 != 0, bits & 8 != 0))
         })?,
     )?;
+    // IsThreatWarningEnabled() (`0x517d30`): the flag `0x519df0` derives from `threatWarning`, 0
+    // off, 1 in a party or raid instance (`InstanceType` 1 or 2), 2 grouped, else on. Labelled:
+    // derived at the call, where 12340 re-derives it on the CVar, map and group changes.
     g.set(
         "IsThreatWarningEnabled",
         lua.create_function(|lua, ()| {
-            let on = lua
-                .globals()
-                .get::<mlua::Function>("GetCVar")
-                .ok()
-                .and_then(|f| f.call::<Option<String>>("threatWarning").ok().flatten())
-                .is_some_and(|v| v != "0" && !v.is_empty());
+            let m = lua.app_data_ref::<Model>().expect("model app_data");
+            let cvar = m.cvars.get("threatwarning");
+            let on = match cvar.map_or(3, |c| crate::script::cvars::sstr_to_int(&c.value)) {
+                0 => false,
+                1 => matches!(m.instance_type, Some(1 | 2)),
+                2 => !m.party.members.is_empty() || !m.party.raid.is_empty(),
+                _ => true,
+            };
             Ok(flag(on))
         })?,
     )?;

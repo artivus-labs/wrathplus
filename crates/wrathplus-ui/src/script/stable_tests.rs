@@ -8,7 +8,7 @@ fn pet(number: u32, name: &str, level: u32) -> StablePetSlot {
         name: name.into(),
         level,
         family: Some("Wolf".into()),
-        loyalty: Some("(Loyalty Level 6) Best Friend".into()),
+        talent: Some("Ferocity".into()),
         diet: vec!["Meat".into(), "Fish".into()],
     }
 }
@@ -43,16 +43,20 @@ fn the_read_surface_answers_the_reference_calls() {
 
     open(&mut s);
     assert_eq!(s.eval::<i64>("return GetNumStableSlots()").unwrap(), 1);
-    assert_eq!(s.eval::<i64>("return GetNumStablePets()").unwrap(), 2);
+    assert_eq!(
+        s.eval::<i64>("return GetNumStablePets()").unwrap(),
+        1,
+        "the stabled pets, not the current one"
+    );
     assert_eq!(
         s.eval::<i64>("return GetNextStableSlotCost()").unwrap(),
         50_000
     );
 
-    // `PetStable.lua:77`'s five-value destructuring.
+    // `PetStable.lua:84`'s five-value destructuring, the talent tree last.
     assert_eq!(
         s.eval::<(String, String, i64, String, String)>(
-            "local i, n, l, f, loy = GetStablePetInfo(1) return i, n, l, f, loy"
+            "local i, n, l, f, t = GetStablePetInfo(1) return i, n, l, f, t"
         )
         .unwrap(),
         (
@@ -60,9 +64,20 @@ fn the_read_surface_answers_the_reference_calls() {
             "Bruiser".into(),
             38,
             "Wolf".into(),
-            "(Loyalty Level 6) Best Friend".into()
+            "Ferocity".into()
         )
     );
+    // Below 1, truncated, is the current pet (`0x5a1388`); a non-number raises.
+    for i in ["0", "-3", "0.9", "1.9"] {
+        let name = s.eval::<String>(&format!("return (select(2, GetStablePetInfo({i})))"));
+        assert_eq!(
+            name.unwrap(),
+            if i == "1.9" { "Bruiser" } else { "Rex" },
+            "{i}"
+        );
+    }
+    let err = s.run("GetStablePetInfo()").unwrap_err().to_string();
+    assert!(err.contains("Usage: GetStablePetInfo(index)"), "{err}");
 
     assert_eq!(
         s.eval::<(String, String)>("return GetStablePetFoodTypes(1)")
@@ -75,11 +90,29 @@ fn the_read_surface_answers_the_reference_calls() {
 }
 
 #[test]
-fn a_missing_pet_still_answers_five_values() {
+fn a_miss_answers_three_values_and_a_family_without_a_tree_four() {
     let mut s = UiScript::new().unwrap();
-    open(&mut s);
-    for call in ["GetStablePetInfo(2)", "GetStablePetInfo(9)"] {
-        assert_eq!(s.arity(call).unwrap(), 5, "{call} arity");
+    let mut no_tree = pet(9, "Imp", 20);
+    no_tree.talent = None;
+    // A row whose creature query has not landed has no family yet: the whole row misses.
+    let pending = StablePetSlot {
+        family: None,
+        ..pet(10, "Pending", 30)
+    };
+    s.set_stable(Some(state([
+        Some(pet(7, "Rex", 41)),
+        Some(no_tree),
+        Some(pending),
+        None,
+        None,
+    ])));
+    assert_eq!(s.arity("GetStablePetInfo(1)").unwrap(), 4);
+    for call in [
+        "GetStablePetInfo(3)",
+        "GetStablePetInfo(4)",
+        "GetStablePetInfo(9)",
+    ] {
+        assert_eq!(s.arity(call).unwrap(), 3, "{call} arity");
         // Still falsy for the stock window's `if ( GetStablePetInfo(i) )`.
         assert!(s.eval::<bool>(&format!("return not {call}")).unwrap());
         assert_eq!(
@@ -299,7 +332,7 @@ fn wrath_slots_three_and_four_read_select_and_pick_up() {
     full.num_stable_slots = 4;
     s.set_stable(Some(full));
     assert_eq!(s.eval::<i64>("return GetNumStableSlots()").unwrap(), 4);
-    assert_eq!(s.eval::<i64>("return GetNumStablePets()").unwrap(), 5);
+    assert_eq!(s.eval::<i64>("return GetNumStablePets()").unwrap(), 4);
     for slot in [3, 4] {
         assert_eq!(
             s.eval::<(String, i64)>(&format!(
@@ -380,7 +413,7 @@ fn index_five_is_rejected_by_read_select_pickup_drop_and_unstable() {
     assert_eq!(slot_index(4), Some(4));
     assert_eq!(slot_index(5), None);
     assert_eq!(slot_index(-1), None);
-    assert_eq!(s.arity("GetStablePetInfo(5)").unwrap(), 5);
+    assert_eq!(s.arity("GetStablePetInfo(5)").unwrap(), 3);
     assert!(s.eval::<bool>("return GetStablePetInfo(5) == nil").unwrap());
     assert_eq!(s.arity("GetStablePetFoodTypes(5)").unwrap(), 0);
     s.eval::<()>("ClickStablePet(4) ClickStablePet(5)").unwrap();

@@ -39,7 +39,7 @@ pub(super) const UNIT_FLAG_PET_IN_COMBAT: u32 = 0x0000_0800;
 /// frame. The reaction is 0: the pet frame reads none.
 pub(super) fn feed_pet_unit(
     script: Option<NonSendMut<UiScript>>,
-    bar: Res<PetBar>,
+    mut bar: ResMut<PetBar>,
     pet: PetUnit,
     // The per-field edges, for `fire_transitions`' watch-bridge arms.
     mut field_edges: MessageReader<crate::net::FieldChanged>,
@@ -127,9 +127,8 @@ pub(super) fn feed_pet_unit(
         script.fire_event("UNIT_PET", vec![ScriptValue::Str("player".into())]);
     }
 
-    // PET_ATTACK_START/STOP (334/335), the pet frame's attack glow, fire on the pet's
-    // `UNIT_FIELD_FLAGS & 0x800` edge: a field callback (`0x5ff580`, at `0x5ff793`/`0x5ff79a`,
-    // registered by offset at `0x6042e2`), not the Attack button's latch.
+    // PET_ATTACK_START/STOP, the pet frame's attack glow, fire on the pet's `UNIT_FIELD_FLAGS &
+    // 0x800` edge (`0x73c503`), whose `0x5d30a0` also sets the attack latch to the flag.
     let in_combat = fresh
         .as_ref()
         .and_then(|_| pet_combat_flag(pet.store(pet_guid)?, pet.self_guid.0));
@@ -138,6 +137,9 @@ pub(super) fn feed_pet_unit(
             gate.audit("feed_pet_unit", "the pet combat-flag edge");
             memory.in_combat = Some(now);
             debug!("ui_pet: pet in-combat flag → {now}");
+            if bar.native.is_some() && bar.attacking != now {
+                bar.attacking = now;
+            }
             script.fire_event(
                 if now {
                     "PET_ATTACK_START"

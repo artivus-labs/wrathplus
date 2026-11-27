@@ -1,6 +1,7 @@
 use super::*;
 
-/// `0x7cbd50` at level 30 (grayband[6] = 7: green down to 23, gray at 22) and the low edge.
+/// `0x98e6a0` at level 30 (grayband[6] = 7: green down to 23, gray at 22), the low edge and the
+/// band's cap of 8 (`0xaa34b8`).
 #[test]
 fn con_color_matches_the_byte_table() {
     assert_eq!(con_color(30, 35), CON_RED);
@@ -12,6 +13,7 @@ fn con_color_matches_the_byte_table() {
         "gap 7 = grayband[6], still green"
     );
     assert_eq!(con_color(30, 22), CON_GRAY, "gap 8 crosses the band");
+    assert_eq!(con_color(60, 51), CON_GRAY, "gap 9 past the band's 8");
     assert_eq!(con_color(1, 1), CON_YELLOW);
     assert_ne!(
         con_color(5, 1),

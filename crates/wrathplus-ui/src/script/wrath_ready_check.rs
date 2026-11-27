@@ -162,6 +162,10 @@ mod tests {
     #[test]
     fn assistant_initiator_status_confirm_preemption_and_finish_are_native() {
         let mut s = UiScript::new().unwrap();
+        // `ConfirmReadyCheck` (`0x5740c0`) sends nothing solo, live deadline or not.
+        s.model_mut().wrath_ready_check.ends_at = Some(1e9);
+        s.run("ConfirmReadyCheck(1)").unwrap();
+        s.model_mut().wrath_ready_check.ends_at = None;
         s.set_party(PartyState {
             own_guid: 7,
             leader_guid: 99,
@@ -190,9 +194,16 @@ mod tests {
         // A check before its deadline (`[0xbeb61c]`) refuses another (`0x57331f`).
         s.run("DoReadyCheck()").unwrap();
         assert_eq!(s.take_ui_errors(), ["ERR_READY_CHECK_IN_PROGRESS"]);
+        // Inside the check; the flag by `0x815500`, default false, so 0 and "0" are not ready.
+        s.run(r#"for _, v in ipairs({1, false, 0, "0"}) do ConfirmReadyCheck(v) end ConfirmReadyCheck()"#)
+            .unwrap();
+        let answer = |r| PartyRequest::ReadyCheckAnswer(r);
+        let answers = [true, false, false, false, false].map(answer);
+        assert_eq!(s.take_party_requests(), answers);
         s.wrath_ready_check_finish();
         s.run(
-            "assert(events[5][1]=='READY_CHECK_FINISHED'); DoReadyCheck(); CheckReadyCheckTime()",
+            "assert(events[5][1]=='READY_CHECK_FINISHED'); DoReadyCheck(); CheckReadyCheckTime() \
+             ConfirmReadyCheck(1)",
         )
         .unwrap();
         assert_eq!(s.take_party_requests(), vec![PartyRequest::ReadyCheckStart]);

@@ -4,8 +4,8 @@
 //! `DuelComplete`/`SendDuelCountdown`, SpellEffects.cpp `EffectDuel`); this module only maps.
 //!
 //! One `SMSG_CONTACT_LIST` becomes the shared friend list and ignore list, split by the contact
-//! flag bits (1 friend, 2 ignored), and the friends' notes ride `WrathContactNotes`; the mute bit
-//! has no place there. The duel countdown is AC's milliseconds (3000) as the shared whole
+//! flag bits (1 friend, 2 ignored), each only when the header's flags carry its bit, and the
+//! friends' notes ride `WrathContactNotes`; the mute bit has no place there. The duel countdown is AC's milliseconds (3000) as the shared whole
 //! seconds; a winner mode of 1 is a retreat.
 use crate::types::{FriendEntry, FriendOnline, FriendStatusUpdate};
 use crate::SessionEvent;
@@ -27,7 +27,7 @@ pub fn decode(opcode: u16, body: &[u8]) -> io::Result<Vec<SessionEvent>> {
     use crate::wrath_social::Packet as S;
     if matches!(opcode, 0x0067 | 0x0068) {
         return Ok(match crate::wrath_social::decode(opcode, body)? {
-            S::ContactList { contacts, .. } => {
+            S::ContactList { flags, contacts } => {
                 let friends = contacts
                     .iter()
                     .filter_map(|c| {
@@ -55,14 +55,20 @@ pub fn decode(opcode: u16, body: &[u8]) -> io::Result<Vec<SessionEvent>> {
                     .filter(|c| c.flags & CONTACT_FRIEND != 0 && !c.note.is_empty())
                     .map(|c| (c.guid, lossy(c.note.clone())))
                     .collect();
-                vec![
-                    SessionEvent::FriendList { friends },
-                    SessionEvent::WrathContactNotes {
+                // 12340 replaces only the lists the header names: friends on bit 1 (`0x6b7e01`),
+                // ignores on bit 2 (`0x6b7e3f`).
+                let mut events = Vec::new();
+                if flags & CONTACT_FRIEND != 0 {
+                    events.push(SessionEvent::FriendList { friends });
+                    events.push(SessionEvent::WrathContactNotes {
                         notes,
                         replace: true,
-                    },
-                    SessionEvent::IgnoreList { guids },
-                ]
+                    });
+                }
+                if flags & CONTACT_IGNORED != 0 {
+                    events.push(SessionEvent::IgnoreList { guids });
+                }
+                events
             }
             S::FriendStatus {
                 result,

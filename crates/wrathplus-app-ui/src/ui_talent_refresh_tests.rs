@@ -3,14 +3,22 @@ use wrathplus_formats::{SpellCatalog, TalentTabInfo};
 use wrathplus_protocol::{types::Field, ObjectFields};
 
 fn packet(app: &mut App, unspent: u32, ranks: &[(u32, u8)]) {
+    packet_groups(app, unspent, 0, &[ranks]);
+}
+
+/// A player `SMSG_TALENTS_INFO` with `groups`, the 0-based `active` one active, no glyphs.
+fn packet_groups(app: &mut App, unspent: u32, active: u8, groups: &[&[(u32, u8)]]) {
     let mut body = vec![0];
     body.extend(unspent.to_le_bytes());
-    body.extend([1, 0, ranks.len() as u8]);
-    for &(id, rank) in ranks {
-        body.extend(id.to_le_bytes());
-        body.push(rank);
+    body.extend([groups.len() as u8, active]);
+    for ranks in groups {
+        body.push(ranks.len() as u8);
+        for &(id, rank) in *ranks {
+            body.extend(id.to_le_bytes());
+            body.push(rank);
+        }
+        body.push(0); // glyph count
     }
-    body.push(0); // glyph count
     let events = wrathplus_protocol::wrath_progress::decode(
         wrathplus_protocol::wrath_progress::SMSG_TALENTS_INFO,
         &body,
@@ -19,8 +27,8 @@ fn packet(app: &mut App, unspent: u32, ranks: &[(u32, u8)]) {
     crate::net::handlers::dispatch(app.world_mut(), events);
 }
 
-#[test]
-fn talent_packet_repaints_open_page_and_learns_next_rank_without_tab_switch() {
+/// A warrior with one three-rank Arms talent (id 10), the offline net plugin and a VM.
+fn talent_app() -> App {
     let mut app = App::new();
     // Offline net plugin registers the production TalentsInfo handler; it opens no socket.
     app.add_plugins(crate::net::NetPlugin { connect: false });
@@ -59,9 +67,15 @@ fn talent_packet_repaints_open_page_and_learns_next_rank_without_tab_switch() {
             (Field::PlayerCharacterPoints1, 0, 99),
         ])),
     ));
-    let script = UiScript::new().unwrap();
+    app.insert_non_send_resource(UiScript::new().unwrap());
+    app
+}
+
+#[test]
+fn talent_packet_repaints_open_page_and_learns_next_rank_without_tab_switch() {
+    let mut app = talent_app();
+    let script = app.world_mut().non_send_resource_mut::<UiScript>();
     script.run("paints=0; local f=CreateFrame('Frame'); f:RegisterEvent('PLAYER_TALENT_UPDATE'); f:SetScript('OnEvent', function() paints=paints+1; local _,_,_,_,rank=GetTalentInfo(1,1); paintedRank=rank; paintedPoints=GetUnspentTalentPoints() end)").unwrap();
-    app.insert_non_send_resource(script);
     // Keep the real feed's Local memo/change ticks between runs without running the net ladder.
     let mut schedule = Schedule::default();
     schedule.add_systems(feed_talents);
@@ -173,5 +187,104 @@ fn player_rank_uses_active_spec_not_pet_or_delayed_spellbook() {
         player_rank(&t, &known, Some(&progress)),
         0,
         "respec ignores stale learned spells"
+    );
+}
+
+/// 12340 keeps the packet's group count and active group (`0x5c9740` into `[0xc20ff8]` and
+/// `[0xc20ff4]`), which `GetNumTalentGroups` and `GetActiveTalentGroup` answer.
+#[test]
+fn the_talents_packet_sets_the_group_count_and_active_group() {
+    let mut app = App::new();
+    app.add_plugins(crate::net::NetPlugin { connect: false });
+    app.init_resource::<PlayerActions>();
+    app.insert_non_send_resource(UiScript::new().unwrap());
+    let mut schedule = Schedule::default();
+    schedule.add_systems(feed_talents);
+    let groups = |app: &mut App| {
+        let script = app.world_mut().non_send_resource_mut::<UiScript>();
+        script
+            .eval::<(u32, u32)>("return GetNumTalentGroups(), GetActiveTalentGroup()")
+            .unwrap()
+    };
+    schedule.run(app.world_mut());
+    assert_eq!(groups(&mut app), (0, 1), "none before the packet");
+    packet_groups(&mut app, 0, 1, &[&[], &[]]);
+    schedule.run(app.world_mut());
+    assert_eq!(groups(&mut app), (2, 2));
+}
+
+/// The handler fires `ACTIVE_TALENT_GROUP_CHANGED` with (new, old) when the active group moves
+/// (`0x5c9ed7`-`0x5c9f00`), each 1-based, or 0 while there are no groups.
+#[test]
+fn a_new_active_group_fires_active_talent_group_changed() {
+    let mut app = App::new();
+    app.add_plugins(crate::net::NetPlugin { connect: false });
+    app.init_resource::<PlayerActions>();
+    let script = UiScript::new().unwrap();
+    script
+        .run(
+            "seen = {} local f = CreateFrame('Frame') \
+             f:RegisterEvent('ACTIVE_TALENT_GROUP_CHANGED') \
+             f:SetScript('OnEvent', function(_, _, new, old) seen[#seen + 1] = new .. ':' .. old end)",
+        )
+        .unwrap();
+    app.insert_non_send_resource(script);
+    let mut schedule = Schedule::default();
+    schedule.add_systems(feed_talents);
+    schedule.run(app.world_mut());
+    for active in [1, 0, 0] {
+        packet_groups(&mut app, 0, active, &[&[], &[]]);
+        schedule.run(app.world_mut());
+    }
+    let mut script = app.world_mut().non_send_resource_mut::<UiScript>();
+    script.tick(0.0);
+    assert_eq!(
+        script
+            .eval::<String>("return table.concat(seen, ' ')")
+            .unwrap(),
+        "2:0 1:2",
+        "the first packet moves from no groups; a repeat fires nothing"
+    );
+}
+
+/// The other group reads its own packet record, its unspent points the active group's spent
+/// and unspent less its own spent (`0x5c9ca0`), and a switch swaps the two.
+#[test]
+fn the_inactive_group_answers_its_own_ranks_and_points() {
+    let mut app = talent_app();
+    let mut schedule = Schedule::default();
+    schedule.add_systems(feed_talents);
+    let read = |app: &mut App| {
+        let script = app.world_mut().non_send_resource_mut::<UiScript>();
+        script
+            .eval::<(u32, u32, u32, u32)>(
+                "local _,_,_,_,a = GetTalentInfo(1, 1) local _,_,_,_,o = GetTalentInfo(1, 1, false, \
+                 false, 2) return a, o, GetUnspentTalentPoints(), GetUnspentTalentPoints(false, false, 2)",
+            )
+            .unwrap()
+    };
+    packet_groups(&mut app, 4, 0, &[&[(10, 0)], &[(10, 2)]]);
+    schedule.run(app.world_mut());
+    assert_eq!(
+        read(&mut app),
+        (1, 3, 4, 2),
+        "1 + 4 points, 3 spent in group 2"
+    );
+    packet_groups(&mut app, 2, 1, &[&[(10, 0)], &[(10, 2)]]);
+    schedule.run(app.world_mut());
+    assert_eq!(
+        read(&mut app),
+        (3, 3, 2, 2),
+        "group 2 active: the default reads it"
+    );
+    let script = app.world_mut().non_send_resource_mut::<UiScript>();
+    assert_eq!(
+        script
+            .eval::<(u32, u32)>(
+                "local _,_,_,_,r = GetTalentInfo(1, 1, false, false, 1) \
+                 return r, GetUnspentTalentPoints(false, false, 1)"
+            )
+            .unwrap(),
+        (1, 4)
     );
 }

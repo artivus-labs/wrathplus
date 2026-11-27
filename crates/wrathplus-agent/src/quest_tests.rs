@@ -24,6 +24,8 @@ UnitInParty = function() return true end
 UnitName = function(u) if u == "questnpc" then return "Pallytest" end end
 signals = {}
 AgentSignal = function(name, who, what, id) signals[#signals + 1] = name .. " " .. who .. " " .. what .. " " .. id end
+-- What is passed (wp.notice) is not these tests' business.
+Notice.on = false
 Move = { companion_now = function() return "Pallytest" end }
 "#;
 

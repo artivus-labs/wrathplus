@@ -70,12 +70,12 @@ pub struct ItemStatsHead {
     pub sell_price: u32,
 }
 
-/// Each damaged item's repair cost in copper after the vendor's discount (`0x4faf30`).
+/// Each damaged item's repair cost in copper after the vendor's discount (`0x584b20`).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RepairCosts {
     /// Equipped items by live inventory id.
     pub equipped: std::collections::HashMap<u32, u32>,
-    /// Container items by `(bag, slot)`: bags 0-4, the bank vault -1 and bank bags 5-10.
+    /// Container items by `(bag, slot)`: bags 0-4, the bank vault -1 and bank bags 5-11.
     pub bags: std::collections::HashMap<(i64, u32), u32>,
 }
 
@@ -102,9 +102,10 @@ impl super::UiScript {
         }
     }
 
-    /// Push `GetRepairAllCost`'s total in copper, swept by the app ahead of the events that read it.
-    pub fn set_repair_all_cost(&mut self, copper: u32) {
-        self.model_mut().repair_all_cost = copper;
+    /// Push `GetRepairAllCost`'s values: the carried total in copper, and whether a worn or
+    /// bags-0-4 item is below its max durability, priced or not (`0x585ab5`).
+    pub fn set_repair_all_cost(&mut self, copper: u32, damaged: bool) {
+        self.model_mut().repair_all_cost = (copper, damaged);
     }
 
     /// Push the repair costs the item tooltip bindings return.
@@ -415,26 +416,6 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // GetRepairAllCost() → cost, canRepair: whether there is damage to pay for, which enables the
-    // repair-all button (`MerchantFrame.lua:38`); 0 away from a vendor that repairs (`0x4fbd60`).
-    g.set(
-        "GetRepairAllCost",
-        lua.create_function(|lua, ()| {
-            let cost = {
-                let model = lua.app_data_ref::<Model>().expect("model app_data");
-                if model.merchant.as_ref().is_some_and(|m| m.can_repair) {
-                    model.repair_all_cost
-                } else {
-                    0
-                }
-            };
-            Ok(MultiValue::from_vec(vec![
-                Value::Integer(i64::from(cost)),
-                Value::Boolean(cost > 0),
-            ]))
-        })?,
-    )?;
-
     g.set(
         "RepairAllItems",
         lua.create_function(|lua, ()| {
@@ -484,49 +465,63 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // ShowMerchantSellCursor(index) (`0x4fbab0`) and ShowBuybackSellCursor(index) (`0x4fbbb0`):
+    // ShowMerchantSellCursor(index) (`0x5856d0`) and ShowBuybackSellCursor(index) (`0x585890`):
     // despite the names, the buy cursor, re-armed each frame an item is hovered
     // (`MerchantFrame.xml:726-733`). Every fail path returns without `CursorSetMode`; the
     // in-flight item lock and base-mode Point gates live app-side.
     g.set(
         "ShowMerchantSellCursor",
-        lua.create_function(|lua, index: usize| {
-            arm_vendor_cursor(lua, |m| {
-                m.items.get(index.wrapping_sub(1)).map(|it| it.price)
-            });
-            Ok(())
+        lua.create_function(|lua, index: Value| {
+            arm_vendor_cursor(
+                lua,
+                index,
+                "Usage: ShowMerchantSellCursor(index)",
+                |m, i| {
+                    let it = m.merchant.as_ref()?.items.get(i)?;
+                    Some(super::wrath_merchant::cannot_buy(m, it))
+                },
+            )
         })?,
     )?;
+    // The buyback row tests the purse alone (`0x585962`).
     g.set(
         "ShowBuybackSellCursor",
-        lua.create_function(|lua, index: usize| {
-            arm_vendor_cursor(lua, |m| {
-                m.buyback.get(index.wrapping_sub(1)).map(|it| it.price)
-            });
-            Ok(())
+        lua.create_function(|lua, index: Value| {
+            arm_vendor_cursor(lua, index, "Usage: ShowBuybackSellCursor(index)", |m, i| {
+                let it = m.merchant.as_ref()?.buyback.get(i)?;
+                Some(m.money < u64::from(it.price))
+            })
         })?,
     )?;
 
     Ok(())
 }
 
-/// Arm the vendor hover cursor from a row's price: Buy(3) if the player can afford it, else the
-/// greyed UnableBuy(23); no price leaves the cursor untouched.
-fn arm_vendor_cursor(lua: &Lua, price_of: impl FnOnce(&MerchantState) -> Option<u32>) {
-    let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-    // The family bails on `IsTargeting` first (`0x6e48a0`): an armed spell keeps its cursor.
-    if model.spell_targeting {
-        return;
+/// Arm the vendor hover cursor: Buy(3), or the greyed UnableBuy when `unable` says the row cannot
+/// be bought; no row leaves the cursor untouched.
+fn arm_vendor_cursor(
+    lua: &Lua,
+    index: Value,
+    usage: &'static str,
+    unable: impl FnOnce(&Model, usize) -> Option<bool>,
+) -> mlua::Result<()> {
+    // The family bails on `IsTargeting` (`0x7fd620`) ahead of its argument check: an armed spell
+    // keeps its cursor.
+    if lua.app_data_ref::<Model>().expect("model").spell_targeting {
+        return Ok(());
     }
-    let Some(price) = model.merchant.as_ref().and_then(price_of) else {
-        return;
+    let index = number_arg(lua, index, usage)?.wrapping_sub(1);
+    let mut model = lua.app_data_mut::<Model>().expect("model app_data");
+    let Some(unable) = usize::try_from(index).ok().and_then(|i| unable(&model, i)) else {
+        return Ok(());
     };
-    model.ui_cursor = Some(if model.money >= u64::from(price) {
-        UiCursorMode::Buy
-    } else {
+    model.ui_cursor = Some(if unable {
         UiCursorMode::UnableBuy
+    } else {
+        UiCursorMode::Buy
     });
     model.ui_cursor_dirty = true;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -778,22 +773,6 @@ mod tests {
         assert!(s.take_merchant_buybacks().is_empty(), "drained");
     }
 
-    /// Away from a vendor that repairs, the total reads 0, as `0x4fbd60` pushes there.
-    #[test]
-    fn the_repair_all_total_reads_zero_away_from_a_repairer() {
-        let mut s = UiScript::new().unwrap();
-        s.set_repair_all_cost(1234);
-        assert!(
-            s.eval::<bool>("return GetRepairAllCost() == 0").unwrap(),
-            "no vendor"
-        );
-        s.set_merchant(Some(stock()));
-        assert!(
-            s.eval::<bool>("return GetRepairAllCost() == 0").unwrap(),
-            "a vendor that does not repair"
-        );
-    }
-
     /// `RepairAllItems` returns before anything else unless the open merchant repairs
     /// (`0x4fadb0`, tested at `0x4fbfe9`–`0x4fbff0`): no vendor, or one without the repair flag,
     /// queues nothing.
@@ -815,11 +794,16 @@ mod tests {
         let mut state = stock();
         state.can_repair = true;
         s.set_merchant(Some(state));
-        s.set_repair_all_cost(1234);
+        s.set_repair_all_cost(1234, false);
         assert!(s.eval::<bool>("return CanMerchantRepair() == 1").unwrap());
-        assert!(s
-            .eval::<bool>("local c, can = GetRepairAllCost()\nreturn c == 1234 and can == true",)
-            .unwrap());
+        let probe = "local c, can = GetRepairAllCost() return c == 1234 and can";
+        assert_eq!(
+            s.eval::<Option<i64>>(probe).unwrap(),
+            None,
+            "no damage: nil"
+        );
+        s.set_repair_all_cost(1234, true);
+        assert_eq!(s.eval::<Option<i64>>(probe).unwrap(), Some(1), "damaged: 1");
 
         s.run("RepairAllItems()").unwrap();
         assert!(s.take_repair_all());

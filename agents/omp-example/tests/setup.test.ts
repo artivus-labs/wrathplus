@@ -17,6 +17,8 @@ test("settings: the port is required, the rest has defaults", () => {
   expect([s.checkinMinutes, s.reflectHours, s.sessionHours, s.maxCost]).toEqual([20, 3, 6, undefined]);
   expect(s.repeatMinutes).toBe(15);
   expect(settingsFromEnv({ ...base, WRATHPLUS_OMP_REPEAT_MINUTES: "0" }, example).repeatMinutes).toBe(0);
+  expect(s.noticeSeconds).toBe(15);
+  expect(settingsFromEnv({ ...base, WRATHPLUS_OMP_NOTICE_SECONDS: "0" }, example).noticeSeconds).toBe(0);
   const t = settingsFromEnv({ ...base, WRATHPLUS_OMP_REFLECT_HOURS: "0", WRATHPLUS_OMP_CHECKIN_MINUTES: "x", WRATHPLUS_OMP_MAX_COST: "5" }, example);
   expect([t.reflectHours, t.checkinMinutes, t.maxCost]).toEqual([0, 20, 5]);
 });

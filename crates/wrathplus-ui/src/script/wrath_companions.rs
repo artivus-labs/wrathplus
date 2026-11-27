@@ -61,15 +61,12 @@ fn companion_type(v: &Value) -> Option<usize> {
         .position(|t| t.as_bytes().eq_ignore_ascii_case(&s))
 }
 
-/// The 1-based index argument (`0x84e030`, rounded), as a 0-based list index.
-fn index_arg(v: &Value) -> Option<usize> {
-    let n = match v {
-        Value::Integer(i) => *i as f64,
-        Value::Number(f) => *f,
-        Value::String(s) => s.to_str().ok()?.trim().parse().ok()?,
-        _ => return None,
-    };
-    usize::try_from(n.round() as i64 - 1).ok()
+/// The 1-based index as a 0-based list index, `None` for the usage error: `lua_tonumber` (a
+/// non-number reads 0), equal to 0 raises (`test ah,0x44; jnp` at `0x53e2f9`, so NaN does not),
+/// then `fistp` truncates and `index - 1` is compared unsigned, so 0.4 or -1 names nothing.
+fn index_arg(lua: &Lua, v: &Value) -> Option<usize> {
+    let n = super::binding_abi::coerced_number(lua, Some(v.clone()));
+    (n != 0.0).then(|| (n as i64 as i32).wrapping_sub(1) as u32 as usize)
 }
 
 fn usage(text: &str) -> mlua::Error {
@@ -83,7 +80,7 @@ fn entry(
     index: &Value,
     text: &str,
 ) -> mlua::Result<(usize, Option<CompanionView>)> {
-    let (Some(ty), Some(i)) = (companion_type(ty), index_arg(index)) else {
+    let (Some(ty), Some(i)) = (companion_type(ty), index_arg(lua, index)) else {
         return Err(usage(text));
     };
     let model = lua.app_data_ref::<Model>().expect("model");
@@ -158,16 +155,17 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             Ok(())
         })?,
     )?;
-    // start, duration, enable: the spell's cooldown, as `GetSpellCooldown` reports one.
+    // start, duration, enable: the spell's cooldown, as `GetSpellCooldown` reports one; nothing
+    // past the list (`0x53e526`).
     g.set(
         "GetCompanionCooldown",
         lua.create_function(|lua, (ty, index): (Value, Value)| {
             let (_, c) = entry(lua, &ty, &index, "GetCompanionCooldown(type, index)")?;
             let Some(c) = c else {
-                return Ok((0.0, 0.0, 0));
+                return Ok(MultiValue::new());
             };
             let now = super::clock::now(lua);
-            Ok(match c.cooldown {
+            let (start, duration, enable) = match c.cooldown {
                 Some((start_ms, duration_ms, enabled)) => {
                     let (start, duration) =
                         (start_ms as f64 / 1000.0, f64::from(duration_ms) / 1000.0);
@@ -178,7 +176,13 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                     }
                 }
                 None => (0.0, 0.0, 1),
-            })
+            };
+            let n = |v: f64| Value::Number(v);
+            Ok(MultiValue::from_vec(vec![
+                n(start),
+                n(duration),
+                Value::Integer(enable.into()),
+            ]))
         })?,
     )?;
     // `0x53bbc0`: the cursor clears; the same spell already held is the drop, an empty cursor
@@ -198,7 +202,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             if held.is_none() {
                 // `GetCursorInfo` names a companion by its list and 1-based index (`0x8009b0`).
                 model.cursor = Some(CursorPayload::Spell(CursorSpell {
-                    book_slot: index_arg(&index).map_or(0, |i| i as u32 + 1),
+                    book_slot: index_arg(lua, &index).map_or(0, |i| i as u32 + 1),
                     book_type: COMPANION_TYPES[kind].into(),
                     spell_id: c.spell_id,
                     texture: c.icon,
@@ -294,6 +298,15 @@ mod tests {
             assert(not pcall(GetCompanionInfo, "MOUNT"))
             local start, duration, enable = GetCompanionCooldown("MOUNT", 1)
             assert(start == 0 and duration == 0 and enable == 1)
+            assert(select("#", GetCompanionCooldown("MOUNT", 99)) == 0)
+            -- Only an index equal to 0 raises; the rest truncate, and below 1 names nothing.
+            assert(select(3, GetCompanionInfo("CRITTER", 2.9)) == 11)
+            for _, i in ipairs({0.4, -1, 0/0}) do
+                assert(select("#", GetCompanionInfo("CRITTER", i)) == 0)
+            end
+            assert(not pcall(GetCompanionInfo, "CRITTER", 0))
+            assert(not pcall(GetCompanionCooldown, "MOUNT"))
+            assert(not pcall(CallCompanion, "MOUNT", "x"))
             "##,
         )
         .unwrap();

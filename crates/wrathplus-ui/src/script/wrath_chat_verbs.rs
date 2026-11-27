@@ -85,14 +85,27 @@ fn name_ok(name: &str) -> mlua::Result<()> {
     Ok(())
 }
 
-/// An arena-team slot argument: rounded, 1-based; 0 past the three slots.
+/// An arena-team slot argument: truncated (`fistp` under RC=11, `0x515cc0`-`0x515ff0`), 1-based;
+/// 0 past the three slots.
 fn team(lua: &Lua, v: &Value) -> u8 {
     lua.coerce_number(v.clone())
         .ok()
         .flatten()
-        .map(|n| n.round_ties_even() as i64)
+        .map(|n| n.trunc() as i64)
         .filter(|n| (1..=3).contains(n))
         .map_or(0, |n| n as u8)
+}
+
+/// `0x7e1830(text, buf, 0x40, 0x100, 1)`: every `|` dropped (`0x7e17f0`), the text cut at its first
+/// CR, LF or `\n` (`0x7e1640`), then cut at its 64th character (`0x7e189d`-`0x7e18b0`), so 63 stay.
+fn reason_text(s: &str) -> String {
+    let s: String = s.chars().filter(|&c| c != '|').collect();
+    let end = [s.find(['\r', '\n']), s.find("\\n")]
+        .into_iter()
+        .flatten()
+        .min()
+        .unwrap_or(s.len());
+    s[..end].chars().take(63).collect()
 }
 
 fn is_number(lua: &Lua, v: &Value) -> bool {
@@ -135,7 +148,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     })?;
     // UninviteUnit(unitOrName [, reason]) (`0x51a7a0`): a unit token or a member's name resolves
     // to a guid (`0x60abf0`, ported as `Model::resolve_token`), and one that does sends
-    // `CMSG_GROUP_UNINVITE_GUID` with the reason cut to 64 characters (`0x7e1830(.., 0x40, ..)`).
+    // `CMSG_GROUP_UNINVITE_GUID` with the reason as [`reason_text`] leaves it.
     set(lua, "UninviteUnit", |lua, args| {
         if !has_player(lua) {
             return none();
@@ -143,11 +156,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         let Some(who) = text(lua, &arg(&args, 0))? else {
             return none();
         };
-        let reason: String = text(lua, &arg(&args, 1))?
-            .unwrap_or_default()
-            .chars()
-            .take(64)
-            .collect();
+        let reason = reason_text(&text(lua, &arg(&args, 1))?.unwrap_or_default());
         let mut model = lua.app_data_mut::<Model>().expect("model app_data");
         let guid = super::wrath_unit_popup::guid_of(&model, &who);
         if guid != 0 {
@@ -157,15 +166,23 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         }
         none()
     })?;
-    // PromoteToLeader(name) (`0x573e10`).
+    // PromoteToLeader(unitOrName) (`0x573e10`): with the player object (`0x520198`), the token or
+    // member name through `0x60abf0` (`0x5201e5`), as UninviteUnit. Labelled: an unresolved name
+    // goes to the app's roster match, where 12340 searches the group and the visible units by
+    // prefix unless argument 2 is set (`0x52027e`); the player type test (`0x52022a`) is not run.
     set(lua, "PromoteToLeader", |lua, args| {
-        let Some(name) = text(lua, &arg(&args, 0))? else {
+        let Some(who) = text(lua, &arg(&args, 0))? else {
             return Err(mlua::Error::runtime("Usage: PromoteToLeader(name)"));
         };
-        lua.app_data_mut::<Model>()
-            .expect("model app_data")
-            .party_requests
-            .push(PartyRequest::PromoteName(name));
+        if !has_player(lua) {
+            return none();
+        }
+        let mut model = lua.app_data_mut::<Model>().expect("model app_data");
+        let request = match super::wrath_unit_popup::guid_of(&model, &who) {
+            0 => PartyRequest::PromoteName(who),
+            guid => PartyRequest::PromoteGuid(guid),
+        };
+        model.party_requests.push(request);
         none()
     })?;
 
@@ -193,22 +210,20 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     }
 
     // ── friends ──
-    // AddOrRemoveFriend(name [, note]) (`0x6b7b70` → `0x6b6e10`): removes a listed friend, else
-    // adds. Labelled: the note is not carried by the add request.
+    // AddOrRemoveFriend(name [, note]) (`0x6b7b70` → `0x6b6e10`): removes a friend whose name
+    // matches through `0x76ea40` (`0x6b6e98`), else adds with the note, as AddFriend.
     set(lua, "AddOrRemoveFriend", |lua, args| {
-        let Some(name) = text(lua, &arg(&args, 0))?.filter(|n| !n.trim().is_empty()) else {
+        let Some((name, note)) = super::social::friend_args(lua, &args) else {
             return none();
         };
         let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-        let listed = model
-            .social
-            .friends
-            .iter()
-            .any(|f| f.name.eq_ignore_ascii_case(&name));
+        let listed = model.social.friends.iter().any(|f| {
+            !f.name.is_empty() && super::unit::token::sstr_eq_i(f.name.as_bytes(), name.as_bytes())
+        });
         let request = if listed {
             super::social::SocialRequest::RemoveFriendName(name)
         } else {
-            super::social::SocialRequest::AddFriend(name)
+            super::social::SocialRequest::AddFriend { name, note }
         };
         model.social_requests.push(request);
         none()
@@ -355,26 +370,23 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     explicit_item::install_by_name(lua)?;
 
     // ── talents, titles, dev ──
+    // SetActiveTalentGroup(groupIndex) (`0x5c5e70`): the index truncated, less one; the active
+    // group, one at or past the count, or one past the second does nothing (`0x5c5ec4`-`0x5c5eda`),
+    // another casts its activation spell (`0xad05e8`), which the app sends.
     set(lua, "SetActiveTalentGroup", |lua, args| {
-        let g = arg(&args, 0);
-        if !is_number(lua, &g) {
-            return Err(mlua::Error::runtime(
-                "Usage: SetActiveTalentGroup(groupIndex)",
-            ));
-        }
-        let group = lua.coerce_number(g)?.unwrap_or(0.0).round_ties_even() as i64;
-        let ask = |name: &str| -> mlua::Result<i64> {
-            match lua.globals().get::<Value>(name)? {
-                Value::Function(f) => Ok(f.call::<Option<i64>>(())?.unwrap_or(1)),
-                _ => Ok(1),
-            }
-        };
-        let (active, count) = (ask("GetActiveTalentGroup")?, ask("GetNumTalentGroups")?);
-        if group != active && group >= 1 && group <= count.min(2) {
-            call(
-                lua,
-                super::ScriptCall::ActivateTalentGroup { group: group as u8 },
-            );
+        const USAGE: &str = "Usage: SetActiveTalentGroup(groupIndex)";
+        let index = i64::from(super::binding_abi::number_arg(lua, arg(&args, 0), USAGE)?) - 1;
+        let groups = lua
+            .app_data_ref::<Model>()
+            .expect("model app_data")
+            .talent_groups
+            .clone();
+        let index = u32::try_from(index)
+            .ok()
+            .filter(|&i| i != groups.active && i < groups.count && i < 2);
+        if let Some(i) = index {
+            let group = i as u8 + 1;
+            call(lua, super::ScriptCall::ActivateTalentGroup { group });
         }
         none()
     })?;
@@ -470,40 +482,6 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             _ => Value::Nil,
         }]))
     })?;
-    // GetPlayerInfoByGUID(guid) (`0x613f90`) → class, englishClass, race, englishRace, sex,
-    // name, realm for a player GUID whose unit is known; nothing otherwise. Labelled: native also
-    // answers from its name cache for players never seen as units.
-    set(lua, "GetPlayerInfoByGUID", |lua, args| {
-        let Some(text) = text(lua, &arg(&args, 0))? else {
-            return Err(mlua::Error::runtime(
-                r#"Usage: GetPlayerInfoByGUID("playerGUID")"#,
-            ));
-        };
-        let guid = parse_guid(&text);
-        if guid == 0 || guid >> 60 != 0 {
-            return none();
-        }
-        let model = lua.app_data_ref::<Model>().expect("model app_data");
-        let Some(u) = model.units_by_guid.get(&guid) else {
-            return none();
-        };
-        let s = |v: &Option<String>| -> mlua::Result<Value> {
-            Ok(match v {
-                Some(v) => Value::String(lua.create_string(v)?),
-                None => Value::Nil,
-            })
-        };
-        Ok(MultiValue::from_vec(vec![
-            s(&u.class)?,
-            s(&u.class_file)?,
-            s(&u.race)?,
-            s(&u.race_file)?,
-            // UnitSex's scale; the unfilled 0 answers 2, as UnitSex does.
-            Value::Integer(i64::from(if u.sex == 0 { 2 } else { u.sex })),
-            s(&u.name)?,
-            Value::String(lua.create_string("")?),
-        ]))
-    })?;
     // GetAutoCompleteResults(text, include, exclude, numReturns [, cursorPosition
     // [, allowFullMatch]]) (`0x57b3a0`) → up to numReturns names starting with the text: group
     // members (flag 0x1), guild members (0x2) and friends (0x4), online ones adding 0x20 (3.3.5
@@ -517,15 +495,16 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         if !(1..=3).all(|i| is_number(lua, &arg(&args, i))) {
             return Err(mlua::Error::runtime(USAGE));
         }
+        // The numbers truncate (`fistp` under RC=11); allowFullMatch is `lua_toboolean`.
         let num = |i| {
             lua.coerce_number(arg(&args, i))
                 .ok()
                 .flatten()
                 .unwrap_or(0.0)
-                .round_ties_even() as i64
+                .trunc() as i64
         };
         let (include, exclude, count) = (num(1) as u32, num(2) as u32, num(3).max(0) as usize);
-        let full = super::binding_abi::bool_or_default(args.get(5), false);
+        let full = !matches!(args.get(5), None | Some(Value::Nil | Value::Boolean(false)));
         let model = lua.app_data_ref::<Model>().expect("model app_data");
         let mut seen: Vec<(String, u32)> = Vec::new();
         let mut add = |name: &str, flags: u32| {
@@ -564,18 +543,6 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     Ok(())
 }
 
-/// A GUID string: an optional `0x`, then up to 16 hex digits.
-fn parse_guid(s: &str) -> u64 {
-    let s = s
-        .strip_prefix("0x")
-        .or_else(|| s.strip_prefix("0X"))
-        .unwrap_or(s);
-    s.chars()
-        .take(16)
-        .map_while(|c| c.to_digit(16))
-        .fold(0u64, |acc, d| acc << 4 | u64::from(d))
-}
-
 #[cfg(test)]
 mod tests {
     use super::WrathChatVerbRequest as R;
@@ -597,10 +564,11 @@ mod tests {
                 name: "Ann".into(),
                 guid: 0x20,
             });
+        s.model_mut().unit_guids.party[0] = 0x20;
         s.run(&format!(
             "InviteUnit('Bob') UninviteUnit('ann', 'afk') UninviteUnit('Nobody') \
                UninviteUnit('Ann', '{}') PromoteToLeader('Cid') GuildInvite('Dee') \
-               GuildSetLeader('Eve') GuildPromote()",
+               GuildSetLeader('Eve') GuildPromote() PromoteToLeader('party1') PromoteToLeader('ann')",
             "r".repeat(70)
         ))
         .unwrap();
@@ -608,8 +576,22 @@ mod tests {
             s.run(&format!("InviteUnit('{}')", "x".repeat(49))).is_err(),
             "Name too long"
         );
+        assert!(
+            s.run("PromoteToLeader()").is_err(),
+            "Usage: PromoteToLeader(name)"
+        );
         let model = s.model_mut();
-        assert_eq!(model.party_requests.len(), 4);
+        assert_eq!(model.party_requests.len(), 6);
+        use crate::script::party::PartyRequest as P;
+        assert_eq!(
+            model.party_requests[3..],
+            [
+                P::PromoteName("Cid".into()),
+                P::PromoteGuid(0x20),
+                P::PromoteGuid(0x20)
+            ],
+            "a token or member name promotes by guid; an unresolved name keeps the roster match"
+        );
         assert_eq!(
             model.party_requests[1..3],
             [
@@ -619,11 +601,23 @@ mod tests {
                 },
                 crate::script::party::PartyRequest::UninviteGuid {
                     guid: 0x20,
-                    reason: "r".repeat(64)
+                    reason: "r".repeat(63)
                 },
             ],
-            "an unresolved name sends nothing; the reason stops at 64 characters"
+            "an unresolved name sends nothing; the reason keeps 63 characters (`0x7e189d`)"
         );
+        drop(model);
+        s.model_mut().party_requests.clear();
+        s.run(r"UninviteUnit('Ann', 'a|b|c\nsecond line')").unwrap();
+        assert_eq!(
+            s.model_mut().party_requests.clone(),
+            [crate::script::party::PartyRequest::UninviteGuid {
+                guid: 0x20,
+                reason: "abc".into()
+            }],
+            "pipes dropped (`0x7e17f0`), cut at a line break (`0x7e1640`)"
+        );
+        let model = s.model_mut();
         assert_eq!(model.guild_requests.len(), 2);
         drop(model);
         s.model_mut()
@@ -633,14 +627,20 @@ mod tests {
                 name: "Fay".into(),
                 ..Default::default()
             });
-        s.run("AddOrRemoveFriend('fay') AddOrRemoveFriend('Gus', 'note')")
-            .unwrap();
+        s.run(
+            "AddOrRemoveFriend('fay') AddOrRemoveFriend('Gus', 'note') AddFriend() AddIgnore() \
+             DelIgnore() AddOrDelIgnore() AddOrRemoveFriend()",
+        )
+        .unwrap();
         let reqs = s.model_mut().social_requests.clone();
         assert_eq!(
             reqs,
             vec![
                 crate::script::social::SocialRequest::RemoveFriendName("fay".into()),
-                crate::script::social::SocialRequest::AddFriend("Gus".into()),
+                crate::script::social::SocialRequest::AddFriend {
+                    name: "Gus".into(),
+                    note: "note".into()
+                },
             ]
         );
     }
@@ -649,7 +649,7 @@ mod tests {
     fn command_intents_split_between_call_order_and_the_outbox() {
         let mut s = vm();
         s.run(
-            "ArenaTeamInviteByName(2, 'Hal') ArenaTeamInviteByName(1, '') ArenaTeamLeave(4) \
+            "ArenaTeamInviteByName(2.9, 'Hal') ArenaTeamInviteByName(1, '') ArenaTeamLeave(4) \
              CancelShapeshiftForm() Dismount() StartAttack() StartAttack('target') StopAttack() \
              TargetLastFriend() TargetNearestEnemyPlayer(1) SetCurrentTitle(42) \
              SetActiveTalentGroup(2) SetTaxiBenchmarkMode()",
@@ -688,6 +688,25 @@ mod tests {
         );
         assert!(s.run("ArenaTeamLeave()").is_err());
         assert!(s.run("SetCurrentTitle('x')").is_err());
+        // Two groups, the first active: group 2 casts (2.9 truncates), the active, a third and a
+        // non-number do not.
+        s.set_talent_groups(crate::script::WrathTalentGroups {
+            count: 2,
+            active: 0,
+            inactive: None,
+        });
+        s.model_mut().script_calls.clear();
+        s.run("SetActiveTalentGroup(1) SetActiveTalentGroup(3) SetActiveTalentGroup(2.9)")
+            .unwrap();
+        assert_eq!(
+            s.model_mut().script_calls.clone(),
+            vec![C::ActivateTalentGroup { group: 2 }]
+        );
+        let err = s.run("SetActiveTalentGroup()").unwrap_err().to_string();
+        assert!(
+            err.contains("Usage: SetActiveTalentGroup(groupIndex)"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -697,31 +716,6 @@ mod tests {
             s.eval::<i64>("return select('#', BNIsFriend(1)) + select('#', BNSendWhisper())")
                 .unwrap(),
             0
-        );
-        s.model_mut().units_by_guid.insert(
-            0x42,
-            crate::script::UnitState {
-                name: Some("Ivy".into()),
-                class: Some("Mage".into()),
-                class_file: Some("MAGE".into()),
-                race: Some("Gnome".into()),
-                race_file: Some("Gnome".into()),
-                sex: 3,
-                ..Default::default()
-            },
-        );
-        assert_eq!(
-            s.eval::<(String, String, i64, String)>(
-                "local c, cf, _, _, sex, n = GetPlayerInfoByGUID('0x0000000000000042') return c, cf, sex, n"
-            )
-            .unwrap(),
-            ("Mage".into(), "MAGE".into(), 3, "Ivy".into())
-        );
-        assert_eq!(
-            s.eval::<i64>("return select('#', GetPlayerInfoByGUID('0xF130000000000042'))")
-                .unwrap(),
-            0,
-            "not a player GUID"
         );
         s.run(
             "SEEN = nil local f = CreateFrame('Frame') f:RegisterEvent('CHAT_MSG_SYSTEM') \
@@ -761,6 +755,12 @@ mod tests {
                 .unwrap(),
             vec!["Albin".to_string()],
             "online, not in the group"
+        );
+        assert_eq!(
+            s.eval::<i64>("return select('#', GetAutoCompleteResults('al', 0xFFFFFFFF, 0, 1.9))")
+                .unwrap(),
+            1,
+            "the count truncates (`0x57b3a0`)"
         );
         assert!(s.run("GetAutoCompleteResults('al')").is_err());
     }

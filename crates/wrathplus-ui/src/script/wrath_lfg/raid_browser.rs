@@ -11,7 +11,7 @@ use std::sync::Arc;
 use mlua::{Lua, MultiValue, Value};
 
 use super::{Model, UiScript, WrathLfgEncounter};
-use crate::script::binding_abi::number_arg;
+use crate::script::binding_abi::{number_arg, tointeger_arg};
 
 /// The character block of a raid browser entry, in the native record's order (`0x5529e0`).
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -121,8 +121,7 @@ pub(crate) struct RaidBrowser {
     joined: u32,
     /// `0xacd660`: players listed before groups.
     players_first: bool,
-    /// `0xbea820`: the keys, most recent first, each with its descending flag. Labelled: the
-    /// initial order is unread; this starts at name, level, class, zone, then the roles.
+    /// `0xbea820`: the keys, most recent first, each with its descending flag.
     order: [(u8, bool); 7],
     requests: Vec<WrathRaidBrowserRequest>,
 }
@@ -134,8 +133,9 @@ impl Default for RaidBrowser {
             groups: Vec::new(),
             players: Vec::new(),
             joined: 0,
-            players_first: false,
-            order: [3, 1, 2, 0, 4, 5, 6].map(|k| (k, false)),
+            // World entry (`0x55d56c`-`0x55d591`): players first, keys 0..6 in order, ascending.
+            players_first: true,
+            order: [0, 1, 2, 3, 4, 5, 6].map(|k| (k, false)),
             requests: Vec::new(),
         }
     }
@@ -369,7 +369,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     // SearchLFGGetResults(index) (`0x555fd0`) → name, level, area, class name, comment, other
     // members, status, class file, encounters total and killed, then the 28-value tail.
     set(lua, "SearchLFGGetResults", |lua, args| {
-        let i = number_arg(lua, arg(&args, 0), "Usage: SearchLFGGetResults(index)")?;
+        // `lua_tointeger` (`0x556005`) rounds the index.
+        let i = tointeger_arg(lua, arg(&args, 0), "Usage: SearchLFGGetResults(index)")?;
         let m = lua.app_data_ref::<Model>().expect("model app_data");
         let rb = &m.wrath_lfg.raid_browser;
         if m.wrath_lfg.row(rb.view.dungeon & 0xff_ffff).is_none() {
@@ -411,8 +412,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         tail(&mut out, Some(rec));
         Ok(MultiValue::from_vec(out))
     })?;
-    // SearchLFGGetPartyResults(index, partyIndex) (`0x556280`) → a group's partyIndex-th member
-    // after the leader: name, level, relationship, class name, area, comment and the tail; an
+    // SearchLFGGetPartyResults(index, partyIndex) (`0x556280`) → a group's member partyIndex, 0
+    // the leader: name, level, relationship, class name, area, comment and the tail; an
     // unresolved or missing member answers nil, "", nil, nil, nil and a nil tail.
     set(lua, "SearchLFGGetPartyResults", |lua, args| {
         const USAGE: &str = "Usage: SearchLFGGetPartyResults(index, partyIndex)";
@@ -426,12 +427,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         else {
             return Ok(MultiValue::new());
         };
-        let member = group.and_then(|g| {
-            usize::try_from(p)
-                .ok()
-                .and_then(|p| g.members.get(p))
-                .filter(|_| p >= 1)
-        });
+        // `0x553490(p - 1)` reads row `p` of the leader-first members: 0 is the leader.
+        let member = group.and_then(|g| usize::try_from(p).ok().and_then(|p| g.members.get(p)));
         let mut out = Vec::new();
         match member.filter(|r| r.name.is_some()) {
             Some(r) => {
@@ -501,7 +498,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         let id = number_arg(lua, arg(&args, 1), USAGE)? as u32;
         let changed = {
             let mut m = lua.app_data_mut::<Model>().expect("model app_data");
-            if kind >= 7 || m.wrath_lfg.row(id & 0xff_ffff).is_none() {
+            // The row is found by the unmasked id (`0x65c290`, `0x559497`).
+            if kind >= 7 || m.wrath_lfg.row(id).is_none() {
                 return Ok(MultiValue::new());
             }
             let entry = (kind as u32) << 24 | id & 0xff_ffff;
@@ -655,6 +653,14 @@ mod tests {
             total_groups: 4,
             total_players: 10,
         }));
+        assert!(
+            s.eval::<bool>(
+                "return SearchLFGGetResults(0.6) == 'Amy' and SearchLFGGetResults(3) == 'Lead'"
+            )
+            .unwrap(),
+            "players first, by level, before any sort"
+        );
+        s.run("SearchLFGSort('group')").unwrap();
         for check in [
             "select(1, SearchLFGGetNumResults()) == 3 and select(2, SearchLFGGetNumResults()) == 14",
             "select('#', SearchLFGGetResults(1)) == 38",
@@ -666,6 +672,7 @@ mod tests {
             "select(1, SearchLFGGetPartyResults(1, 1)) == 'Pal' and select(3, SearchLFGGetPartyResults(1, 1)) == 'friend'",
             "select('#', SearchLFGGetPartyResults(1, 1)) == 34 and select('#', SearchLFGGetPartyResults(1, 2)) == 33",
             "select(2, SearchLFGGetPartyResults(1, 2)) == ''",
+            "SearchLFGGetPartyResults(1, 0) == 'Lead' and SearchLFGGetPartyResults(1, -1) == nil",
             "select(1, SearchLFGGetEncounterResults(1, 1)) == 'Sartharion' and select(3, SearchLFGGetEncounterResults(1, 1)) == true",
             "select(3, SearchLFGGetEncounterResults(2, 1)) == false and select('#', SearchLFGGetEncounterResults(2, 2)) == 3",
             "select('#', SearchLFGGetResults(4)) == 0",
@@ -693,6 +700,8 @@ mod tests {
             )
             .unwrap()
         };
+        assert_eq!(order(&s), "AmyZedBob", "zone, then level, before any sort");
+        s.run("SearchLFGSort('name')").unwrap();
         assert_eq!(order(&s), "AmyBobZed");
         s.run("SearchLFGSort('name')").unwrap();
         assert_eq!(order(&s), "ZedBobAmy", "a repeat flips the direction");
@@ -702,7 +711,7 @@ mod tests {
         assert_eq!(order(&s), "AmyZedBob", "the tank first, then level");
         s.run("SearchLFGSort('healer')").unwrap();
         assert_eq!(order(&s), "BobAmyZed");
-        s.run("SearchLFGJoin(2, 50) SearchLFGJoin(2, 50) SearchLFGJoin(9, 50) SearchLFGLeave() SearchLFGLeave()")
+        s.run("SearchLFGJoin(2, 50) SearchLFGJoin(2, 50) SearchLFGJoin(9, 50) SearchLFGLeave() SearchLFGLeave() SearchLFGJoin(2, 16777266)")
             .unwrap();
         assert_eq!(
             s.take_wrath_raid_browser_requests(),

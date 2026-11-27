@@ -404,11 +404,10 @@ impl ObjectFields {
     pub fn player_guild_rank(&self) -> u32 {
         self.get(Field::PlayerGuildrank).unwrap_or(0)
     }
-    /// `PLAYER_FIELD_BYTES` byte 0 bit `0x08`, `PLAYER_FIELD_BYTE_RELEASE_TIMER`: set at death
-    /// outside instances, where the server releases the spirit after 6 minutes; the client arms
-    /// its own `now + 360000` ms, and with the bit clear `GetReleaseTimeRemaining()` is -1.
-    pub fn player_release_timer_running(&self) -> bool {
-        self.get(Field::PlayerFieldBytes).unwrap_or(0) & 0x08 != 0
+    /// `PLAYER_FIELD_BYTES` byte 0's release bits, which 12340's death handler reads once
+    /// (`0x6dc070`): `0x10` `NO_RELEASE_WINDOW`, then `0x08` `RELEASE_TIMER`, the 6-minute window.
+    pub fn player_release_bits(&self) -> u8 {
+        (self.get(Field::PlayerFieldBytes).unwrap_or(0) & 0x18) as u8
     }
     /// `PLAYER_FIELD_BYTES` byte 2 (private, field 1197): the four extra action bars' toggles,
     /// bits `0x01..0x08`, read by `GetActionBarToggles` (`0x5a8790`) at `[[player+0x1008]+0x1066]`

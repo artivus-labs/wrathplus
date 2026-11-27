@@ -252,9 +252,8 @@ mod tests {
         let s = script();
         let get = |e: &str| s.eval::<f64>(&format!("return {e}()")).unwrap();
         assert_eq!(get("GetWaterDetail"), 0.0);
-        // Build 12340's stock `farclip` is registered at 1000 before the fixture's rows, which
-        // only reset its default.
-        assert_eq!(get("GetFarclip"), 1000.0);
+        // Build 12340 registers `farclip` at "350" (`0x78e517`), as the fixture's row does.
+        assert_eq!(get("GetFarclip"), 350.0);
         // `shadowLevel` "1" → `1 − 1`; `baseMip` "0" → `1 − 0`: both sliders at High.
         assert_eq!(get("GetTerrainMip"), 0.0);
         assert_eq!(get("GetBaseMip"), 1.0);
@@ -262,7 +261,7 @@ mod tests {
         assert_eq!(get("GetTexLodBias"), 0.0);
         // A bare VM without the rows answers the registered defaults.
         let bare = UiScript::new().unwrap();
-        assert_eq!(bare.eval::<f64>("return GetFarclip()").unwrap(), 1000.0);
+        assert_eq!(bare.eval::<f64>("return GetFarclip()").unwrap(), 350.0);
         assert_eq!(bare.eval::<f64>("return GetTerrainMip()").unwrap(), 0.0);
     }
 

@@ -1,29 +1,39 @@
 //! The bank bindings: the app pushes the open bank's snapshot ([`UiScript::set_bank`]), and
 //! `PurchaseSlot` and `CloseBankFrame` queue intents it drains.
 //!
-//! The vault is container `-1` (24 slots) and containers 5..=10 (the six bags), the reference's
+//! The vault is container `-1` (28 slots) and containers 5..=11 (the seven bags), the reference's
 //! own ids (`BankFrame.lua:1-4`), so the container verbs work on it unchanged. The bag items
-//! themselves are inventory slots 64..=69, read through `GetInventoryItem*` as the reference's bank
+//! themselves are inventory slots 68..=74, read through `GetInventoryItem*` as the reference's bank
 //! reads them (`BankFrame.lua:28`); they stream whether or not a banker is open.
 
 use mlua::{Lua, MultiValue, Value};
 
 use super::Model;
 
-/// The open bank's purchase row, pushed whole by the app.
+/// The bank's purchase row, pushed whole by the app.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct BankState {
-    /// Purchased bag slots, 0..=6: `PLAYER_BYTES_2` byte 2.
+    /// Purchased bag slots, 0..=7: `PLAYER_BYTES_2` byte 2.
     pub num_purchased: u32,
     /// The next slot's price in copper, `BankBagSlotPrices.dbc` row `num_purchased + 1`; the rows
-    /// past 6 hold 999999999, and 0 means the row is absent.
+    /// past 7 hold 999999999, and 0 means the row is absent.
     pub next_cost: u32,
 }
 
 impl super::UiScript {
-    /// Push (or clear, with `None`) the open bank's snapshot.
+    /// Push (or clear, with `None`) the open bank; an open push also carries the purchase row.
     pub fn set_bank(&mut self, state: Option<BankState>) {
-        self.model_mut().bank = state;
+        let mut model = self.model_mut();
+        if let Some(row) = &state {
+            model.bank_slots = row.clone();
+        }
+        model.bank = state;
+    }
+
+    /// Push the purchase row with the bank closed: 12340 reads it off the player
+    /// (`0x57bad5`), so `GetNumBankSlots` and `GetBankSlotCost` answer without a banker.
+    pub fn set_bank_slots(&mut self, state: BankState) {
+        self.model_mut().bank_slots = state;
     }
 
     /// Whether `PurchaseSlot()` was called since the last drain; the app sends
@@ -43,16 +53,16 @@ impl super::UiScript {
 pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     let g = lua.globals();
 
-    // GetNumBankSlots() → numSlots, full: `full` is 1 from six slots up, else nil (`0x4f85b0`:
-    // `cmp esi,6; jl`).
+    // GetNumBankSlots() → numSlots, full (`0x57bab0`): `full` is 1 from seven slots up, else nil
+    // (`0x57bafb cmp esi,0x7; jl`).
     g.set(
         "GetNumBankSlots",
         lua.create_function(|lua, ()| {
             let n = {
                 let model = lua.app_data_ref::<Model>().expect("model app_data");
-                model.bank.as_ref().map_or(0, |b| b.num_purchased)
+                model.bank_slots.num_purchased
             };
-            let full = if n >= 6 {
+            let full = if n >= 7 {
                 Value::Integer(1)
             } else {
                 Value::Nil
@@ -64,12 +74,12 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // GetBankSlotCost(numSlots): the argument is unread; the pushed state names the next slot.
+    // GetBankSlotCost(numSlots) (`0x57bb30`): the argument is unread; the row names the next slot.
     g.set(
         "GetBankSlotCost",
-        lua.create_function(|lua, _n: Option<u32>| {
+        lua.create_function(|lua, _n: MultiValue| {
             let model = lua.app_data_ref::<Model>().expect("model app_data");
-            Ok(i64::from(model.bank.as_ref().map_or(0, |b| b.next_cost)))
+            Ok(i64::from(model.bank_slots.next_cost))
         })?,
     )?;
 
@@ -145,22 +155,35 @@ mod tests {
             .unwrap());
         assert_eq!(s.eval::<i64>("return GetBankSlotCost(2)").unwrap(), 100_000);
 
-        // Six purchased: full = 1, and 999999999 is the DBC's sentinel row.
+        // Six of seven purchased is not full; seven is, and 999999999 is the DBC's sentinel row.
         s.set_bank(Some(BankState {
             num_purchased: 6,
+            next_cost: 250_000,
+        }));
+        assert!(s
+            .eval::<bool>("local n, full = GetNumBankSlots()\nreturn n == 6 and full == nil")
+            .unwrap());
+        s.set_bank(Some(BankState {
+            num_purchased: 7,
             next_cost: 999_999_999,
         }));
         assert!(s
-            .eval::<bool>("local n, full = GetNumBankSlots()\nreturn n == 6 and full == 1")
+            .eval::<bool>("local n, full = GetNumBankSlots()\nreturn n == 7 and full == 1")
             .unwrap());
 
+        // Closed, the row still answers: 12340 reads the player, not the banker.
         s.set_bank(None);
+        s.set_bank_slots(BankState {
+            num_purchased: 3,
+            next_cost: 250_000,
+        });
         assert!(s
-            .eval::<bool>("local n, full = GetNumBankSlots()\nreturn n == 0 and full == nil")
+            .eval::<bool>("local n, full = GetNumBankSlots()\nreturn n == 3 and full == nil")
             .unwrap());
+        assert_eq!(s.eval::<i64>("return GetBankSlotCost()").unwrap(), 250_000);
     }
 
-    /// The bank bags are inventory slots 64..=69, as the reference's bank reads them
+    /// The bank bags are inventory slots 68..=74, as the reference's bank reads them
     /// (`BankFrame.lua:28`).
     #[test]
     fn bank_bag_slots_read_through_the_inventory_api() {
