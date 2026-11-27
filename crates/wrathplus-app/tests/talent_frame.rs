@@ -92,6 +92,7 @@ fn fixture(points_spent: u32) -> TalentUiState {
         tabs: vec![TalentTabView {
             name: "Arms".into(),
             background: "WarriorArms".into(),
+            icon: None,
             points_spent,
         }],
         talents: vec![vec![rend, deep_wounds]],

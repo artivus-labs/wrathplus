@@ -480,6 +480,7 @@ pub(crate) fn build_tab_pages(
             name: tab.name.clone(),
             background: tab.background.clone(),
             points_spent: spent,
+            icon: tab.icon.clone(),
         });
         pages.push(views);
     }

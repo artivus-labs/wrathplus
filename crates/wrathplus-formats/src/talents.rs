@@ -29,6 +29,8 @@ const COL_T_REQUIRED_SPELL: usize = 20;
 
 const TALENT_TAB_FIELDS: usize = 16;
 const COL_TT_NAME_ENUS: usize = 1;
+/// `SpellIconID`, 12340's column 18 (`+0x8`).
+const COL_TT_ICON: usize = 10;
 const COL_TT_RACE_MASK: usize = 11;
 const COL_TT_CLASS_MASK: usize = 12;
 const COL_TT_BACKGROUND: usize = 14;
@@ -81,6 +83,8 @@ pub struct TalentTabInfo {
     pub pet_talent_mask: u32,
     /// The `Interface\TalentFrame\<background>-…` art base ("MageFire").
     pub background: String,
+    /// The `SpellIcon.dbc` path of `SpellIconID`, `GetTalentTabInfo`'s texture; `None` with no row.
+    pub icon: Option<String>,
 }
 
 /// Talent tabs by class and talents by tab.
@@ -179,6 +183,7 @@ pub fn load_talent_catalog(chain: &mut Chain) -> Result<TalentCatalog> {
         .read_file(TALENT_TAB)
         .context("reading TalentTab.dbc")?;
     let tab_set = parse(&tab_bytes, talent_tab_schema(), "TalentTab.dbc")?;
+    let icons = crate::dbc::load_spell_icon_map(chain)?;
     let mut tabs = Vec::new();
     for r in tab_set.records() {
         let Some(id) = u32_at(r, 0) else { continue };
@@ -189,6 +194,7 @@ pub fn load_talent_catalog(chain: &mut Chain) -> Result<TalentCatalog> {
             class_mask: u32_at(r, COL_TT_CLASS_MASK).unwrap_or(0),
             pet_talent_mask: u32_at(r, COL_TT_PET_MASK).unwrap_or(0),
             background: str_at(&tab_set, r, COL_TT_BACKGROUND).unwrap_or_default(),
+            icon: u32_at(r, COL_TT_ICON).and_then(|i| icons.get(&i).cloned()),
         });
     }
 
@@ -238,5 +244,10 @@ mod tests {
         assert_eq!(cat.pet_tab_name(2), Some("Cunning"));
         assert_eq!(cat.pet_tab_name(-1), None);
         assert_eq!(cat.pet_tab_name(5), None);
+        // `0x5c620e`: every tab's `SpellIconID` names a `SpellIcon.dbc` row.
+        assert!(cat
+            .tabs
+            .iter()
+            .all(|t| t.icon.as_ref().is_some_and(|p| !p.is_empty())));
     }
 }

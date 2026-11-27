@@ -25,6 +25,7 @@ fn the_pet_page_answers_is_pet_and_queues_pet_learns() {
         tabs: vec![TalentTabView {
             name: "Ferocity".into(),
             background: "HunterPetFerocity".into(),
+            icon: None,
             points_spent: 1,
         }],
         talents: vec![vec![

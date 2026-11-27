@@ -47,6 +47,7 @@ fn inspected_groups_build_ranked_pages_with_nothing_learnable() {
             class_mask: 1,
             pet_talent_mask: 0,
             background: "WarriorArms".into(),
+            icon: None,
         }],
         vec![
             talent(10, 0, &[100, 101, 102], (0, 0)),

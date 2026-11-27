@@ -205,9 +205,14 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                     int(0),
                 ]));
             };
+            let icon = match &t.icon {
+                Some(p) => Value::String(lua.create_string(p)?),
+                None => Value::Nil,
+            };
             Ok(MultiValue::from_vec(vec![
                 Value::String(lua.create_string(&t.name)?),
-                Value::Nil,
+                // `0x5c620e`: `TalentTab.SpellIconID` through `SpellIcon.dbc` (`+0x4`), else nil.
+                icon,
                 int(t.points_spent),
                 Value::String(lua.create_string(&t.background)?),
                 // The preview points past the spent ones (`0x5c6150`, the tab's `+8`).
@@ -429,6 +434,7 @@ mod tests {
             tabs: vec![TalentTabView {
                 name: "Arcane".into(),
                 background: "MageArcane".into(),
+                icon: None,
                 points_spent: spent,
             }],
             talents: vec![vec![TalentView {

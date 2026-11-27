@@ -97,6 +97,7 @@ fn test_app() -> (App, crossbeam_channel::Receiver<crate::net::ClientCommand>) {
                     class_mask: 0,
                     pet_talent_mask: 1,
                     background: String::new(),
+                    icon: None,
                 }],
                 Vec::new(),
             ),
