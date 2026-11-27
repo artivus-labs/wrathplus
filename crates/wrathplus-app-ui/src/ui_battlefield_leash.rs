@@ -45,6 +45,7 @@ pub(crate) fn leash_battlemaster(
         .get(&guid)
         .and_then(|e| bodies.get(*e).ok())
         .map(|tf| {
+            // Labelled: 12340 reads the reach once at targeting (`0x51fce0`), ours every frame.
             let reach = objects.object(guid).map_or(1.5, |o| o.unit_combat_reach());
             let is_player = wrathplus_protocol::guid::is_player(guid);
             (tf.translation(), leash_sq(reach, is_player))
