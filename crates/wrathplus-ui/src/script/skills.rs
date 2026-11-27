@@ -195,9 +195,9 @@ fn entry_at(model: &Model, index: i32) -> Option<&SkillEntry> {
 /// `CollapseSkillHeader`/`ExpandSkillHeader` (`0x5ce3a0`/`0x5ce400`): an index at or below 0
 /// folds or unfolds every group (`0x5ce3de`), any other row its own category, a skill row's too
 /// (`0x5cd760` reads `[entry+4]`). Each re-sort signals `SKILL_LINES_CHANGED` (`0x5cd6fc`); a row
-/// past the array does nothing.
+/// past the array does nothing, `i32::MIN` (NaN) too, as its minus one wraps (`0x5ce3dc`).
 fn set_collapsed(model: &mut Model, index: i32, collapse: bool) {
-    let targets: Vec<u32> = if index <= 0 {
+    let targets: Vec<u32> = if index.wrapping_sub(1) < 0 {
         model.skills_groups.iter().map(|g| g.category_id).collect()
     } else {
         match row_at(model, index) {

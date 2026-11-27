@@ -163,7 +163,7 @@ fn collapse_hides_a_groups_entries_and_remaps_indices() {
             .count()
     };
     assert_eq!(signals(&mut s), 6);
-    s.run("CollapseSkillHeader(99) ExpandSkillHeader(99)")
+    s.run("CollapseSkillHeader(99) ExpandSkillHeader(99) CollapseSkillHeader(0/0)")
         .unwrap();
     assert_eq!(signals(&mut s), 0);
     for verb in [
