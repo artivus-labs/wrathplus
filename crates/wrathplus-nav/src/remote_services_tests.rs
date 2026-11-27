@@ -409,3 +409,72 @@ fn mailboxes_are_gameobjects_told_to_either_side_with_their_events() {
     assert_eq!(told("innkeeper", HUMAN, ""), ["innkeeper 6740 None None"]);
     assert_eq!(told("mailbox,innkeeper", HUMAN, "").len(), 3);
 }
+
+#[test]
+fn the_nearest_class_trainers_are_told_beyond_the_radius_and_the_cap() {
+    // Loch Modan: a mage with no mage trainer within 2000 yards; Ironforge's beyond it, one of
+    // them a game event's, and the Horde's nearer still.
+    let ironforge = [
+        format!("5144 0 1 2500 0 0 0x33 8 0 {ALLIANCE} Bink"),
+        format!("5145 0 1 2600 0 0 0x33 8 0 {ALLIANCE} Juli"),
+        format!("5146 0 1 2700 0 0 0x33 8 0 {ALLIANCE} Nittlebur"),
+        format!("26326 0 1 2400 0 0 0x33 8 0 {ALLIANCE} @7 Mage_Trainer"),
+        format!("5880 0 1 2300 0 0 0x33 8 0 {HORDE} Un'Thuwa"),
+        format!("1901 0 1 2200 0 0 0x33 1 0 {ALLIANCE} Kelstrum"),
+        format!("1300 1 1 10 0 0 0x33 8 0 {ALLIANCE} Elsewhere"),
+        format!("1699 0 1 2100 0 0 0x80 0 0 {ALLIANCE} Far_Vendor"),
+        format!("5159 0 1 3000 0 0 0x50 0 185:Cooking {ALLIANCE} Daryl"),
+        format!("1 0 1 10 0 0 0x80 0 0 {ALLIANCE} Vendor_A"),
+        format!("2 0 1 20 0 0 0x80 0 0 {ALLIANCE} Vendor_B"),
+        format!("3 0 1 30 0 0 0x80 0 0 {ALLIANCE} Vendor_C"),
+    ]
+    .join("\n");
+    let told = |spawns: &str, kinds: &str, cap: u32, active: &str| {
+        over(
+            spawns,
+            &format!("{kinds} 0 1 0 0 2000 8 {cap} {HUMAN} {active}"),
+        )
+        .into_iter()
+        .map(|p| format!("{} {}", p.kind, p.entry))
+        .collect::<Vec<_>>()
+    };
+    // The nearest two of the mage's own on the map: not the Horde's, the warrior's, another
+    // map's, nor one whose event has it off.
+    assert_eq!(
+        told(&ironforge, "trainer", 20, ""),
+        ["trainer 5144", "trainer 5145"]
+    );
+    assert_eq!(
+        told(&ironforge, "trainer", 20, "@7"),
+        ["trainer 26326", "trainer 5144"]
+    );
+    // Only trainers come from beyond the radius, and the cap makes room for them.
+    assert_eq!(
+        told(&ironforge, "trainer,vendor", 3, ""),
+        ["vendor 1", "trainer 5144", "trainer 5145"]
+    );
+    assert_eq!(
+        told(&ironforge, "vendor", 20, ""),
+        ["vendor 1", "vendor 2", "vendor 3"]
+    );
+    // Cooking (and First Aid) the same; trainer_profession is not.
+    assert_eq!(
+        told(&ironforge, "trainer_cooking", 20, ""),
+        ["trainer_cooking 5159"]
+    );
+    assert!(told(&ironforge, "trainer_profession", 20, "").is_empty());
+    // A trainer within the radius counts, one whose event has it off does not (still told).
+    let thelsamar = [
+        ironforge.clone(),
+        format!("944 0 1 100 0 0 0x33 8 0 {ALLIANCE} Near"),
+        format!("26327 0 1 50 0 0 0x33 8 0 {ALLIANCE} @7 Near_Event"),
+    ]
+    .join("\n");
+    assert_eq!(
+        told(&thelsamar, "trainer", 20, ""),
+        ["trainer 26327", "trainer 944", "trainer 5144"]
+    );
+    // On the wire nothing new: a far trainer is a place like any other.
+    let far = over(&ironforge, &format!("trainer 0 1 0 0 2000 8 20 {HUMAN}"));
+    assert_eq!((far[0].pos[0], far[0].name.as_str()), (2500.0, "Bink"));
+}
