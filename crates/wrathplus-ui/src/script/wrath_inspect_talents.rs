@@ -101,6 +101,8 @@ fn pages(
             .and_then(|i| t.groups.get(i))
             .map(|g| &g.pages);
     }
+    // Not gated on `g < count` as the glyph getters are: past it 12340's group record is null
+    // (`0x5c777c`, `0x5c5fee`), yet the talent getters still answer, from no ranks.
     let groups = &model.talent_groups;
     match player_group(model, group)? {
         g if g == groups.active => Some(&model.talents),

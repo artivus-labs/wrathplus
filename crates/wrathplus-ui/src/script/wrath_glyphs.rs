@@ -12,7 +12,6 @@
 //! - `GlyphMatchesSocket` (`0x5b7410`) reads the pending glyph cast. The first `APPLY_GLYPH` effect
 //!   whose glyph row and socket row both exist answers 1 when their type flags agree; otherwise it
 //!   answers nothing. With no player it answers nil.
-//!
 
 use mlua::{Lua, MultiValue, Table, Value};
 
