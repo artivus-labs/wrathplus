@@ -238,6 +238,12 @@ fn a_day_lists_events_holidays_and_projected_resets() {
             .unwrap(),
         (1, 3, "ONGOING".into())
     );
+    // `0x5bec70`: the pending invites listed with an inviter, here more than the server's 0.
+    assert_eq!(
+        s.eval::<i64>("return CalendarGetNumPendingInvites()")
+            .unwrap(),
+        2
+    );
     // `0x5b91a0`: an offset past -1..1 or a day before 24 November 2004 lists nothing.
     assert_eq!(
         s.eval::<i64>("return CalendarGetNumDayEvents(2, 4)")
@@ -307,6 +313,12 @@ fn an_opened_event_edits_and_updates() {
         s.eval::<(i64, i64, i64)>("return CalendarGetEventIndex()")
             .unwrap()
     };
+    // `0x5bd7e0` asks for the calendar once.
+    s.run("OpenCalendar() OpenCalendar()").unwrap();
+    assert_eq!(
+        s.take_wrath_calendar_requests(),
+        [WrathCalendarRequest::GetCalendar]
+    );
     s.run("CalendarOpenEvent(0, 15, 1)").unwrap();
     assert_eq!(
         s.take_wrath_calendar_requests(),
@@ -343,6 +355,12 @@ fn an_opened_event_edits_and_updates() {
     });
     s.set_wrath_calendar(Arc::new(view.clone()));
     assert_eq!(index(&s), (0, 15, 1));
+    // `0x5bd850`: the open event's row carries the pending bit, whatever the invitee's status.
+    assert!(s
+        .eval::<bool>(
+            "return CalendarEventHasPendingInvite() and select(22, CalendarGetEventInfo()) == 1"
+        )
+        .unwrap());
     // `0x5f26f0`: statuses 1..8, less SIGNEDUP, NOT_SIGNEDUP and the invitee's own (OUT).
     assert_eq!(
         s.eval::<String>(

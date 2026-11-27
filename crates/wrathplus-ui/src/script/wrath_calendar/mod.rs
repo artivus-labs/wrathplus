@@ -359,6 +359,8 @@ pub(crate) struct State {
     clipboard: Option<(u64, u64, WrathCalendarDate)>,
     open: Option<Open>,
     action_pending: bool,
+    /// `OpenCalendar` has asked (`0xc207f1`).
+    calendar_asked: bool,
     last_invite: Option<f64>,
     last_add: Option<f64>,
     requests: Vec<WrathCalendarRequest>,
@@ -536,6 +538,19 @@ impl State {
             }
         });
         list
+    }
+
+    /// `0x5bd850`: the open event is on the pending-invite list, which the calendar's arrival
+    /// prunes to unanswered invites to unlocked events still ahead (`0x5c2f1d`).
+    fn pending_invite(&self) -> bool {
+        let id = match self.open.as_ref().map(|o| &o.what) {
+            Some(Opened::Event { event_id, .. }) => *event_id,
+            _ => return false,
+        };
+        self.view
+            .entries
+            .iter()
+            .any(|e| e.event_id == id && e.bits & 1 != 0)
     }
 
     fn my_invitee(&self) -> Option<WrathCalendarInvitee> {

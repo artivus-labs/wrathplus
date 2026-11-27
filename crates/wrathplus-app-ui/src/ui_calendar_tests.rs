@@ -446,8 +446,17 @@ fn errors_name_their_player_and_lockouts_update() {
         &mut Vec::new(),
     );
     assert_eq!(state.lockouts[0].0.seconds_left, 2 * 86_400);
-    reduce(&mut state, Packet::NumPending { count: 3 }, ME, &mut fired);
+    // `0x5b7ce0` announces a new count only; the calendar's arrival asks for it (`0x5be30b`).
+    let mut fired = Vec::new();
+    for count in [3, 3] {
+        reduce(&mut state, Packet::NumPending { count }, ME, &mut fired);
+    }
     assert_eq!(state.pending, 3);
+    assert_eq!(events(&fired), ["CALENDAR_UPDATE_PENDING_INVITES"]);
+    assert_eq!(
+        pending::follow_up(&calendar_packet()),
+        Some(Command::GetNumPending)
+    );
     // `0x5c3fe0` clears the pending bit after the calendar, never after an invite alert, after an
     // invite only on its clear byte, and after a result only with an error line (`0x5b9960`).
     let mut clears = |packet| reduce(&mut state, packet, ME, &mut Vec::new());

@@ -276,8 +276,9 @@ fn feed_calendar(
     let me = self_q.single().ok();
     let my_guid = me.map_or(0, |(g, _)| g.0);
     let mut fired: Vec<(&'static str, Vec<V>)> = Vec::new();
-    let mut clear_pending = false;
+    let (mut clear_pending, mut sent) = (false, Vec::new());
     for packet in packets.0.drain(..) {
+        sent.extend(pending::follow_up(&packet));
         clear_pending |= reduce(&mut state, packet, my_guid, &mut fired);
     }
     for request in script.take_wrath_calendar_requests() {
@@ -285,11 +286,11 @@ fn feed_calendar(
             fired.push(("CALENDAR_UPDATE_INVITE_LIST", args));
         }
         let store = me.map(|(_, s)| s);
-        for command in apply(&mut state, request, my_guid, store) {
-            let _ = commands.0.send(ClientCommand::NativeCalendar(command));
-        }
+        sent.extend(apply(&mut state, request, my_guid, store));
     }
-
+    for command in sent {
+        let _ = commands.0.send(ClientCommand::NativeCalendar(command));
+    }
     let view = Arc::new(build(
         &state,
         &catalog,
@@ -645,9 +646,11 @@ fn reduce(
                 }
             }
         }
+        // `0x5b7ce0` announces the server's count only when it changes.
         Packet::NumPending { count } => {
-            state.pending = count;
-            fired.push(("CALENDAR_UPDATE_PENDING_INVITES", vec![]));
+            if std::mem::replace(&mut state.pending, count) != count {
+                fired.push(("CALENDAR_UPDATE_PENDING_INVITES", vec![]));
+            }
         }
         Packet::ClearPendingAction => {}
     }

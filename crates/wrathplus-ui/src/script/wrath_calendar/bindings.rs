@@ -40,7 +40,6 @@ const REPEAT_KEYS: [&str; 4] = [
     "CALENDAR_REPEAT_MONTHLY",
 ];
 /// Wire statuses.
-const INVITED: u8 = 0;
 const ACCEPTED: u8 = 1;
 const DECLINED: u8 = 2;
 const TENTATIVE: u8 = 8;
@@ -396,17 +395,32 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             }
         }
     })?;
+    // CalendarGetNumPendingInvites (`0x5bf830` → `0x5bec70`): the pending invites listed with an
+    // inviter, or the server's count when higher. Labelled: the ignore test (`0x6b52e0`) is not
+    // held here.
     set(lua, "CalendarGetNumPendingInvites", |lua, _| {
-        let n = read(lua, |st| st.view.pending_invites);
+        let n = read(lua, |st| {
+            let listed = st
+                .view
+                .entries
+                .iter()
+                .filter(|e| e.bits & 1 != 0 && e.creator != 0);
+            (listed.count() as u32).max(st.view.pending_invites)
+        });
         many(vec![i(n)])
     })?;
     set(lua, "CalendarIsActionPending", |lua, _| {
         let p = read(lua, |st| st.action_pending);
         many(vec![Value::Boolean(p)])
     })?;
-    // OpenCalendar(): `CMSG_CALENDAR_GET_CALENDAR`.
+    // OpenCalendar (`0x5bd7e0`): asks once (`0xc207f1`, cleared only when the calendar starts,
+    // `0x5c425b`).
     set(lua, "OpenCalendar", |lua, _| {
-        write(lua, |st, _| st.push(R::GetCalendar));
+        write(lua, |st, _| {
+            if !std::mem::replace(&mut st.calendar_asked, true) {
+                st.push(R::GetCalendar);
+            }
+        });
         many(vec![])
     })?;
     set(lua, "CanEditGuildEvent", |lua, _| {
@@ -484,7 +498,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 None if fields.flags & GUILD_EVENT != 0 => (LUA_NOT_SIGNEDUP, LUA_SIGNUP),
                 None => (0, 0),
             };
-            let pending = me.as_ref().is_some_and(|m| m.status == INVITED);
+            let pending = st.pending_invite();
             Some((fields, creator, tex, pending, status, kind))
         });
         let Some((fields, creator, tex, pending, status, kind)) = info else {
@@ -560,9 +574,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         many(vec![Value::Boolean(c)])
     })?;
     set(lua, "CalendarEventHasPendingInvite", |lua, _| {
-        let p = read(lua, |st| {
-            st.my_invitee().is_some_and(|m| m.status == INVITED)
-        });
+        let p = read(lua, State::pending_invite);
         many(vec![Value::Boolean(p)])
     })?;
     // CalendarCanAddEvent (`0x5b8ba0`) and CalendarCanSendInvite (`0x5b8b30`): nothing pending
