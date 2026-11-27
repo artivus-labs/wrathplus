@@ -137,7 +137,7 @@ pub fn apply_script_calls(
             ScriptCall::CastPetSpell { spell_id, on_self } => {
                 crate::ui_pet_book::cast_pet_spell(&mut appliers.p6(), spell_id, on_self);
             }
-            ScriptCall::PetAction(slot) => appliers.p6().press_slot(slot),
+            ScriptCall::PetAction(slot) => appliers.p6().press_slot(slot, explicit.flatten()),
             ScriptCall::PetOrder(packed) => appliers.p6().order(packed),
             // Build 12340's ChatFrame verbs ([`crate::ui_chat_verbs`]), in call order.
             ScriptCall::StartAttack { unit } => {

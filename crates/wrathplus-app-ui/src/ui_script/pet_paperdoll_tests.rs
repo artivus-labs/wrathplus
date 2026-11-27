@@ -61,9 +61,6 @@ fn hunter_pet_stats() -> PetStats {
         hunter_pet: true,
         happiness: Some(3),
         damage_percentage: 125.0,
-        loyalty_rate: 20.0,
-        loyalty: Some("(Loyalty Level 6) Best Friend".into()),
-        training_points: (170, 130),
         experience: (4200, 8000),
         family: Some("Boar".into()),
         food_types: ["Meat", "Fish", "Cheese", "Bread", "Fungus", "Fruit"]

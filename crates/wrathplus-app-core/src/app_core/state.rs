@@ -612,10 +612,10 @@ pub struct PetBar {
     /// press's GCD. Each mutation but the seed fires the flush, off [`Cooldowns::generation`]
     /// (`bar::fire_pet_cooldown_events`).
     pub cooldowns: Cooldowns,
-    /// The client's `[0xb714b0]`, a local latch: all of `IsPetAttackActive`, and the only thing
-    /// that lights Attack (`0x4bdf16`-`0x4bdf22`). Raised only for a possessed unit (`0x4bd420`),
-    /// so never on a hunter's bar; lowered by `PetStopAttack` (`0x4bd650`), a new pet (`0x4bc8ce`)
-    /// and the old-target clear (`0x493a18`). `PET_ATTACK_*` read the pet's flag `0x800` instead.
+    /// The attack latch `[0xc234dc]`: all of `IsPetAttackActive`, and the only thing that lights
+    /// Attack (`0x5d51e5`). Set to the pet's in-combat flag on its edge (`0x5d30a0`) and on each
+    /// pet-spells packet (`0x5d6a80`), raised by an Attack order (`0x5d4509`), lowered by
+    /// `PetStopAttack` (`0x5d46c2`). The 1.12 press path raises it for a possessed unit only.
     pub attacking: bool,
     /// `PET_BAR_UPDATE` signals, counted. Both state writes signal unconditionally (`0x4bc940`,
     /// `0x4bc960`), and `OnClick`'s `SetChecked(0)` needs that repaint to relight a press on the

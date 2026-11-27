@@ -589,6 +589,8 @@ fn the_stock_bar_greys_a_stunned_pet_and_its_click_sends_nothing() {
         ..claw()
     };
     let mut rig = rig(vec![(CLAW, display)], &[CLAW], Some(owned_pet()));
+    // Alive: a pet at 0 health has no bar to click (`0x5d35f9`).
+    set_pet(&mut rig, &[]);
     // A Wrath session's bar is the native `SMSG_PET_SPELLS` (`WrathPetSpells`), which alone fills
     // the slot's own usability that `GetPetActionSlotUsable` reads.
     rig.app.world_mut().resource_mut::<PetBar>().native = Some(native_claw_bar());
@@ -627,13 +629,17 @@ fn the_stock_bar_greys_a_stunned_pet_and_its_click_sends_nothing() {
 }
 
 /// `0x4bd06f`-`0x4bd08b` read three flags and never the pet's health: a dead pet's bar is usable,
-/// its press goes out, and only the Attack order's own validator refuses it (`0x612e10`).
+/// its press goes out, and only the Attack order's own validator refuses it (`0x612e10`). Only
+/// `PetHasActionBar` reads the health (`0x5d35f9`), so the stock bar hides.
 #[test]
 fn a_dead_pet_is_still_usable() {
     let mut rig = scene();
+    let bar = |rig: &mut Rig| ui(rig, |s| s.eval::<Option<i64>>("return PetHasActionBar()"));
+    assert_eq!(bar(&mut rig).unwrap(), Some(1));
     set_pet(&mut rig, &[(HEALTH, 0)]);
 
     assert!(usable_answer(&mut rig));
+    assert_eq!(bar(&mut rig).unwrap(), None, "a dead pet has no bar");
     rig.press(1);
     assert_eq!(pet_actions(&rig.sent()), 1, "the spell press goes out");
     rig.order(FOLLOW);
@@ -657,4 +663,28 @@ fn native_claw_bar() -> wrathplus_protocol::wrath_pet::PetSpells {
         spells: vec![Action(CLAW_WORD)],
         ..Default::default()
     }
+}
+
+/// `CastPetAction(index, unit)`'s unit (`0x5d68ca`) aims the press; without one, the selection
+/// (`0x5d4237`).
+#[test]
+fn a_native_press_aims_at_the_unit_it_names_else_the_selection() {
+    let mut rig = scene();
+    rig.app.world_mut().resource_mut::<PetBar>().native = Some(native_claw_bar());
+    for (unit, want) in [(None, FOE), (Some(ME), ME)] {
+        rig.app
+            .world_mut()
+            .run_system_once(move |mut p: crate::ui_pet::drain::PetPress| p.press_slot(1, unit))
+            .expect("the press applies");
+        let sent = rig.sent();
+        let aimed = sent.iter().find_map(|c| match c {
+            ClientCommand::PetAction { target_guid, .. } => Some(*target_guid),
+            _ => None,
+        });
+        assert_eq!(aimed, Some(want), "{unit:?}: {sent:?}");
+    }
+    // An Attack order raises the latch for an ordinary pet too (`0x5d4509`), which the bar pushes.
+    rig.order(ATTACK);
+    rig.frame();
+    assert!(ui(&mut rig, |s| s.eval::<bool>("return IsPetAttackActive()")).unwrap());
 }

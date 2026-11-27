@@ -13,7 +13,6 @@ use wrathplus_protocol::types::StabledPet;
 use wrathplus_ui::script::{StableIntent, StablePetSlot, StableState, UiScript, NUM_STABLE_SLOTS};
 
 use crate::app_core::catalogs::PetFamilyTables;
-use crate::app_core::catalogs::PetStatTables;
 use crate::app_core::schedule::UiFeed;
 use crate::app_core::schedule::UiInput;
 use crate::names::NameCache;
@@ -80,13 +79,10 @@ pub struct StableOpen {
     /// (`0x4cac9b`), and `PET_STABLE_UPDATE`/`_PAPERDOLL` only from its creature-cache callbacks
     /// (`0x4cb3bf`, `0x4cba5f`).
     pub(crate) fresh_list: bool,
-    /// Native lists have no loyalty field; never resolve a Vanilla loyalty label for them.
-    pub(crate) native: bool,
 }
 
 impl StableOpen {
     pub(crate) fn open(&mut self, npc: u64, num_stable_slots: u8, pets: Vec<StabledPet>) {
-        self.native = false;
         self.npc = Some(npc);
         self.num_stable_slots = num_stable_slots;
         self.pets = pets;
@@ -94,7 +90,6 @@ impl StableOpen {
     }
 
     pub(crate) fn clear(&mut self) {
-        self.native = false;
         self.npc = None;
         self.num_stable_slots = 0;
         self.pets.clear();
@@ -114,12 +109,13 @@ impl NpcSession for StableOpen {
     }
 }
 
-/// One wire row as a Lua slot; icon, family and diet stay `None` until the creature query answers.
+/// One wire row as a Lua slot; icon, family, talent and diet stay `None` until the creature query
+/// answers.
 fn resolve_pet(
     wire: &StabledPet,
     names: &NameCache,
     families: Option<&PetFamilyTables>,
-    stats: Option<&PetStatTables>,
+    talents: Option<&wrathplus_formats::TalentCatalog>,
     commands: &NetCommands,
 ) -> StablePetSlot {
     // Guid 0 asks for the template alone: a stabled pet has no spawn.
@@ -139,9 +135,9 @@ fn resolve_pet(
         name: wire.name.clone(),
         level: wire.level,
         family: family_row.map(|f| f.name.clone()),
-        // The loyalty level's `PetLoyalty.dbc` name, as `GetPetLoyalty` gives the live pet's.
-        loyalty: stats
-            .and_then(|t| t.loyalty.name(wire.loyalty))
+        // The first `TalentTab` whose pet mask has the family's type bit (`0x5a1447`-`0x5a1489`).
+        talent: family_row
+            .and_then(|f| talents?.pet_tab_name(f.pet_talent_type))
             .map(str::to_string),
         // The food mask as diet names, as `GetPetFoodTypes` gives them; empty for a zero mask.
         diet: family_row
@@ -164,7 +160,7 @@ fn snapshot(
     open: &StableOpen,
     names: &NameCache,
     families: Option<&PetFamilyTables>,
-    stats: Option<&PetStatTables>,
+    talents: Option<&wrathplus_formats::TalentCatalog>,
     next_slot_cost: u32,
     has_live_pet: bool,
     commands: &NetCommands,
@@ -174,17 +170,7 @@ fn snapshot(
     for wire in &open.pets {
         // Seat rows by their slot, not position: a petless hunter's list has no slot-0 row.
         match slots.get_mut(usize::from(wire.slot)) {
-            Some(seat) => {
-                let mut pet = resolve_pet(
-                    wire, names, families, stats.filter(|_| !open.native), commands,
-                );
-                if open.native {
-                    // Wrath PetStable.lua formats the fifth return as a talent string.
-                    // No loyalty travels on this wire; an unknown talent is empty, not nil.
-                    pet.loyalty = Some(String::new());
-                }
-                *seat = Some(pet);
-            },
+            Some(seat) => *seat = Some(resolve_pet(wire, names, families, talents, commands)),
             None => debug!(
                 "ui_stable: pet {} arrived in slot {} — past the {NUM_STABLE_SLOTS} the window has, dropped",
                 wire.pet_number, wire.slot
@@ -206,7 +192,7 @@ pub(crate) fn feed_stable(
     mut open: ResMut<StableOpen>,
     bar: Res<crate::app_core::state::PetBar>,
     families: Option<Res<PetFamilyTables>>,
-    stats: Option<Res<PetStatTables>>,
+    talents: Option<Res<crate::ui_talent::Talents>>,
     prices: Option<Res<StableSlotPrices>>,
     commands: Res<NetCommands>,
     names: Res<NameCache>,
@@ -243,7 +229,7 @@ pub(crate) fn feed_stable(
         &open,
         &names,
         families.as_deref(),
-        stats.as_deref(),
+        talents.as_deref().map(|t| &t.catalog),
         next_slot_cost,
         has_live_pet,
         &commands,

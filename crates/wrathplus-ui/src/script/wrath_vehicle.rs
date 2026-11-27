@@ -587,11 +587,11 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             })?,
         )?;
     }
-    // texture, name, enabled for the possess bar's slot (`0x5d5820`): 1 is the spell, enabled; 2
-    // its cancel, enabled unless the spell cannot be cancelled. Three nils for any other slot, or
-    // without a player or a possess spell.
+    // GetPossessInfo(index) (`0x5d5820`): slot 1 the spell, 2 its cancel, else three nils; only an
+    // index equal to 0, a non-number included, raises (`0x5d5843`), and the rest truncate.
     set("GetPossessInfo", |lua, args| {
-        let Some(slot) = index(lua, &arg(&args, 0))? else {
+        let n = number(lua, &arg(&args, 0))?.unwrap_or(0.0);
+        let Some(slot) = (n != 0.0).then_some(n as i64) else {
             return Err(mlua::Error::runtime("Usage: GetPossessInfo(index)"));
         };
         let model = lua.app_data_ref::<Model>().expect("model");
@@ -911,12 +911,12 @@ mod tests {
         s.set_wrath_vehicles(v);
         s.run(
             r##"
-            local t, n, e = GetPossessInfo(1)
+            local t, n, e = GetPossessInfo(1.9)
             assert(t == "Interface\\Icons\\Spell_Shadow_ShadowWordDominate" and n == "Mind Control" and e == true)
             t, n, e = GetPossessInfo(2)
             assert(t == "Interface\\Icons\\Spell_ChargeNegative" and n == "Mind Control" and e == false)
             assert(select("#", GetPossessInfo(3)) == 3 and GetPossessInfo(3) == nil)
-            assert(not pcall(GetPossessInfo))
+            assert(not pcall(GetPossessInfo) and not pcall(GetPossessInfo, 0))
             assert(IsPossessBarVisible() == true)
             "##,
         )

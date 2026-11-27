@@ -97,6 +97,16 @@ pub(crate) fn companion_type(spell: &SpellDisplay, slots: &SummonProperties) -> 
     }
 }
 
+/// `GetCompanionInfo`'s icon (`0x53e3e2`-`0x53e3f2`): `ActiveIconID` for a companion that is out
+/// and has one, else `SpellIconID`.
+fn companion_icon(spell: &SpellDisplay, active: bool) -> Option<String> {
+    if active && spell.active_icon_id != 0 {
+        spell.active_icon.clone()
+    } else {
+        spell.icon.clone()
+    }
+}
+
 /// The entry a creature guid carries (`0x802d24`: `low >> 24 | (high & 0xfffff) << 8`).
 fn guid_entry(guid: u64) -> u32 {
     ((guid >> 24) & 0x0fff_ffff) as u32
@@ -169,7 +179,7 @@ fn feed_companions(
                 .resolve_creature(creature_id, 0, &commands)
                 .map(str::to_string),
             spell_id,
-            icon: spell.icon.clone(),
+            icon: companion_icon(spell, active),
             active,
             cooldown: cooldowns
                 .info(spell_id, 0, Some(spell), clock.anchor)
@@ -261,6 +271,21 @@ mod tests {
         assert_eq!(companion_type(&spell(28, 999, 0), &slots), None, "no row");
         assert_eq!(companion_type(&spell(6, 0, 78), &slots), Some(1));
         assert_eq!(companion_type(&spell(6, 0, 4), &slots), None);
+    }
+
+    #[test]
+    fn an_active_companion_draws_its_active_icon_when_it_has_one() {
+        let mut s = spell(28, 41, 0);
+        s.icon = Some("Interface\\Icons\\Pet".into());
+        s.active_icon = Some("Interface\\Icons\\PetOut".into());
+        assert_eq!(
+            companion_icon(&s, true),
+            s.icon,
+            "no ActiveIconID: the spell icon"
+        );
+        s.active_icon_id = 7;
+        assert_eq!(companion_icon(&s, true), s.active_icon);
+        assert_eq!(companion_icon(&s, false), s.icon);
     }
 
     #[test]

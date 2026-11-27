@@ -87,13 +87,61 @@ fn test_app() -> (App, crossbeam_channel::Receiver<crate::net::ClientCommand>) {
         .add_plugins(crate::ui_pet_talent_tree::UiPetTalentTreePlugin)
         .init_resource::<crate::app_core::chat::ChatLog>()
         .init_resource::<crate::sound::MessageSounds>()
+        .insert_resource(boar_tables())
+        .insert_resource(crate::ui_talent::Talents {
+            catalog: wrathplus_formats::TalentCatalog::from_rows(
+                vec![wrathplus_formats::TalentTabInfo {
+                    id: 410,
+                    name: "Ferocity".into(),
+                    race_mask: 0,
+                    class_mask: 0,
+                    pet_talent_mask: 1,
+                    background: String::new(),
+                }],
+                Vec::new(),
+            ),
+        })
         .insert_non_send_resource(wrathplus_ui::script::UiScript::new().unwrap())
         .add_systems(
             Update,
             (super::super::feed_stable, super::super::drain_stable).chain(),
         );
     register(&mut app);
+    // Every row's entry (`list_body`) is a boar whose creature query has answered.
+    app.world_mut().resource_mut::<NameCache>().insert_creature(
+        1190,
+        Some(crate::names::CreatureRecord {
+            name: "Boar".into(),
+            subname: None,
+            creature_type: 1,
+            pet_family: 5,
+            rank: 0,
+            type_flags: 0,
+            civilian: false,
+            racial_leader: false,
+            display_id: 0,
+            modifiers: None,
+        }),
+    );
     (app, rx)
+}
+
+/// `CreatureFamily.dbc` row 5, Boar, on pet talent type 0 (Ferocity's mask bit).
+fn boar_tables() -> crate::app_core::catalogs::PetFamilyTables {
+    let boar = wrathplus_formats::CreatureFamily {
+        name: "Boar".into(),
+        icon: "Interface\\Icons\\Ability_Hunter_Pet_Boar".into(),
+        pet_food_mask: 0,
+        min_scale: 1.0,
+        min_scale_level: 1,
+        max_scale: 1.0,
+        max_scale_level: 2,
+        pet_talent_type: 0,
+    };
+    crate::app_core::catalogs::PetFamilyTables {
+        families: [(5, boar)].into_iter().collect(),
+        foods: Default::default(),
+    }
 }
 
 const ULBREK: u64 = 17379391129526469420;
@@ -153,7 +201,7 @@ fn ulbrek_packet_opens_current_porkchop_closes_gossip_and_drains_real_stable_ver
         .resource::<crate::ui_gossip::GossipState>()
         .npc
         .is_none());
-    lua(&app, "local _,name,level,_,loyalty=GetStablePetInfo(0); assert(name=='Porkchop' and level==13 and loyalty==''); assert(string.format('%s', loyalty)==''); assert(IsAtStableMaster()); assert(GetNumStableSlots()==0); assert(shows==1)");
+    lua(&app, "local _,name,level,family,talent=GetStablePetInfo(0); assert(name=='Porkchop' and level==13 and family=='Boar' and talent=='Ferocity'); assert(IsAtStableMaster()); assert(GetNumStableSlots()==0); assert(shows==1)");
     // A repeated list owes SHOW even when every row is identical.
     dispatch(&mut app, 0x26f, &body);
     lua(&app, "assert(shows==2); StablePet()");
