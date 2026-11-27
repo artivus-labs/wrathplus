@@ -6,6 +6,10 @@ fn script() -> UiScript {
 
 #[test]
 fn empty_defaults() {
+    assert_eq!(
+        [bit(0), bit(33), bit(64), bit(65)],
+        [0, 1 << 32, 1 << 63, 1 << 32]
+    );
     script()
         .run(
             r#"
