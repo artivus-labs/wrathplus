@@ -15,6 +15,35 @@ pub(crate) fn load_ui(s: &mut UiScript, entry: &str) -> usize {
     load_entry(s, entry, false, false)
 }
 
+/// A position the identity projection [`feed`] installs shows at UV `(x, y)`.
+#[cfg(test)]
+pub(super) fn at(x: f32, y: f32) -> Option<wrathplus_ui::script::MapPos> {
+    let pos = wrathplus_ui::script::MapPos {
+        x,
+        y,
+        ..Default::default()
+    };
+    Some(pos)
+}
+
+/// Pushes the player (guid 1, party `11..13`) at `player` and `members` under an identity
+/// projection.
+#[cfg(test)]
+pub(super) fn feed(
+    s: &mut UiScript,
+    player: Option<wrathplus_ui::script::MapPos>,
+    facing: f32,
+    members: Vec<(u64, wrathplus_ui::script::MapPos)>,
+) {
+    s.set_world_map_projection(|_, p| Some((p.x, p.y)));
+    s.set_unit_guids(&wrathplus_ui::script::UnitGuids {
+        player: 1,
+        party: [11, 12, 13, 0],
+        ..Default::default()
+    });
+    s.set_world_map_feed(None, player, facing, None, members);
+}
+
 /// The cooldown indicator's file, as the stock `CooldownFrameTemplate` names it.
 #[cfg(test)]
 pub(super) const COOLDOWN_MODEL: &str = r"Interface\Cooldown\UI-Cooldown-Indicator.mdx";

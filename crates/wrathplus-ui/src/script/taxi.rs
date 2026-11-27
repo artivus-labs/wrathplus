@@ -3,7 +3,9 @@
 //! intents the app drains. Positions are normalized 0..1 from the map's bottom-left, which the Lua
 //! scales by the 316x352 map.
 
-use mlua::{Lua, Table};
+use mlua::{Lua, Table, Value};
+
+use super::binding_abi::{coerced_number, number_arg};
 
 use super::region::region_handle_of;
 use super::Model;
@@ -80,8 +82,11 @@ impl super::UiScript {
     }
 }
 
-/// A node by 1-based Lua index.
-fn node(model: &Model, i: i64) -> Option<&TaxiUiNode> {
+/// The reference's out-of-range raise for a position or a fare (`0xa13a1c`).
+const INVALID_SLOT: &str = "Invalid taxi node slot";
+
+/// A node by 1-based Lua index; 12340 bounds `slot - 1` unsigned against the node count.
+fn node(model: &Model, i: i32) -> Option<&TaxiUiNode> {
     let nodes = &model.taxi.as_ref()?.nodes;
     usize::try_from(i)
         .ok()?
@@ -100,10 +105,12 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // "NONE" out of range, a button the reference hides.
+    // The slot verbs check `lua_isnumber`, raise their Usage line and truncate (`0x590d60` on).
+    // "NONE" out of range, a button the reference hides (`0x590c70`).
     g.set(
         "TaxiNodeGetType",
-        lua.create_function(|lua, i: i64| {
+        lua.create_function(|lua, i: Value| {
+            let i = number_arg(lua, i, "Usage: TaxiNodeGetType(slot)")?;
             let model = lua.app_data_ref::<Model>().expect("model");
             Ok(node(&model, i).map_or("NONE", |n| n.node_type.era_str()))
         })?,
@@ -111,38 +118,46 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
 
     g.set(
         "TaxiNodePosition",
-        lua.create_function(|lua, i: i64| {
+        lua.create_function(|lua, i: Value| {
+            let i = number_arg(lua, i, "Usage: TaxiNodePosition(slot)")?;
             let model = lua.app_data_ref::<Model>().expect("model");
-            let (x, y) = node(&model, i).map_or((0.0, 0.0), |n| n.pos);
-            Ok((x, y))
+            let n = node(&model, i).ok_or_else(|| mlua::Error::runtime(INVALID_SLOT))?;
+            Ok(n.pos)
         })?,
     )?;
 
     g.set(
         "TaxiNodeName",
-        lua.create_function(|lua, i: i64| {
+        lua.create_function(|lua, i: Value| {
+            let i = number_arg(lua, i, "Usage: TaxiNodeName(slot)")?;
             let model = lua.app_data_ref::<Model>().expect("model");
-            Ok(node(&model, i).map_or(String::new(), |n| n.name.clone()))
+            Ok(node(&model, i).map_or("INVALID".into(), |n| n.name.clone()))
         })?,
     )?;
 
     g.set(
         "TaxiNodeCost",
-        lua.create_function(|lua, i: i64| {
+        lua.create_function(|lua, i: Value| {
+            let i = number_arg(lua, i, "Usage: TaxiNodeCost(slot)")?;
             let model = lua.app_data_ref::<Model>().expect("model");
-            Ok(node(&model, i).map_or(0, |n| n.cost) as i64)
+            let n = node(&model, i).ok_or_else(|| mlua::Error::runtime(INVALID_SLOT))?;
+            Ok(i64::from(n.cost))
         })?,
     )?;
 
     // The reference computes the hovered node's route here; the app precomputes every route.
     g.set(
         "TaxiNodeSetCurrent",
-        lua.create_function(|_, _: i64| Ok(()))?,
+        lua.create_function(|lua, i: Value| {
+            number_arg(lua, i, "Usage: TaxiNodeSetCurrent(slot)").map(drop)
+        })?,
     )?;
 
+    // No number check here or in the hop getters: a bare `lua_tonumber`, truncated (`0x5911cd`).
     g.set(
         "GetNumRoutes",
-        lua.create_function(|lua, i: i64| {
+        lua.create_function(|lua, i: Option<Value>| {
+            let i = coerced_number(lua, i) as i32;
             let model = lua.app_data_ref::<Model>().expect("model");
             Ok(node(&model, i).map_or(0, |n| n.routes.len()) as i64)
         })?,
@@ -157,7 +172,11 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     ] {
         g.set(
             name,
-            lua.create_function(move |lua, (i, hop): (i64, i64)| {
+            lua.create_function(move |lua, (i, hop): (Option<Value>, Option<Value>)| {
+                let (i, hop) = (
+                    coerced_number(lua, i) as i32,
+                    coerced_number(lua, hop) as i32,
+                );
                 let model = lua.app_data_ref::<Model>().expect("model");
                 let coord = node(&model, i)
                     .zip(usize::try_from(hop).ok().and_then(|h| h.checked_sub(1)))
@@ -170,7 +189,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
 
     g.set(
         "TakeTaxiNode",
-        lua.create_function(|lua, i: i64| {
+        lua.create_function(|lua, i: Value| {
+            let i = number_arg(lua, i, "Usage: TakeTaxiNode(slot)")?;
             if let Ok(i) = usize::try_from(i) {
                 lua.app_data_mut::<Model>()
                     .expect("model")

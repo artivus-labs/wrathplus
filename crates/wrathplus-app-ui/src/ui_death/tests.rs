@@ -59,8 +59,9 @@ fn the_session_edge_clears_the_world_scoped_death_memory_and_nothing_else_does()
     app.add_message::<crate::app_core::session::DisconnectedMessage>()
         .insert_resource(DeathFeedState {
             mirror: Some((0x1234, true, true)),
-            died_at: Some(12.0),
-            vm: crate::app_core::vm_memo::VmMemo::default(),
+            release: Some(ReleaseTimer::Ends(12.0)),
+            healer: Some(0x5678),
+            ..Default::default()
         });
 
     // No session edge: the memory stands.
@@ -88,7 +89,92 @@ fn the_session_edge_clears_the_world_scoped_death_memory_and_nothing_else_does()
         "a relog must find no mirror, or the login-while-ghost arm cannot fire"
     );
     assert!(
-        feed.died_at.is_none(),
+        feed.release.is_none() && feed.healer.is_none(),
         "the release window is the dead session's, and re-arms at the next login"
     );
+}
+
+/// `0x6dc070` reads the release bits once; `0x516210` and `0x516280` answer whole seconds.
+#[test]
+fn the_release_timer_arms_from_the_bits_and_answers_whole_seconds() {
+    let at = |bits, flags| Some(arm_release(bits, flags, 100.0));
+    assert_eq!(release_seconds(None, 100.0), 0, "before any death");
+    assert_eq!(
+        release_seconds(at(0x08, 0), 100.4),
+        359,
+        "the window, truncated"
+    );
+    assert_eq!(
+        release_seconds(at(0x18, 0), 100.0),
+        0,
+        "NO_RELEASE_WINDOW wins"
+    );
+    assert_eq!(
+        release_seconds(at(0x08, 0x4000), 100.0),
+        -1,
+        "out of bounds"
+    );
+    assert_eq!(release_seconds(at(0, 0), 100.0), -1, "no timer bit");
+    assert_eq!(
+        release_seconds(at(0x08, 0), 900.0),
+        0,
+        "expired, alive or not"
+    );
+    assert_eq!(recovery_seconds(Some(130.9), 100.0), 30, "rounded down");
+    assert_eq!(recovery_seconds(Some(99.0), 100.0), 0);
+}
+
+/// `0x6d1fc0`: within reach + 4 yd, inclusive; `0x6db010` keeps only a ghost's ask in range.
+#[test]
+fn the_spirit_healer_reaches_four_yards_past_its_reach_and_asks_only_a_ghost() {
+    let me = Vec3::ZERO;
+    assert!(healer_in_range(me, Vec3::new(5.5, 0.0, 0.0), 1.5));
+    assert!(!healer_in_range(me, Vec3::new(5.6, 0.0, 0.0), 1.5));
+    assert!(
+        healer_in_range(me, Vec3::new(0.0, 7.0, 0.0), 3.0),
+        "a bigger reach"
+    );
+    assert_eq!(standing_ask(Some(9), true, |_| true), Some(9));
+    assert_eq!(standing_ask(Some(9), false, |_| true), None, "alive");
+    assert_eq!(standing_ask(Some(9), true, |_| false), None, "out of range");
+    let mut feed = DeathFeedState {
+        healer: Some(9),
+        ..Default::default()
+    };
+    assert!(
+        accept_xp_loss(&feed).is_none(),
+        "not a ghost in range this frame"
+    );
+    feed.xp_loss_ready = true;
+    assert!(matches!(
+        accept_xp_loss(&feed),
+        Some(ClientCommand::SpiritHealerActivate { npc: 9 })
+    ));
+}
+
+/// `0x51b800` declines a pending offer before `CMSG_RECLAIM_CORPSE`.
+#[test]
+fn retrieve_corpse_declines_a_pending_offer_first() {
+    let mut net = DeathNet {
+        resurrect: Some(offer(7, "Priest")),
+        corpse_guid: Some(0xC0),
+        ..Default::default()
+    };
+    let sent = retrieve_corpse(&mut net);
+    assert!(matches!(
+        sent.as_slice(),
+        [
+            ClientCommand::ResurrectResponse {
+                caster: 7,
+                accept: false
+            },
+            ClientCommand::ReclaimCorpse { corpse: 0xC0 }
+        ]
+    ));
+    assert!(net.resurrect.is_none());
+    let again = retrieve_corpse(&mut net);
+    assert!(matches!(
+        again.as_slice(),
+        [ClientCommand::ReclaimCorpse { corpse: 0xC0 }]
+    ));
 }

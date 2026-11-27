@@ -1,23 +1,22 @@
 //! The release, reclaim, resurrect and self-res verbs and the getters the `DEATH`,
 //! `RECOVER_CORPSE`, `RESURRECT` and `XP_LOSS` dialogs call, over a snapshot the app pushes.
-//! The three predicates answer Lua booleans where the reference answers `1` or nil
-//! (`ResurrectHasSickness` `0x48aa00`, `ResurrectHasTimer` `0x48aa30`, `CheckSpiritHealerDist`
-//! `0x48d120`).
+//! The three predicates answer `1` or nil (`ResurrectHasSickness` `0x5159c0`, `ResurrectHasTimer`
+//! `0x515a00`, `CheckSpiritHealerDist` `0x51b6e0`).
 
 use mlua::{Lua, Value};
 
+use super::binding_abi::flag;
 use super::Model;
 
 /// The death snapshot the app pushes each frame.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct DeathUiState {
-    /// Seconds until the server force-releases, counted from death against the 6-minute
-    /// `CORPSE_REPOP_TIME` the wire never carries. `None` (`PLAYER_FIELD_BYTES` bit `0x08` clear,
-    /// an instanceable map) answers -1, which picks the no-timer text (`StaticPopup.lua:380-387`).
-    pub release_remaining: Option<f32>,
-    /// Seconds until the corpse is reclaimable, from `SMSG_CORPSE_RECLAIM_DELAY` at arrival; the
-    /// `StartDelay` gate of `RECOVER_CORPSE` and `RESURRECT`.
-    pub recovery_delay: f32,
+    /// `GetReleaseTimeRemaining`: whole seconds until the server force-releases, -1 for no timer,
+    /// which picks the no-timer text (`StaticPopup.lua:380-387`), 0 before any death.
+    pub release_remaining: i32,
+    /// `GetCorpseRecoveryDelay`: whole seconds until the corpse is reclaimable, from
+    /// `SMSG_CORPSE_RECLAIM_DELAY`; the `StartDelay` gate of `RECOVER_CORPSE` and `RESURRECT`.
+    pub recovery_delay: u32,
     /// The pending resurrect offer warns of resurrection sickness (`ResurrectHasSickness`).
     pub resurrect_sickness: bool,
     /// The pending offer still honors the reclaim-delay gate (`ResurrectHasTimer`).
@@ -87,10 +86,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         "GetReleaseTimeRemaining",
         lua.create_function(|lua, ()| {
             let model = lua.app_data_ref::<Model>().expect("model app_data");
-            Ok(model
-                .death
-                .release_remaining
-                .map_or(-1.0, |s| f64::from(s.max(0.0))))
+            Ok(model.death.release_remaining)
         })?,
     )?;
 
@@ -98,7 +94,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         "GetCorpseRecoveryDelay",
         lua.create_function(|lua, ()| {
             let model = lua.app_data_ref::<Model>().expect("model app_data");
-            Ok(f64::from(model.death.recovery_delay.max(0.0).ceil()))
+            Ok(model.death.recovery_delay)
         })?,
     )?;
 
@@ -106,21 +102,24 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         "ResurrectHasSickness",
         lua.create_function(|lua, ()| {
             let model = lua.app_data_ref::<Model>().expect("model app_data");
-            Ok(model.death.resurrect_sickness)
+            Ok(flag(model.death.resurrect_sickness))
         })?,
     )?;
     g.set(
         "ResurrectHasTimer",
         lua.create_function(|lua, ()| {
             let model = lua.app_data_ref::<Model>().expect("model app_data");
-            Ok(model.death.resurrect_has_timer)
+            // Never in an arena: the current map's `InstanceType` 4 (`[0xbea570]`, `0x515a03`).
+            Ok(flag(
+                model.death.resurrect_has_timer && model.instance_type != Some(4),
+            ))
         })?,
     )?;
     g.set(
         "CheckSpiritHealerDist",
         lua.create_function(|lua, ()| {
             let model = lua.app_data_ref::<Model>().expect("model app_data");
-            Ok(model.death.spirit_healer_in_range)
+            Ok(flag(model.death.spirit_healer_in_range))
         })?,
     )?;
 

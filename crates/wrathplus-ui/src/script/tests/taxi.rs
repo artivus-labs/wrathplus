@@ -43,6 +43,15 @@ fn taxi_snapshot_surfaces_and_intents_drain() {
         assert(math.abs(x - 0.55) < 1e-6 and math.abs(y - 0.8) < 1e-6)
         assert(TaxiNodeName(2) == "Orgrimmar, Durotar")
         assert(TaxiNodeCost(2) == 110)
+        -- Out of range (`0x590d60`, `0x590e00`, `0x5915e0`), and the number check's Usage lines.
+        assert(TaxiNodeName(3) == "INVALID" and TaxiNodeName(2.9) == "Orgrimmar, Durotar")
+        assert(not pcall(TaxiNodePosition, 3) and not pcall(TaxiNodeCost, 0))
+        assert(select(2, pcall(TaxiNodeCost, 3)):find("Invalid taxi node slot"))
+        for _, verb in ipairs({"TaxiNodeName", "TaxiNodePosition", "TaxiNodeGetType", "TaxiNodeCost",
+                               "TakeTaxiNode", "TaxiNodeSetCurrent"}) do
+          assert(select(2, pcall(_G[verb])):find("Usage: " .. verb .. "(slot)", 1, true), verb)
+        end
+        assert(GetNumRoutes() == 0)
         TaxiNodeSetCurrent(2)                          -- faithful no-op
         assert(GetNumRoutes(1) == 0 and GetNumRoutes(2) == 1)
         assert(math.abs(TaxiGetSrcX(2, 1) - 0.5) < 1e-6)
