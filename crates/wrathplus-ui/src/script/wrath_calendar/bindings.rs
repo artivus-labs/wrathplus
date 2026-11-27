@@ -6,6 +6,7 @@ use mlua::{Lua, MultiValue, Value};
 mod context;
 mod dates;
 mod sends;
+mod setters;
 
 use super::{
     Open, Opened, State, WrathCalendarDate, WrathCalendarEntry, WrathCalendarFields,
@@ -277,16 +278,6 @@ fn has3(lua: &Lua, args: &MultiValue) -> bool {
 fn guild_event_right(lua: &Lua) -> bool {
     let model = lua.app_data_ref::<Model>().expect("model app_data");
     model.guild.in_guild && model.guild.rights & RIGHT_GUILD_EVENT != 0
-}
-
-/// Edit the open event's fields; with nothing open it is ignored.
-fn edit(lua: &Lua, change: impl FnOnce(&mut WrathCalendarFields)) {
-    write(lua, |st, _| {
-        if let Some(open) = st.open.as_mut() {
-            change(&mut open.fields);
-            open.changed = true;
-        }
-    });
 }
 
 fn context_row(st: &State) -> Option<WrathCalendarEntry> {
@@ -608,105 +599,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         new_draft(lua, PLAYER, u8::try_from(slot).ok());
         many(vec![])
     })?;
-    set(lua, "CalendarEventSetTitle", |lua, args| {
-        let t = text_arg(lua, &args, 0).unwrap_or_default();
-        edit(lua, |f| f.title = t);
-        many(vec![])
-    })?;
-    set(lua, "CalendarEventSetDescription", |lua, args| {
-        let t = text_arg(lua, &args, 0).unwrap_or_default();
-        edit(lua, |f| f.description = t);
-        many(vec![])
-    })?;
-    set(lua, "CalendarEventSetType", |lua, args| {
-        if let Some(t) = int_arg(lua, &args, 0).filter(|t| (1..=5).contains(t)) {
-            edit(lua, |f| {
-                f.event_type = (t - 1) as u8;
-                f.dungeon = -1;
-            });
-        }
-        many(vec![])
-    })?;
-    set(lua, "CalendarEventSetRepeatOption", |lua, args| {
-        if let Some(r) = int_arg(lua, &args, 0).filter(|r| (1..=4).contains(r)) {
-            edit(lua, |f| f.repeat = (r - 1) as u8);
-        }
-        many(vec![])
-    })?;
-    set(lua, "CalendarEventSetSize", |lua, args| {
-        if let Some(n) = int_arg(lua, &args, 0) {
-            edit(lua, |f| f.max_invites = n.max(0) as u32);
-        }
-        many(vec![])
-    })?;
-    set(lua, "CalendarEventSetTextureID", |lua, args| {
-        let index = int_arg(lua, &args, 0);
-        let dungeons = read(lua, |st| st.view.textures.clone());
-        edit(lua, |f| {
-            let list = match f.event_type {
-                0 => &dungeons[0],
-                1 => &dungeons[1],
-                _ => return,
-            };
-            f.dungeon = index
-                .and_then(|k| usize::try_from(k - 1).ok())
-                .and_then(|k| list.get(k))
-                .map_or(-1, |t| t.dungeon);
-        });
-        many(vec![])
-    })?;
-    for (name, lockout) in [
-        ("CalendarEventSetDate", false),
-        ("CalendarEventSetLockoutDate", true),
-    ] {
-        set(lua, name, move |lua, args| {
-            let (Some(m), Some(d), Some(y)) = (
-                int_arg(lua, &args, 0),
-                int_arg(lua, &args, 1),
-                int_arg(lua, &args, 2),
-            ) else {
-                return many(vec![]);
-            };
-            edit(lua, |f| {
-                let slot = if lockout { &mut f.lockout } else { &mut f.date };
-                *slot = WrathCalendarDate::new(y as i32, m as u8, d as u8, slot.hour, slot.minute);
-            });
-            many(vec![])
-        })?;
-    }
-    for (name, lockout) in [
-        ("CalendarEventSetTime", false),
-        ("CalendarEventSetLockoutTime", true),
-    ] {
-        set(lua, name, move |lua, args| {
-            let (Some(h), Some(m)) = (int_arg(lua, &args, 0), int_arg(lua, &args, 1)) else {
-                return many(vec![]);
-            };
-            edit(lua, |f| {
-                let slot = if lockout { &mut f.lockout } else { &mut f.date };
-                slot.hour = h.clamp(0, 23) as u8;
-                slot.minute = m.clamp(0, 59) as u8;
-            });
-            many(vec![])
-        })?;
-    }
-    for (name, bit, on) in [
-        ("CalendarEventSetLocked", LOCKED, true),
-        ("CalendarEventClearLocked", LOCKED, false),
-        ("CalendarEventSetAutoApprove", AUTO_APPROVE, true),
-        ("CalendarEventClearAutoApprove", AUTO_APPROVE, false),
-    ] {
-        set(lua, name, move |lua, _| {
-            edit(lua, |f| {
-                if on {
-                    f.flags |= bit;
-                } else {
-                    f.flags &= !bit;
-                }
-            });
-            many(vec![])
-        })?;
-    }
+    setters::install(lua)?;
     sends::install(lua)?;
 
     // ── the option lists ──────────────────────────────────────────────────────────────────────

@@ -570,6 +570,24 @@ fn a_draft_is_added_with_its_fields() {
     s.run("CalendarNewGuildAnnouncement()").unwrap();
     assert!(!s.eval::<bool>("return CalendarEventCanEdit()").unwrap());
     s.take_wrath_calendar_requests();
+    // `0x5f1130` marks a change only for a different title, capped by `0x7e1830`; a bad time is
+    // refused (`0x5bb61e`); a setter without its arguments raises its usage.
+    s.run("CalendarNewEvent() CalendarEventSetTitle('')")
+        .unwrap();
+    assert!(!s
+        .eval::<bool>("return CalendarEventHaveSettingsChanged()")
+        .unwrap());
+    s.run("CalendarEventSetTitle(('x'):rep(80)) CalendarEventSetTime(25, 0)")
+        .unwrap();
+    assert_eq!(
+        s.eval::<(i64, bool)>(
+            "return #(CalendarGetEventInfo()), err == (CALENDAR_ERROR_INVALID_TIME or 'CALENDAR_ERROR_INVALID_TIME')"
+        )
+        .unwrap(),
+        (31, true)
+    );
+    assert!(s.run("CalendarEventSetDate()").is_err());
+    s.take_wrath_calendar_requests();
     // A player draft carries 0x1 (`0x5f2abd`), which its add sends.
     s.run("CalendarNewEvent()").unwrap();
     assert_eq!(
@@ -656,6 +674,11 @@ fn invites_sort_and_status_options_need_a_moderator() {
         .unwrap());
     // `0x5b9960` clears the pending bit after the error line and announces it.
     assert_eq!(s.eval::<i64>("return cleared").unwrap(), 1);
+    // `0x5b7d20`: an invitee without the moderator rank sets nothing.
+    s.run("CalendarEventSetTitle('Mine')").unwrap();
+    assert!(!s
+        .eval::<bool>("return CalendarEventHaveSettingsChanged()")
+        .unwrap());
     // `0x5f23f0` answers with the player's own invite and sets the pending bit; nothing more
     // answers while it is set.
     s.take_wrath_calendar_requests();
