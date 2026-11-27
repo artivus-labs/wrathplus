@@ -1,5 +1,5 @@
-//! `BankBagSlotPrices.dbc`: the copper price of each bank bag slot. Rows 7-12 hold an unreachable
-//! `999999999` sentinel, as `GetNumBankSlots()` reports full at 6. `CMSG_BUY_BANK_SLOT` carries no
+//! `BankBagSlotPrices.dbc`: the copper price of each bank bag slot. Rows 8-12 hold an unreachable
+//! `999999999` sentinel, as `GetNumBankSlots()` reports full at 7. `CMSG_BUY_BANK_SLOT` carries no
 //! index: the server buys the slot after the count in `PLAYER_BYTES_2` byte 2.
 
 use anyhow::{Context, Result};

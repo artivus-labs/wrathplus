@@ -169,6 +169,7 @@ fn resolve_service(
         group_name,
         tooltip: service_tooltip(wire.spell, spells),
         item_link: describe::service_item_link(trainer_type, display, items, commands),
+        skill_line: law::service_skill_line(wire.spell, spells, skill_lines),
     }
 }
 

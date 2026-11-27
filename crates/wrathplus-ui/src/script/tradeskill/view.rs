@@ -120,7 +120,7 @@ fn collate(a: &str, b: &str) -> std::cmp::Ordering {
 
 /// The groups in display order (`0x4fca20`): by `ItemClass`, then name, never subclass id; each
 /// group's recipes by tier, product ItemLevel (`record+0x14`), then name. A recipe with no group
-/// yet goes into an empty-named group keyed `u32::MAX`, which sorts last.
+/// goes into the group keyed `u32::MAX`, which sorts last.
 pub(super) fn build_groups(recipes: &[TradeSkillRecipe]) -> Vec<TradeSkillGroup> {
     let mut map: HashMap<(u32, u32), TradeSkillGroup> = HashMap::new();
     for (i, r) in recipes.iter().enumerate() {
@@ -128,14 +128,16 @@ pub(super) fn build_groups(recipes: &[TradeSkillRecipe]) -> Vec<TradeSkillGroup>
             Some((class, subclass, name)) => ((*class, *subclass), name.clone()),
             None => ((u32::MAX, u32::MAX), String::new()),
         };
-        map.entry(key)
-            .or_insert_with(|| TradeSkillGroup {
-                key,
-                name,
-                entries: Vec::new(),
-            })
-            .entries
-            .push(i);
+        let g = map.entry(key).or_insert_with(|| TradeSkillGroup {
+            key,
+            name,
+            entries: Vec::new(),
+        });
+        // The no-product group is named by the line's alternate verb (`0x5db325`, `0x5daab4`).
+        if g.name.is_empty() {
+            g.name = r.alt_verb.clone().unwrap_or_default();
+        }
+        g.entries.push(i);
     }
     let mut groups: Vec<TradeSkillGroup> = map.into_values().collect();
     for g in &mut groups {
@@ -236,9 +238,8 @@ pub(super) fn selected_visible_index(model: &Model) -> u32 {
         .map_or(0, |p| (p + 1) as u32)
 }
 
-/// `SelectTradeSkill`: holds the recipe at a visible index. A header index leaves the selection
-/// as it was, and an out-of-range one clears it; the stock Lua folds a header instead of selecting
-/// it (`Blizzard_TradeSkillUI.lua:184-192`).
+/// `SelectTradeSkill`: holds the recipe at a visible index; a header or out-of-range index clears
+/// it, as 12340 stores 0 for a row id `<= 0` (`0x5da94d`-`0x5da95f`).
 pub(super) fn select(model: &mut Model, index: u32) {
     let visible = rows(model);
     match index.checked_sub(1).and_then(|n| visible.get(n as usize)) {
@@ -251,33 +252,32 @@ pub(super) fn select(model: &mut Model, index: u32) {
                 .and_then(|t| t.recipes.get(*ei))
                 .map_or(0, |r| r.spell_id);
         }
-        Some(Row::Header { .. }) => {}
-        None => {
+        Some(Row::Header { .. }) | None => {
             model.trade_skill_selection = 0;
             model.trade_skill_selected_spell = 0;
         }
     }
 }
 
-/// Folds or unfolds the group whose header is visible row `id`; 0 is every group, as the stock
-/// collapse-all button passes, and any other row is a no-op.
-pub(super) fn set_collapsed(model: &mut Model, id: usize, collapse: bool) {
-    if id == 0 && !collapse {
+/// Folds or unfolds the group whose header is visible row `id`; `<= 0` is every group, as the stock
+/// collapse-all button passes. Any other row answers `false`, which the verbs raise on.
+pub(super) fn set_collapsed(model: &mut Model, id: i64, collapse: bool) -> bool {
+    if id <= 0 && !collapse {
         model.trade_skill_collapsed.clear();
-        return;
+        return true;
     }
-    let targets: Vec<(u32, u32)> = if id == 0 {
+    let targets: Vec<(u32, u32)> = if id <= 0 {
         let Some(t) = model.trade_skill.as_ref() else {
-            return;
+            return true;
         };
         build_groups(&t.recipes)
             .into_iter()
             .map(|g| g.key)
             .collect()
     } else {
-        match rows(model).get(id - 1) {
+        match rows(model).get(id as usize - 1) {
             Some(Row::Header { key, .. }) => vec![*key],
-            _ => Vec::new(),
+            _ => return false,
         }
     };
     for k in targets {
@@ -287,4 +287,5 @@ pub(super) fn set_collapsed(model: &mut Model, id: usize, collapse: bool) {
             model.trade_skill_collapsed.remove(&k);
         }
     }
+    true
 }

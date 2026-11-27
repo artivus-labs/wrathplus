@@ -809,7 +809,7 @@ fn merchant_tabs_drive_buyback_page_and_repair_pair() {
         ],
         can_repair: true,
     }));
-    s.set_repair_all_cost(76);
+    s.set_repair_all_cost(76, true);
     s.fire_event(
         "MERCHANT_SHOW",
         vec![ScriptValue::Str("Kurdram Stonehammer".into())],

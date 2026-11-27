@@ -130,7 +130,7 @@ pub(in crate::script) fn install(lua: &Lua) -> mlua::Result<()> {
                     Value::Nil,
                 ])
             };
-            let row = (index.round_ties_even() as i64)
+            let row = i64::from(binding_abi::ftol(index))
                 .checked_sub(1)
                 .and_then(|n| usize::try_from(n).ok())
                 .and_then(|n| rows(&model).get(n).cloned());
@@ -192,29 +192,42 @@ pub(in crate::script) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // Expand/CollapseTradeSkillSubClass(i): the group whose header is visible row i; 0 is all.
-    g.set(
-        "ExpandTradeSkillSubClass",
-        lua.create_function(|lua, id: usize| {
-            let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-            set_collapsed(&mut model, id, false);
-            model.trade_skill_touched = true;
-            Ok(())
-        })?,
-    )?;
-    g.set(
-        "CollapseTradeSkillSubClass",
-        lua.create_function(|lua, id: usize| {
-            let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-            set_collapsed(&mut model, id, true);
-            model.trade_skill_touched = true;
-            Ok(())
-        })?,
-    )?;
+    // Expand/CollapseTradeSkillSubClass(i) (`0x5dd500`, `0x5dd460`): the group whose header is
+    // visible row i, `<= 0` all; any other row raises the reference's own text, which names a skill
+    // line for the one and a sub class for the other.
+    for (verb, collapse, bad, usage) in [
+        (
+            "ExpandTradeSkillSubClass",
+            false,
+            "Bad skill line in ExpandTradeSkillSubClass",
+            "Usage: ExpandTradeSkillSubClass(index)",
+        ),
+        (
+            "CollapseTradeSkillSubClass",
+            true,
+            "Bad sub class in CollapseTradeSkillSubClass",
+            "Usage: CollapseTradeSkillSubClass(index)",
+        ),
+    ] {
+        g.set(
+            verb,
+            lua.create_function(move |lua, id: Value| {
+                let id = i64::from(binding_abi::ftol_arg(lua, id, usage)?);
+                let mut model = lua.app_data_mut::<Model>().expect("model app_data");
+                if !set_collapsed(&mut model, id, collapse) {
+                    return Err(mlua::Error::runtime(bad));
+                }
+                model.trade_skill_touched = true;
+                Ok(())
+            })?,
+        )?;
+    }
 
     g.set(
         "GetTradeSkillIcon",
-        lua.create_function(|lua, index: usize| {
+        lua.create_function(|lua, index: Value| {
+            let index = number_arg(lua, index, "Usage: GetTradeSkillIcon(index)")?;
+            let index = usize::try_from(index).unwrap_or(0);
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             opt_str(lua, recipe_at(&model, index).and_then(|r| r.icon.as_ref()))
         })?,
@@ -224,8 +237,9 @@ pub(in crate::script) fn install(lua: &Lua) -> mlua::Result<()> {
         "GetTradeSkillNumMade",
         lua.create_function(|lua, index: usize| {
             let model = lua.app_data_ref::<Model>().expect("model app_data");
+            // A miss answers 1, 1 (`0x5db7dd`).
             let (min_made, max_made) =
-                recipe_at(&model, index).map_or((0, 0), |r| (r.min_made, r.max_made));
+                recipe_at(&model, index).map_or((1, 1), |r| (r.min_made, r.max_made));
             Ok(MultiValue::from_vec(vec![
                 Value::Integer(i64::from(min_made)),
                 Value::Integer(i64::from(max_made)),
@@ -256,8 +270,8 @@ pub(in crate::script) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // GetTradeSkillReagentInfo(index, reagentIndex): one nil on a miss; name and icon are nil
-    // until the item template arrives.
+    // GetTradeSkillReagentInfo(index, reagentIndex): four nils on a miss (`0x5de4bb`); name and
+    // icon are nil until the item template arrives.
     g.set(
         "GetTradeSkillReagentInfo",
         lua.create_function(|lua, (index, reagent_index): (usize, usize)| {
@@ -265,7 +279,7 @@ pub(in crate::script) fn install(lua: &Lua) -> mlua::Result<()> {
             let Some(reagent) = recipe_at(&model, index)
                 .and_then(|r| reagent_index.checked_sub(1).and_then(|n| r.reagents.get(n)))
             else {
-                return Ok(MultiValue::from_vec(vec![Value::Nil]));
+                return Ok(MultiValue::from_vec(vec![Value::Nil; 4]));
             };
             Ok(MultiValue::from_vec(vec![
                 opt_str(lua, reagent.name.as_ref())?,
@@ -293,13 +307,19 @@ pub(in crate::script) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // GetTradeskillRepeatCount(): the lowercase "s" is the 1.12 name.
+    // GetTradeskillRepeatCount() (`0x5da270`): the Create All count, never below 1, with or
+    // without a window. Labelled: 12340 answers it only while the repeating spell is selected; the
+    // snapshot does not carry which spell repeats.
     g.set(
         "GetTradeskillRepeatCount",
         lua.create_function(|lua, ()| {
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             Ok(i64::from(
-                model.trade_skill.as_ref().map_or(0, |t| t.repeat_count),
+                model
+                    .trade_skill
+                    .as_ref()
+                    .map_or(0, |t| t.repeat_count)
+                    .max(1),
             ))
         })?,
     )?;
@@ -307,9 +327,10 @@ pub(in crate::script) fn install(lua: &Lua) -> mlua::Result<()> {
     // SelectTradeSkill and GetTradeSkillSelectionIndex take and answer visible indices.
     g.set(
         "SelectTradeSkill",
-        lua.create_function(|lua, index: u32| {
+        lua.create_function(|lua, index: Value| {
+            let index = number_arg(lua, index, "Usage: SelectTradeSkill(index)")?;
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-            select(&mut model, index);
+            select(&mut model, u32::try_from(index).unwrap_or(0));
             Ok(())
         })?,
     )?;
@@ -321,17 +342,20 @@ pub(in crate::script) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // DoTradeSkill(index, count): queues the recipe's spell for `count` crafts, which the app sends
-    // as one `CMSG_CAST_SPELL` each.
+    // DoTradeSkill(index [, repeat]) (`0x5dac00`): queues the recipe's spell for `repeat` crafts
+    // (default 1, truncated), which the app sends as one `CMSG_CAST_SPELL` each; a repeat at or
+    // past numAvailable takes numAvailable, with no floor (`0x5dac90`-`0x5dac9c`).
     g.set(
         "DoTradeSkill",
-        lua.create_function(|lua, (index, count): (usize, Option<i64>)| {
+        lua.create_function(|lua, (index, count): (Value, Value)| {
+            let index = number_arg(lua, index, "Usage: DoTradeSkill(index [, repeat])")?;
+            let count = lua.coerce_number(count)?.map_or(1, |n| n as i64 as u32);
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-            if let Some((spell_id, avail)) =
-                recipe_at(&model, index).map(|r| (r.spell_id, r.num_available))
-            {
-                // The client clamps the repeat to numAvailable, at least 1 (`0x500280`).
-                let n = (count.unwrap_or(1).max(1) as u32).min(avail.max(1));
+            let recipe = usize::try_from(index)
+                .ok()
+                .and_then(|i| recipe_at(&model, i));
+            if let Some((spell_id, avail)) = recipe.map(|r| (r.spell_id, r.num_available)) {
+                let n = if count >= avail { avail } else { count };
                 model.trade_skill_dos.push((spell_id, n));
             }
             Ok(())
@@ -354,62 +378,72 @@ pub(in crate::script) fn install(lua: &Lua) -> mlua::Result<()> {
     // `Set*(i, 0)` hides it. Each set fires TRADE_SKILL_UPDATE through the touched flag
     // (`0x4fd710`), and `Get*(0)` asks whether everything is shown. The reference's per-header
     // subclass flag (`+0xc`, mask `0x84dd60`) is kept here as hidden group keys.
+    // GetTradeSkillSubClassFilter(i) (`0x5da1b0`): `<= 0` asks whether every group shows; past the
+    // groups raises.
     g.set(
         "GetTradeSkillSubClassFilter",
-        lua.create_function(|lua, index: usize| {
+        lua.create_function(|lua, index: Value| {
+            const USAGE: &str = "Usage: GetTradeSkillSubClassFilter(index)";
+            let index = i64::from(number_arg(lua, index, USAGE)?);
             let model = lua.app_data_ref::<Model>().expect("model app_data");
-            let Some(t) = model.trade_skill.as_ref() else {
-                return Ok(binding_abi::flag(false));
+            let groups = model
+                .trade_skill
+                .as_ref()
+                .map_or_else(Vec::new, |t| build_groups(&t.recipes));
+            let hidden = |k| model.trade_skill_subclass_hidden.contains(k);
+            if index <= 0 {
+                return Ok(binding_abi::flag(!groups.iter().any(|g| hidden(&g.key))));
+            }
+            let Some(g) = groups.get(index as usize - 1) else {
+                return Err(mlua::Error::runtime(
+                    "Bad sub class in GetTradeSkillSubClassFilter",
+                ));
             };
-            let groups = build_groups(&t.recipes);
-            Ok(match index.checked_sub(1) {
-                None => binding_abi::flag(
-                    !groups
-                        .iter()
-                        .any(|g| model.trade_skill_subclass_hidden.contains(&g.key)),
-                ),
-                Some(n) => binding_abi::flag(
-                    groups
-                        .get(n)
-                        .is_some_and(|g| !model.trade_skill_subclass_hidden.contains(&g.key)),
-                ),
-            })
+            Ok(binding_abi::flag(!hidden(&g.key)))
         })?,
     )?;
+    // SetTradeSkillSubClassFilter(index [, on, exclusive]) (`0x5dd0f0`): `<= 0` shows every group;
+    // past the groups raises; `on` is required; `on` with a non-zero `exclusive` shows only i.
     g.set(
         "SetTradeSkillSubClassFilter",
-        lua.create_function(
-            |lua, (index, on, exclusive): (usize, Option<i64>, Option<i64>)| {
-                let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-                let Some(t) = model.trade_skill.as_ref() else {
-                    return Ok(());
-                };
-                let keys: Vec<(u32, u32)> = build_groups(&t.recipes)
-                    .into_iter()
-                    .map(|g| g.key)
-                    .collect();
-                let on = on.unwrap_or(1) != 0;
-                let exclusive = exclusive.unwrap_or(0) != 0;
-                match index.checked_sub(1) {
-                    None => model.trade_skill_subclass_hidden.clear(),
-                    Some(n) => {
-                        let Some(&key) = keys.get(n) else {
-                            return Ok(());
-                        };
-                        if on && exclusive {
-                            model.trade_skill_subclass_hidden =
-                                keys.iter().copied().filter(|&k| k != key).collect();
-                        } else if on {
-                            model.trade_skill_subclass_hidden.remove(&key);
-                        } else {
-                            model.trade_skill_subclass_hidden.insert(key);
-                        }
-                    }
-                }
-                model.trade_skill_touched = true;
-                Ok(())
-            },
-        )?,
+        lua.create_function(|lua, (index, on, exclusive): (Value, Value, Value)| {
+            const USAGE: &str = "Usage: SetTradeSkillSubClassFilter(index [, on\\off, exclusive])";
+            let index = binding_abi::string_arg(lua, index, USAGE)?;
+            let index = index.trim().parse::<f64>().map_or(0, |n| n as i64);
+            let mut model = lua.app_data_mut::<Model>().expect("model app_data");
+            model.trade_skill_touched = true;
+            if index <= 0 {
+                model.trade_skill_subclass_hidden.clear();
+                return Ok(());
+            }
+            let keys: Vec<(u32, u32)> = model
+                .trade_skill
+                .as_ref()
+                .map_or_else(Vec::new, |t| build_groups(&t.recipes))
+                .into_iter()
+                .map(|g| g.key)
+                .collect();
+            let Some(&key) = keys.get(index as usize - 1) else {
+                return Err(mlua::Error::runtime(
+                    "Bad sub class in SetTradeSkillSubClassFilter",
+                ));
+            };
+            let Some(on) = lua.coerce_number(on)? else {
+                return Err(mlua::Error::runtime(
+                    "Missing on//off parameter in SetTradeSkillSubClassFilter",
+                ));
+            };
+            let exclusive = lua.coerce_number(exclusive)?.is_some_and(|n| n as i64 != 0);
+            if on as i64 == 0 {
+                model.trade_skill_subclass_hidden.insert(key);
+            } else if exclusive {
+                model.trade_skill_subclass_hidden =
+                    keys.into_iter().filter(|&k| k != key).collect();
+            } else {
+                model.trade_skill_subclass_hidden.remove(&key);
+            }
+            Ok(())
+        })?,
     )?;
     // GetTradeSkillInvSlots(): the products' slot names in ascending bit order (`0xbde058`).
     g.set(
@@ -496,7 +530,7 @@ pub(in crate::script) fn install_wrath(lua: &Lua) -> mlua::Result<()> {
     let g = lua.globals();
     let index_arg = |lua: &Lua, args: &MultiValue| -> Option<usize> {
         let n = lua.coerce_number(args.front()?.clone()).ok().flatten()?;
-        usize::try_from(n.round() as i64).ok()
+        usize::try_from(binding_abi::ftol(n)).ok()
     };
     g.set(
         "GetTradeSkillDescription",
@@ -642,4 +676,114 @@ pub(in crate::script) fn install_wrath(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
     Ok(())
+}
+
+#[cfg(test)]
+mod wrath_tests {
+    use super::super::tests::two_recipe_state;
+    use crate::script::UiScript;
+
+    fn err(s: &UiScript, call: &str) -> String {
+        s.run(call).unwrap_err().to_string()
+    }
+
+    /// `GetTradeskillRepeatCount` is never below 1 (`0x5da2a0`); `DoTradeSkill` truncates and caps
+    /// at numAvailable without a floor (`0x5dac90`).
+    #[test]
+    fn the_repeat_count_and_do_trade_skill_follow_12340() {
+        let mut s = UiScript::new().unwrap();
+        assert_eq!(
+            s.eval::<i64>("return GetTradeskillRepeatCount()").unwrap(),
+            1
+        );
+        let mut state = two_recipe_state();
+        state.repeat_count = 0;
+        s.set_trade_skill(Some(state.clone()));
+        assert_eq!(
+            s.eval::<i64>("return GetTradeskillRepeatCount()").unwrap(),
+            1
+        );
+        state.repeat_count = 3;
+        s.set_trade_skill(Some(state));
+        assert_eq!(
+            s.eval::<i64>("return GetTradeskillRepeatCount()").unwrap(),
+            3
+        );
+        s.run("DoTradeSkill(3, 9) DoTradeSkill(3, 2.7) DoTradeSkill(3, 0) DoTradeSkill(3)")
+            .unwrap();
+        assert_eq!(
+            s.take_trade_skill_dos(),
+            vec![(2963, 5), (2963, 2), (2963, 0), (2963, 1)]
+        );
+        assert!(err(&s, "DoTradeSkill()").contains("Usage: DoTradeSkill(index [, repeat])"));
+        // The index truncates (`0x5db2e8`): 2.7 is row 2, Simple Robe, not row 3.
+        let name = s.eval::<String>("return (GetTradeSkillInfo(2.7))").unwrap();
+        assert_eq!(name, "Simple Robe");
+    }
+
+    /// The verbs that clear, miss in shape, or raise (`0x5da900`, `0x5db6e0`, `0x5de400`,
+    /// `0x5dd460`/`0x5dd500`, `0x5da1b0`, `0x5dd0f0`).
+    #[test]
+    fn the_selection_misses_and_bad_indices_follow_12340() {
+        let mut s = UiScript::new().unwrap();
+        s.set_trade_skill(Some(two_recipe_state()));
+        s.run("SelectTradeSkill(3) SelectTradeSkill(1)").unwrap();
+        assert_eq!(
+            s.eval::<i64>("return GetTradeSkillSelectionIndex()")
+                .unwrap(),
+            0,
+            "a header clears the selection"
+        );
+        assert_eq!(
+            s.eval::<(i64, i64)>("return GetTradeSkillNumMade(1)")
+                .unwrap(),
+            (1, 1)
+        );
+        assert_eq!(
+            s.eval::<i64>("return select('#', GetTradeSkillReagentInfo(1, 1))")
+                .unwrap(),
+            4
+        );
+        assert!(err(&s, "CollapseTradeSkillSubClass(2)")
+            .contains("Bad sub class in CollapseTradeSkillSubClass"));
+        assert!(err(&s, "ExpandTradeSkillSubClass(3)")
+            .contains("Bad skill line in ExpandTradeSkillSubClass"));
+        s.run("CollapseTradeSkillSubClass(0) ExpandTradeSkillSubClass(-1)")
+            .unwrap();
+        assert!(err(&s, "GetTradeSkillSubClassFilter(5)")
+            .contains("Bad sub class in GetTradeSkillSubClassFilter"));
+        assert_eq!(
+            s.eval::<i64>("return GetTradeSkillSubClassFilter(0)")
+                .unwrap(),
+            1
+        );
+        assert!(err(&s, "SetTradeSkillSubClassFilter(1)")
+            .contains("Missing on//off parameter in SetTradeSkillSubClassFilter"));
+        assert!(err(&s, "SetTradeSkillSubClassFilter(5, 1)")
+            .contains("Bad sub class in SetTradeSkillSubClassFilter"));
+        assert!(err(&s, "SetTradeSkillSubClassFilter({})")
+            .contains("Usage: SetTradeSkillSubClassFilter(index [, on\\off, exclusive])"));
+        for verb in [
+            "ExpandTradeSkillSubClass",
+            "CollapseTradeSkillSubClass",
+            "GetTradeSkillSubClassFilter",
+            "SelectTradeSkill",
+            "GetTradeSkillIcon",
+        ] {
+            assert!(err(&s, &format!("{verb}()")).contains(&format!("Usage: {verb}(index)")));
+        }
+    }
+
+    /// A recipe with no product files under the (-1, -1) header, which 12340 names by the line's
+    /// alternate verb (`0x5db325`, `0x5daab4`).
+    #[test]
+    fn the_no_product_header_is_the_alternate_verb() {
+        let mut s = UiScript::new().unwrap();
+        let mut state = two_recipe_state();
+        state.recipes[0].group = None;
+        state.recipes[0].alt_verb = Some("Enchant".into());
+        s.set_trade_skill(Some(state));
+        let probe = "local n = GetTradeSkillInfo(3) return n .. '/' .. select(2, GetTradeSkillSubClasses())";
+        assert_eq!(s.eval::<String>(probe).unwrap(), "Enchant/Enchant");
+    }
 }

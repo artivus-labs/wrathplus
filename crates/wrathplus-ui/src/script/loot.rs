@@ -42,7 +42,7 @@ pub struct LootRow {
     pub name: Option<String>,
     /// Icon path; `None` without a display icon, answered as [`MISSING_ICON`].
     pub texture: Option<String>,
-    /// Stack size looted; 1 for the coin row.
+    /// Stack size looted; 0 for the coin row (`0x588617`).
     pub quantity: u32,
     /// Quality 0..6; `None` while the template is in flight, answered as [`CACHE_MISS_QUALITY`].
     pub quality: Option<u32>,
@@ -63,9 +63,9 @@ pub struct LootRow {
 /// One open loot window, pushed whole by the app; `None` means no loot is open.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct LootState {
-    /// The fixed slot list. A looted slot becomes `None`: still counted by `GetNumLootItems`, read
-    /// once at `OnShow` (`LootFrame.lua:132`), but neither item nor coin, so `LootFrame_Update`
-    /// hides its button in place (`LootFrame.lua:80`).
+    /// The fixed slot list. A looted slot becomes `None`: neither item nor coin, so
+    /// `LootFrame_Update` hides its button in place, and counted by `GetNumLootItems` while an
+    /// occupied slot follows it (`0x588190`).
     pub rows: Vec<Option<LootRow>>,
     /// `IsFishingLoot` (wire `loot_type` 3): the reel-in sound and portrait (`LootFrame.lua:137`).
     pub fishing: bool,
@@ -140,15 +140,6 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // GetNumLootItems(): cleared slots included, so it holds still while a window is open.
-    g.set(
-        "GetNumLootItems",
-        lua.create_function(|lua, ()| {
-            let model = lua.app_data_ref::<Model>().expect("model app_data");
-            Ok(model.loot.as_ref().map_or(0, |l| l.rows.len()) as i64)
-        })?,
-    )?;
-
     // GetLootSlotInfo(slot) → texture, item, quantity, quality (`0x4c2c60`, `LootFrame.lua:81`),
     // four on every leg (`0x4c2d07 mov eax,4`): no item is `nil, "", 0, 0`, a cleared slot
     // `nil, "", 0, -1`. The miss sentinels are a floor: the reference opens no window before every
@@ -218,28 +209,6 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     )?;
 
     g.set(
-        "LootSlotIsItem",
-        lua.create_function(|lua, slot: usize| {
-            let model = lua.app_data_ref::<Model>().expect("model app_data");
-            Ok(slot
-                .checked_sub(1)
-                .and_then(|n| model.loot.as_ref()?.rows.get(n)?.as_ref())
-                .is_some_and(|r| !r.is_coin))
-        })?,
-    )?;
-
-    g.set(
-        "LootSlotIsCoin",
-        lua.create_function(|lua, slot: usize| {
-            let model = lua.app_data_ref::<Model>().expect("model app_data");
-            Ok(slot
-                .checked_sub(1)
-                .and_then(|n| model.loot.as_ref()?.rows.get(n)?.as_ref())
-                .is_some_and(|r| r.is_coin))
-        })?,
-    )?;
-
-    g.set(
         "IsFishingLoot",
         lua.create_function(|lua, ()| {
             let model = lua.app_data_ref::<Model>().expect("model app_data");
@@ -285,16 +254,6 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         lua.create_function(|lua, slot: u32| {
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
             model.loot_confirms.push(slot);
-            Ok(())
-        })?,
-    )?;
-
-    // CloseLoot([failed]): the "unable to open the UI" argument (`LootFrame.lua:18`) is ignored.
-    g.set(
-        "CloseLoot",
-        lua.create_function(|lua, _args: MultiValue| {
-            let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-            model.loot_close = true;
             Ok(())
         })?,
     )?;

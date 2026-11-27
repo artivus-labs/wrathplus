@@ -155,3 +155,27 @@ pub(super) fn category(state: u8) -> TrainerServiceCategory {
         _ => TrainerServiceCategory::Unavailable,
     }
 }
+
+/// `GetTrainerServiceSkillLine` (`0x5952f0`): over the spell's effects in order, a `SKILL_STEP`'s
+/// own line (its misc value), else the line of the spell a non-pet `LEARN_SPELL` teaches, else of
+/// the spell itself; the first that resolves names it. Labelled: the ability lookup's race and
+/// class filter (`0x812410`) is not applied.
+pub(super) fn service_skill_line(
+    wire_spell: u32,
+    spells: &SpellCatalog,
+    skill_lines: Option<&SkillLineCatalog>,
+) -> Option<String> {
+    let (d, c) = (spells.get(wire_spell)?, skill_lines?);
+    (0..3).filter(|&i| d.effects[i] != 0).find_map(|i| {
+        let line = if d.effects[i] == SPELL_EFFECT_SKILL_STEP {
+            u32::try_from(d.effect_misc_value[i]).ok()?
+        } else if d.effects[i] == SPELL_EFFECT_LEARN_SPELL
+            && d.effect_implicit_target_a[i] != TARGET_UNIT_PET
+        {
+            c.spell_to_line(d.effect_trigger_spell[i])?
+        } else {
+            c.spell_to_line(wire_spell)?
+        };
+        Some(c.line(line)?.name.clone())
+    })
+}

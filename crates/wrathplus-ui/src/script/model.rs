@@ -652,8 +652,8 @@ pub(crate) struct Model {
 
     /// The open vendor's stock, the `BuyMerchantItem` calls and whether `CloseMerchant` ran.
     pub(crate) merchant: Option<merchant::MerchantState>,
-    /// `GetRepairAllCost`'s total; 0 unless a repairer is open.
-    pub(crate) repair_all_cost: u32,
+    /// `GetRepairAllCost`'s total and carried damage; 0 and false unless a repairer is open.
+    pub(crate) repair_all_cost: (u32, bool),
     /// The repair costs `SetInventoryItem` and `SetBagItem` return.
     pub(crate) repair_costs: merchant::RepairCosts,
     pub(crate) merchant_buys: Vec<(u32, u32)>,
@@ -670,8 +670,10 @@ pub(crate) struct Model {
     /// The stable window: snapshot, selection, drag and queued calls, reset together on close.
     pub(crate) stable: stable::StableModel,
 
-    /// The open bank's slot-purchase row and calls; its contents are bags -1 and 5..=10.
+    /// The open bank and its calls, and the purchase row, which outlives the window (`0x57bab0`);
+    /// its contents are bags -1 and 5..=11.
     pub(crate) bank: Option<bank::BankState>,
+    pub(crate) bank_slots: bank::BankState,
     pub(crate) bank_purchase: bool,
     pub(crate) bank_close: bool,
 
@@ -1382,7 +1384,7 @@ impl Model {
             gossip_close: false,
             gossip_quest_selects: Vec::new(),
             merchant: None,
-            repair_all_cost: 0,
+            repair_all_cost: (0, false),
             repair_costs: Default::default(),
             merchant_buys: Vec::new(),
             merchant_cursor_sells: Vec::new(),
@@ -1393,6 +1395,7 @@ impl Model {
             repair_mode: false,
             stable: Default::default(),
             bank: None,
+            bank_slots: bank::BankState::default(),
             bank_purchase: false,
             bank_close: false,
             trainer: None,
