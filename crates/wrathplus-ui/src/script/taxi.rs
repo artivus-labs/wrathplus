@@ -105,7 +105,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // The slot verbs check `lua_isnumber`, raise their Usage line and truncate (`0x590d60` on).
+    // The slot verbs check `lua_isnumber`, raise their Usage line and truncate (`0x590d60` on), by
+    // an inline chop `fistp` qword (`0x590dab`), so `number_arg`, not `__ftol2`'s `ftol_arg`.
     // "NONE" out of range, a button the reference hides (`0x590c70`).
     g.set(
         "TaxiNodeGetType",

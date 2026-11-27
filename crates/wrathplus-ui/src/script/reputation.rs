@@ -79,7 +79,8 @@ pub enum ReputationSend {
     Watch(Option<u32>),
 }
 
-/// The fold state; `pub(crate)` only because [`super::model::Model`] stores it.
+/// The fold state; `pub(crate)` only because [`super::model::Model`] stores it. Per VM, so a
+/// `/reload` resets it, where 12340's mask is a global only the full rebuild (`0x5d2bc0`) resets.
 #[derive(Default)]
 pub(crate) struct Folds {
     /// Folded headers by key (a `Faction.dbc` id, 0 "Other", -1 "Inactive").
@@ -409,6 +410,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     // GetFactionInfo(index) → ReputationFrame.lua:158's thirteen: name, description, standingID,
     // barMin, barMax, barValue, atWarWith, canToggleAtWar, isHeader, isCollapsed, hasRep,
     // isWatched, isChild; thirteen wide on every path, a miss included (`0x5d1150` → `0x5d0da0`).
+    // It, `GetFactionInfoByID`, `FactionToggleAtWar` and `Set*FactionActive` truncate by an inline
+    // `fistp` qword (`0x5d119c`), so `number_arg`; their `ftol_arg` siblings call `__ftol2`.
     g.set(
         "GetFactionInfo",
         lua.create_function(|lua, index: Value| {
