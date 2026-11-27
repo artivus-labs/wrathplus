@@ -22,6 +22,8 @@ use std::sync::Arc;
 
 pub use date::WrathCalendarDate;
 
+use super::ScriptValue as V;
+
 /// What a day row is, `0x5b7fd0`'s calendar-type string.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum WrathCalendarKind {
@@ -383,7 +385,16 @@ impl super::UiScript {
 
     /// Push the game clock's date and time, what `CalendarGetDate` (`0x5b8160`) reads.
     pub fn set_game_date(&mut self, now: WrathCalendarDate) {
-        self.model_mut().wrath_calendar.clock = Some(now);
+        let alarms = {
+            let mut model = self.model_mut();
+            let st = &mut model.wrath_calendar;
+            st.clock = Some(now);
+            st.alarms(now)
+        };
+        for (title, hour, minute) in alarms {
+            let args = vec![V::Str(title), V::Int(hour), V::Int(minute)];
+            self.fire_event("CALENDAR_EVENT_ALARM", args);
+        }
     }
 
     /// The bit `CalendarIsActionPending` answers, announced as `CALENDAR_ACTION_PENDING`; App
@@ -538,6 +549,27 @@ impl State {
             }
         });
         list
+    }
+
+    /// `CALENDAR_EVENT_ALARM`'s (title, hour, minute) for each listed event whose alarm the clock
+    /// reaches: the calendar's arrival arms one on the game clock 15 minutes before each event
+    /// (`0x5c2dc3`, `0x76db30`), and at that minute `0x5b7910` fires event `0x245` ("%s%d%d") for an
+    /// accepted or confirmed invite (`+0xa8` 1 or 3, `0x5b7944`). Cost: one pass over the list per
+    /// game minute.
+    fn alarms(&self, now: WrathCalendarDate) -> Vec<(String, i64, i64)> {
+        let at = now.seconds() + 15 * 60;
+        let due = |e: &&WrathCalendarEntry| {
+            e.event_id != 0 && e.date.seconds() == at && matches!(e.invite, Some((1 | 3, _)))
+        };
+        let rows = self.view.entries.iter().filter(due);
+        rows.map(|e| {
+            (
+                e.title.clone(),
+                i64::from(e.date.hour),
+                i64::from(e.date.minute),
+            )
+        })
+        .collect()
     }
 
     /// `0x5bd850`: the open event is on the pending-invite list, which the calendar's arrival

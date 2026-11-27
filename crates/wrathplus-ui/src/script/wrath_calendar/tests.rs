@@ -143,6 +143,11 @@ fn a_day_lists_events_holidays_and_projected_resets() {
             ..Default::default()
         },
         event_row(20, 19, 1),
+        WrathCalendarEntry {
+            invite: Some((1, 0)),
+            bits: 0,
+            ..event_row(21, 19, 0)
+        },
     ];
     // Weekly from Tuesday 2 March 2010 05:00: Tuesday the 16th.
     view.raid_resets = vec![WrathCalendarRaidReset {
@@ -238,6 +243,17 @@ fn a_day_lists_events_holidays_and_projected_resets() {
             .unwrap(),
         (1, 3, "ONGOING".into())
     );
+    // `0x5b7910`: an accepted invite's alarm fires on the game minute 15 before the event.
+    s.run(
+        "alarm = ''
+         local f = CreateFrame('Frame')
+         f:RegisterEvent('CALENDAR_EVENT_ALARM')
+         f:SetScript('OnEvent', function(_, _, t, h, m) alarm = alarm .. t .. ' ' .. h .. ':' .. m end)",
+    )
+    .unwrap();
+    s.set_game_date(WrathCalendarDate::new(2010, 3, 21, 18, 44));
+    s.set_game_date(WrathCalendarDate::new(2010, 3, 21, 18, 45));
+    assert_eq!(s.eval::<String>("return alarm").unwrap(), "Naxx 19:0");
     // `0x5bec70`: the pending invites listed with an inviter, here more than the server's 0.
     assert_eq!(
         s.eval::<i64>("return CalendarGetNumPendingInvites()")

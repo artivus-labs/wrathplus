@@ -25,7 +25,7 @@
 //! GlobalStrings (the client's own table is not traced); the guild-filter and arena-team member
 //! lists fill a draft at level 0, their byte uninterpreted (an open server event ignores them);
 //! `0x0442`/`0x0460`/`0x0461` never arrive (AzerothCore sends none), so
-//! no status alert, invite note or `CALENDAR_EVENT_ALARM` exists; a holiday lasts its first
+//! no status alert or invite note exists; a holiday lasts its first
 //! duration from each start date; system events are never sent.
 
 use std::collections::HashMap;
