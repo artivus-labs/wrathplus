@@ -31,6 +31,8 @@ export const WAKE_EVENTS = [
   "AGENT_GOAL_BLOCKED",
   "AGENT_GOAL_DONE",
   "AGENT_HOLD_EXPIRED",
+  // What the character passes (wp.notice): notable, but batched (notice.ts), never one wake each.
+  "AGENT_NOTICED",
   // Counted for the check-ins' evidence, never waking the planner by themselves:
   "AGENT_ACTION_FAILED",
   "AGENT_PULL_REFUSED",
@@ -50,7 +52,7 @@ const URGENT = new Set([
   "TRADE_SHOW",
   "DUEL_REQUESTED",
 ]);
-const NOTABLE = new Set(["PLAYER_LEVEL_UP", "AGENT_GOAL_BLOCKED", "AGENT_GOAL_DONE", "AGENT_HOLD_EXPIRED"]);
+const NOTABLE = new Set(["PLAYER_LEVEL_UP", "AGENT_GOAL_BLOCKED", "AGENT_GOAL_DONE", "AGENT_HOLD_EXPIRED", "AGENT_NOTICED"]);
 const NEARBY = new Set(["CHAT_MSG_SAY", "CHAT_MSG_YELL", "CHAT_MSG_EMOTE", "CHAT_MSG_TEXT_EMOTE"]);
 
 const str = (v: unknown): string => (v === undefined || v === null ? "" : String(v));
@@ -112,6 +114,8 @@ export function describe(e: GameEvent): string {
     case "AGENT_HOLD_EXPIRED":
       if (a[2]) return `Your hold "${str(a[0])}" ended with its walk (${str(a[2])}) after ${str(a[1])} s: hold again or Goals.release().`;
       return `Your hold "${str(a[0])}" ran out after ${str(a[1])} s: hold again or Goals.release().`;
+    case "AGENT_NOTICED":
+      return `Noticed ${str(a[0])} ${str(a[1])}${a[3] === null || a[3] === undefined ? "" : ` ${Math.round(Number(a[3]))} yd`}${a[6] ? ` (${str(a[6])})` : ""}.`;
     case "AGENT_ACTION_FAILED":
       return `Goal action ${str(a[1])} (goal ${str(a[0])}) failed: ${clip(str(a[2]), 200)}`;
     case "AGENT_COMBAT_DONE":
@@ -134,6 +138,11 @@ export class Inbox {
     if (same) same.count += 1;
     else this.#items.push({ urgency, line, count: 1 });
     return urgency;
+  }
+
+  /** A line that is no single event (a batch of notices), at an urgency. */
+  note(line: string, urgency: Urgency): void {
+    this.#items.push({ urgency, line, count: 1 });
   }
 
   get size(): number {

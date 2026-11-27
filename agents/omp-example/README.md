@@ -69,6 +69,11 @@ The launcher:
   does not wake it again: the repeats are counted and shown in the next check-in's evidence.
   Urgent events always wake it. Combat, loot, walks and failures never wake it: the Lua plays, and the
   failures are counted for the check-ins.
+- **Batches what the character passes.** `AGENT_NOTICED` (wp.notice: a quest giver, trainer, vendor,
+  node, subzone ... new to the character) is collected for `WRATHPLUS_OMP_NOTICE_SECONDS` into one
+  wake, nearest first; it rides along sooner with anything else that wakes the planner. Each
+  check-in's evidence adds what was passed since the last, muted or not (the client's
+  `Notice.passed`), counted by kind with names.
 - **Checks in** every `WRATHPLUS_OMP_CHECKIN_MINUTES`, whatever else woke it meanwhile: the turn for improving the controller. The check-in carries **evidence** the launcher counted since the last one (game errors from `UI_ERROR_MESSAGE`, failed goal actions and their reasons, refused pulls, how fights ended, the latest fight review), and asks the agent to take the most costly recurring failure or the weakest scorecard objective, study its cause in the Lua, and change the controller or write down why not (the `improve-the-controller` skill). The launcher only counts; it never decides what a failure means.
 - **Reflects** every `WRATHPLUS_OMP_REFLECT_HOURS`: it asks the planner to dispatch the
   `reflector` agent (the `reflect` skill: scorecard, needs, ledger, at most two proposals).
@@ -156,6 +161,7 @@ Read `usage.jsonl` for the real numbers.
 | `WRATHPLUS_OMP_SESSION_HOURS` | `6` | before a fresh session (`0`: never) |
 | `WRATHPLUS_OMP_TURN_MAX_MINUTES` | `30` | a longer turn is aborted (`0`: never) |
 | `WRATHPLUS_OMP_REPEAT_MINUTES` | `15` | a notable event repeating one that woke the planner this recently (the same goal blocked for the same reason, the same hold run out) does not wake it again; repeats are counted in the next check-in (`0`: every one wakes it) |
+| `WRATHPLUS_OMP_NOTICE_SECONDS` | `15` | `AGENT_NOTICED` events are collected this long into one wake (`0`: each wakes at once) |
 | `WRATHPLUS_OMP_MAX_COST` | none | USD per session, passed as `--max-cost` |
 | `WRATHPLUS_OMP_FRESH` | off | `1`: start a new session instead of continuing the last one |
 | `WRATHPLUS_JUDGE_DIR`, `WRATHPLUS_SCORECARD_SECONDS` | the MCP server's | passed through to it |

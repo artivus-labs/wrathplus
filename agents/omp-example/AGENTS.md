@@ -216,6 +216,16 @@ Every turn of yours costs money; the Lua runs for free.
   are counted in the next check-in's evidence. Do not sit in a loop of `events` calls waiting
   for something to happen: each call re-sends your whole context. Spend the turns you are given
   on improving the controller (above), not on waiting.
+- **What you pass.** `wp.notice` (`Notice`) signals `AGENT_NOTICED(kind, name, guid, distance, x,
+  y, extra)` the first time this character comes within 60 yd of a quest giver ("!", or a grey "!"
+  with `trivial`), a hand-in, a trainer, vendor, repairer, flight master, innkeeper, banker,
+  auctioneer or mailbox, a rare or elite, a herb or vein, a chest, another player, or enters a new
+  subzone. The launcher batches them into one wake per `WRATHPLUS_OMP_NOTICE_SECONDS` (15), nearest
+  first, and every check-in lists all that was passed since the last. Mute what your goal has no use
+  for: `Notice.mute("player")`, or with a filter, `Notice.mute("quest_available", "n.trivial")`
+  (muted notices are still in `Notice.recent` and the check-in digest); `Notice.unmute(kind)`. A
+  Lua reflex can handle the common cases without waking you (`Notice.listen(name, fn)`; returning
+  true takes the notice in hand, e.g. a detour to a "!" in reach): that is your choice to make.
 - When you do wait inside a turn (for a walk you started, an answer), use long waits
   (`wait_ms: 25000`) with a `names` filter, a few at most.
 - Let Lua do the real-time work: if you find yourself calling `lua` to do the same thing every

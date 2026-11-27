@@ -19,7 +19,7 @@ use mlua::{Lua, Table};
 use std::sync::{Arc, Mutex};
 use wrathplus_app_core::app_core::session::{ObjectStore, SelfPlayer};
 use wrathplus_app_core::app_core::state::QuestGiver;
-use wrathplus_app_net::go_templates::GameObjectTemplates;
+use wrathplus_app_net::go_templates::{GameObjectTemplates, LockTypes, Locks};
 use wrathplus_app_net::names::{gated_rank, NameCache};
 use wrathplus_app_net::net::{Guid, GuidIndex, NetEntity};
 use wrathplus_app_world::target::click::Interact;
@@ -58,7 +58,8 @@ pub(crate) struct Seen {
     pub npc: Vec<&'static str>,
     /// The title under a creature's name ("Weapons Merchant", "Blacksmithing Trainer").
     pub title: Option<String>,
-    /// The quest marker over it: "available", "incomplete" or "reward".
+    /// The quest marker over it: "available", "incomplete" or "reward"; "available_low" for a
+    /// quest only far below us (the grey "!" the client shows with low-level quests tracked).
     pub quest: Option<&'static str>,
     /// A creature's rank once its template is cached: "normal", "elite", "rareelite", "worldboss"
     /// or "rare"; and whether it is a critter (`CreatureType.dbc` 8: a rabbit, a sheep).
@@ -68,6 +69,9 @@ pub(crate) struct Seen {
     /// quest ids, and whether each is complete.
     pub quests: Vec<(u32, bool)>,
     pub go_type: Option<i32>,
+    /// A game object's lock, as the cursor over it shows it ([`lock_word`]): "GatherHerbs" (a
+    /// herb), "Mine" (a vein) or "PickLock" (a locked chest); none for an open one.
+    pub lock: Option<&'static str>,
 }
 
 /// The player's own place.
@@ -149,10 +153,12 @@ fn kind_name(kind: EntityKind) -> &'static str {
     }
 }
 
-/// The 3.3.5 questgiver status byte as a marker: 7/8 available, 5 incomplete, 3/6/9/10 reward.
+/// The 3.3.5 questgiver status byte as a marker: 7/8 available, 2/4 available_low (the quest is
+/// far below us: `DIALOG_STATUS_LOW_LEVEL_AVAILABLE[_REP]`), 5 incomplete, 3/6/9/10 reward.
 pub(crate) fn quest_marker(status: u32) -> Option<&'static str> {
     match status {
         7 | 8 => Some("available"),
+        2 | 4 => Some("available_low"),
         5 => Some("incomplete"),
         3 | 6 | 9 | 10 => Some("reward"),
         _ => None,
@@ -166,6 +172,28 @@ fn reaction_name(ring: u8) -> Option<&'static str> {
         3 => Some("neutral"),
         _ => Some("friendly"),
     }
+}
+
+/// The `LockType.dbc` cursor names a game object's lock can show (`0x5f3070`), as `lock` words.
+const LOCK_CURSORS: [&str; 3] = ["GatherHerbs", "Mine", "PickLock"];
+
+/// A lock's cursor name as a `'static` word: the three cursor-bearing kinds, else none.
+pub(crate) fn lock_word(cursor: Option<&str>) -> Option<&'static str> {
+    LOCK_CURSORS.into_iter().find(|c| Some(*c) == cursor)
+}
+
+/// The cursor a game object's lock shows, as the client resolves it: the template's `lockId`, that
+/// `Lock.dbc` row's first slot's `LockType` index, that row's `CursorName`.
+fn lock_cursor(
+    lock_id: u32,
+    locks: Option<&Locks>,
+    types: Option<&LockTypes>,
+) -> Option<&'static str> {
+    if lock_id == 0 {
+        return None;
+    }
+    let index = locks?.0.slots(lock_id)?[0].index;
+    lock_word(types?.0.cursor_name(index))
 }
 
 /// Creature ranks as `UnitClassification` words them (AzerothCore `CreatureEliteType` 0..4).
@@ -186,6 +214,8 @@ pub(crate) fn snapshot(
     map: Option<Res<wrathplus_world::world_map::CurrentMap>>,
     names: Option<Res<NameCache>>,
     templates: Option<Res<GameObjectTemplates>>,
+    locks: Option<Res<Locks>>,
+    lock_types: Option<Res<LockTypes>>,
     quests: Option<Res<QuestGiver>>,
     relations: RelationInputs,
     death: Option<Res<wrathplus_app_core::app_core::death::DeathNet>>,
@@ -256,9 +286,10 @@ pub(crate) fn snapshot(
                     wrathplus_app_net::creature_type::creature_type_word(r.creature_type)
                 });
             } else if net.kind == EntityKind::GameObject {
-                s.name = templates
-                    .as_ref()
-                    .and_then(|t| t.get(guid.0).map(|g| g.name.clone()));
+                let template = templates.as_ref().and_then(|t| t.get(guid.0));
+                s.name = template.map(|g| g.name.clone());
+                s.lock = template
+                    .and_then(|g| lock_cursor(g.lock_id, locks.as_deref(), lock_types.as_deref()));
                 s.go_type = Some(fields.gameobject_type_id());
             }
             s
@@ -346,6 +377,7 @@ fn seen_table(lua: &Lua, s: &Seen) -> mlua::Result<Table> {
     t.set("classification", s.classification)?;
     t.set("critter", s.critter.then_some(true))?;
     t.set("go_type", s.go_type)?;
+    t.set("lock", s.lock)?;
     if !s.quests.is_empty() {
         let quests = lua.create_table()?;
         for &(id, complete) in &s.quests {
