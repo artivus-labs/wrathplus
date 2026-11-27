@@ -78,12 +78,20 @@ fn load_talents(mut commands: Commands, assets: Option<Res<WorldAssets>>) {
 #[derive(Resource, Default)]
 pub(crate) struct LastTalentGroups(u32, u32);
 
-fn on_session_end(In(event): In<SessionEvent>, mut last: ResMut<LastTalentGroups>) {
+fn on_session_end(
+    In(event): In<SessionEvent>,
+    mut last: ResMut<LastTalentGroups>,
+    progress: Option<ResMut<WrathProgress>>,
+) {
     if matches!(
         event,
         SessionEvent::Disconnected { .. } | SessionEvent::LoggedOut
     ) {
         *last = LastTalentGroups::default();
+        // Dropped too: the packet record outlives a logout and would seed the next character's pair.
+        if let Some(mut progress) = progress {
+            progress.talents.clear();
+        }
     }
 }
 

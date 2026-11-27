@@ -265,6 +265,7 @@ fn a_new_active_group_fires_active_talent_group_changed() {
         .run_system_once_with(on_session_end, end)
         .unwrap();
     watch(&mut app);
+    schedule.run(app.world_mut());
     packet_groups(&mut app, 0, 1, &[&[], &[]]);
     schedule.run(app.world_mut());
     assert_eq!(seen(&mut app), "2:0", "a login on group 2");
