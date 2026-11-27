@@ -16,8 +16,8 @@
 --       highest first; status is "active", "blocked" (no plan reaches it now: AGENT_GOAL_BLOCKED
 --       (name, why) once as it blocks), "done" or "failed".
 --   `progress` is always there, at the lowest priority: hand in, pick up, work objectives, train,
---       sell and repair, rest, else walk to a known quest hub, else grind, else look further afield
---       or travel to a better zone.
+--       sell and repair, rest, else walk to a known quest hub, else travel on from a zone we have
+--       outlevelled, else grind, else look further afield or travel to a better zone.
 -- Facts, the planner's world state, read fresh each pass (Goals.facts(); Goals.fact(name, fn) adds
 --   one): quest_ready, objectives_open, quest_giver_near, quest_hub_known (a hub to walk to:
 --   below), hand_in_near, bags_full (fewer free
@@ -27,9 +27,11 @@
 --   (the main hand cannot swing), pull_ok (fit to start a fight: none of those three),
 --   needs_food (nothing to eat, or to drink for a mana user, and money for some), recent_deaths
 --   (in the last ten minutes: each lowers the levels pulled, Survive.band), mobs_for_xp (a mob in
---   sight that gives XP and is a safe pull: Survive.pull_ok), zone_fit ("low": the zone is below
---   us, "ok", "high": above us), in_combat, dead. wp.professions adds can_cook, can_bandage,
---   food_low, bandages_low, can_skill_up and profession_to_learn.
+--   sight that gives XP and is a safe pull: Survive.pull_ok), zone_fit (by the mobs in sight, else
+--   the zone's band: "low", below us; "ok"; "high", above us), zone_outlevelled (the zone's band is
+--   below us and its mobs in sight at most `near_grey` levels above grey: below), in_combat, dead.
+--   wp.professions adds can_cook, can_bandage, food_low, bandages_low, can_skill_up and
+--   profession_to_learn.
 -- Actions:
 --   Goals.action{ name, why, pre = { fact = value } | fn(facts), effects = { fact = value },
 --                 cost = n | fn(facts), run = fn(args), done = fn() → finished, ok, why, timeout,
@@ -47,7 +49,12 @@
 --       us fails it "nothing to pick up at ...", and that hub and those within `hub_radius` yards
 --       (the town) wait `hub_wait` seconds, or the next level. travel_to_zone walks to a quest hub
 --       it knows in the zone, else the zone's middle (AgentZones' point), and ends when the walk
---       does (or in the zone, once the realm names a hub there), not at the zone line. seek_mobs'
+--       does (or in the zone, once the realm names a hub there), not at the zone line. It runs for a
+--       zone outgrown (zone_fit "low"), too high, or the planner's data.zone, and for one
+--       outlevelled (zone_outlevelled) though its mobs still give some XP: there grind costs
+--       `outlevelled_grind` more, so once no quest work is left here (no objective to work, hand-in,
+--       errand or hub to visit, all cheaper) the runner leaves for the nearest zone that fits, and
+--       grinds on only while no travel can start (no zone to go to, or each backing off). seek_mobs'
 --       steps further afield leave out those that head toward a zone below us (away from our
 --       zone's middle, nearer its), unless no other way goes on. Fights are only started
 --       when Survive.pull_ok says so (grind and work_objective take the nearest safe mob, and wait
@@ -125,6 +132,10 @@ local G = {
   rest_below = 0.7, mana_below = 0.4, rest_until = 0.9,
   -- Mobs this many levels above us still count when reading how a zone suits us (zone_fit).
   above = 2,
+  -- A zone whose band is below us, and whose mobs in sight are at most `near_grey` levels above
+  -- grey (their median), is outlevelled (zone_outlevelled): there grind costs `outlevelled_grind`
+  -- more, so with no quest work left, travel to a zone that fits comes first.
+  near_grey = 3, outlevelled_grind = 20,
   -- A walk that ends within this many yards of a quest's hand-in point has arrived at it.
   hand_in_reach = 60,
   -- An objective's mob that is no safe pull is waited on this long before the objective is left;
@@ -587,10 +598,10 @@ local function median(list)
   return list[math.floor((#list + 1) / 2)]
 end
 
--- How the zone suits our level: what is in sight first (three or more mobs are evidence), else
--- the zone's band from the client's tables.
-local function zone_fit()
-  local lvl, levels = level(), {}
+-- The median level of the mobs in sight, when three or more are (evidence of what the zone
+-- holds), else nil.
+local function local_level()
+  local levels = {}
   for _, u in ipairs(nearby()) do
     -- Critters are level 1 wherever they hop: they say nothing about the zone.
     if u.kind == "unit" and not u.dead and u.level and (u.reaction == "hostile" or u.reaction == "neutral")
@@ -598,16 +609,31 @@ local function zone_fit()
       levels[#levels + 1] = u.level
     end
   end
-  local here
-  if #levels >= 3 then
-    here = median(levels)
-  else
+  return #levels >= 3 and median(levels) or nil
+end
+
+-- How the zone suits our level: what is in sight first (three or more mobs are evidence), else
+-- the zone's band from the client's tables.
+local function zone_fit()
+  local lvl, here = level(), local_level()
+  if not here then
     local z = current_zone()
     return z and band_fit(z) or "ok"
   end
   if here <= grey(lvl) then return "low" end
   if here > lvl + G.above + 1 then return "high" end
   return "ok"
+end
+
+-- Whether we have outlevelled the zone we stand in: its band (the client's tables) is below us,
+-- and the mobs in sight say the same, their median at most `near_grey` levels above grey (or too
+-- few in sight to say otherwise). Mobs that still give XP do not make it a zone to stay in; a
+-- pocket of mobs well above grey (a cave of higher levels) does.
+local function zone_outlevelled()
+  local z = current_zone()
+  if not z or z.city or band_fit(z) ~= "low" then return false end
+  local here = local_level()
+  return here == nil or here <= grey(level()) + G.near_grey
 end
 
 local BUILT_IN_FACTS = {
@@ -702,6 +728,7 @@ local BUILT_IN_FACTS = {
     return any
   end },
   { "zone_fit", zone_fit },
+  { "zone_outlevelled", zone_outlevelled },
 }
 for _, f in ipairs(BUILT_IN_FACTS) do G.fact(f[1], f[2]) end
 
@@ -1540,7 +1567,8 @@ end
 -- Questing before grinding, as `progress` says: with no giver in reach, walk to the nearest
 -- known quest hub that suits our level, so pick_up_quests can run there. Working an open
 -- objective (5) is cheaper; the hub and its pick-up (3.5 + yards / 400, at most 5.5, then 2) come
--- before grind (8) and seek_mobs (6 + 8), and far before travel_to_zone (20 or 40).
+-- before grind (8) and seek_mobs (6 + 8), and before travel_to_zone (10 out of an outlevelled zone,
+-- then a grind; else 20 or 40).
 G.action({
   name = "visit_quest_hub",
   stop = function() Move.free() end,
@@ -1929,7 +1957,9 @@ G.action({
   why = "Fight the nearest mob in sight that gives XP and is a safe pull (alone, in our level band).",
   pre = function(f) return f.mobs_for_xp and not f.hp_low and not f.mana_low and not f.gear_broken end,
   effects = { progressed = true },
-  cost = function(f) return f.bags_full and 12 or 8 end,
+  -- In a zone we have outlevelled, dearer than travelling on (10) and grinding there (8), but
+  -- still the way when travel is not (no zone to go to, no route: travel backs off).
+  cost = function(f) return (f.bags_full and 12 or 8) + (f.zone_outlevelled and G.outlevelled_grind or 0) end,
   run = function()
     local list = seen(100)
     local best, why
@@ -2026,13 +2056,20 @@ G.action({
   pre = function(f)
     -- A zone that suits us is not left because nothing safe is in sight just now (a death has
     -- lowered what we pull, a camp is too crowded): that is seek_mobs' to walk off. Leaving is
-    -- for a zone outgrown or too high, or the planner's choice (a goal's data.zone).
-    if f.zone_fit == "ok" and not top_zone_wish() then return false end
+    -- for a zone outgrown (its mobs grey, or the zone outlevelled: zone_outlevelled) or too
+    -- high, or the planner's choice (a goal's data.zone).
+    if f.zone_fit == "ok" and not f.zone_outlevelled and not top_zone_wish() then return false end
     if pass.travel == nil then pass.travel = travel_target(top_zone_wish()) or false end
     return pass.travel ~= false
   end,
-  effects = { zone_fit = "ok", mobs_for_xp = true },
-  cost = function(f) return f.zone_fit == "ok" and 40 or 20 end,
+  effects = { zone_fit = "ok", zone_outlevelled = false, mobs_for_xp = true },
+  -- Out of an outlevelled zone, travel and the grind after it (10 + 8) come before grinding on
+  -- there (8 + outlevelled_grind), and after quest work here (an objective 5, a hub visit and its
+  -- pick-up at most 7.5, a hand-in at most 6) and the errands (at most 7).
+  cost = function(f)
+    if f.zone_outlevelled then return 10 end
+    return f.zone_fit == "ok" and 40 or 20
+  end,
   run = function(args)
     local z = travel_target(args.data and args.data.zone or top_zone_wish())
     assert(z, "no zone to travel to")
