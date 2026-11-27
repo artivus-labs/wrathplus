@@ -38,7 +38,7 @@ pub(super) fn edit_right(st: &State, guild_right: bool) -> bool {
 }
 
 /// `0x5b7c00`: a creatable day, today to `CalendarGetMaxCreateDate`'s.
-fn creatable(st: &State, date: WrathCalendarDate) -> bool {
+pub(super) fn creatable(st: &State, date: WrathCalendarDate) -> bool {
     let today = st.today();
     let day = |d: WrathCalendarDate| (d.year, d.month, d.day);
     let last = super::dates::max_create(today);

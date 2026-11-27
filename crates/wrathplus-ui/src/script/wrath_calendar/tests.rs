@@ -142,6 +142,7 @@ fn a_day_lists_events_holidays_and_projected_resets() {
             bits: 4 | 8,
             ..Default::default()
         },
+        event_row(20, 19, 1),
     ];
     // Weekly from Tuesday 2 March 2010 05:00: Tuesday the 16th.
     view.raid_resets = vec![WrathCalendarRaidReset {
@@ -151,7 +152,7 @@ fn a_day_lists_events_holidays_and_projected_resets() {
         period: 7 * 86_400,
         difficulty_key: String::new(),
     }];
-    let s = vm(view);
+    let mut s = vm(view);
     assert_eq!(
         s.eval::<i64>("return CalendarGetNumDayEvents(0, 15)")
             .unwrap(),
@@ -243,6 +244,41 @@ fn a_day_lists_events_holidays_and_projected_resets() {
             .unwrap(),
         0
     );
+    // The context verbs read their own arguments (`0x5baeb0` and siblings), without any
+    // selection, and raise their usage with neither.
+    assert_eq!(
+        s.eval::<(bool, bool, bool, bool)>(
+            "return CalendarContextEventCanEdit(0, 20, 1), CalendarContextEventCanEdit(0, 19, 1),
+                    CalendarContextInviteIsPending(0, 15, 2), CalendarContextEventCanComplain(0, 15, 2)"
+        )
+        .unwrap(),
+        (true, false, true, true)
+    );
+    assert_eq!(
+        s.eval::<(String, i64, i64, String)>(
+            "return CalendarContextInviteModeratorStatus(0, 19, 1), CalendarContextInviteStatus(0, 18, 1),
+                    CalendarContextInviteType(0, 19, 1), CalendarContextEventGetCalendarType(0, 19, 1)"
+        )
+        .unwrap(),
+        ("CREATOR".into(), 1, 2, "GUILD_EVENT".into())
+    );
+    assert!(s.run("CalendarContextEventCanEdit()").is_err());
+    // `0x5b97d0` keeps the last context event for a row that does not exist.
+    s.run("CalendarContextSelectEvent(0, 20, 1) CalendarContextSelectEvent(0, 17, 1)")
+        .unwrap();
+    assert_eq!(
+        s.eval::<(i64, i64, i64)>("return CalendarContextGetEventIndex()")
+            .unwrap(),
+        (0, 20, 1)
+    );
+    // Removing needs the moderator or creator bits (`0x5bd31e`), and sets the pending bit.
+    s.run("CalendarContextEventRemove(0, 15, 2) CalendarContextEventRemove()")
+        .unwrap();
+    assert!(matches!(
+        s.take_wrath_calendar_requests().as_slice(),
+        [WrathCalendarRequest::RemoveEvent { event_id: 100, .. }]
+    ));
+    assert!(s.eval::<bool>("return CalendarIsActionPending()").unwrap());
     s.run("CalendarSetAbsMonth(11, 2005) CalendarSetMonth(-12)")
         .unwrap();
     assert_eq!(

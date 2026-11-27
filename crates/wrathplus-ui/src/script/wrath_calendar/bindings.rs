@@ -3,6 +3,7 @@
 
 use mlua::{Lua, MultiValue, Value};
 
+mod context;
 mod dates;
 mod sends;
 
@@ -295,18 +296,6 @@ fn context_row(st: &State) -> Option<WrathCalendarEntry> {
 fn invite_at(st: &State, index: Option<i64>) -> Option<WrathCalendarInvitee> {
     let k = usize::try_from(index? - 1).ok()?;
     st.invitees().into_iter().nth(k)
-}
-
-fn rsvp_context(lua: &Lua, status: u8) {
-    write(lua, |st, _| {
-        if let Some(row) = context_row(st).filter(|r| r.event_id != 0) {
-            st.push(R::Rsvp {
-                event_id: row.event_id,
-                invite_id: row.invite_id,
-                status,
-            });
-        }
-    });
 }
 
 pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
@@ -939,189 +928,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             .len();
         many(vec![i(level), i(level), i(ranks as i64)])
     })?;
-    // ── the context menu's event ──────────────────────────────────────────────────────────────
-    set(lua, "CalendarContextSelectEvent", |lua, args| {
-        let (o, d, n) = (
-            int_arg(lua, &args, 0),
-            int_arg(lua, &args, 1),
-            int_arg(lua, &args, 2),
-        );
-        write(lua, |st, _| {
-            st.context = match (o, d, n) {
-                (Some(o), Some(d), Some(n)) => st.slot(o as i32, d, n),
-                _ => None,
-            };
-        });
-        many(vec![])
-    })?;
-    set(lua, "CalendarContextDeselectEvent", |lua, _| {
-        write(lua, |st, _| st.context = None);
-        many(vec![])
-    })?;
-    set(lua, "CalendarContextGetEventIndex", |lua, _| {
-        let v = read(lua, |st| match st.context {
-            Some((y, m, d, n)) => (st.offset_of(y, m), d as i64, n as i64 + 1),
-            None => (0, 0, 0),
-        });
-        many(vec![i(v.0), i(v.1), i(v.2)])
-    })?;
-    set(
-        lua,
-        "CalendarContextEventGetCalendarType",
-        |lua, _| match read(lua, context_row) {
-            Some(r) => many(vec![s(lua, r.kind.token())?]),
-            None => many(vec![Value::Nil]),
-        },
-    )?;
-    set(lua, "CalendarContextEventCanEdit", |lua, _| {
-        let can = read(lua, |st| {
-            context_row(st).is_some_and(|r| {
-                matches!(r.kind, K::Player | K::GuildEvent | K::GuildAnnouncement)
-                    && (r.creator == st.view.me || r.invite.is_some_and(|(_, rank)| rank >= 1))
-            })
-        });
-        many(vec![Value::Boolean(can)])
-    })?;
-    set(lua, "CalendarContextEventCanComplain", |lua, _| {
-        let can = read(lua, |st| {
-            context_row(st).is_some_and(|r| {
-                r.kind == K::Player
-                    && r.creator != st.view.me
-                    && r.invite.is_some_and(|(s, _)| s == INVITED)
-            })
-        });
-        many(vec![Value::Boolean(can)])
-    })?;
-    set(lua, "CalendarContextEventComplain", |lua, _| {
-        write(lua, |st, _| {
-            if let Some(r) = context_row(st).filter(|r| r.event_id != 0) {
-                st.push(R::Complain {
-                    event_id: r.event_id,
-                    guid: r.creator,
-                });
-            }
-        });
-        many(vec![])
-    })?;
-    set(lua, "CalendarContextEventClipboard", |lua, _| {
-        let has = read(lua, |st| st.clipboard.is_some());
-        many(vec![Value::Boolean(has)])
-    })?;
-    set(lua, "CalendarContextEventCopy", |lua, _| {
-        write(lua, |st, _| {
-            if let Some(r) = context_row(st).filter(|r| r.event_id != 0) {
-                st.clipboard = Some((r.event_id, r.invite_id, r.date));
-            }
-        });
-        many(vec![])
-    })?;
-    // CalendarContextEventPaste(offset, day) (`0x5bd460` → `0x5bc870`): a copy on that day at
-    // the source's time.
-    set(lua, "CalendarContextEventPaste", |lua, args| {
-        let (Some(o), Some(d)) = (int_arg(lua, &args, 0), int_arg(lua, &args, 1)) else {
-            return usage("Usage: Script_CalendarContextEventPaste([-1.0.1], monthDay)");
-        };
-        let sent = write(lua, |st, _| {
-            let Some((event_id, invite_id, at)) = st.clipboard else {
-                return false;
-            };
-            let Some((y, m, day, _)) = st.slot(o as i32, d, 1) else {
-                return false;
-            };
-            st.push(R::CopyEvent {
-                event_id,
-                invite_id,
-                date: WrathCalendarDate::new(y, m, day, at.hour, at.minute),
-            });
-            true
-        });
-        pend_if(lua, sent);
-        many(vec![])
-    })?;
-    // `0x5bd220` → `0x5bc6d0` sets the pending bit without announcing it (`0x5bc787`).
-    set(lua, "CalendarContextEventRemove", |lua, _| {
-        write(lua, |st, _| {
-            if let Some(r) = context_row(st).filter(|r| r.event_id != 0) {
-                st.push(R::RemoveEvent {
-                    event_id: r.event_id,
-                    invite_id: r.invite_id,
-                    flags: r.flags,
-                });
-                st.action_pending = true;
-            }
-        });
-        many(vec![])
-    })?;
-    set(lua, "CalendarContextEventSignUp", |lua, _| {
-        write(lua, |st, _| {
-            if let Some(r) = context_row(st).filter(|r| r.event_id != 0) {
-                st.push(R::SignUp {
-                    event_id: r.event_id,
-                    tentative: false,
-                });
-            }
-        });
-        many(vec![])
-    })?;
-    for (name, status) in [
-        ("CalendarContextInviteAvailable", ACCEPTED),
-        ("CalendarContextInviteDecline", DECLINED),
-        ("CalendarContextInviteTentative", TENTATIVE),
-    ] {
-        set(lua, name, move |lua, _| {
-            rsvp_context(lua, status);
-            many(vec![])
-        })?;
-    }
-    set(lua, "CalendarContextInviteRemove", |lua, _| {
-        write(lua, |st, _| {
-            if let Some(r) = context_row(st).filter(|r| r.event_id != 0) {
-                let me = st.view.me;
-                st.push(R::RemoveInvite {
-                    event_id: r.event_id,
-                    invitee: me,
-                    invite_id: r.invite_id,
-                    owner_invite_id: r.invite_id,
-                });
-            }
-        });
-        many(vec![])
-    })?;
-    set(lua, "CalendarContextInviteIsPending", |lua, _| {
-        let p = read(lua, |st| {
-            context_row(st).is_some_and(|r| r.invite.is_some_and(|(s, _)| s == INVITED))
-        });
-        many(vec![Value::Boolean(p)])
-    })?;
-    set(lua, "CalendarContextInviteStatus", |lua, _| {
-        let v = read(lua, |st| {
-            context_row(st).map_or(0, |r| match r.invite {
-                Some((s, _)) => i64::from(s) + 1,
-                None if r.kind == K::GuildEvent => LUA_NOT_SIGNEDUP,
-                None => 0,
-            })
-        });
-        many(vec![i(v)])
-    })?;
-    set(lua, "CalendarContextInviteType", |lua, _| {
-        let v = read(lua, |st| {
-            context_row(st).map_or(0, |r| {
-                if r.kind == K::GuildEvent && r.invite.is_none() {
-                    LUA_SIGNUP
-                } else {
-                    1
-                }
-            })
-        });
-        many(vec![i(v)])
-    })?;
-    set(lua, "CalendarContextInviteModeratorStatus", |lua, _| {
-        let rank = read(lua, |st| {
-            context_row(st).and_then(|r| r.invite).map_or(0, |(_, r)| r)
-        });
-        many(vec![s(lua, mod_status(rank))?])
-    })?;
-    Ok(())
+    context::install(lua)
 }
 
 /// A `CalendarNew*` draft: today at the current hour, type Other, never repeating.
