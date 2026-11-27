@@ -353,6 +353,14 @@ mod tests {
         assert!(bar.attacking, "a fighting pet raises it");
         reseed_attack_latch(&mut bar, None);
         assert!(!bar.attacking, "an unresolved pet lowers it");
+        for repeat in [false, true] {
+            let before = bar.bar_signals;
+            super::super::drain::apply_native_order(&mut bar, 7, PET_COMMAND_ATTACK);
+            assert!(
+                bar.attacking && bar.bar_signals != before,
+                "repeat {repeat}: 0x5d4530"
+            );
+        }
         let mut legacy = PetBar {
             attacking: true,
             ..Default::default()

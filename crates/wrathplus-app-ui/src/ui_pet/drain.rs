@@ -118,6 +118,8 @@ impl PetPress<'_, '_> {
         }
         let possessing = possessing(Some(store), self.pet.self_guid.0);
         let mut target_guid = target.or(self.selection.guid).unwrap_or(0);
+        // Labelled: 12340's Attack (`0x5d4210`) sends the guid or the selection as is and tests it
+        // with `0x72bdb0`; ours runs the 1.12 actor ladder and nearest-enemy pick (`0x6131a0`).
         if kind == 7 && id == PET_COMMAND_ATTACK {
             if crate::ui_action::attack_actor_refusal(
                 Some(store),
@@ -136,21 +138,7 @@ impl PetPress<'_, '_> {
             };
             target_guid = guid;
         }
-        if let Some(native) = self.bar.native.as_mut() {
-            if kind == 6 {
-                native.react = id as u8;
-            }
-            if kind == 7 && (id == PET_COMMAND_STAY || id == PET_COMMAND_FOLLOW) {
-                native.command = id as u8;
-            }
-        }
-        if kind == 6 || (kind == 7 && id <= PET_COMMAND_FOLLOW) {
-            self.bar.bar_signals = self.bar.bar_signals.wrapping_add(1);
-        }
-        // An Attack order the pet may carry out raises the latch for any pet (`0x5d4509`).
-        if kind == 7 && id == PET_COMMAND_ATTACK {
-            self.bar.attacking = true;
-        }
+        apply_native_order(&mut self.bar, kind, id);
         if let Some(display) = display.filter(|_| is_spell) {
             arm_pet_gcd(
                 &mut self.bar,
@@ -411,8 +399,28 @@ pub(super) fn toggle_slot_autocast(bar: &mut PetBar, slot: u32) -> Option<PetAct
     Some(flipped)
 }
 
-/// `PetStopAttack`'s core (`0x4bd650`): send `CMSG_PET_STOP_ATTACK` and lower the latch, or do
-/// nothing when it is already down (`0x4bd65e`). Returns whether it sent.
+/// A native order's local state: the reaction or Stay/Follow command it sets, its repaint, and
+/// Attack's latch. 12340 raises the latch for a pet passing `0x72bdb0` (`0x5d4509`), then fires
+/// `PET_BAR_UPDATE` (`0x5d4530`) whenever it is up, a repeat Attack's included.
+pub(super) fn apply_native_order(bar: &mut PetBar, kind: u8, id: u32) {
+    if let Some(native) = bar.native.as_mut() {
+        if kind == 6 {
+            native.react = id as u8;
+        }
+        if kind == 7 && (id == PET_COMMAND_STAY || id == PET_COMMAND_FOLLOW) {
+            native.command = id as u8;
+        }
+    }
+    if kind == 6 || (kind == 7 && id <= PET_COMMAND_ATTACK) {
+        bar.bar_signals = bar.bar_signals.wrapping_add(1);
+    }
+    if kind == 7 && id == PET_COMMAND_ATTACK {
+        bar.attacking = true;
+    }
+}
+
+/// `PetStopAttack`'s core (`0x5d4650`): send `CMSG_PET_STOP_ATTACK` and lower the latch, or do
+/// nothing when it is already down (`0x5d4659`). Returns whether it sent.
 pub(super) fn stop_pet_attack(bar: &mut PetBar, commands: &NetCommands) -> bool {
     let pet_guid = bar.guid();
     if !bar.attacking || pet_guid == 0 {
@@ -423,8 +431,8 @@ pub(super) fn stop_pet_attack(bar: &mut PetBar, commands: &NetCommands) -> bool 
     true
 }
 
-/// `0x493910`'s entry gate: the old-target clear runs only when a selection existed (`0x493937`)
-/// and is being replaced or dropped (`0x493949`/`0x493951`).
+/// `0x5241b0`'s entry gate: the old-target clear runs only when a selection existed (`0x5241d4`)
+/// and is being replaced or dropped.
 pub(super) fn old_target_cleared(previous: Option<u64>, now: Option<u64>) -> bool {
     previous.is_some() && previous != now
 }
