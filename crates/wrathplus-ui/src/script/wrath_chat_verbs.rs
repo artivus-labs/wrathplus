@@ -96,9 +96,10 @@ fn team(lua: &Lua, v: &Value) -> u8 {
         .map_or(0, |n| n as u8)
 }
 
-/// `0x7e1830(text, buf, 0x40, 0x100, 1)`: every `|` dropped (`0x7e17f0`), the text cut at its first
-/// CR, LF or `\n` (`0x7e1640`), then cut at its 64th character (`0x7e189d`-`0x7e18b0`), so 63 stay.
-fn reason_text(s: &str) -> String {
+/// `0x7e1830(text, buf, 0x40, 0x100, 1)`, which UninviteUnit (`0x51a83c`) and SetLFGComment
+/// (`0x5539be`) both call: every `|` dropped (`0x7e17f0`), the text cut at its first CR, LF or
+/// `\n` (`0x7e1640`), then cut at its 64th character (`0x7e189d`-`0x7e18b0`), so 63 stay.
+pub(super) fn sanitised_line(s: &str) -> String {
     let s: String = s.chars().filter(|&c| c != '|').collect();
     let end = [s.find(['\r', '\n']), s.find("\\n")]
         .into_iter()
@@ -148,7 +149,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     })?;
     // UninviteUnit(unitOrName [, reason]) (`0x51a7a0`): a unit token or a member's name resolves
     // to a guid (`0x60abf0`, ported as `Model::resolve_token`), and one that does sends
-    // `CMSG_GROUP_UNINVITE_GUID` with the reason as [`reason_text`] leaves it.
+    // `CMSG_GROUP_UNINVITE_GUID` with the reason as [`sanitised_line`] leaves it.
     set(lua, "UninviteUnit", |lua, args| {
         if !has_player(lua) {
             return none();
@@ -156,7 +157,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         let Some(who) = text(lua, &arg(&args, 0))? else {
             return none();
         };
-        let reason = reason_text(&text(lua, &arg(&args, 1))?.unwrap_or_default());
+        let reason = sanitised_line(&text(lua, &arg(&args, 1))?.unwrap_or_default());
         let mut model = lua.app_data_mut::<Model>().expect("model app_data");
         let guid = super::wrath_unit_popup::guid_of(&model, &who);
         if guid != 0 {
