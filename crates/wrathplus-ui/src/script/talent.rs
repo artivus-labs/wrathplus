@@ -29,6 +29,8 @@ pub struct TalentTabView {
     /// The `Interface\TalentFrame\<base>-` art base, the tuple's `fileName`.
     pub background: String,
     pub points_spent: u32,
+    /// The tab's `SpellIcon.dbc` path, the tuple's `iconTexture`.
+    pub icon: Option<String>,
 }
 
 /// One prerequisite edge, a `GetTalentPrereqs` triplet.
@@ -140,7 +142,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // `texture` is nil: the stock frame never reads it. Out of range answers a single nil.
+    // The icon is the tab's `SpellIcon.dbc` path (`0x5c620e`), nil with no row. Out of range
+    // answers a single nil.
     g.set(
         "GetTalentTabInfo",
         lua.create_function(|lua, i: usize| {
@@ -148,9 +151,13 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             let Some(tab) = i.checked_sub(1).and_then(|n| model.talents.tabs.get(n)) else {
                 return Ok(MultiValue::from_vec(vec![Value::Nil]));
             };
+            let icon = match &tab.icon {
+                Some(p) => Value::String(lua.create_string(p)?),
+                None => Value::Nil,
+            };
             Ok(MultiValue::from_vec(vec![
                 Value::String(lua.create_string(&tab.name)?),
-                Value::Nil,
+                icon,
                 Value::Integer(i64::from(tab.points_spent)),
                 Value::String(lua.create_string(&tab.background)?),
             ]))

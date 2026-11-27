@@ -25,7 +25,7 @@ use super::errors::{
 use super::weapon_icon::{auto_attack_icon, substitutes_weapon_icon};
 use super::{
     cast_fail, show_messages, CastErrors, MessageSink, MountErrors, PetTameFailures, PlayerActions,
-    Shown, Spells, UiError, UiErrorKeys, UiErrorTexts,
+    Shown, Spells, UiErrorKeys, UiErrorTexts,
 };
 use crate::spell::reagents::{has_reagents, reagent_casts};
 
@@ -213,22 +213,7 @@ pub(super) fn feed_actions(
         .collect();
     show_messages(&mut script, &mut sink, "ui_action", resolved);
 
-    // The engine's own by-key messages (`ERR_PASSIVE_ABILITY`, the macro compiler's
-    // `ERR_UNKNOWN_MACRO_OPTION_S` with its `%s`): `wrathplus_ui` cannot reach [`UiErrorKeys`], so
-    // it queues keys that show here, one frame late.
-    let engine_keys = script.take_ui_errors().into_iter().map(UiError::key);
-    let engine_errors: Vec<UiError> = engine_keys
-        .chain(
-            script
-                .take_ui_errors_s()
-                .into_iter()
-                .map(|(k, s)| UiError::s(k, s)),
-        )
-        .collect();
-    let engine_lines: Vec<Shown> = engine_errors
-        .into_iter()
-        .filter_map(|e| ui_error_text_for_script(&e, &script).map(|t| Shown::keyed(e.key, t)))
-        .collect();
+    let engine_lines = super::engine_lines(&mut script);
     show_messages(&mut script, &mut sink, "ui_action", engine_lines);
 
     let store = self_q.iter().next();

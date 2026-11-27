@@ -80,6 +80,21 @@ fn a_system_line_prints_verbatim() {
         )),
         ["You are now Away: AFK"]
     );
+    // A binding's unkeyed system line (`0x509dd0(text, 0)`) and a chat-kind refusal (`0x50`) reach
+    // the frame through the engine drain, where a bare `CHAT_MSG_SYSTEM` raised in the handler.
+    let mut s = printing_vm();
+    s.run("SetLootMethod('group') SendSystemMessage('An invented line')")
+        .unwrap();
+    s.tick(0.0);
+    let mut windows = super::frames::ChatWindows::default();
+    for line in crate::ui_action::engine_lines(&mut s) {
+        assert_eq!(line.kind(), wrathplus_ui::messages::MsgKind::Chat);
+        let event = ChatEvent::text_only(K::System, line.text().into());
+        super::frames::route(&mut s, &mut windows, &event);
+    }
+    assert!(s.errors().is_empty(), "handler errors: {:?}", s.errors());
+    let not_in_group = s.eval::<String>("return ERR_NOT_IN_GROUP").unwrap();
+    assert_eq!(printed(&s), [not_in_group.as_str(), "An invented line"]);
 }
 
 /// `format(CHAT_<token>_NOTICE, arg8, arg4)`, once the window carries the channel; the leave

@@ -626,7 +626,7 @@ fn the_menu_verbs_queue_the_right_requests() {
     assert_eq!(
         s.take_party_requests(),
         vec![PartyRequest::AssistantLeader {
-            name: "Member2".into(),
+            guid: raid[2].guid,
             grant: true
         }]
     );

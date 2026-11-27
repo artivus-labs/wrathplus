@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use mlua::{Lua, MultiValue, Value};
 
-use super::{Model, ScriptValue, UiScript};
+use super::{Model, UiScript};
 
 /// One `SMSG_RAID_INSTANCE_INFO` row with what App resolves from `Map.dbc` and `MapDifficulty`.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -162,7 +162,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             ]))
         })?,
     )?;
-    // SetSavedInstanceExtend(index, extend): the second argument must be a boolean.
+    // SetSavedInstanceExtend(index, extend) (`0x50dc10`): the second argument must be a boolean.
     g.set(
         "SetSavedInstanceExtend",
         lua.create_function(|lua, args: MultiValue| {
@@ -198,7 +198,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                     "RAID_INSTANCE_LOCK_NOT_EXTENDED"
                 };
                 let line = global_string(lua, key).replacen("%s", &dungeon_name(lua, &row), 1);
-                super::tick::fire_event_into(lua, "CHAT_MSG_SYSTEM", vec![ScriptValue::Str(line)]);
+                super::ui_errors::system_line(lua, line);
             }
             Ok(())
         })?,
@@ -290,10 +290,9 @@ mod tests {
         assert!(s
             .eval::<bool>("return select(6, GetSavedInstanceInfo(1))")
             .unwrap());
-        assert_eq!(
-            s.eval::<String>("return SEEN").unwrap(),
-            "Kept: Naxxramas [Big]."
-        );
+        // `0x50dd24`: `0x509dd0(text, 0)`, a system line on the unkeyed queue.
+        assert!(s.eval::<Option<String>>("return SEEN").unwrap().is_none());
+        assert_eq!(s.take_system_lines(), ["Kept: Naxxramas [Big]."]);
         assert_eq!(
             s.take_wrath_saved_instance_requests(),
             [

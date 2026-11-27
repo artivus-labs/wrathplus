@@ -140,6 +140,8 @@ fn bank_items_ride_the_cursor_as_mode_11() {
     // Without deposit rights on tab 2 the move is refused and the item stays held.
     s.run("PickupGuildBankItem(2, 1)").unwrap();
     assert!(s.take_wrath_guild_bank_requests().is_empty());
+    // `0x5a5476`: message `0x5f`, by key for the app's chat-kind sink.
+    assert_eq!(s.take_ui_errors(), ["ERR_GUILD_PERMISSIONS"]);
     assert!(matches!(
         s.cursor_payload(),
         Some(CursorPayload::GuildBankItem(_))

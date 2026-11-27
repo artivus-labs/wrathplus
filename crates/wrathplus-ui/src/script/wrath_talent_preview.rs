@@ -393,6 +393,7 @@ mod tests {
             tabs: vec![TalentTabView {
                 name: "Arms".into(),
                 background: "WarriorArms".into(),
+                icon: None,
                 points_spent: 2,
             }],
             talents: vec![vec![talent(10, 1, 1, 2, 5), talent(20, 1, 2, 0, 1), c]],

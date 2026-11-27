@@ -131,20 +131,6 @@ fn tab_right(model: &Model, tab: usize, bit: u32) -> bool {
         .is_some_and(|(flags, _)| flags & bit != 0)
 }
 
-/// A kind-0 message: the global string as a system chat line.
-fn system_line(lua: &Lua, key: &str) -> mlua::Result<()> {
-    let message = match lua.globals().get::<Value>(key)? {
-        Value::String(s) => s.to_string_lossy(),
-        _ => key.to_string(),
-    };
-    super::tick::fire_event_into(
-        lua,
-        "CHAT_MSG_SYSTEM",
-        vec![super::ScriptValue::Str(message)],
-    );
-    Ok(())
-}
-
 /// Whether the player's rank holds `right`, and with `allowance` also a non-zero money word.
 fn rank_right(model: &Model, right: u32, allowance: bool) -> bool {
     let guild = &model.guild;
@@ -338,7 +324,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             }
         }
         if refused {
-            system_line(lua, "ERR_GUILD_PERMISSIONS")?;
+            let mut model = lua.app_data_mut::<Model>().expect("model app_data");
+            model.ui_errors.push("ERR_GUILD_PERMISSIONS");
         }
         none()
     })?;

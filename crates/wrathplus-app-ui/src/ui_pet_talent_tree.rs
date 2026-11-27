@@ -205,6 +205,7 @@ mod tests {
             class_mask: 0,
             pet_talent_mask,
             background: String::new(),
+            icon: None,
         };
         let talents = Talents {
             catalog: TalentCatalog::from_rows(
@@ -232,6 +233,7 @@ mod tests {
             class_mask: 0,
             pet_talent_mask,
             background: String::new(),
+            icon: None,
         };
         let talent = |id, col, ranks: [u32; 5]| Talent {
             id,

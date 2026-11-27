@@ -10,11 +10,13 @@ fn one_tab_state() -> TalentUiState {
             TalentTabView {
                 name: "Fire".into(),
                 background: "MageFire".into(),
+                icon: Some("Interface\\Icons\\Invented_Tab".into()),
                 points_spent: 7,
             },
             TalentTabView {
                 name: "Frost".into(),
                 background: "MageFrost".into(),
+                icon: None,
                 points_spent: 0,
             },
         ],
@@ -77,7 +79,8 @@ fn bindings_read_the_pushed_snapshot() {
         r#"
         assert(GetNumTalentTabs() == 2)
         local name, texture, points, file = GetTalentTabInfo(1)
-        assert(name == "Fire" and texture == nil and points == 7 and file == "MageFire")
+        assert(name == "Fire" and points == 7 and file == "MageFire")
+        assert(texture == "Interface\\Icons\\Invented_Tab" and select(2, GetTalentTabInfo(2)) == nil)
         assert(GetTalentTabInfo(3) == nil, "out of range is nil")
         assert(GetNumTalents(1) == 2 and GetNumTalents(2) == 0 and GetNumTalents(9) == 0)
 

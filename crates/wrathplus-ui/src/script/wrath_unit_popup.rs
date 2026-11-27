@@ -170,30 +170,14 @@ fn display_channel_flags(m: &Model) -> Option<u8> {
 }
 
 /// A difficulty change while grouped needs the leader: message `0x54`, ERR_NOT_LEADER (table
-/// `0xac8af0`, kind 0, a system line).
-fn leader_gate(lua: &Lua) -> mlua::Result<bool> {
-    let refused = {
-        let m = lua.app_data_ref::<Model>().expect("model app_data");
-        grouped(&m) && m.party.leader_guid != player_guid(&m)
-    };
+/// `0xac8af0`, kind 0, a system line; `0x5260e7`, `0x52623e`).
+fn leader_gate(lua: &Lua) -> bool {
+    let mut m = lua.app_data_mut::<Model>().expect("model app_data");
+    let refused = grouped(&m) && m.party.leader_guid != player_guid(&m);
     if refused {
-        system_line(lua, "ERR_NOT_LEADER")?;
+        m.ui_errors.push("ERR_NOT_LEADER");
     }
-    Ok(!refused)
-}
-
-/// A kind-0 message: the global string as a system chat line.
-fn system_line(lua: &Lua, key: &str) -> mlua::Result<()> {
-    let message = match lua.globals().get::<Value>(key)? {
-        Value::String(s) => s.to_string_lossy(),
-        _ => key.to_string(),
-    };
-    super::tick::fire_event_into(
-        lua,
-        "CHAT_MSG_SYSTEM",
-        vec![super::ScriptValue::Str(message)],
-    );
-    Ok(())
+    !refused
 }
 
 /// The `difficulty` argument as native's 0-based index, `None` past `max`.
@@ -241,7 +225,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         let Some(d) = difficulty(lua, &args, "Usage: SetDungeonDifficulty(difficulty)", 1)? else {
             return none();
         };
-        if leader_gate(lua)? {
+        if leader_gate(lua) {
             lua.app_data_mut::<Model>()
                 .expect("model app_data")
                 .wrath_group
@@ -254,7 +238,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         let Some(d) = difficulty(lua, &args, "Usage: SetRaidDifficulty(difficulty)", 3)? else {
             return none();
         };
-        if leader_gate(lua)? {
+        if leader_gate(lua) {
             lua.app_data_mut::<Model>()
                 .expect("model app_data")
                 .wrath_group
@@ -278,7 +262,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         none()
     })?;
     // SetOptOutOfLoot(flag) (`0x52cf00`): the flag, then OPT_OUT_LOOT_TOGGLE_ON/OFF as a system
-    // line. GetOptOutOfLoot reads it back.
+    // line (`0x52cf54`, no catalog row). GetOptOutOfLoot reads it back.
     set(lua, "SetOptOutOfLoot", |lua, args| {
         // `lua_toboolean` (`0x52cf0a`): 0 and "0" are true.
         let on = !matches!(
@@ -295,7 +279,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         } else {
             "OPT_OUT_LOOT_TOGGLE_OFF"
         };
-        system_line(lua, key)?;
+        let line = crate::strings::global(lua, key).unwrap_or_else(|| key.to_string());
+        super::ui_errors::system_line(lua, line);
         none()
     })?;
     set(lua, "GetOptOutOfLoot", |lua, _| {
@@ -594,9 +579,11 @@ mod tests {
         s.set_party(PartyState::default());
         assert!(s.run("SetDungeonDifficulty('x')").is_err());
         s.run("SEEN=nil local f=CreateFrame('Frame') f:RegisterEvent('CHAT_MSG_SYSTEM') f:SetScript('OnEvent', function(_, _, msg) SEEN=msg end) assert(f:IsEventRegistered('CHAT_MSG_SYSTEM')==1 and f:IsEventRegistered('BAG_UPDATE')==nil) SetOptOutOfLoot(0)").unwrap();
+        // `0x509dd0(text, 0)` is a system line on the unkeyed queue, never a bare event.
         assert!(s
-            .eval::<bool>("return GetOptOutOfLoot()==1 and SEEN~=nil")
+            .eval::<bool>("return GetOptOutOfLoot()==1 and SEEN==nil")
             .unwrap());
+        assert_eq!(s.take_system_lines(), ["OPT_OUT_LOOT_TOGGLE_ON"]);
         assert_eq!(
             s.take_wrath_unit_popup_requests(),
             vec![
@@ -626,10 +613,8 @@ mod tests {
         });
         s.run("SEEN=nil SetRaidDifficulty(1)").unwrap();
         assert!(s.take_wrath_unit_popup_requests().is_empty());
-        assert!(s.take_ui_errors().is_empty());
-        assert!(s
-            .eval::<bool>("return SEEN=='ERR_NOT_LEADER' or SEEN==ERR_NOT_LEADER")
-            .unwrap());
+        assert_eq!(s.take_ui_errors(), ["ERR_NOT_LEADER"]);
+        assert!(s.eval::<bool>("return SEEN==nil").unwrap());
         assert!(s
             .eval::<bool>("local a,b=CanChangePlayerDifficulty(); return a==false and b==false")
             .unwrap());

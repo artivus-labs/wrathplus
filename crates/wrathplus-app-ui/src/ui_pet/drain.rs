@@ -120,6 +120,8 @@ impl PetPress<'_, '_> {
         let mut target_guid = target.or(self.selection.guid).unwrap_or(0);
         // Labelled: 12340's Attack (`0x5d4210`) sends the guid or the selection as is and tests it
         // with `0x72bdb0`; ours runs the 1.12 actor ladder and nearest-enemy pick (`0x6131a0`).
+        // A failed test only skips raising the latch (`0x5d4509`): with it already up, 12340 still
+        // fires `PET_BAR_UPDATE` (`0x5d4530`) and sends (`0x5d4556`).
         if kind == 7 && id == PET_COMMAND_ATTACK {
             if crate::ui_action::attack_actor_refusal(
                 Some(store),

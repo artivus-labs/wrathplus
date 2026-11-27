@@ -410,19 +410,6 @@ fn arg(args: &MultiValue, i: usize) -> Value {
     args.get(i).cloned().unwrap_or(Value::Nil)
 }
 
-/// `0x7e1830(text, buf, 0x40, 0x100, 1)`, the sanitiser `UninviteUnit` shares (labelled: a copy):
-/// every `|` dropped (`0x7e17f0`), the text cut at its first CR, LF or `\n` (`0x7e1640`), then at
-/// its 64th character's lead byte (`0x7e189d`-`0x7e18b0`), so 63 stay.
-fn sent_text(s: &str) -> String {
-    let s: String = s.chars().filter(|&c| c != '|').collect();
-    let end = [s.find(['\r', '\n']), s.find("\\n")]
-        .into_iter()
-        .flatten()
-        .min()
-        .unwrap_or(s.len());
-    s[..end].chars().take(63).collect()
-}
-
 /// `0x559b70`: a dungeon or heroic (types 1, 5) keeps only dungeons and heroics, a raid (2) only
 /// raids and only outside a party (`0x52bd10`), any other type nothing; a clear (`0x559340`) or a
 /// new entry (`0x559c35`) marks the selection for the next join to resend.
@@ -655,9 +642,13 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         match &member.name {
             Some(name) => {
                 out.push(text(lua, name)?);
-                // Labelled: 12340 answers the name-cache record's gendered ChrClasses name
-                // (`0x72aab0` → `0x7159e0`); this reads the member's unit, "" without one.
-                let class = m.unit_by_guid(member.guid).and_then(|u| u.class.as_deref());
+                // The name-cache record's class (`0x67d770`, `0x72aab0` → `0x7159e0`), "" with no
+                // row. Labelled: the record holds one class name, not ChrClasses' gendered pair,
+                // and a guid it lacks (our own, never queried) reads the member's unit.
+                let class = match m.player_names.get(&member.guid) {
+                    Some(r) => r.class.as_ref().map(|c| c.0.as_str()),
+                    None => m.unit_by_guid(member.guid).and_then(|u| u.class.as_deref()),
+                };
                 out.push(text(lua, class.unwrap_or_default())?);
             }
             None => out.extend([Value::Nil, Value::Nil]),
@@ -958,7 +949,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 .unwrap_or_default(),
             _ => String::new(),
         };
-        let comment = sent_text(&comment);
+        let comment = super::super::wrath_chat_verbs::sanitised_line(&comment);
         let t = now();
         let mut m = lua.app_data_mut::<Model>().expect("model app_data");
         let q = &mut m.wrath_lfg.queue;

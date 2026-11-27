@@ -85,6 +85,11 @@ impl Shown {
         &self.text
     }
 
+    #[cfg(test)]
+    pub(crate) fn kind(&self) -> MsgKind {
+        self.kind
+    }
+
     /// A catalog message by GlobalStrings key, the reference's `DisplayError(id)`: its record gives
     /// the surface and the sound. A key with no row cannot occur in the reference, where a message
     /// is an index, so it warns and falls back to a silent [`MsgKind::Error`]; the warning is the
@@ -138,6 +143,31 @@ pub(crate) fn keyed_line_s(script: &UiScript, key: &'static str, args: &[&str]) 
         .collect();
     let text = wrathplus_ui::strings::fill(&template, &args);
     (!text.is_empty()).then(|| Shown::keyed(key, text))
+}
+
+/// The engine's own messages, one frame late: its by-key refusals (`ERR_PASSIVE_ABILITY`, the
+/// macro compiler's `ERR_UNKNOWN_MACRO_OPTION_S` with its `%s`), which `wrathplus_ui` cannot put
+/// on [`UiErrorKeys`], then the system lines its bindings print with no catalog row
+/// (`0x509dd0(text, 0)`), raised as chat lines so the stock handler gets every argument.
+/// Labelled: 12340 prints each at its call, so within one frame the order across the two queues
+/// is lost.
+pub(crate) fn engine_lines(script: &mut UiScript) -> Vec<Shown> {
+    let keys = script.take_ui_errors().into_iter().map(UiError::key);
+    let errors: Vec<UiError> = keys
+        .chain(
+            script
+                .take_ui_errors_s()
+                .into_iter()
+                .map(|(k, s)| UiError::s(k, s)),
+        )
+        .collect();
+    let keyed = errors
+        .into_iter()
+        .filter_map(|e| ui_error_text_for_script(&e, script).map(|t| Shown::keyed(e.key, t)));
+    let mut lines: Vec<Shown> = keyed.collect();
+    let system = script.take_system_lines().into_iter();
+    lines.extend(system.map(|t| Shown::unkeyed(MsgKind::Chat, t)));
+    lines
 }
 
 /// The one sink for a resolved line: show it on its [`MsgKind`]'s surface and queue its catalog

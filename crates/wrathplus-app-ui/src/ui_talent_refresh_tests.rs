@@ -54,6 +54,7 @@ fn talent_app() -> App {
                 class_mask: 1,
                 pet_talent_mask: 0,
                 background: String::new(),
+                icon: None,
             }],
             vec![talent],
         ),
