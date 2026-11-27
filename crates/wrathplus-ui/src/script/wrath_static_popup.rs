@@ -235,10 +235,11 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         }
         none()
     })?;
-    // PartyLFGStartBackfill() (`0x55a0c0`): the group's dungeon becomes the whole selection and
-    // the ordinary join goes out (`wrath_lfg`'s queue).
+    // PartyLFGStartBackfill() (`0x55a0c0`) → true when the join send ran (`wrath_lfg`'s queue).
     set(lua, "PartyLFGStartBackfill", |lua, _| {
-        super::wrath_lfg::start_backfill(lua);
+        if super::wrath_lfg::start_backfill(lua) {
+            return one(Value::Boolean(true));
+        }
         none()
     })?;
     set(lua, "RespondInstanceLock", |lua, args| {
@@ -250,13 +251,12 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         );
         none()
     })?;
+    // SetLFGBootVote(vote) (`0x554a50` → `0x554960`), behind `wrath_lfg`'s boot gate.
     set(lua, "SetLFGBootVote", |lua, args| {
-        push(
-            lua,
-            R::SetLfgBootVote {
-                yes: truth(&args, 0),
-            },
-        );
+        let yes = truth(&args, 0);
+        if super::wrath_lfg::boot_vote(lua, yes) {
+            push(lua, R::SetLfgBootVote { yes });
+        }
         none()
     })?;
     for (global, entry) in [
@@ -599,7 +599,6 @@ mod tests {
                 R::DeclineLevelGrant,
                 R::CancelSummon,
                 R::RespondInstanceLock { accept: true },
-                R::SetLfgBootVote { yes: false },
                 R::BattlefieldMgrQueueInvite {
                     id: 7,
                     accept: true
