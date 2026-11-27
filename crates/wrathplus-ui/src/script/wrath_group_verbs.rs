@@ -184,6 +184,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                     "SetLootThreshold(): threshold must be between 2 and 6",
                 ));
             }
+            // Labelled: 12340 also needs the active player object (`0x4038f0`, `0x52def8`).
             m.party_requests.push(PartyRequest::LootThreshold(n as u32));
             Ok(())
         })?,
