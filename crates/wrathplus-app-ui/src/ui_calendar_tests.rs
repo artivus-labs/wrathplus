@@ -240,6 +240,14 @@ fn a_draft_adds_with_its_invites() {
         ME,
         None,
     );
+    // A draft's list edits fire the list event once App holds them; a server event's wait.
+    let removal = |event_id| R::RemoveInvite {
+        event_id,
+        invitee: 20,
+        invite_id: 0,
+        owner_invite_id: 0,
+    };
+    assert!(draft_list::redraws(&removal(0)) && !draft_list::redraws(&removal(100)));
     let mut fired = Vec::new();
     reduce(
         &mut state,

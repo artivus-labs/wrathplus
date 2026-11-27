@@ -317,6 +317,21 @@ fn an_opened_event_edits_and_updates() {
         .unwrap(),
         "2 3 4 6 9"
     );
+    // `0x5f2750` sends only a status the filter offers; `0x5f2860` only a change of rank;
+    // `0x5f2238` never removes the creator.
+    s.run(
+        "CalendarEventSetStatus(2, 5) CalendarEventSetStatus(2, 2)
+         CalendarEventSetModerator(2) CalendarEventClearModerator(2) CalendarEventRemoveInvite(1)",
+    )
+    .unwrap();
+    assert!(matches!(
+        s.take_wrath_calendar_requests().as_slice(),
+        [
+            WrathCalendarRequest::SetStatus { status: 1, .. },
+            WrathCalendarRequest::SetModerator { rank: 1, .. }
+        ]
+    ));
+    assert!(s.run("CalendarEventSetModerator()").is_err());
     // `0x5ba2c4`: an uncached name is ""; `0x5b8ae0` rounds half to even and keeps a selection
     // past the list's end out.
     assert_eq!(
@@ -605,8 +620,17 @@ fn invites_sort_and_status_options_need_a_moderator() {
         .unwrap());
     // `0x5b9960` clears the pending bit after the error line and announces it.
     assert_eq!(s.eval::<i64>("return cleared").unwrap(), 1);
-    // `0x5b96de`: without the edit right, removing the event removes the player's own invite.
+    // `0x5f23f0` answers with the player's own invite and sets the pending bit; nothing more
+    // answers while it is set.
     s.take_wrath_calendar_requests();
+    s.run("CalendarEventAvailable() CalendarEventDecline()")
+        .unwrap();
+    assert!(matches!(
+        s.take_wrath_calendar_requests().as_slice(),
+        [WrathCalendarRequest::Rsvp { status: 1, .. }]
+    ));
+    s.set_wrath_calendar_action_pending(false);
+    // `0x5b96de`: without the edit right, removing the event removes the player's own invite.
     s.run("CalendarRemoveEvent()").unwrap();
     assert!(matches!(
         s.take_wrath_calendar_requests().as_slice(),

@@ -288,17 +288,6 @@ fn edit(lua: &Lua, change: impl FnOnce(&mut WrathCalendarFields)) {
     });
 }
 
-/// The open event's ids and the player's invite.
-fn open_ids(st: &State) -> Option<(u64, u64)> {
-    match st.open.as_ref()?.what {
-        Opened::Event {
-            event_id,
-            invite_id,
-        } => Some((event_id, invite_id)),
-        Opened::Draft => Some((0, 0)),
-    }
-}
-
 fn context_row(st: &State) -> Option<WrathCalendarEntry> {
     st.row(st.context?)
 }
@@ -306,43 +295,6 @@ fn context_row(st: &State) -> Option<WrathCalendarEntry> {
 fn invite_at(st: &State, index: Option<i64>) -> Option<WrathCalendarInvitee> {
     let k = usize::try_from(index? - 1).ok()?;
     st.invitees().into_iter().nth(k)
-}
-
-/// An invite gesture on the open event, the player's own invite as the owner.
-fn invite_request(
-    lua: &Lua,
-    args: &MultiValue,
-    make: impl FnOnce(u64, &WrathCalendarInvitee, u64) -> R,
-) {
-    let index = int_arg(lua, args, 0);
-    write(lua, |st, _| {
-        let Some((event_id, _)) = open_ids(st) else {
-            return;
-        };
-        let Some(target) = invite_at(st, index) else {
-            return;
-        };
-        let owner = st.my_invitee().map_or(0, |m| m.invite_id);
-        let request = make(event_id, &target, owner);
-        st.push(request);
-    });
-}
-
-fn rsvp_open(lua: &Lua, status: u8) {
-    write(lua, |st, _| {
-        if let Some(Opened::Event {
-            event_id,
-            invite_id,
-        }) = st.open.as_ref().map(|o| o.what.clone())
-        {
-            let invite_id = st.my_invitee().map_or(invite_id, |m| m.invite_id);
-            st.push(R::Rsvp {
-                event_id,
-                invite_id,
-                status,
-            });
-        }
-    });
 }
 
 fn rsvp_context(lua: &Lua, status: u8) {
@@ -906,44 +858,6 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             None => many((0..6).map(|_| i(0)).collect()),
         }
     })?;
-    set(lua, "CalendarEventRemoveInvite", |lua, args| {
-        invite_request(lua, &args, |event_id, t, owner| R::RemoveInvite {
-            event_id,
-            invitee: t.guid,
-            invite_id: t.invite_id,
-            owner_invite_id: owner,
-        });
-        many(vec![])
-    })?;
-    // CalendarEventSetStatus(index, status) (`0x5b8730` → `0x5b7d60`).
-    set(lua, "CalendarEventSetStatus", |lua, args| {
-        let Some(status) = int_arg(lua, &args, 1).filter(|s| (1..=9).contains(s)) else {
-            return usage("Usage: CalendarEventSetStatus(index, status)");
-        };
-        invite_request(lua, &args, |event_id, t, owner| R::SetStatus {
-            event_id,
-            invitee: t.guid,
-            invite_id: t.invite_id,
-            owner_invite_id: owner,
-            status: (status - 1) as u8,
-        });
-        many(vec![])
-    })?;
-    for (name, rank) in [
-        ("CalendarEventSetModerator", 1u8),
-        ("CalendarEventClearModerator", 0u8),
-    ] {
-        set(lua, name, move |lua, args| {
-            invite_request(lua, &args, |event_id, t, owner| R::SetModerator {
-                event_id,
-                invitee: t.guid,
-                invite_id: t.invite_id,
-                owner_invite_id: owner,
-                rank,
-            });
-            many(vec![])
-        })?;
-    }
     // CalendarEventSelectInvite(index) (`0x5b8ae0`): `lua_tointeger` (`0x5b8b0c`); an index within
     // the open event's list stores that invite's id (`0x5f1a00`).
     set(lua, "CalendarEventSelectInvite", |lua, args| {
@@ -1025,29 +939,6 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             .len();
         many(vec![i(level), i(level), i(ranks as i64)])
     })?;
-    // The player's answer to the open event.
-    for (name, status) in [
-        ("CalendarEventAvailable", ACCEPTED),
-        ("CalendarEventDecline", DECLINED),
-        ("CalendarEventTentative", TENTATIVE),
-    ] {
-        set(lua, name, move |lua, _| {
-            rsvp_open(lua, status);
-            many(vec![])
-        })?;
-    }
-    set(lua, "CalendarEventSignUp", |lua, _| {
-        write(lua, |st, _| {
-            if let Some((event_id, _)) = open_ids(st).filter(|(e, _)| *e != 0) {
-                st.push(R::SignUp {
-                    event_id,
-                    tentative: false,
-                });
-            }
-        });
-        many(vec![])
-    })?;
-
     // ── the context menu's event ──────────────────────────────────────────────────────────────
     set(lua, "CalendarContextSelectEvent", |lua, args| {
         let (o, d, n) = (

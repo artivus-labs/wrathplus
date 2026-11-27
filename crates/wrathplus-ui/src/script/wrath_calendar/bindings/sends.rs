@@ -3,7 +3,7 @@
 
 use mlua::Lua;
 
-use super::super::Opened;
+use super::super::{Open, Opened};
 use super::{
     guild_event_right, many, pend_if, set, update_error, update_error_with, write, State,
     WrathCalendarDate, ANNOUNCEMENT, GUILD_EVENT, R,
@@ -288,7 +288,220 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         });
         finish(lua, outcome)
     })?;
+    // The player's answer (`0x5bd6e0`, `0x5bd760`, `0x5bd750` → `0x5bc3e0`): nothing while pending
+    // or without an event; on a guild event of the player's guild only a tentative answer, which
+    // signs up (`0x5f2530(1)`); otherwise `0x5f23f0` answers a server event the player is invited
+    // to, setting the pending bit.
+    for (name, status) in [
+        ("CalendarEventAvailable", super::ACCEPTED),
+        ("CalendarEventDecline", super::DECLINED),
+        ("CalendarEventTentative", super::TENTATIVE),
+    ] {
+        set(lua, name, move |lua, _| {
+            let in_guild = guild_in(lua);
+            let outcome = write(lua, |st, _| {
+                let Some((event_id, flags)) = server_event(st) else {
+                    return Outcome::Quiet;
+                };
+                // Labelled: 12340 compares the event's guild (`+0x550`) with the player's.
+                if flags & GUILD_EVENT != 0 && in_guild {
+                    if status != super::TENTATIVE {
+                        return Outcome::Quiet;
+                    }
+                    st.push(R::SignUp {
+                        event_id,
+                        tentative: true,
+                    });
+                    return Outcome::Sent;
+                }
+                let Some(mine) = st.my_invitee() else {
+                    return Outcome::Quiet;
+                };
+                st.push(R::Rsvp {
+                    event_id,
+                    invite_id: mine.invite_id,
+                    status,
+                });
+                Outcome::Sent
+            });
+            finish(lua, outcome)
+        })?;
+    }
+    // CalendarEventSignUp (`0x5bd7d0` → `0x5bc460`): a guild event the player has no invite to.
+    set(lua, "CalendarEventSignUp", |lua, _| {
+        let outcome = write(lua, |st, _| {
+            let Some((event_id, flags)) = server_event(st) else {
+                return Outcome::Quiet;
+            };
+            if flags & GUILD_EVENT == 0 || st.my_invitee().is_some() {
+                return Outcome::Quiet;
+            }
+            st.push(R::SignUp {
+                event_id,
+                tentative: false,
+            });
+            Outcome::Sent
+        });
+        finish(lua, outcome)
+    })?;
+    // CalendarEventSetStatus(index, status) (`0x5b8730` → `0x5b7d60` → `0x5f2750`): the edit
+    // right; a server event not while pending; only a status the options filter offers
+    // (`0x5f26f0`); sent without the pending bit.
+    set(lua, "CalendarEventSetStatus", |lua, args| {
+        let (Some(index), Some(status)) =
+            (super::int_arg(lua, &args, 0), super::int_arg(lua, &args, 1))
+        else {
+            return super::usage("Usage: CalendarEventSetStatus(index, status)");
+        };
+        let right = guild_event_right(lua);
+        write(lua, |st, _| {
+            let Some((event_id, target, owner)) = invite_gesture(st, right, index) else {
+                return;
+            };
+            let guild = st
+                .open
+                .as_ref()
+                .is_some_and(|o| o.fields.flags & GUILD_EVENT != 0);
+            let offered = (1..=8).contains(&(status - 1))
+                && !matches!(status - 1, 6 | 7)
+                && status - 1 != i64::from(target.status)
+                && !(guild && matches!(status - 1, 1 | 2));
+            if offered {
+                st.push(R::SetStatus {
+                    event_id,
+                    invitee: target.guid,
+                    invite_id: target.invite_id,
+                    owner_invite_id: owner,
+                    status: (status - 1) as u8,
+                });
+            }
+        });
+        many(vec![])
+    })?;
+    // CalendarEventSetModerator / ClearModerator(index) (`0x5b87d0`, `0x5b8840` → `0x5b7dc0` →
+    // `0x5f2860`): the edit right; a server event not while pending; the creator or a moderator
+    // (else CALENDAR_ERROR_PERMISSIONS); on a guild event only a signed-up invite
+    // (CALENDAR_ERROR_NO_MODERATOR, `0x5f16e0`); a change of rank only; no pending bit.
+    for (name, rank, line) in [
+        (
+            "CalendarEventSetModerator",
+            1u8,
+            "Usage: CalendarEventSetModerator(index)",
+        ),
+        (
+            "CalendarEventClearModerator",
+            0u8,
+            "Usage: CalendarEventClearModerator(index)",
+        ),
+    ] {
+        set(lua, name, move |lua, args| {
+            let Some(index) = super::int_arg(lua, &args, 0) else {
+                return super::usage(line);
+            };
+            let right = guild_event_right(lua);
+            let outcome = write(lua, |st, _| {
+                let Some((event_id, target, owner)) = invite_gesture(st, right, index) else {
+                    return Outcome::Quiet;
+                };
+                if !st.can_edit() {
+                    return Outcome::Refused("CALENDAR_ERROR_PERMISSIONS");
+                }
+                let guild = st
+                    .open
+                    .as_ref()
+                    .is_some_and(|o| o.fields.flags & GUILD_EVENT != 0);
+                if guild && !target.signup {
+                    return Outcome::Refused("CALENDAR_ERROR_NO_MODERATOR");
+                }
+                if target.rank != rank {
+                    st.push(R::SetModerator {
+                        event_id,
+                        invitee: target.guid,
+                        invite_id: target.invite_id,
+                        owner_invite_id: owner,
+                        rank,
+                    });
+                }
+                Outcome::Quiet
+            });
+            finish(lua, outcome)
+        })?;
+    }
+    // CalendarEventRemoveInvite(index) (`0x5bb0c0` → `0x5b9780` → `0x5f2220`): nothing while
+    // pending; never the creator (CALENDAR_DELETE_CREATOR_FAILED); another's invite needs the
+    // creator or a moderator (CALENDAR_ERROR_PERMISSIONS); a server event's removal sets the
+    // pending bit.
+    set(lua, "CalendarEventRemoveInvite", |lua, args| {
+        let Some(index) = super::int_arg(lua, &args, 0) else {
+            return super::usage("Usage: CalendarEventRemoveInvite(index)");
+        };
+        let outcome = write(lua, |st, _| {
+            let Some(open) = st.open.as_ref().filter(|_| !st.action_pending) else {
+                return Outcome::Quiet;
+            };
+            let what = open.what.clone();
+            let Some(target) = super::invite_at(st, Some(index)) else {
+                return Outcome::Quiet;
+            };
+            if target.rank == 2 {
+                return Outcome::Refused("CALENDAR_DELETE_CREATOR_FAILED");
+            }
+            if target.guid != st.view.me && !st.can_edit() {
+                return Outcome::Refused("CALENDAR_ERROR_PERMISSIONS");
+            }
+            let owner = st.my_invitee().map_or(0, |m| m.invite_id);
+            let event_id = match what {
+                Opened::Event { event_id, .. } => event_id,
+                Opened::Draft => 0,
+            };
+            st.push(R::RemoveInvite {
+                event_id,
+                invitee: target.guid,
+                invite_id: target.invite_id,
+                owner_invite_id: owner,
+            });
+            if event_id == 0 {
+                Outcome::Quiet
+            } else {
+                Outcome::Sent
+            }
+        });
+        finish(lua, outcome)
+    })?;
     Ok(())
+}
+
+/// The open server event and its flags, with no action pending (`0x5f23f0`, `0x5f2530` refuse a
+/// draft).
+fn server_event(st: &State) -> Option<(u64, u32)> {
+    if st.action_pending {
+        return None;
+    }
+    match st.open.as_ref()? {
+        Open {
+            what: Opened::Event { event_id, .. },
+            fields,
+            ..
+        } => Some((*event_id, fields.flags)),
+        _ => None,
+    }
+}
+
+/// `0x5b7d60`/`0x5b7dc0`: an invite gesture needs the edit right (`0x5b7d20`), and on a server
+/// event no pending action; the target and the player's own invite as the owner.
+fn invite_gesture(
+    st: &State,
+    right: bool,
+    index: i64,
+) -> Option<(u64, crate::script::WrathCalendarInvitee, u64)> {
+    let open = st.open.as_ref().filter(|_| edit_right(st, right))?;
+    let event_id = match open.what {
+        Opened::Event { event_id, .. } if !st.action_pending => event_id,
+        Opened::Event { .. } => return None,
+        Opened::Draft => 0,
+    };
+    let target = super::invite_at(st, Some(index))?;
+    Some((event_id, target, st.my_invitee().map_or(0, |m| m.invite_id)))
 }
 
 /// A player event's draft, the mass invites' target: `+0x500` set, flags without `0x440`.
