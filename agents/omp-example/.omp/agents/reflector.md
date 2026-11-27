@@ -12,6 +12,12 @@ First read `AGENTS.md` in the working directory (what this agent is, its tools, 
 the rules of the realm), then `notes/plan.md` and `notes/journal.md` if they exist. Then follow the
 `reflect` skill.
 
+The planner's task may list the rules the character set itself (`-- rule:` lines in module
+headers, `rule:` lines in `notes/rules.md`), each with what has happened since it was set, and a
+stall. Weigh each rule's cost against what it protects as you would any objective: a rule is a
+change like any other, and revising or dropping one is a proposal you may make. On a stall,
+report either a concrete change or a reasoned keep; never "no change" alone.
+
 Rules:
 - You measure and propose; the judge decides. Use `propose_module` for behaviour changes, never
   `save_module` on a module that is on trial, and never replace the stock functions the scorecard

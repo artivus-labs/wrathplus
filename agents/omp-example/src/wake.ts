@@ -2,6 +2,8 @@
 // stream for these names only; everything else (combat, loot, walks) is the Lua controller's
 // business, which the planner reads itself with the `events` tool when it wants to.
 
+import type { Review } from "./rules.ts";
+
 export interface GameEvent {
   seq: number;
   time: number;
@@ -279,8 +281,17 @@ export class Repeats {
 
 export type WakeReason = "events" | "checkin" | "start" | "restart" | "reflect";
 
-/** The message the planner wakes to. */
-export function wakeMessage(reason: WakeReason, lines: string[], status: string, minutesQuiet?: number, evidence: string[] = []): string {
+/** The message the planner wakes to. A check-in or reflection also carries the review: the rules
+ *  the agent set itself with what each has cost, and when an objective has stalled, the decision
+ *  it asks for (`rules.ts`). */
+export function wakeMessage(
+  reason: WakeReason,
+  lines: string[],
+  status: string,
+  minutesQuiet?: number,
+  evidence: string[] = [],
+  review: Review = { rules: [] },
+): string {
   const head: Record<WakeReason, string> = {
     start: "A new session starts. Read your notes and skills, check status and the scorecard, then get your controller playing.",
     restart: "The launcher restarted and this session resumes. Check status and your controller, then carry on.",
@@ -290,9 +301,14 @@ export function wakeMessage(reason: WakeReason, lines: string[], status: string,
       "Reflection is due. Dispatch the `reflector` agent with the task tool (a fresh context with the same game tools) and wait for its report; then act on it: proposals it made are queued with the judge, notes it wrote are in notes/. Keep your own turn short.",
   };
   const body = lines.length ? `\n\nEvents since your last turn:\n${lines.map((l) => `- ${l}`).join("\n")}` : "";
-  const seen =
-    reason === "checkin" || reason === "reflect"
-      ? `\n\nEvidence since the last check-in:\n${evidence.length ? evidence.map((l) => `- ${l}`).join("\n") : "- (nothing failed, and no fights ended)"}`
-      : "";
-  return `[launcher ${new Date().toISOString()}] ${head[reason]}\n${status}${body}${seen}`;
+  const reviewed = reason === "checkin" || reason === "reflect";
+  const seen = reviewed
+    ? `\n\nEvidence since the last check-in:\n${evidence.length ? evidence.map((l) => `- ${l}`).join("\n") : "- (nothing failed, and no fights ended)"}`
+    : "";
+  const rules = reviewed && review.rules.length ? `\n\n${RULES_HEAD}\n${review.rules.map((l) => `- ${l}`).join("\n")}` : "";
+  const decision = reviewed && review.decision ? `\n\n${review.decision}` : "";
+  const pass = reason === "reflect" && (rules || decision) ? "\n\nGive the reflector the rules and any stall above in its task." : "";
+  return `[launcher ${new Date().toISOString()}] ${head[reason]}\n${status}${body}${seen}${rules}${decision}${pass}`;
 }
+
+export const RULES_HEAD = "Rules you set yourself, and what has happened since each was set:";

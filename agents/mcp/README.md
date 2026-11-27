@@ -87,6 +87,11 @@ within 25 of five skill a level, the equipped average item level within 5 of the
 reserve of 25 x level² copper. Each is a gap (0 = met) and a share of its target; the shares sum
 to one needs number whose change per hour is an objective.
 
+**Self-imposed rules** (`src/rules.ts`, a library for the harnesses, not a tool): an agent's own
+`-- rule: what | why: reason | set: YYYY-MM-DD HH:MM` lines (module headers, notes), the cost
+since each was set from these samples, and stall detection over a harness's review windows.
+Both example harnesses use it; nothing in it enforces or removes a rule.
+
 **The judge** (`src/judge.ts`) decides which module changes are kept. `propose_module` keeps the
 candidate as a version in the judge's folder and queues a trial. The champion is the module as
 the judge last kept it, or as the client holds it at the first trial (no file: the champion is the

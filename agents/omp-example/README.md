@@ -162,6 +162,8 @@ Read `usage.jsonl` for the real numbers.
 | `WRATHPLUS_OMP_TURN_MAX_MINUTES` | `30` | a longer turn is aborted (`0`: never) |
 | `WRATHPLUS_OMP_REPEAT_MINUTES` | `15` | a notable event repeating one that woke the planner this recently (the same goal blocked for the same reason, the same hold run out) does not wake it again; repeats are counted in the next check-in (`0`: every one wakes it) |
 | `WRATHPLUS_OMP_NOTICE_SECONDS` | `15` | `AGENT_NOTICED` events are collected this long into one wake (`0`: each wakes at once) |
+| `WRATHPLUS_OMP_STALL_XP_CHECKINS` | `3` | check-ins in a row with no experience before the check-in states the stall and asks for a decision (`0`: never) |
+| `WRATHPLUS_OMP_STALL_QUEST_HOURS` | `4` | hours in a row with no quest handed in, the same (`0`: never) |
 | `WRATHPLUS_OMP_MAX_COST` | none | USD per session, passed as `--max-cost` |
 | `WRATHPLUS_OMP_FRESH` | off | `1`: start a new session instead of continuing the last one |
 | `WRATHPLUS_JUDGE_DIR`, `WRATHPLUS_SCORECARD_SECONDS` | the MCP server's | passed through to it |

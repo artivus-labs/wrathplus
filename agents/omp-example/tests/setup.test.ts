@@ -21,6 +21,9 @@ test("settings: the port is required, the rest has defaults", () => {
   expect(settingsFromEnv({ ...base, WRATHPLUS_OMP_NOTICE_SECONDS: "0" }, example).noticeSeconds).toBe(0);
   const t = settingsFromEnv({ ...base, WRATHPLUS_OMP_REFLECT_HOURS: "0", WRATHPLUS_OMP_CHECKIN_MINUTES: "x", WRATHPLUS_OMP_MAX_COST: "5" }, example);
   expect([t.reflectHours, t.checkinMinutes, t.maxCost]).toEqual([0, 20, 5]);
+  expect([s.stallXpCheckins, s.stallQuestHours, s.scorecardSeconds]).toEqual([3, 4, 30]);
+  const u = settingsFromEnv({ ...base, WRATHPLUS_OMP_STALL_XP_CHECKINS: "6", WRATHPLUS_OMP_STALL_QUEST_HOURS: "0" }, example);
+  expect([u.stallXpCheckins, u.stallQuestHours]).toEqual([6, 0]);
 });
 
 test("the working dir gets AGENTS.md and the config each start; skills only when missing", () => {
