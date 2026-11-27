@@ -1,6 +1,7 @@
 //! Tests for `world`: the snapshot's Lua view, orders, and NPC services.
 
 use super::*;
+use mlua::Lua;
 
 #[test]
 fn guids_round_trip_as_hex_text() {
@@ -181,6 +182,21 @@ fn creature_ranks_and_critters_reach_lua() {
             distance: 12.0,
             ..Default::default()
         },
+        // A flight master whose node is not known yet (its green "!"), and one whose is.
+        Seen {
+            guid: 0x4,
+            kind: "unit",
+            distance: 14.0,
+            taxi: Some(false),
+            ..Default::default()
+        },
+        Seen {
+            guid: 0x5,
+            kind: "unit",
+            distance: 15.0,
+            taxi: Some(true),
+            ..Default::default()
+        },
     ];
     let lua = Lua::new();
     install(&lua, &handles).unwrap();
@@ -192,6 +208,11 @@ fn creature_ranks_and_critters_reach_lua() {
         .eval()
         .unwrap();
     assert_eq!(read, "elite nil normal true nil");
+    let taxi: String = lua
+        .load("local n = AgentNearby() return tostring(n[3].taxi) .. ' ' .. n[4].taxi .. ' ' .. n[5].taxi")
+        .eval()
+        .unwrap();
+    assert_eq!(taxi, "nil unknown known");
 }
 
 /// Under a cinematic the list is what the server's camera sees: `AgentNearby` says so in a second

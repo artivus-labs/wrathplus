@@ -29,7 +29,7 @@
 //!
 //! In Lua, besides the stock API: `AgentNearby([yards])`, `AgentFindNpc(service [, yards])`,
 //! `AgentPosition()`, `AgentTarget(guid)`, `AgentInteract(guid)`, `AgentCinematic()` (`world`),
-//! `AgentQuestPOI(quest)` (`quest_poi`), `AgentZones()` (`zones`), `AgentPath`, `AgentMoveTo`,
+//! `AgentQuestPOI(quest)` (`quest_poi`), `AgentZones()` (`zones`), `AgentTaxiNodes()` (`taxi`), `AgentPath`, `AgentMoveTo`,
 //! `AgentStop`, `AgentWalk`, `AgentServices` (`nav`, over local mmaps from `WOW_NAV_MMAPS`, else
 //! routes asked of the realm; services always from the realm), `AgentPoint(u, v [, frame])`
 //! (`point`), and the module functions (`env`).
@@ -58,6 +58,7 @@ mod server;
 mod stock_api;
 #[cfg(test)]
 mod stock_extract;
+mod taxi;
 mod world;
 mod zones;
 
@@ -127,11 +128,13 @@ impl Plugin for AgentPlugin {
         let (nav, nav_link) = nav::link(events.clone(), started, world.orders.clone());
         let (pois, poi_link) = quest_poi::link();
         let (zones, zone_link) = zones::link();
+        let (taxi, taxi_link) = taxi::link();
         app.insert_resource(Link {
             world,
             nav,
             pois,
             zones,
+            taxi,
             queue,
             events,
             started,
@@ -144,6 +147,7 @@ impl Plugin for AgentPlugin {
         .insert_resource(nav_link)
         .insert_resource(poi_link)
         .insert_resource(zone_link)
+        .insert_resource(taxi_link)
         .add_systems(Update, (pump_events, serve_jobs).chain())
         .add_systems(
             Update,
@@ -153,6 +157,8 @@ impl Plugin for AgentPlugin {
                 nav::walk,
                 quest_poi::mirror,
                 zones::load,
+                taxi::load,
+                taxi::mirror,
             ),
         );
         look::add_stamp(app);
@@ -178,6 +184,8 @@ struct Link {
     pois: quest_poi::Handles,
     /// The zones and their levels (`zones`).
     zones: zones::Handles,
+    /// The flight paths and those known (`taxi`).
+    taxi: taxi::Handles,
     /// The screenshots sent, to point into (`look`, `point`).
     frames: look::SharedFrames,
 }
@@ -208,6 +216,9 @@ fn pump_events(
         }
         if let Err(e) = zones::install(script.lua(), &link.zones) {
             error!("agent port: zones: {e}");
+        }
+        if let Err(e) = taxi::install(script.lua(), &link.taxi, &link.world) {
+            error!("agent port: flight paths: {e}");
         }
         if let Err(e) = nav::install(script.lua(), &link.nav, &link.world) {
             error!("agent port: navigation functions: {e}");

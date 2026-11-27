@@ -93,6 +93,10 @@
 --   data.zone that is not in that list, or whose fit is "high", is refused by Goals.push with the
 --   zones that fit. An action the planner taught (not built in) that walks into a zone above us
 --   is stopped there and fails with the same list.
+-- Flights (wp.taxi): the walks of hand_in_quests, visit_quest_hub and travel_to_zone go by
+--   Move.travel, which flies a long trip between known flight paths when Taxi.plan says that beats
+--   the walk; wp.taxi adds the fact flight_path_unknown_near and the action learn_flight_path (talk
+--   to a flight master near us whose path we do not know). The runner starts nothing on a flight.
 --
 -- Places: Goals.places[kind] lists the NPCs seen (kinds trainer, our class's; vendor, every
 --   merchant, which buys any item, quartermasters too; repair; questgiver, one with a quest for us,
@@ -1038,6 +1042,7 @@ local function busy()
   local held = AgentCinematic and AgentCinematic()
   if held then return "waiting: " .. held end
   if UnitAffectingCombat("player") or (Combat and Combat.active) then return "fighting" end
+  if UnitOnTaxi and UnitOnTaxi("player") then return "on a flight" end
   -- Running from a fight is still the fight: no walk of the runner's takes the legs over.
   if Combat and Combat.fleeing then return "fleeing" end
   local a = Agent and Agent.activity and Agent.activity()
@@ -1204,6 +1209,7 @@ end
 -- The verbs wrapped for the length of one port call: { name, classify, on Move }.
 local VERBS = {
   { "AgentMoveTo", walking_to() }, { "AgentInteract", walking_to(5) }, { "to", walking_to(), true },
+  { "travel", walking_to(), true },
   { "AgentStop", stopping("Stopped") }, { "SitStandOrDescendStart", stopping("Sat down") },
   { "DoEmote", sit_emote },
 }
@@ -1498,7 +1504,7 @@ G.action({
       if h and not G.cooling("hand_in_quests:" .. q.title) then
         args.subject, args.going = q.title, "the hand-in of " .. q.title
         quest_visit.target = { id = q.id, title = q.title, x = h.x, y = h.y }
-        local ok, why = Move.to(h.x, h.y)
+        local ok, why = Move.travel(h.x, h.y)
         if not ok then error(hand_in_failure("no way: " .. tostring(why)), 0) end
         return
       end
@@ -1586,7 +1592,7 @@ G.action({
     args.going = p.zone and (p.name .. " in " .. p.zone) or p.name
     hub_visit = { place = p, tried = {} }
     note("quest hub: " .. args.going)
-    local ok, why = Move.to(p.x, p.y, p.z)
+    local ok, why = Move.travel(p.x, p.y, p.z)
     if not ok then error("no way to the quest hub at " .. tostring(p.name) .. ": " .. tostring(why), 0) end
   end,
   done = function()
@@ -2080,7 +2086,7 @@ G.action({
     args.subject, args.going = z.name, hub and (hub.name .. " in " .. z.name) or z.name
     travel = { zone = z, to = to, hub = hub }
     note("travel to " .. args.going .. " (levels " .. z.min .. "-" .. z.max .. ")")
-    local ok, why = Move.to(to.x, to.y, to.z)
+    local ok, why = Move.travel(to.x, to.y, to.z)
     assert(ok, why)
   end,
   -- Over when the walk is: arrived, or ended anywhere in the zone. A walk to the middle also ends

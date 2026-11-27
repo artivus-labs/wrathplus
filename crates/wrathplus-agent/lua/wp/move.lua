@@ -13,6 +13,10 @@
 --                               no ground (`stall_yards` in `stall_after` seconds, out of a fight and
 --                               not eating) is sent again once, then ends "stalled", which is also
 --                               put out as AGENT_WALK_DONE("stalled", target).
+--   Move.travel(x, y [, z])     Move.to for a place, flying where that beats the walk (wp.taxi:
+--                               Taxi.plan says when): walk to the flight master, fly, walk the rest,
+--                               all one walk ending as AGENT_MOVE_DONE, with AGENT_FLIGHT_DONE(ok,
+--                               why) between. A flight that falls through walks on from there.
 --   Move.follow(unit)           follow mode: keep within `follow_distance` of them (moving only
 --                               once they are `slack` yards further, as players do), go to where
 --                               they were last seen if they leave sight, and fight beside them:
@@ -51,6 +55,8 @@ local M = {
 }
 
 local who, guid, anchor, aimed, seen, seen_at, started, point
+-- A Move.travel's flight under way (wp.taxi's journey), until it lands or falls through.
+local journey
 -- Where the walk last gained ground and when, and whether it was sent again after stalling.
 local progress, resent
 
@@ -126,8 +132,15 @@ local function halt()
   aimed = nil
 end
 
+-- Drop a flight under way that has not started (an order replacing the walk): Taxi closes its windows.
+local function drop_journey()
+  if journey and Taxi and Taxi.cancel then Taxi.cancel(journey) end
+  journey = nil
+end
+
 local function finish(outcome)
   local name = who
+  drop_journey()
   M.mode, M.state, who, guid, aimed, point = nil, nil, nil, nil, nil, nil
   M.last = { unit = name, outcome = outcome }
   halt()
@@ -136,6 +149,7 @@ end
 
 local function set(mode, unit)
   if Combat and Combat.active then Combat.stop() end
+  drop_journey()
   who, guid, aimed, seen, seen_at, started = unit, resolve(unit), nil, nil, GetTime(), GetTime()
   progress, resent = nil, false
   M.mode, M.last = mode, nil
@@ -160,6 +174,16 @@ function M.to(unit, within, z)
     finish("failed")
     return false, tostring(unit) .. " is not in sight: walk closer, or give coordinates"
   end
+  return true
+end
+
+function M.travel(x, y, z)
+  local p = type(x) == "table" and x or { x = x, y = y, z = z }
+  local plan = Taxi and Taxi.plan and Taxi.plan(p)
+  if not plan then return M.to(p) end
+  set("to", string.format("(%d, %d)", p.x, p.y))
+  point, M.to_within = p, 3
+  journey = Taxi.start(plan)
   return true
 end
 
@@ -201,6 +225,7 @@ function M.stay()
 end
 
 function M.free()
+  drop_journey()
   halt()
   M.mode, M.state, who, guid, aimed = nil, nil, nil, nil, nil
 end
@@ -292,6 +317,18 @@ local function tick(now)
     else
       M.state = "holding this spot"
     end
+    return
+  end
+  if M.mode == "to" and point and journey then
+    local outcome = Taxi.step(journey, now)
+    if not outcome then
+      M.state = journey and journey.state
+      return
+    end
+    if outcome ~= "walk" then return finish(outcome) end
+    journey = nil
+    progress, resent = nil, false
+    if not AgentMoveTo(point.x, point.y, point.z) then return finish("failed") end
     return
   end
   if M.mode == "to" and point then
