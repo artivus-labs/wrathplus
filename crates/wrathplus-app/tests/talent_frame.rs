@@ -149,6 +149,7 @@ fn open_window(points_spent: u32) -> UiScript {
     load_ui(&mut script);
     script.set_unit("player", Some(probe_player()));
     script.set_talents(fixture(points_spent));
+    script.set_talent_groups(wrathplus_ui::script::WrathTalentGroups::single());
     script.run("ToggleTalentFrame()").expect("toggle");
     script
 }

@@ -92,7 +92,8 @@ fn argb(r: f64, g: f64, b: f64) -> u32 {
     0xff00_0000 | c(r) << 16 | c(g) << 8 | c(b)
 }
 
-/// The turn-in's banner from the eleven arguments after the team size (`0x5a2733`-`0x5a27c3`).
+/// The turn-in's banner from the eleven arguments after the team size (`0x5a2733`-`0x5a27c3`);
+/// the two styles cut by `__ftol2_sse` (`0x5a277e`, `0x5a27a1`).
 fn banner(lua: &Lua, args: &MultiValue) -> [u32; 5] {
     let n: Option<Vec<f64>> = (1..12).map(|i| number(lua, arg(args, i))).collect();
     let Some(n) = n else {
@@ -100,9 +101,9 @@ fn banner(lua: &Lua, args: &MultiValue) -> [u32; 5] {
     };
     [
         argb(n[0], n[1], n[2]),
-        n[3].round() as i64 as u32,
+        super::binding_abi::ftol(n[3]) as u32,
         argb(n[4], n[5], n[6]),
-        n[7].round() as i64 as u32,
+        super::binding_abi::ftol(n[7]) as u32,
         argb(n[8], n[9], n[10]),
     ]
 }
@@ -129,7 +130,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             };
             match super::petition::validate_guild_name(&name) {
                 Ok(()) => {
-                    let index = index.round() as i64 as u32;
+                    let index = index as i64 as u32; // `fistp` under chop
                     push(lua, WrathPetitionVendorRequest::Buy { index, name });
                     Ok(Value::Integer(1))
                 }
@@ -165,7 +166,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 return Err(mlua::Error::runtime("Usage: GetPetitionItemInfo(index)"));
             };
             let row = lua.app_data_ref::<State>().and_then(|s| {
-                let i = usize::try_from((index.round() as i64).checked_sub(1)?).ok()?;
+                let i = usize::try_from(i64::from(super::binding_abi::ftol(index)).checked_sub(1)?)
+                    .ok()?;
                 s.rows.as_ref()?.get(i).cloned()
             });
             let text = |s: Option<String>| -> mlua::Result<Value> {
@@ -213,7 +215,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 push(
                     lua,
                     WrathPetitionVendorRequest::TurnIn {
-                        team_size: size.round() as i64,
+                        team_size: i64::from(size as i64 as i32), // `fistp` (`0x5a273c`)
                         banner,
                     },
                 );
@@ -279,7 +281,7 @@ mod tests {
             1
         );
         assert!(s.eval::<bool>("return BuyPetition(2, '') == nil").unwrap());
-        s.run("TurnInArenaPetition(3, 1, 0, 0, 12, 0, 0, 1, 3, 0.5, 0.5, 0.5)")
+        s.run("TurnInArenaPetition(3.9, 1, 0, 0, 12.9, 0, 0, 1, 3.9, 0.5, 0.5, 0.5)")
             .unwrap();
         s.run("TurnInArenaPetition(5)").unwrap();
         s.run("ClosePetitionVendor() ClosePetitionVendor()")

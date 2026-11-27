@@ -233,24 +233,27 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // CheckTalentMasterDist(): polled by that dialog's OnUpdate, false hides it. The reference
-    // re-runs its interact-range test on the latched trainer (`0x5df980`, `d² <= [0xc4c28c]`);
-    // no packet either way.
+    // CheckTalentMasterDist(): polled by that dialog's OnUpdate, nil hides it; 1 or nil
+    // (`0x51b740`) off the trainer range test (`0x6d2070`), no packet either way.
     g.set(
         "CheckTalentMasterDist",
         lua.create_function(|lua, ()| {
             let model = lua.app_data_ref::<Model>().expect("model app_data");
-            Ok(model.talent_master_pending)
+            Ok(super::binding_abi::flag(model.talent_master_pending))
         })?,
     )?;
 
-    // Every unit token answers the player's own pair: `PLAYER_CHARACTER_POINTS1/2` are private
-    // fields only we receive.
+    // UnitCharacterPoints(unit) (`0x610fb0`): the private pair for the active player alone
+    // (`0x61101d`); another player, any other unit or none answers 0, 0.
     g.set(
         "UnitCharacterPoints",
-        lua.create_function(|lua, _unit: String| {
+        lua.create_function(|lua, unit: Value| {
+            const USAGE: &str = "Usage: UnitCharacterPoints(\"unit\")";
+            let unit = super::binding_abi::string_arg(lua, unit, USAGE)?;
             let model = lua.app_data_ref::<Model>().expect("model app_data");
-            let (cp1, cp2) = model.talents.points;
+            let me = model.local_guid();
+            let mine = me != 0 && model.resolve_token(&unit).unit() == Some(me);
+            let (cp1, cp2) = if mine { model.talents.points } else { (0, 0) };
             Ok((i64::from(cp1), i64::from(cp2)))
         })?,
     )?;

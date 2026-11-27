@@ -282,12 +282,9 @@ fn spawn_slot(
     // author them too for the swing trail (`0x6c67f0`).
     if slot_idx == 2 && hs.attach == attach_id::HAND_LEFT {
         if let Some([top, bottom]) = dm.string_anchors {
-            commands.entity(root).insert(crate::bowstring::Bowstring {
-                owner: entity,
-                // Bone and offset: the prop flexes, so the tips move.
-                top,
-                bottom,
-            });
+            // Bone and offset: the prop flexes, so the tips move.
+            let string = crate::bowstring::Bowstring::new(entity, top, bottom, &dm.markers);
+            commands.entity(root).insert(string);
         }
     }
     // The swing trail's `WTOBJECT`, one per weapon hand (`0x608d60`) and freed with the model,

@@ -19,6 +19,7 @@ use crate::names::NameCache;
 use crate::net::{ClientCommand, GuidIndex, NetCommands, Objects};
 use crate::ui_session::NpcSession;
 
+mod initiate;
 mod net;
 
 /// One side's offer: slots 0-5 change hands, slot 6 is the non-traded enchant slot.
@@ -684,8 +685,8 @@ fn feed_trade(
     *last_open = trade.is_open();
 }
 
-/// Drain the Lua intents into the trade `CMSG`s. `CloseTrade` clears the session, sending
-/// `CMSG_CANCEL_TRADE` only while one is live.
+/// Drain the Lua intents into the trade `CMSG`s. `CloseTrade` clears the session and always sends
+/// `CMSG_CANCEL_TRADE`.
 fn drain_trade(
     script: Option<NonSendMut<UiScript>>,
     mut trade: ResMut<TradeSession>,
@@ -695,6 +696,8 @@ fn drain_trade(
     objects: Objects,
     items: Res<Items>,
     self_q: Query<&ObjectStore, With<SelfPlayer>>,
+    self_guid: Option<Res<crate::app_core::session::SelfGuid>>,
+    mut errors: ResMut<crate::app_core::errors::UiErrorKeys>,
 ) {
     let Some(mut script) = script else {
         return;
@@ -702,17 +705,19 @@ fn drain_trade(
     // Our bag contents, for the own-column item resolve.
     let store = self_q.iter().next();
 
+    let me = self_guid.and_then(|g| g.0);
     for token in script.take_trade_initiates() {
-        match resolve_trade_target(&token, &selection, &group) {
-            Some(guid) => {
+        match initiate::initiate_target(&token, me, store, &objects, &selection, &group) {
+            Ok(guid) => {
                 info!(target: "trade", "initiate: {token:?} -> {guid:#x}; sending CMSG_INITIATE_TRADE");
                 trade.initiate(guid);
                 let _ = commands
                     .0
                     .send(ClientCommand::InitiateTrade { target: guid });
             }
-            None => {
-                info!(target: "trade", "initiate: {token:?} did not resolve to a player guid — nothing sent");
+            Err(Some(key)) => errors.0.push(crate::app_core::errors::UiError::key(key)),
+            Err(None) => {
+                info!(target: "trade", "initiate: {token:?} names no streamed player — nothing sent")
             }
         }
     }
@@ -770,10 +775,9 @@ fn drain_trade(
                 .send(ClientCommand::ClearTradeItem { trade_slot });
         }
     }
+    // `CloseTrade` (`0x587940`) sends the cancel whether or not a trade is live (`0x5879c4`).
     if script.take_trade_close() {
-        if trade.is_open() || trade.partner.is_some() {
-            let _ = commands.0.send(ClientCommand::CancelTrade);
-        }
+        let _ = commands.0.send(ClientCommand::CancelTrade);
         trade.close_window();
     }
     // The `TRADE` popup's verbs: an empty `0x117` or `0x11C` and no local teardown; the status
@@ -817,11 +821,6 @@ fn trim_offer_to_purse(
             .0
             .send(ClientCommand::SetTradeGold { copper: trimmed });
     }
-}
-
-/// The player guid a UnitPopup token names, through [`crate::ui_unit::player_token_guid`].
-fn resolve_trade_target(token: &str, selection: &Selection, group: &GroupState) -> Option<u64> {
-    crate::target::unit_tokens::player_token_guid(token, selection, group)
 }
 
 #[cfg(test)]
@@ -986,15 +985,6 @@ mod tests {
     }
 
     #[test]
-    fn resolve_target_reads_the_selection_and_roster() {
-        // "player" is yourself, and there is no roster for "party3".
-        let sel = Selection::default();
-        let group = GroupState::default();
-        assert_eq!(resolve_trade_target("player", &sel, &group), None);
-        assert_eq!(resolve_trade_target("party3", &sel, &group), None);
-    }
-
-    #[test]
     fn status_codes_are_stable() {
         assert_eq!(TradeStatus::OpenWindow.code(), 2);
         assert_eq!(TradeStatus::Accept.code(), 4);
@@ -1009,6 +999,7 @@ mod tests {
         let mut app = App::new();
         app.init_resource::<TradeSession>()
             .init_resource::<GroupState>()
+            .init_resource::<crate::app_core::errors::UiErrorKeys>()
             .init_resource::<Items>()
             .init_resource::<GuidIndex>()
             .insert_resource(NetCommands(tx))
@@ -1018,6 +1009,13 @@ mod tests {
                 ..Default::default()
             });
         app.insert_non_send_resource(UiScript::new().unwrap());
+        app.world_mut()
+            .spawn((SelfPlayer, ObjectStore(Default::default())));
+        let partner = app.world_mut().spawn(ObjectStore(Default::default())).id();
+        app.world_mut()
+            .resource_mut::<GuidIndex>()
+            .0
+            .insert(0x7, partner);
 
         app.world_mut()
             .non_send_resource_mut::<UiScript>()
@@ -1448,6 +1446,7 @@ mod tests {
         let mut app = App::new();
         app.init_resource::<TradeSession>()
             .init_resource::<GroupState>()
+            .init_resource::<crate::app_core::errors::UiErrorKeys>()
             .init_resource::<Items>()
             .init_resource::<GuidIndex>()
             .insert_resource(NetCommands(tx))
@@ -1490,6 +1489,7 @@ mod tests {
         let mut app = App::new();
         app.init_resource::<TradeSession>()
             .init_resource::<GroupState>()
+            .init_resource::<crate::app_core::errors::UiErrorKeys>()
             .init_resource::<Items>()
             .init_resource::<GuidIndex>()
             .insert_resource(NetCommands(tx))

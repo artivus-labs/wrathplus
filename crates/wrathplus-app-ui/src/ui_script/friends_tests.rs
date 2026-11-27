@@ -180,6 +180,8 @@ fn friend_rows_render_the_online_and_offline_templates() {
         .eval::<bool>("return FriendsFrameFriendsScrollFrameButton2:IsShown()")
         .unwrap());
     assert_eq!(row(&s, "Button3Name:GetText()"), "Twomage");
+    // `infoText = area` for offline rows too (`FriendsFrame.lua:2157`): no zone row is `UNKNOWN`.
+    assert_eq!(row(&s, "Button3Info:GetText()"), "Unknown");
     assert!(
         s.eval::<bool>("return FriendsFrameFriendsScrollFrameButton3:IsVisible()")
             .unwrap(),
@@ -508,7 +510,10 @@ fn the_who_buttons_need_a_selected_row() {
     s.run("WhoFrameAddFriendButton:Click()").unwrap();
     assert_eq!(
         s.take_social_requests(),
-        vec![SocialRequest::AddFriend("Furor".to_string())]
+        vec![SocialRequest::AddFriend {
+            name: "Furor".to_string(),
+            note: String::new()
+        }]
     );
 
     push(
@@ -591,7 +596,10 @@ fn add_friend_without_a_target_opens_the_name_dialog() {
     s.run("StaticPopup1Button1:Click()").unwrap();
     assert_eq!(
         s.take_social_requests(),
-        vec![SocialRequest::AddFriend("Onerogue".to_string())]
+        vec![SocialRequest::AddFriend {
+            name: "Onerogue".to_string(),
+            note: String::new()
+        }]
     );
     assert!(
         !s.eval::<bool>("return StaticPopup1:IsVisible()").unwrap(),

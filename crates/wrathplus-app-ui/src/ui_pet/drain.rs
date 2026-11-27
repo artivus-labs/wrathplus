@@ -42,15 +42,16 @@ pub struct PetPress<'w, 's> {
 }
 
 impl PetPress<'_, '_> {
-    /// `CastPetAction(slot)`, a 1-based bar slot.
-    pub fn press_slot(&mut self, slot: u32) {
+    /// `CastPetAction(slot[, unit])`, a 1-based bar slot and the unit's guid, else the selection
+    /// (`0x5d4210` takes `[0xbd07b0]` for a zero guid).
+    pub fn press_slot(&mut self, slot: u32, target: Option<u64>) {
         if let Some(native) = &self.bar.native {
             if let Some(entry) = slot
                 .checked_sub(1)
                 .and_then(|i| native.actions.get(i as usize))
                 .copied()
             {
-                self.press_native(entry);
+                self.press_native(entry, target.filter(|&g| g != 0));
             }
             return;
         }
@@ -72,14 +73,14 @@ impl PetPress<'_, '_> {
     /// number only labels logs.
     pub fn order(&mut self, packed: u32) {
         if self.bar.native.is_some() {
-            self.press_native(wrathplus_protocol::wrath_pet::Action(packed));
+            self.press_native(wrathplus_protocol::wrath_pet::Action(packed), None);
         } else {
             self.press(0, PetActionEntry::from(packed));
         }
     }
 
     /// Native action dispatch never narrows a spell ID through the Vanilla entry helper.
-    fn press_native(&mut self, entry: wrathplus_protocol::wrath_pet::Action) {
+    fn press_native(&mut self, entry: wrathplus_protocol::wrath_pet::Action, target: Option<u64>) {
         let Some(store) = self.pet.usable_pet(&self.bar) else {
             return;
         };
@@ -116,7 +117,7 @@ impl PetPress<'_, '_> {
             return;
         }
         let possessing = possessing(Some(store), self.pet.self_guid.0);
-        let mut target_guid = self.selection.guid.unwrap_or(0);
+        let mut target_guid = target.or(self.selection.guid).unwrap_or(0);
         if kind == 7 && id == PET_COMMAND_ATTACK {
             if crate::ui_action::attack_actor_refusal(
                 Some(store),
@@ -126,7 +127,7 @@ impl PetPress<'_, '_> {
                 return;
             }
             let Some(guid) = self.pick.target(
-                None,
+                target,
                 &mut self.selection,
                 &mut self.seam,
                 &mut self.ui_errors,
@@ -146,7 +147,8 @@ impl PetPress<'_, '_> {
         if kind == 6 || (kind == 7 && id <= PET_COMMAND_FOLLOW) {
             self.bar.bar_signals = self.bar.bar_signals.wrapping_add(1);
         }
-        if kind == 7 && id == PET_COMMAND_ATTACK && possessing {
+        // An Attack order the pet may carry out raises the latch for any pet (`0x5d4509`).
+        if kind == 7 && id == PET_COMMAND_ATTACK {
             self.bar.attacking = true;
         }
         if let Some(display) = display.filter(|_| is_spell) {
@@ -427,11 +429,22 @@ pub(super) fn old_target_cleared(previous: Option<u64>, now: Option<u64>) -> boo
     previous.is_some() && previous != now
 }
 
-/// The old-target clear's `PetStopAttack` (`0x493910`, at `0x493a18` when `0x5ee5a0` finds a
-/// possessed unit at `0x493a0f`). It sits before the notify branch, so every selection writer runs
-/// it; a re-select runs no clear (`0x493540`).
+/// Whether a selection change calls the pet off: the old-target clear (`0x5241b0`) runs
+/// `PetStopAttack` only while we control another unit (`0x6dd060` at `0x5242bb`), so a hunter's
+/// retarget leaves the pet fighting.
+pub(super) fn old_target_stops_pet(
+    previous: Option<u64>,
+    now: Option<u64>,
+    vehicle: Option<&crate::net::wrath_vehicle::VehicleState>,
+) -> bool {
+    old_target_cleared(previous, now)
+        && vehicle.is_some_and(|v| v.possessed.is_some() || v.controlling)
+}
+
+/// The old-target clear's `PetStopAttack` (`0x5242c4`); a re-select runs no clear.
 pub(crate) fn pet_stop_on_old_target_clear(
     selection: Res<Selection>,
+    vehicle: Option<Res<crate::net::wrath_vehicle::VehicleState>>,
     mut previous: Local<Option<u64>>,
     mut bar: ResMut<PetBar>,
     commands: Res<NetCommands>,
@@ -440,10 +453,10 @@ pub(crate) fn pet_stop_on_old_target_clear(
     if *previous == now {
         return;
     }
-    let cleared = old_target_cleared(*previous, now);
+    let stops = old_target_stops_pet(*previous, now, vehicle.as_deref());
     *previous = now;
-    if cleared && stop_pet_attack(&mut bar, &commands) {
-        debug!("ui_pet: the old-target clear called the pet off (0x493a18)");
+    if stops && stop_pet_attack(&mut bar, &commands) {
+        debug!("ui_pet: the old-target clear called the pet off (0x5242c4)");
     }
 }
 

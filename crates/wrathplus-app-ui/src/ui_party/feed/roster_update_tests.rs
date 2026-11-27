@@ -355,3 +355,71 @@ fn the_stock_raid_ui_repaints_a_member_who_dies_out_of_view() {
     let errors = app.world().non_send_resource::<UiScript>().errors();
     assert!(errors.is_empty(), "script errors: {errors:?}");
 }
+
+/// Every list zeroes the group's LFG entry and restricted flag before setting them (`0x6d8b43`), so
+/// an LFG list signals `LFG_UPDATE` and a restricted one `PARTY_LFG_RESTRICTED`, each time, ahead
+/// of its `PARTY_MEMBERS_CHANGED` (`0x6d8d9d`, `0x6d8dad`, `0x6d8db7`); the getters read the list.
+#[test]
+fn an_lfg_list_signals_its_lfg_events_and_feeds_the_lfg_getters() {
+    use wrathplus_protocol::wrath_group::{Member, Roster};
+    let mut app = app();
+    app.world_mut()
+        .non_send_resource_mut::<UiScript>()
+        .run(
+            r#"
+            LFG = {}
+            local f = CreateFrame("Frame")
+            for _, e in ipairs({"LFG_UPDATE", "PARTY_LFG_RESTRICTED", "PARTY_MEMBERS_CHANGED"}) do
+                f:RegisterEvent(e)
+            end
+            f:SetScript("OnEvent", function(_, e) LFG[#LFG + 1] = e end)
+            "#,
+        )
+        .unwrap();
+    let send = |app: &mut App, group_type: u8, lfg_byte: u8| {
+        let member = Member {
+            name: "M1".into(),
+            guid: member(1),
+            status: ON,
+            subgroup: 0,
+            flags: 0,
+            roles: 0,
+        };
+        let roster = Roster {
+            group_type,
+            subgroup: 0,
+            flags: 0,
+            roles: 0,
+            lfg: (group_type & 8 != 0).then_some((lfg_byte, 0x0100_0001)),
+            group_guid: 3,
+            counter: 1,
+            members: vec![member],
+            leader: ME,
+            loot: None,
+        };
+        let mut group = app.world_mut().resource_mut::<GroupState>();
+        group.apply_wrath_list(roster, Some(ME));
+    };
+    let seen = |app: &mut App, code: &str| -> String {
+        frame(app);
+        let script = app.world_mut().non_send_resource_mut::<UiScript>();
+        let out = script.eval(code).unwrap();
+        script.run("LFG = {}").unwrap();
+        out
+    };
+    let probe = "return table.concat(LFG, ' ') .. ' ' .. tostring(HasLFGRestrictions()) .. ' ' \
+                 .. tostring(CanPartyLFGBackfill())";
+    send(&mut app, 0x0c, 0);
+    assert_eq!(
+        seen(&mut app, probe),
+        "LFG_UPDATE PARTY_LFG_RESTRICTED PARTY_MEMBERS_CHANGED true true"
+    );
+    send(&mut app, 0x0c, 2);
+    assert_eq!(
+        seen(&mut app, probe),
+        "LFG_UPDATE PARTY_LFG_RESTRICTED PARTY_MEMBERS_CHANGED true false",
+        "the same group again signals again; the LFG byte's bit 2 stops the backfill"
+    );
+    send(&mut app, 0, 0);
+    assert_eq!(seen(&mut app, probe), "PARTY_MEMBERS_CHANGED false false");
+}

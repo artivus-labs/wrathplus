@@ -61,6 +61,13 @@ pub(crate) struct State {
     force_gossip: bool,
 }
 
+impl State {
+    /// The fatigue slot (`0xbd0b80`) running down: its scale (`+0xc`) below 0.
+    pub(crate) fn fatigue_draining(&self) -> bool {
+        self.mirror[0].as_ref().is_some_and(|t| t.scale < 0)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 struct PvpTimer {
     /// `PLAYER_FLAGS_PVP_TIMER` (`0x40000`).
@@ -218,14 +225,14 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             Ok(lua.app_data_ref::<ActionBarPage>().map_or(0, |p| p.0) + 1)
         })?,
     )?;
-    // ChangeActionBarPage(page) (`0x5a7f60`): pages 1-6, else an error; a new page fires
-    // `ACTIONBAR_PAGE_CHANGED` (event `0xaf`). Labelled: the `0x5191c0(0xe)` gate.
+    // ChangeActionBarPage(page) (`0x5a7f60`): pages 1-6, truncated (`0x5a7f73`), else an error; a
+    // new page fires `ACTIONBAR_PAGE_CHANGED` (event `0xaf`). Labelled: the `0x5191c0(0xe)` gate.
     g.set(
         "ChangeActionBarPage",
         lua.create_function(|lua, page: Value| {
             let page = lua
                 .coerce_number(page)?
-                .map_or(0, |n| n.round_ties_even() as i64)
+                .map_or(0, |n| i64::from(super::binding_abi::ftol(n)))
                 - 1;
             if !(0..6).contains(&page) {
                 return Err(mlua::Error::runtime(
@@ -421,10 +428,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     g.set(
         "IsStackableAction",
         lua.create_function(|lua, slot: Value| {
-            let slot = lua
-                .coerce_number(slot)?
-                .ok_or_else(|| mlua::Error::runtime("Usage: IsStackableAction(slot)"))?
-                .round_ties_even() as i64;
+            let slot = super::binding_abi::ftol_arg(lua, slot, "Usage: IsStackableAction(slot)")?;
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             let stacks = u32::try_from(slot)
                 .ok()
@@ -730,7 +734,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(s.eval::<i64>("return GetActionBarPage()").unwrap(), 1);
-        s.run("ChangeActionBarPage(3) ChangeActionBarPage(3)")
+        s.run("ChangeActionBarPage(3) ChangeActionBarPage(3.9)")
             .unwrap();
         assert_eq!(s.eval::<i64>("return GetActionBarPage()").unwrap(), 3);
         assert_eq!(
@@ -870,7 +874,7 @@ mod tests {
         s.set_item_template(4540, template(20));
         s.set_item_template(2589, template(1));
         for check in [
-            "IsStackableAction(1) == 1",
+            "IsStackableAction(1) == 1 and IsStackableAction(1.9) == 1",
             "IsStackableAction(2) == nil and IsStackableAction(3) == nil",
             "IsStackableAction(145) == nil and IsStackableAction(0) == nil",
         ] {
@@ -880,6 +884,7 @@ mod tests {
             );
         }
         assert!(s.run("IsStackableAction('x')").is_err());
+        assert!(s.run("IsStackableAction()").is_err());
     }
 
     #[test]

@@ -61,9 +61,11 @@ impl Plugin for UiPetPlugin {
                 fire_pet_cooldown_events
                     .in_set(UnitFeed)
                     .after(CooldownEvents),
+                // Its flag edge sets the attack latch the bar pushes (`0x5d30a0`).
                 feed_pet_unit
                     .in_set(UnitFeed)
-                    .after(crate::ui_pet_stats::PetSnapshot),
+                    .after(crate::ui_pet_stats::PetSnapshot)
+                    .before(feed_pet_bar),
                 feed_pet_menu.in_set(UnitFeed),
                 // After this frame's presses, as the one drain before it ran them ahead of the
                 // toggles, stops and writes.

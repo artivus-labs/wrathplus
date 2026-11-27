@@ -2,9 +2,9 @@
 //! guid `[0xbd1968]`, the party slots at `0xbd1948` and the raid roster (`0xbeb568`, rank at
 //! `+0xc`), compared with the active player's guid (`0x4d3790`).
 
-use mlua::{Lua, Value};
+use mlua::{Lua, MultiValue, Value};
 
-use crate::script::binding_abi::flag;
+use crate::script::binding_abi::{bool_or_default, flag};
 use crate::script::{Model, PartyRequest};
 
 /// The local player leads: `[0xbd1968]` is non-zero and equals our guid (`0x52cce3`), no raid
@@ -162,7 +162,77 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             Ok(())
         })?,
     )?;
+    // SetLootThreshold(threshold) (`0x52de60`), in its order: not grouped is ERR_NOT_IN_GROUP
+    // (`0x50`) and not leading ERR_NOT_LEADER (`0x54`); then `isnumber` (the usage line's typo is
+    // 12340's, `0xa07ffc`), `ftol`, and 2 to 6 (`0xa07fc4`). The send keeps the method and master.
+    g.set(
+        "SetLootThreshold",
+        lua.create_function(|lua, n: Value| {
+            let mut m = lua.app_data_mut::<Model>().expect("model");
+            if !grouped(&m) {
+                m.ui_errors.push("ERR_NOT_IN_GROUP");
+                return Ok(());
+            }
+            if !leads(&m) {
+                m.ui_errors.push("ERR_NOT_LEADER");
+                return Ok(());
+            }
+            let usage = "Usage: SetLooThreshold(threshold)";
+            let n = crate::script::binding_abi::ftol_arg(lua, n, usage)?;
+            if !(2..=6).contains(&n) {
+                return Err(mlua::Error::runtime(
+                    "SetLootThreshold(): threshold must be between 2 and 6",
+                ));
+            }
+            m.party_requests.push(PartyRequest::LootThreshold(n as u32));
+            Ok(())
+        })?,
+    )?;
+    // ConfirmReadyCheck([ready]) (`0x5740c0`): only grouped with the check's deadline `[0xbeb61c]`
+    // still ahead; the flag by `0x815500` with default false, so 0 and "0" are not ready.
+    g.set(
+        "ConfirmReadyCheck",
+        lua.create_function(|lua, args: MultiValue| {
+            let mut m = lua.app_data_mut::<Model>().expect("model");
+            if grouped(&m) && m.wrath_ready_check.ends_at.is_some_and(|end| end > m.now) {
+                let ready = bool_or_default(args.front(), false);
+                m.party_requests.push(PartyRequest::ReadyCheckAnswer(ready));
+            }
+            Ok(())
+        })?,
+    )?;
+    // SetRaidRosterSelection(index) (`0x572bc0`): truncated; the guid of raid row `index`, or 0
+    // past the roster (`0x572c3e`). GetRaidRosterSelection (`0x572c50`): that guid's row now, or 0.
+    g.set(
+        "SetRaidRosterSelection",
+        lua.create_function(|lua, index: Value| {
+            let usage = "Usage: SetRaidRosterSelection(index)";
+            let index = crate::script::binding_abi::number_arg(lua, index, usage)?;
+            let mut m = lua.app_data_mut::<Model>().expect("model");
+            let row = usize::try_from(index.wrapping_sub(1)).ok();
+            m.raid_selection = row.and_then(|i| m.party.raid.get(i)).map_or(0, |r| r.guid);
+            Ok(())
+        })?,
+    )?;
+    g.set(
+        "GetRaidRosterSelection",
+        lua.create_function(|lua, ()| {
+            let m = lua.app_data_ref::<Model>().expect("model");
+            let guid = m.raid_selection;
+            let row = m
+                .party
+                .raid
+                .iter()
+                .position(|r| guid != 0 && r.guid == guid);
+            Ok(row.map_or(0, |i| i as i64 + 1))
+        })?,
+    )?;
     Ok(())
+}
+
+/// In a group: a party member or a raid roster (`0x52de63`-`0x52de76`).
+fn grouped(m: &Model) -> bool {
+    !m.party.members.is_empty() || !m.party.raid.is_empty()
 }
 
 /// `DoReadyCheck`'s gate (`0x5732b0`): in a raid the leader or an officer (`0x572740`), else the

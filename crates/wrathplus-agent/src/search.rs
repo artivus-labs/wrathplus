@@ -7,8 +7,11 @@
 //!   `wp.values.health`) and the `Agent*` functions registered from Rust ([`AGENT_FNS`]), each with
 //!   its signature line, doc comment and `file:line`.
 //! - `own`: the agent's saved modules: the module's name, and the lines that match, with a snippet.
-//! - `api`: the global function names in the UI VM, names only (no stock docs ship with WrathPlus);
-//!   the server asks the game loop for them ([`crate::lua::globals`]).
+//! - `api`: the global functions in the UI VM, which the server asks the game loop for
+//!   ([`crate::lua::globals`]); a stock function we bind carries the comment above its binding,
+//!   its `file:line` and the binding's source ([`crate::stock_api`]).
+//! - `framexml`: lines of the stock interface's Lua and XML off the player's own install, with
+//!   the lines around them ([`crate::framexml`]); never shipped, read only when asked.
 
 use serde_json::{json, Value};
 use std::path::Path;
@@ -40,7 +43,7 @@ impl Entry {
 /// The `Agent*` functions registered from Rust: name, signature, doc, and the file that registers
 /// it (its text, to find the line). `search_tests` keeps this list and the registrations in step.
 pub(crate) const AGENT_FNS: &[(&str, &str, &str, &str, &str)] = &[
-    ("AgentNearby", "AgentNearby([yards]) -> list, note", "Every unit, player, game object and corpse the client knows, nearest first: { guid, kind, name, title, entry, x, y, z, distance, level, health, health_max, dead, reaction, creature_type, in_combat, lootable, tapped, tapped_by_me, target, npc, quest, go_type, quests }. The second value says why the list is empty or far away while a cinematic holds the client.", "world.rs", include_str!("world.rs")),
+    ("AgentNearby", "AgentNearby([yards]) -> list, note", "Every unit, player, game object and corpse the client knows, nearest first: { guid, kind, name, title, entry, x, y, z, distance, level, health, health_max, dead, reaction, creature_type, in_combat, lootable, tapped, tapped_by_me, target, npc, quest, go_type, lock, quests }: quest is \"available\", \"available_low\" (only quests far below you: the grey !), \"incomplete\" or \"reward\"; lock, on a game object, is the cursor its lock shows: \"GatherHerbs\", \"Mine\" or \"PickLock\". The second value says why the list is empty or far away while a cinematic holds the client.", "world.rs", include_str!("world.rs")),
     ("AgentFindNpc", "AgentFindNpc(service[, yards]) -> unit | nil", "The nearest living NPC in sight offering a service (\"repair\", \"vendor\", \"classtrainer\", \"innkeeper\", \"flightmaster\"...), from its NPC flags; an unknown service is an error naming the known ones.", "world.rs", include_str!("world.rs")),
     ("AgentPosition", "AgentPosition() -> { x, y, z, facing, map } | nil", "Where the character stands, in world coordinates; nil out of the world.", "world.rs", include_str!("world.rs")),
     ("AgentCorpse", "AgentCorpse() -> { x, y, z, map, distance } | nil", "Our corpse, where to run as a ghost (inside an instance, its entrance); distance when on the same map.", "world.rs", include_str!("world.rs")),
@@ -53,7 +56,7 @@ pub(crate) const AGENT_FNS: &[(&str, &str, &str, &str, &str)] = &[
     ("AgentStop", "AgentStop()", "Stop the walk.", "nav/api.rs", include_str!("nav/api.rs")),
     ("AgentWalk", "AgentWalk() -> { status, remaining, goal, note, route, interact, cinematic }", "The walk: status idle, routing, walking, arrived, stopped, failed or stuck; note says why; route the corners ahead; interact the guid it ends talking to.", "nav/api.rs", include_str!("nav/api.rs")),
     ("AgentAvoid", "AgentAvoid({ { x, y, radius }, ... }) -> count", "Circles every later route goes round when a fair detour exists; AgentAvoid({}) clears.", "nav/api.rs", include_str!("nav/api.rs")),
-    ("AgentServices", "AgentServices([kinds[, radius]]) -> places | { pending = true } | nil, why", "Where services are on your map, asked of the realm: vendor, repair, trainer, flightmaster, innkeeper, banker, questgiver-hub, trainer_cooking, trainer_first_aid, trainer_profession, auctioneer, mailbox. { pending = true } first; after AGENT_SERVICES_READY the next call returns the places, nearest first: { kind, entry, name, x, y, z, map, zone, distance, members, profession, event, event_active, house }. event = true marks a spawn a game event brings out (event_active: whether its event had it out when the realm answered; off: likely not there). house (auctioneers only): the auction house it serves, alliance, horde or neutral (Booty Bay, Gadgetzan, Everlook); the other side's are not told. A mailbox is a game object (entry: its gameobject entry).", "nav/services.rs", include_str!("nav/services.rs")),
+    ("AgentServices", "AgentServices([kinds[, radius]]) -> places | { pending = true } | nil, why", "Where services are on your map, asked of the realm: vendor, repair, trainer, flightmaster, innkeeper, banker, questgiver-hub, trainer_cooking, trainer_first_aid, trainer_profession, auctioneer, mailbox. { pending = true } first; after AGENT_SERVICES_READY the next call returns the places, nearest first: { kind, entry, name, x, y, z, map, zone, distance, members, profession, event, event_active, house }. event = true marks a spawn a game event brings out (event_active: whether its event had it out when the realm answered; off: likely not there). house (auctioneers only): the auction house it serves, alliance, horde or neutral (Booty Bay, Gadgetzan, Everlook); the other side's are not told. A mailbox is a game object (entry: its gameobject entry). Within the realm's radius (2000 yd), except the nearest two class, Cooking and First Aid trainers on your map, told however far.", "nav/services.rs", include_str!("nav/services.rs")),
     ("AgentQuestPOI", "AgentQuestPOI(questId) -> { { objective, map, x, y, points }, ... } | nil", "A logged quest's map areas: objective is the objective's index, -1 where it is handed in; x, y the area's centre. Nil until the server answers.", "quest_poi.rs", include_str!("quest_poi.rs")),
     ("AgentZones", "AgentZones() -> { { id, name, map, faction, city, min, max, x, y }, ... }", "The zones from the client's own tables, with the level band each suits and a point in the middle.", "zones.rs", include_str!("zones.rs")),
     ("AgentPoint", "AgentPoint(u, v[, frame]) -> { x, y, z, hit, distance, range, bearing, turn, pitch, frame } | nil, why[, { bearing, turn, pitch, frame }]", "What is at pixel (u, v) of a screenshot (its frame number, else the newest; pixels from the image's top-left, as sent): the camera ray of that frame met against the world now. hit is terrain, wmo (a building), doodad (a tree, a fence) or other; distance is from you, range from the camera; bearing is the direction from you as AgentPosition().facing counts it, turn how far to turn from your facing (positive left). Units and water are not met. Nothing met (sky, past the loaded world): nil, why and the ray's bearing. From a frame script only the bearing.", "point.rs", include_str!("point.rs")),
@@ -137,7 +140,7 @@ fn header_entry(lines: &[&str], qualified: &str) -> String {
 
 /// The function's text from its definition to the `end` that closes it at the same indentation
 /// (the definition line alone when it closes there). `search_tests` checks every built-in's span.
-fn body(lines: &[&str], i: usize) -> String {
+pub(crate) fn body(lines: &[&str], i: usize) -> String {
     let def = lines[i].trim_end();
     if def.ends_with(" end") || def.ends_with(")end") {
         return def.to_string();
@@ -278,15 +281,32 @@ fn rank_builtin(e: &Entry, q: &str) -> Option<u8> {
         })
 }
 
-pub(crate) const KINDS: [&str; 3] = ["builtin", "own", "api"];
+/// Every kind, in rank order; all are searched by default. `framexml` comes last: it shows how the
+/// stock UI uses a function once the builtin, own and api hits have said what exists.
+pub(crate) const KINDS: [&str; 4] = ["builtin", "own", "api", "framexml"];
 
-/// Search `kinds` for `q`; `api` is the VM's global function names, asked of the game loop only
-/// when that kind is wanted. Best first: by score, then kind (builtin, own, api), then name.
+/// [`search_in`] over the player's own stock UI ([`crate::framexml::installed`]).
 pub(crate) fn search(
     q: &str,
     kinds: &[&str],
     scripts: &Path,
     api: impl FnOnce() -> Vec<String>,
+    limit: usize,
+) -> Value {
+    search_in(q, kinds, scripts, api, crate::framexml::installed, limit)
+}
+
+/// Search `kinds` for `q`; `api` is the VM's global function names, asked of the game loop only
+/// when that kind is wanted, and `stock_ui` the stock interface's files, read only when
+/// `framexml` is. A stock function matches by name or by the doc of its binding
+/// ([`crate::stock_api`]). Best first: by score, then kind (builtin, own, api, framexml), then
+/// name; a `framexml` hit carries the lines around it as `source`.
+pub(crate) fn search_in<'a>(
+    q: &str,
+    kinds: &[&str],
+    scripts: &Path,
+    api: impl FnOnce() -> Vec<String>,
+    stock_ui: impl FnOnce() -> &'a [wrathplus_app_ui::ui_script::StockFile],
     limit: usize,
 ) -> Value {
     let q = q.trim().to_lowercase();
@@ -307,35 +327,49 @@ pub(crate) fn search(
             if AGENT_FNS.iter().any(|f| f.0 == name) {
                 continue;
             }
-            if let Some(s) = rank_name(&name.to_lowercase(), &q) {
-                let entry = Entry {
-                    kind: "api",
-                    name,
-                    signature: String::new(),
-                    doc: String::new(),
-                    at: String::new(),
-                    source: None,
-                };
+            let entry = crate::stock_api::entry(&name)
+                .unwrap_or_else(|| crate::stock_api::bare(name.clone()));
+            let score = rank_name(&name.to_lowercase(), &q)
+                .or_else(|| (!q.is_empty() && entry.doc.to_lowercase().contains(&q)).then_some(3));
+            if let Some(s) = score {
                 hits.push((s, 2, entry));
             }
         }
+    }
+    if kinds.contains(&"framexml") {
+        hits.extend(
+            crate::framexml::search(stock_ui(), &q)
+                .into_iter()
+                .map(|(s, e)| (s, 3, e)),
+        );
     }
     hits.sort_by(|a, b| (a.0, a.1, &a.2.name, &a.2.at).cmp(&(b.0, b.1, &b.2.name, &b.2.at)));
     let total = hits.len();
     let results: Vec<Value> = hits
         .iter()
         .take(limit)
-        .map(|(_, _, e)| e.json(false))
+        .map(|(_, k, e)| e.json(*k == 3))
         .collect();
     json!({"query": q, "kinds": kinds, "total": total, "results": results})
 }
 
-/// What one name is: a built-in (with its source when it is Lua), an own module (its source), or a
-/// global of the VM (`in_api`). `Err` carries suggestions.
+/// [`doc_in`] over the player's own stock UI.
 pub(crate) fn doc(
     name: &str,
     scripts: &Path,
     in_api: impl FnOnce(&str) -> bool,
+) -> Result<Value, Value> {
+    doc_in(name, scripts, in_api, crate::framexml::installed)
+}
+
+/// What one name is: a built-in (with its source when it is Lua), an own module (its source), a
+/// global of the VM (`in_api`: with our binding's doc and source when we bind it), or the stock
+/// UI's (a function it defines, a file, `file:line`). `Err` carries suggestions.
+pub(crate) fn doc_in<'a>(
+    name: &str,
+    scripts: &Path,
+    in_api: impl FnOnce(&str) -> bool,
+    stock_ui: impl FnOnce() -> &'a [wrathplus_app_ui::ui_script::StockFile],
 ) -> Result<Value, Value> {
     let lower = name.trim().to_lowercase();
     let all = builtins();
@@ -368,9 +402,18 @@ pub(crate) fn doc(
             );
         }
     }
-    if in_api(name) {
+    let global = in_api(name);
+    if global {
+        if let Some(e) = crate::stock_api::entry(name.trim()) {
+            return Ok(e.json(true));
+        }
+    }
+    if let Some(found) = crate::framexml::doc(stock_ui(), name) {
+        return Ok(found);
+    }
+    if global {
         return Ok(
-            json!({"kind": "api", "name": name, "doc": "A global function of the UI's Lua: the stock 3.3.5a addon API (or a function an addon or module defined). WrathPlus ships no stock API docs; its behaviour is the 3.3.5a client's."}),
+            json!({"kind": "api", "name": name, "doc": "A global function of the UI's Lua that WrathPlus does not bind itself: Lua's own library, or one an addon or module defined. Its behaviour is the 3.3.5a client's."}),
         );
     }
     let suggestions = search(&lower, &["builtin", "own"], scripts, Vec::new, 5)["results"]

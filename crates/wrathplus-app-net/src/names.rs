@@ -249,6 +249,13 @@ impl NameCache {
         self.generation
     }
 
+    /// Every player a name query answered for: guid, name and `(race, class, gender)`.
+    pub fn answered_players(&self) -> impl Iterator<Item = (u64, &str, (u8, u8, u8))> + '_ {
+        self.player_traits
+            .iter()
+            .filter_map(|(&guid, &traits)| Some((guid, self.players.get(guid)?.as_str(), traits)))
+    }
+
     /// `(race, class, gender)` for a player guid the name query has answered for.
     pub fn player_traits(&self, guid: u64) -> Option<(u8, u8, u8)> {
         self.player_traits.get(&guid).copied()

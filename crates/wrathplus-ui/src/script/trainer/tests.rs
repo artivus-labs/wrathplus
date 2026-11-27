@@ -30,6 +30,7 @@ fn svc(
         group_key,
         group_name: group_name.into(),
         item_link: None,
+        skill_line: None,
     }
 }
 
@@ -98,7 +99,8 @@ fn tree_interleaves_headers_and_ordered_services() {
         )
         .unwrap();
     assert_eq!((hn.as_str(), ht.as_str()), ("Arms", "header"));
-    assert_eq!((hsub, hexp), (None, Some(1)));
+    // A header's subtext is "" (`0x594fd4`).
+    assert_eq!((hsub, hexp), (Some(String::new()), Some(1)));
 
     let info = |s: &mut UiScript, i: i64| {
         s.eval::<(String, String)>(&format!(
@@ -624,5 +626,66 @@ fn names_collate_as_the_clients_folding_compare() {
         super::collate("Straße", "Strasse"),
         Greater,
         "ß = SS; the raw tie"
+    );
+}
+
+/// 12340's shapes: a service row's fourth return is 1 (`0x59512d`); the fold verbs raise on a row
+/// that is no header (`0xa14340`) and take `<= 0` as all; the skill line is the spell's own.
+#[test]
+fn service_rows_folds_and_the_skill_line_follow_12340() {
+    let mut s = UiScript::new().unwrap();
+    let mut t = trainer();
+    t.services[0].skill_line = Some("Alchemy".into());
+    t.services[0].item_link = Some("robe".into());
+    s.set_trainer(Some(t));
+    assert_eq!(
+        s.eval::<Option<i64>>("return select(4, GetTrainerServiceInfo(2))")
+            .unwrap(),
+        Some(1)
+    );
+    let line = |s: &UiScript, i: u32| -> Option<String> {
+        s.eval(&format!("return GetTrainerServiceSkillLine({i})"))
+            .unwrap()
+    };
+    assert_eq!(
+        line(&s, 2).as_deref(),
+        Some("Alchemy"),
+        "the spell's line, not the header"
+    );
+    assert_eq!(line(&s, 3), None, "no line resolved: nil");
+    assert_eq!(
+        s.eval::<String>("return GetTrainerServiceItemLink(2.7)")
+            .unwrap(),
+        "robe",
+        "the index truncates"
+    );
+    for verb in ["GetTrainerServiceInfo", "SelectTrainerService"] {
+        let err = s.run(&format!("{verb}()")).unwrap_err().to_string();
+        assert!(err.contains(&format!("Usage: {verb}(index)")), "{err}");
+    }
+    for (verb, text) in [
+        (
+            "CollapseTrainerSkillLine",
+            "Bad skill line in CollapseTrainerSkillLine",
+        ),
+        (
+            "ExpandTrainerSkillLine",
+            "Bad skill line in ExpandTrainerSkillLine",
+        ),
+    ] {
+        let err = s.run(&format!("{verb}(2)")).unwrap_err().to_string();
+        assert!(err.contains(text), "{err}");
+        let err = s.run(&format!("{verb}()")).unwrap_err().to_string();
+        assert!(err.contains(&format!("Usage: {verb}(index)")), "{err}");
+    }
+    s.run("CollapseTrainerSkillLine(0) ExpandTrainerSkillLine(-1)")
+        .unwrap();
+    let err = s
+        .run("GetTrainerServiceSkillLine()")
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains("Usage: GetTrainerServiceSkillLine(index)"),
+        "{err}"
     );
 }

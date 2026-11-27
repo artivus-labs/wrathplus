@@ -4,7 +4,7 @@ use wrathplus_formats::{SpellCatalog, SpellDisplay};
 use wrathplus_protocol::types::{ItemInfo, ItemSpellEntry};
 use wrathplus_protocol::ObjectFields;
 
-use super::{resolve_self_res, SelfRes, SPELL_EFFECT_SELF_RESURRECT};
+use super::{resolve_self_res, resurrection_blocked, SelfRes, SPELL_EFFECT_SELF_RESURRECT};
 use crate::app_core::state::Spells;
 use crate::items::Items;
 use crate::net::{ClientCommand, NetCommands};
@@ -176,4 +176,25 @@ fn a_zero_field_falls_through_to_a_carried_item() {
         resolve_self_res(&bare, &objects, &items, Some(&spells), &net),
         None
     );
+}
+
+/// `0x727860`: an aura applying 314 blocks with its `EffectMiscValue`, unless the self-res spell
+/// carries `AttributesEx7` `0x8000000`.
+#[test]
+fn a_prevent_resurrection_aura_blocks_unless_the_self_res_bypasses_it() {
+    const CURSE: u32 = 70_000;
+    let curse = SpellDisplay {
+        effect_apply_aura: [0, 314, 0],
+        effect_misc_value: [0, 12, 0],
+        ..Default::default()
+    };
+    let bypass = SpellDisplay {
+        attributes_ex7: 0x0800_0000,
+        ..named("Reincarnation", [94, 0, 0])
+    };
+    let spells = catalog([(CURSE, curse), (REINCARNATION, bypass)]);
+    let c = &spells.catalog;
+    assert_eq!(resurrection_blocked(None, [1, CURSE], c), Some(12));
+    assert_eq!(resurrection_blocked(Some(REINCARNATION), [CURSE], c), None);
+    assert_eq!(resurrection_blocked(None, [1, 2], c), None);
 }

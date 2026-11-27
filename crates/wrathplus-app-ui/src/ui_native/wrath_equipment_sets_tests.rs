@@ -148,4 +148,7 @@ fn a_full_manager_saves_nothing_new() {
         apply(&mut sets, request, &[0; EQUIPMENT_SLOTS], &HashMap::new()),
         None
     );
+    // The VM's view keeps the server's index as the record id (`[rec+0x10]`).
+    let view = set_view(&sets.sets[&7], &|_| Some(40_000));
+    assert_eq!((view.id, view.items[0], view.items[4]), (7, 40_000, 1));
 }

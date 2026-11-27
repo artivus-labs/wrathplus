@@ -61,6 +61,30 @@ fn contacts_split_into_friends_and_ignores_and_statuses_keep_their_tail() {
         SessionEvent::IgnoreList { guids: vec![3] },
     ];
     assert_eq!(debug(&decode(0x67, &list).unwrap()), debug(&expected));
+    // 12340 replaces only the lists the header's flags name (`0x6b7e01`, `0x6b7e3f`): the answer to
+    // `ShowFriends` (flags 1) leaves the ignore list alone, and an ignore-only list the friends.
+    let friends_only = [w(1), w(1), q(2), w(1), vec![0], vec![0]].concat();
+    let friend_events = [
+        SessionEvent::FriendList {
+            friends: vec![FriendEntry {
+                guid: 2,
+                ..Default::default()
+            }],
+        },
+        SessionEvent::WrathContactNotes {
+            notes: vec![],
+            replace: true,
+        },
+    ];
+    assert_eq!(
+        debug(&decode(0x67, &friends_only).unwrap()),
+        debug(&friend_events)
+    );
+    let ignores_only = [w(2), w(1), q(3), w(2), vec![0]].concat();
+    assert_eq!(
+        debug(&decode(0x67, &ignores_only).unwrap()),
+        debug(&expected[2..])
+    );
     let online = [vec![2], q(9), vec![1], w(12), w(80), w(5)].concat();
     assert_eq!(
         debug(&decode(0x68, &online).unwrap()),

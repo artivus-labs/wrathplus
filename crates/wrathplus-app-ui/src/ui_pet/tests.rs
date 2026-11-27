@@ -536,6 +536,12 @@ fn touching_your_target_calls_the_pet_off() {
     assert!(old_target_cleared(Some(7), None));
     // A re-select never reaches the clear (`0x493540`).
     assert!(!old_target_cleared(Some(7), Some(7)));
+    // It calls the pet off only while we control another unit (`0x5242bb`): not a hunter's.
+    let mut vehicle = crate::net::wrath_vehicle::VehicleState::default();
+    assert!(!old_target_stops_pet(Some(7), Some(9), Some(&vehicle)));
+    vehicle.possessed = Some(0xF14);
+    assert!(old_target_stops_pet(Some(7), Some(9), Some(&vehicle)));
+    assert!(!old_target_stops_pet(Some(7), Some(7), Some(&vehicle)));
 
     assert!(stop_pet_attack(&mut bar, &commands));
     assert!(!bar.attacking, "the latch is down");
@@ -738,6 +744,7 @@ fn a_cooldown_alone_is_pushed_with_no_event_from_the_bar_feed() {
     app.init_resource::<crate::app_core::ui_flags::UiClock>()
         .init_resource::<crate::net::GuidIndex>()
         .init_resource::<crate::app_core::session::SelfGuid>()
+        .init_resource::<crate::names::NameCache>()
         .insert_resource(crate::app_core::state::Spells {
             catalog: wrathplus_formats::SpellCatalog::from_displays(HashMap::from([(
                 CLAW,

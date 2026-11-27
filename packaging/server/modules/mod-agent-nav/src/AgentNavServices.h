@@ -10,7 +10,9 @@
 //                                  questgiver-hub, trainer_cooking, trainer_first_aid,
 //                                  trainer_profession (any profession trainer), auctioneer,
 //                                  mailbox; radius in yards (default and most:
-//                                  AgentNav.ServiceRadius)
+//                                  AgentNav.ServiceRadius); the nearest two of the asker's
+//                                  class trainers, Cooking and First Aid trainers (those asked
+//                                  for) are told however far, on its map (SelectServices)
 //   s <id> <i> <n> <kind> <entry> <x> <y> <z> <members> <profession> <event> <house> <name>
 //                                  the i-th of n places, nearest first; entry: the creature's
 //                                  template entry, a mailbox's gameobject entry; members: the quest
@@ -285,6 +287,9 @@ struct Place
     std::size_t members = 1;
     // EventText at the asking: "-", "on" or "off".
     std::string_view event = "-";
+    // One of the nearest trainers told at any distance (kKindsToldAnyDistance): kept whatever the
+    // radius and the cap.
+    bool kept = false;
 };
 
 // The kinds a spawn offers to this asker (the hub kind aside: that takes its neighbours).
@@ -318,11 +323,23 @@ inline std::uint16_t KindsOf(Spawn const& s, ServiceQuery const& q)
     return out & q.kinds;
 }
 
+// The trainer kinds told beyond the radius: the asker's class trainer, Cooking and First Aid. A
+// character trains wherever its trainer stands, and a quiet zone may have none within the radius
+// (a Gnome Mage in Loch Modan: the nearest mage trainers are in Ironforge), so the nearest
+// kTrainersTold of each kind asked for, on the map and not hostile, are always in the answer,
+// however far and whatever the cap; one whose event has it off does not count (nor is it told
+// from beyond the radius). Others within the radius are told as usual. The client reads how far
+// each is from its `x, y, z`. Profession trainers in general are not: the realm would need the
+// asker's professions.
+constexpr std::uint16_t kKindsToldAnyDistance = KindTrainer | KindCookingTrainer | KindFirstAidTrainer;
+constexpr std::size_t kTrainersTold = 2;
+
 // The places for a query: each kind asked for that a spawn on the asker's map and phase, within
 // the radius and not hostile either way, offers (so the other side's auctioneers are left out, as
 // the core would not deal with the asker; mailboxes have no faction); a spawn offering several
 // kinds is one place per kind. Quest hubs are quest givers with at least kHubMembers within
-// kHubRadius, one place per hub (its nearest member). Nearest first, at most `cap`.
+// kHubRadius, one place per hub (its nearest member). Nearest first, at most `cap`; the nearest
+// trainers (kKindsToldAnyDistance) are kept whatever the radius and the cap.
 inline std::vector<Place> SelectServices(std::vector<Spawn> const& spawns, ServiceQuery const& q)
 {
     std::vector<Place> out;
@@ -331,14 +348,15 @@ inline std::vector<Place> SelectServices(std::vector<Spawn> const& spawns, Servi
     {
         if (s.map != q.map || !(s.phaseMask & q.phaseMask))
             continue;
-        float const d = std::hypot(s.x - q.x, s.y - q.y);
-        if (d > q.radius || HostileTo(s.faction, q.faction) || HostileTo(q.faction, s.faction))
+        if (HostileTo(s.faction, q.faction) || HostileTo(q.faction, s.faction))
             continue;
-        std::uint16_t const kinds = KindsOf(s, q);
+        float const d = std::hypot(s.x - q.x, s.y - q.y);
+        bool const within = d <= q.radius;
+        std::uint16_t const kinds = KindsOf(s, q) & (within ? 0xffff : kKindsToldAnyDistance);
         for (KindName const& k : kKindNames)
             if (kinds & k.kind)
                 out.push_back(Place{static_cast<std::uint16_t>(k.kind), &s, d, 1});
-        if ((q.kinds & KindQuestHub) && (s.npcFlags & kFlagQuestGiver))
+        if (within && (q.kinds & KindQuestHub) && (s.npcFlags & kFlagQuestGiver))
             givers.push_back(Place{KindQuestHub, &s, d, 1});
     }
     auto const nearest = [](Place const& a, Place const& b) {
@@ -366,11 +384,42 @@ inline std::vector<Place> SelectServices(std::vector<Spawn> const& spawns, Servi
     for (Place const* h : hubs)
         out.push_back(*h);
     std::sort(out.begin(), out.end(), nearest);
-    if (out.size() > q.cap)
-        out.resize(q.cap);
     for (Place& p : out)
         p.event = EventText(*p.spawn, q.activeEvents);
-    return out;
+    // The nearest trainers of each kind told at any distance (those whose event has them off
+    // aside) are kept; the rest of those beyond the radius go.
+    for (KindName const& k : kKindNames)
+    {
+        if (!(k.kind & kKindsToldAnyDistance))
+            continue;
+        std::size_t told = 0;
+        for (Place& p : out)
+            if (p.kind == k.kind && p.event != "off" && told < kTrainersTold)
+            {
+                p.kept = true;
+                ++told;
+            }
+    }
+    out.erase(std::remove_if(out.begin(), out.end(),
+                  [&](Place const& p) { return p.distance > q.radius && !p.kept; }),
+        out.end());
+    // At most `cap`, nearest first, the kept ones before any other.
+    std::size_t const kept =
+        static_cast<std::size_t>(std::count_if(out.begin(), out.end(), [](Place const& p) { return p.kept; }));
+    std::size_t room = q.cap > kept ? q.cap - kept : 0;
+    std::vector<Place> capped;
+    for (Place const& p : out)
+    {
+        if (capped.size() >= q.cap)
+            break;
+        if (p.kept || room > 0)
+        {
+            if (!p.kept)
+                --room;
+            capped.push_back(p);
+        }
+    }
+    return capped;
 }
 
 // A name as one field: spaces as underscores, "-" for none.

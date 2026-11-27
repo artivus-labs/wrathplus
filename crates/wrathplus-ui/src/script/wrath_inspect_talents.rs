@@ -24,7 +24,34 @@ pub struct WrathInspectTalents {
     pub groups: Vec<WrathInspectGroup>,
 }
 
+/// The player's talent groups as `SMSG_TALENTS_INFO` leaves them (12340's handler `0x5c9e60`):
+/// the count `[0xc20ff8]` and the 0-based active group `[0xc20ff4]`, both 0 before the first
+/// packet (`0x5c9ab9`).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct WrathTalentGroups {
+    pub count: u32,
+    pub active: u32,
+    /// The other group's 0-based index and pages, from its packet record; the active group's are
+    /// [`super::UiScript::set_talents`]'.
+    pub inactive: Option<(u32, super::TalentUiState)>,
+}
+
+impl WrathTalentGroups {
+    /// One group, active: a single-spec character's talents packet.
+    pub fn single() -> Self {
+        Self {
+            count: 1,
+            ..Self::default()
+        }
+    }
+}
+
 impl super::UiScript {
+    /// Replace the player's talent group count and active group.
+    pub fn set_talent_groups(&mut self, groups: WrathTalentGroups) {
+        self.model_mut().talent_groups = groups;
+    }
+
     /// Replace the inspected talents; `None` once nothing is inspected. The host fires
     /// `INSPECT_TALENT_READY` after a reply.
     pub fn set_wrath_inspect_talents(&mut self, talents: Option<WrathInspectTalents>) {
@@ -43,10 +70,12 @@ impl super::UiScript {
 // (`/tmp/azb-ui-talent-native.log`): GetNumTalentTabs `0x5c5cc0`, GetTalentTabInfo `0x5c6150`,
 // GetNumTalents `0x5c5d40`, GetTalentInfo `0x5c7800`, GetTalentPrereqs `0x5c7ed0`,
 // GetNumTalentGroups `0x5c5df0`, GetActiveTalentGroup `0x5c5810`, GetUnspentTalentPoints
-// `0x5c6310`, GetTalentLink `0x5c7ce0`. The player has the one group the host pushes
-// (`set_talents`), whose preview ranks are [`super::wrath_talent_preview`]'s; the inspect branch
-// reads [`WrathInspectTalents`], whose preview ranks are its ranks; the pet branch reads the
-// hunter pet's one page (`set_pet_talents`). Labelled: a second player group is not carried.
+// `0x5c6310`, GetTalentLink `0x5c7ce0`. A missing group is the player's active one (`0x5c57d0`).
+// The player's active group is the pages the host pushes (`set_talents`), whose preview ranks are
+// [`super::wrath_talent_preview`]'s, and the other is [`WrathTalentGroups::inactive`]; the inspect
+// branch reads [`WrathInspectTalents`], whose preview ranks are its ranks; the pet branch reads the
+// hunter pet's one page (`set_pet_talents`). Labelled: an inspect call without a group reads the
+// inspected active group, where `0x5c57d0` takes the player's.
 
 use mlua::{Lua, MultiValue, Value};
 
@@ -54,7 +83,7 @@ use super::talent::{TalentTabView, TalentView};
 use super::wrath_talent_preview as preview;
 use super::Model;
 
-/// Which pages a getter reads: the player's (group 1 only), or an inspected group's.
+/// Which pages a getter reads: the player's group, or an inspected group's.
 fn pages(
     model: &Model,
     inspect: bool,
@@ -72,12 +101,27 @@ fn pages(
             .and_then(|i| t.groups.get(i))
             .map(|g| &g.pages);
     }
-    (group.unwrap_or(1) == 1).then_some(&model.talents)
+    let groups = &model.talent_groups;
+    match player_group(model, group)? {
+        g if g == groups.active => Some(&model.talents),
+        g => groups
+            .inactive
+            .as_ref()
+            .filter(|(i, _)| *i == g)
+            .map(|(_, p)| p),
+    }
 }
 
-/// The player's own pages, whose preview ranks the preview state holds.
-fn own(inspect: bool, pet: bool) -> bool {
-    !inspect && !pet
+/// A 1-based group argument as 0-based, the active group without one (`0x5c57d0`).
+fn player_group(model: &Model, group: Option<i64>) -> Option<u32> {
+    group.map_or(Some(model.talent_groups.active), |g| {
+        u32::try_from(g - 1).ok()
+    })
+}
+
+/// The player's active pages, whose preview ranks the preview state holds.
+fn own(model: &Model, inspect: bool, pet: bool, group: Option<i64>) -> bool {
+    !inspect && !pet && player_group(model, group) == Some(model.talent_groups.active)
 }
 
 fn flag(on: bool) -> Value {
@@ -92,7 +136,15 @@ fn arg(args: &MultiValue, i: usize) -> Value {
     args.get(i).cloned().unwrap_or(Value::Nil)
 }
 
-/// A rounded number argument, `None` when not a number.
+/// A tab or talent index, truncated (`fistp` under RC=11), `None` when not a number.
+fn index(lua: &Lua, v: &Value) -> Option<i64> {
+    lua.coerce_number(v.clone())
+        .ok()
+        .flatten()
+        .map(|n| n.trunc() as i64)
+}
+
+/// A group argument, rounded as `lua_tointeger` (`0x5c57d0`) reads it; `None` when not a number.
 fn number(lua: &Lua, v: &Value) -> Option<i64> {
     lua.coerce_number(v.clone())
         .ok()
@@ -134,7 +186,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     g.set(
         "GetTalentTabInfo",
         lua.create_function(|lua, args: MultiValue| {
-            let Some(tab) = number(lua, &arg(&args, 0)) else {
+            let Some(tab) = index(lua, &arg(&args, 0)) else {
                 return Err(mlua::Error::runtime(
                     "Usage: GetTalentTabInfo(tabIndex[, isInspect[, isPet[, groupIndex]]])",
                 ));
@@ -157,7 +209,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 int(t.points_spent),
                 Value::String(lua.create_string(&t.background)?),
                 // The preview points past the spent ones (`0x5c6150`, the tab's `+8`).
-                int(if own(inspect, pet) {
+                int(if own(&model, inspect, pet, group) {
                     preview::tab_preview_spent(&model, (tab - 1) as usize)
                 } else {
                     0
@@ -169,7 +221,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     g.set(
         "GetNumTalents",
         lua.create_function(|lua, args: MultiValue| {
-            let Some(tab) = number(lua, &arg(&args, 0)) else {
+            let Some(tab) = index(lua, &arg(&args, 0)) else {
                 return Err(mlua::Error::runtime(
                     "Usage: GetNumTalents(tabIndex[, isInspect[, isPet]])",
                 ));
@@ -189,7 +241,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     g.set(
         "GetTalentInfo",
         lua.create_function(|lua, args: MultiValue| {
-            let (Some(tab), Some(i)) = (number(lua, &arg(&args, 0)), number(lua, &arg(&args, 1)))
+            let (Some(tab), Some(i)) = (index(lua, &arg(&args, 0)), index(lua, &arg(&args, 1)))
             else {
                 return Err(mlua::Error::runtime(
                     "Usage: GetTalentInfo(tabIndex, talentIndex[, isInspect[, isPet[, groupIndex]]])",
@@ -215,7 +267,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 ]));
             };
             let meets = if inspect { t.rank > 0 } else { t.meets_prereq };
-            let preview_rank = if own(inspect, pet) {
+            let preview_rank = if own(&model, inspect, pet, group) {
                 preview::preview_rank(&model, (tab - 1) as usize, (i - 1) as usize, t)
             } else {
                 t.rank
@@ -243,7 +295,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     g.set(
         "GetTalentPrereqs",
         lua.create_function(|lua, args: MultiValue| {
-            let (Some(tab), Some(i)) = (number(lua, &arg(&args, 0)), number(lua, &arg(&args, 1)))
+            let (Some(tab), Some(i)) = (index(lua, &arg(&args, 0)), index(lua, &arg(&args, 1)))
             else {
                 return Err(mlua::Error::runtime(
                     "Usage: GetTalentPrereqs(tabIndex, talentIndex[, isInspect[, isPet[, groupIndex]]])",
@@ -255,7 +307,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             let mut out = Vec::new();
             if let Some(t) = pages(&model, inspect, pet, group).and_then(|p| talent_at(p, tab, i)) {
                 for p in &t.prereqs {
-                    let preview_met = if own(inspect, pet) {
+                    let preview_met = if own(&model, inspect, pet, group) {
                         preview::prereq_preview_met(&model, (tab - 1) as usize, p.tier, p.column, p.rank)
                     } else {
                         p.learnable
@@ -267,7 +319,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // GetNumTalentGroups([isInspect [, isPet]]): the inspected groups; the player's one; the pet's.
+    // GetNumTalentGroups([isInspect [, isPet]]) (`0x5c5df0`): the inspected groups (`[0xc21010]`),
+    // the pet's one, the player's from the talents packet (`[0xc20ff8]`).
     g.set(
         "GetNumTalentGroups",
         lua.create_function(|lua, args: MultiValue| {
@@ -278,23 +331,24 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                     .as_ref()
                     .map_or(0, |t| t.groups.len()) as i64,
                 (false, true) => i64::from(model.pet_talents.is_some()),
-                (false, false) => 1,
+                (false, false) => i64::from(model.talent_groups.count),
             })
         })?,
     )?;
 
-    // GetActiveTalentGroup([isInspect [, isPet]]): 1-based.
+    // GetActiveTalentGroup([isInspect [, isPet]]) (`0x5c5810`), 1-based: the inspected
+    // `[0xc21004]`, the pet's always 1, the player's `[0xc20ff4]`.
     g.set(
         "GetActiveTalentGroup",
         lua.create_function(|lua, args: MultiValue| {
             let model = lua.app_data_ref::<Model>().expect("model app_data");
-            Ok(if truth(&args, 0) {
-                model
+            Ok(match (truth(&args, 0), truth(&args, 1)) {
+                (true, _) => model
                     .wrath_inspect_talents
                     .as_ref()
-                    .map_or(1, |t| i64::from(t.active_group.max(1)))
-            } else {
-                1
+                    .map_or(1, |t| i64::from(t.active_group.max(1))),
+                (false, true) => 1,
+                (false, false) => i64::from(model.talent_groups.active) + 1,
             })
         })?,
     )?;
@@ -335,7 +389,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     g.set(
         "GetTalentLink",
         lua.create_function(|lua, args: MultiValue| {
-            let (Some(tab), Some(i)) = (number(lua, &arg(&args, 0)), number(lua, &arg(&args, 1)))
+            let (Some(tab), Some(i)) = (index(lua, &arg(&args, 0)), index(lua, &arg(&args, 1)))
             else {
                 return Err(mlua::Error::runtime(
                     "Usage: GetTalentLink(tabIndex, talentIndex[, isInspect[, isPet[, groupIndex[, isPreview]]]])",
@@ -348,7 +402,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             else {
                 return Ok(Value::Nil);
             };
-            let rank = if own(inspect, pet) && truth(&args, 5) {
+            let rank = if own(&model, inspect, pet, group) && truth(&args, 5) {
                 preview::preview_rank(&model, (tab - 1) as usize, (i - 1) as usize, t)
             } else {
                 t.rank
@@ -420,7 +474,41 @@ mod tests {
             4
         );
         assert_eq!(s.eval::<i64>("return GetUnspentTalentPoints()").unwrap(), 7);
-        assert_eq!(s.eval::<i64>("return GetNumTalentGroups()").unwrap(), 1);
+        // The player's groups come from the talents packet: none before it (`0x5c9ab9`).
+        assert_eq!(
+            s.eval::<(i64, i64)>("return GetNumTalentGroups(), GetActiveTalentGroup()")
+                .unwrap(),
+            (0, 1)
+        );
+        s.set_talent_groups(WrathTalentGroups {
+            count: 2,
+            active: 1,
+            inactive: Some((0, page(2, 10, 5))),
+        });
+        assert_eq!(
+            s.eval::<(i64, i64, i64)>(
+                "return GetNumTalentGroups(), GetActiveTalentGroup(), GetActiveTalentGroup(false, true)"
+            )
+            .unwrap(),
+            (2, 2, 1),
+            "the pet's group is always 1"
+        );
+        // Group 2 is active, the pushed pages; group 1 is the inactive record, no preview.
+        assert_eq!(
+            s.eval::<(i64, i64, i64, i64, i64, i64)>(
+                "local _,_,_,_,r,_,_,_,p = GetTalentInfo(1, 1, false, false, 1) \
+                 local _,_,_,_,a = GetTalentInfo(1, 1) local _,_,_,_,b = GetTalentInfo(1, 1, false, false, 2) \
+                 return r, p, a, b, select(3, GetTalentTabInfo(1, false, false, 1)), \
+                    GetUnspentTalentPoints(false, false, 1)"
+            )
+            .unwrap(),
+            (2, 2, 1, 1, 10, 5)
+        );
+        assert!(
+            s.eval::<bool>("return GetTalentInfo(1, 1, false, false, 3) == nil")
+                .unwrap(),
+            "a group past the count answers the miss"
+        );
         // Inspect: nothing yet, then two groups, the second active.
         assert_eq!(s.eval::<i64>("return GetNumTalentTabs(true)").unwrap(), 0);
         assert_eq!(
@@ -485,5 +573,19 @@ mod tests {
             0
         );
         assert!(s.run("GetTalentInfo(1)").is_err());
+        for call in [
+            "GetTalentTabInfo()",
+            "GetNumTalents()",
+            "GetTalentPrereqs()",
+            "GetTalentLink()",
+        ] {
+            assert!(s.run(call).is_err(), "{call}");
+        }
+        // Tab and index truncate (`fistp` under RC=11, `0x5c783d`, `0x5c7863`).
+        assert_eq!(
+            s.eval::<i64>("return select(5, GetTalentInfo(1.9, 1.9, true))")
+                .unwrap(),
+            3
+        );
     }
 }

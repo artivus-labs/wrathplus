@@ -4,7 +4,9 @@ use std::collections::BTreeMap;
 
 use bevy::prelude::*;
 use wrathplus_protocol::{types::Field, ObjectFields};
-use wrathplus_ui::script::{UiScript, WrathCurrencyEntry, WrathCurrencySnapshot};
+use wrathplus_ui::script::{
+    UiScript, WrathCurrencyCategory, WrathCurrencyEntry, WrathCurrencySnapshot,
+};
 
 use crate::app_core::session::ObjectStore;
 use crate::app_core::session::SelfPlayer;
@@ -74,26 +76,26 @@ fn token_counts(stacks: &[(u32, u32)]) -> BTreeMap<u32, u32> {
     counts
 }
 
+/// Every `CurrencyTypes` row in table order; only a known row asks for its item's name and icon.
 fn roster<'a>(
     known: u64,
     types: impl Iterator<Item = &'a wrathplus_formats::currencies::CurrencyType>,
     counts: &BTreeMap<u32, u32>,
-    mut category_name: impl FnMut(u32) -> Option<String>,
     mut metadata: impl FnMut(u32) -> (Option<String>, Option<String>),
 ) -> Vec<WrathCurrencyEntry> {
-    let mut groups = BTreeMap::<u32, Vec<WrathCurrencyEntry>>::new();
-    for currency in types {
-        if currency.item_id == 0 || !currency.known_mask().is_some_and(|bit| known & bit != 0) {
-            continue;
-        }
-        let (name, icon) = metadata(currency.item_id);
-        groups
-            .entry(currency.category_id)
-            .or_default()
-            .push(WrathCurrencyEntry {
+    types
+        .map(|currency| {
+            let is_known = currency.known_mask().is_some_and(|bit| known & bit != 0);
+            let (name, icon) = if is_known && currency.item_id != 0 {
+                metadata(currency.item_id)
+            } else {
+                (None, None)
+            };
+            WrathCurrencyEntry {
                 name,
                 icon,
                 category_id: currency.category_id,
+                bit_index: currency.bit_index,
                 item_id: currency.item_id,
                 count: counts.get(&currency.item_id).copied().unwrap_or(0),
                 extra_currency_type: match currency.item_id {
@@ -101,21 +103,9 @@ fn roster<'a>(
                     43308 => 2,
                     _ => 0,
                 },
-                ..Default::default()
-            });
-    }
-    let mut entries = Vec::new();
-    for (category_id, children) in groups {
-        entries.push(WrathCurrencyEntry {
-            category_id,
-            name: category_name(category_id),
-            is_header: true,
-            is_expanded: true,
-            ..Default::default()
-        });
-        entries.extend(children);
-    }
-    entries
+            }
+        })
+        .collect()
 }
 
 pub fn feed(
@@ -138,27 +128,31 @@ pub fn feed(
         fresh.token_stacks = token_stacks(&player.0, |guid| objects.object(guid));
         if let (Some(known), Some(data)) = (known_currencies(&player.0), data.as_deref()) {
             let mut counts = token_counts(&fresh.token_stacks);
-            // Native special rows bypass the hidden bag; never create rows without known bits.
+            // The honor and arena rows count player fields, not the hidden bag (`0x5b075a`).
             counts.insert(43307, fresh.arena_current.unwrap_or(0));
             counts.insert(43308, fresh.honor_current.unwrap_or(0));
-            fresh.entries = roster(
-                known,
-                data.types.iter(),
-                &counts,
-                |id| data.categories.get(id).map(|c| c.name.clone()),
-                |id| {
-                    let Some(template) = items.template(id, 0, &commands) else {
-                        return (None, None);
-                    };
-                    (
-                        Some(template.name.clone()),
-                        icons
-                            .as_deref()
-                            .and_then(|icons| icons.catalog.get(template.display_info_id))
-                            .and_then(|display| display.icon.clone()),
-                    )
-                },
-            );
+            fresh.known = known;
+            // `0x5afde2`: every category starts unfolded.
+            fresh.categories = (data.categories.iter())
+                .map(|c| WrathCurrencyCategory {
+                    id: c.id,
+                    flags: c.flags,
+                    name: c.name.clone(),
+                    is_expanded: true,
+                })
+                .collect();
+            fresh.entries = roster(known, data.types.iter(), &counts, |id| {
+                let Some(template) = items.template(id, 0, &commands) else {
+                    return (None, None);
+                };
+                (
+                    Some(template.name.clone()),
+                    icons
+                        .as_deref()
+                        .and_then(|icons| icons.catalog.get(template.display_info_id))
+                        .and_then(|display| display.icon.clone()),
+                )
+            });
         }
     }
     // Rebuild pending metadata every frame; only authoritative snapshot changes cross the seam.

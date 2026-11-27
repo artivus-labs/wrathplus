@@ -11,8 +11,8 @@ tool is one HTTP call to the port.
 | `point(u, v, frame?)` | `GET /point?u=…&v=…&frame=N` | the world point at pixel (u, v) of that screenshot: `{x, y, z, hit, distance, range, bearing, turn, pitch, frame}`, or `{why, bearing, turn, pitch, frame}` when the ray meets nothing loaded |
 | `events(since?, names?, exclude?, wait_ms?, limit?)` | `GET /events` | `{events, next, missed}`; pass `next` as the next `since` |
 | `status()` | `GET /status` | `{state, in_world, ui_ready, cinematic, time, player, nav}` (`nav`: where walking routes come from) |
-| `lua_search(query, kinds?, limit?)` | `GET /lua/search?q=…&kind=…&limit=…` | what exists to call: built-in helpers (signature, doc, file:line), your modules' matching lines, the API's names |
-| `lua_doc(name)` | `GET /lua/doc?name=…` | one function's signature, doc and source, or a module's source |
+| `lua_search(query, kinds?, limit?)` | `GET /lua/search?q=…&kind=…&limit=…` | what exists to call, by kind: `builtin` helpers (signature, doc, file:line), your modules' matching lines (`own`), the stock API's functions with the note above each binding (`api`: what it returns, where it is bound), and lines of the stock UI's own Lua and XML from your install with the lines around them (`framexml`); all four by default, framexml hits last |
+| `lua_doc(name)` | `GET /lua/doc?name=…` | one built-in's signature, doc and source; a module's source; a stock API function's binding note, place and Rust source; or from the stock UI a function's source, a file's functions, or `File.lua:line` with the lines around it |
 | `modules(name?)` | `GET /files[/<name>]` | the saved module list, or one module's source |
 | `save_module(name, source)` | `PUT /files/<name>` | `{saved, bytes}`; `require(name)` or `AgentReload(name)` in Lua loads it |
 | `scorecard(sample?)` | (the judge's samples) | current values, needs (gaps) and trends; see [Scorecard and judge](#scorecard-and-judge) |

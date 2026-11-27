@@ -10,7 +10,8 @@
 //! pushes those, with every DBC and world-state value resolved; the VM owns the selection, the
 //! type order and the requests.
 //!
-//! Every index argument is `lua_isnumber`-gated and rounded to nearest (`0x84e030` + `ROUND`).
+//! Every index argument is `lua_isnumber`-gated and cut toward zero, by `fistp` under chop or by
+//! `__ftol2_sse` as each verb converts.
 
 use mlua::{Lua, MultiValue, Value};
 
@@ -123,6 +124,8 @@ pub(crate) struct QueueState {
     /// The active slot's map is an arena, and the active slot is rated (`0x549ad0`).
     pub(crate) active_arena: bool,
     pub(crate) active_rated: bool,
+    /// The last status 3's arena-faction byte is non-zero (`0xbea54a`).
+    pub(crate) arena_faction: bool,
     pub(crate) instance_expiration_ms: u32,
     pub(crate) requests: Vec<BattlefieldRequest>,
 }
@@ -159,15 +162,20 @@ fn status_text(status: u32) -> &'static str {
     }
 }
 
-/// `lua_isnumber` then the rounded value; `None` for a non-number.
+/// `lua_isnumber` then `fistp` under chop, its low dword (`0x54bc7c`); `None` for a non-number.
 fn number(lua: &Lua, v: &Value) -> mlua::Result<Option<i64>> {
     Ok(lua
         .coerce_number(v.clone())?
-        .map(|n| n.round_ties_even() as i64))
+        .map(|n| i64::from(n as i64 as i32)))
 }
 
 fn index_arg(lua: &Lua, v: &Value, usage: &'static str) -> mlua::Result<i64> {
     number(lua, v)?.ok_or_else(|| mlua::Error::RuntimeError(usage.into()))
+}
+
+/// [`index_arg`] for the verbs that convert by `__ftol2_sse` (`0x54e046`, `0x54e701`).
+fn ftol_index_arg(lua: &Lua, v: &Value, usage: &'static str) -> mlua::Result<i64> {
+    super::binding_abi::ftol_arg(lua, v.clone(), usage).map(i64::from)
 }
 
 /// A 1-based index under `n`, unsigned as the reference compares it.
@@ -254,6 +262,11 @@ impl super::UiScript {
         q.active_rated = active_rated;
     }
 
+    /// The last status 3's arena-faction byte, non-zero.
+    pub fn set_battlefield_arena_faction(&mut self, nonzero: bool) {
+        self.model_mut().battlefield.arena_faction = nonzero;
+    }
+
     /// Every `BattlemasterList` type. The first push adopts the battleground types' table order
     /// and sorts it (`0x54e720`, at a start with no holiday states); later pushes keep the VM's
     /// order, appending any type new to it.
@@ -304,9 +317,12 @@ impl super::UiScript {
     }
 }
 
-/// The confirm countdown's server clock, `0x548700`; `None` until the first time reply.
-fn server_now(model: &Model) -> Option<i64> {
-    super::wrath_server_time::server_now(model)
+/// The server clock `0x548700`: `time(0)` plus the offset, which is 0 before the first time reply.
+fn server_now(model: &Model) -> i64 {
+    super::wrath_server_time::server_now(model).unwrap_or_else(|| {
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH);
+        now.map_or(0, |d| d.as_secs() as i64)
+    })
 }
 
 pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
@@ -496,10 +512,10 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     )?;
 
     // AcceptBattlefieldPort(index, accept): nil off slots 1-2, else 1 and the app sends
-    // `CMSG_BATTLEFIELD_PORT` with the slot's queue id. A decline of the listed type also closes
-    // the list window (`0x54dc3e`). Unresolved, labelled: the accept-side refusals (`0x54da10`:
-    // a unit flag, the death check, a movement flag, `0x54a430`, the group check), each a
-    // game-error line and nil, are not modelled.
+    // `CMSG_BATTLEFIELD_PORT` with the slot's queue id. An accept with a player outside a
+    // battleground (`0x54a700`: the map's `InstanceType` 3) first runs the port refusals, each a
+    // catalog error and nil with nothing sent. A decline of the listed type also closes the list
+    // window (`0x54dc3e`).
     g.set(
         "AcceptBattlefieldPort",
         lua.create_function(|lua, args: MultiValue| {
@@ -514,6 +530,14 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             let accept = bool_or_default(args.get(1), false);
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
             let model = &mut *model;
+            let in_bg = (model.wrath_state.instance.as_ref()).is_some_and(|i| i.instance_type == 3);
+            if accept && player_exists(model) && !in_bg {
+                let gates = super::wrath_port_gates::PortGates::of(model);
+                if let Some(key) = gates.refusal(super::wrath_port_gates::CombatTest::Flag) {
+                    model.ui_errors.push(key);
+                    return Ok(Value::Nil);
+                }
+            }
             model
                 .battlefield
                 .requests
@@ -553,6 +577,15 @@ pub(super) fn install_wrath(lua: &Lua) -> mlua::Result<()> {
                 flag(q.active_arena),
                 flag(q.active_rated),
             ]))
+        })?,
+    )?;
+
+    // 1/nil: the arena-faction byte is non-zero (`0x54a280`).
+    g.set(
+        "GetBattlefieldArenaFaction",
+        lua.create_function(|lua, ()| {
+            let model = lua.app_data_ref::<Model>().expect("model app_data");
+            Ok(flag(model.battlefield.arena_faction))
         })?,
     )?;
 
@@ -603,7 +636,7 @@ pub(super) fn install_wrath(lua: &Lua) -> mlua::Result<()> {
     g.set(
         "GetBattlegroundInfo",
         lua.create_function(|lua, index: Value| {
-            let index = index_arg(lua, &index, "Usage: GetBattlegroundInfo(index)")?;
+            let index = ftol_index_arg(lua, &index, "Usage: GetBattlegroundInfo(index)")?;
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             let q = &model.battlefield;
             let Some(t) = slot_index(index, q.order.len())
@@ -622,23 +655,25 @@ pub(super) fn install_wrath(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // Re-sort the type list with the current holiday states; a numeric argument is read and
-    // ignored (`0x54c9f0`).
+    // Re-sort the type list with the current holiday states; no argument is read, and the answer
+    // is `true` (`0x54c9f9`).
     g.set(
         "SortBGList",
         lua.create_function(|lua, _: MultiValue| {
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
             model.battlefield.sort_order();
-            Ok(())
+            Ok(true)
         })?,
     )?;
 
     // `CMSG_BATTLEFIELD_LIST` for the type at that position, which becomes the listed type at
-    // once (`0x54e5b0`); nothing without a player or out of range.
+    // once, its instances emptied until the reply (`0x54e6a8`); nothing without a player or out
+    // of range.
     g.set(
         "RequestBattlegroundInstanceInfo",
         lua.create_function(|lua, index: Value| {
-            let index = index_arg(lua, &index, "Usage: RequestBattlegroundInstanceInfo(index)")?;
+            let usage = "Usage: RequestBattlegroundInstanceInfo(index)";
+            let index = ftol_index_arg(lua, &index, usage)?;
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
             if !player_exists(&model) {
                 return Ok(());
@@ -647,6 +682,7 @@ pub(super) fn install_wrath(lua: &Lua) -> mlua::Result<()> {
             if let Some(&bg_type) = slot_index(index, q.order.len()).map(|i| &q.order[i]) {
                 if q.ty(bg_type).is_some() {
                     q.list.bg_type = bg_type;
+                    q.list.instances.clear();
                     q.requests.push(BattlefieldRequest::List { bg_type });
                 }
             }
@@ -666,7 +702,7 @@ pub(super) fn install_wrath(lua: &Lua) -> mlua::Result<()> {
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             let w = &model.battlefield.world_pvp;
             let left = if w.status == 2 {
-                i64::from(w.deadline) - server_now(&model).unwrap_or(0)
+                i64::from(w.deadline) - server_now(&model)
             } else {
                 0
             };
@@ -696,7 +732,7 @@ pub(super) fn install_wrath(lua: &Lua) -> mlua::Result<()> {
             if !w.wintergrasp_waiting {
                 return Ok(MultiValue::new());
             }
-            let left = (i64::from(w.wintergrasp_next) - server_now(&model).unwrap_or(0)).max(0);
+            let left = (i64::from(w.wintergrasp_next) - server_now(&model)).max(0);
             Ok(MultiValue::from_vec(vec![Value::Integer(left)]))
         })?,
     )?;
@@ -722,12 +758,12 @@ pub(super) fn install_wrath(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // The battlefield-manager queue and exit verbs: a rounded id, no usage errors (`0x54e1a0`,
-    // `0x54e200`). The two invite answers are the static-popup module's.
+    // The battlefield-manager queue and exit verbs: an unchecked `lua_tonumber` cut by
+    // `__ftol2_sse`, no usage errors (`0x54e1a0`, `0x54e200`). The invite answers are elsewhere.
     g.set(
         "BattlefieldMgrQueueRequest",
         lua.create_function(|lua, id: Value| {
-            let battle_id = number(lua, &id)?.unwrap_or(0) as u32;
+            let battle_id = super::binding_abi::ftol(lua.coerce_number(id)?.unwrap_or(0.0)) as u32;
             push(lua, BattlefieldRequest::BfQueueRequest { battle_id });
             Ok(())
         })?,
@@ -735,7 +771,7 @@ pub(super) fn install_wrath(lua: &Lua) -> mlua::Result<()> {
     g.set(
         "BattlefieldMgrExitRequest",
         lua.create_function(|lua, id: Value| {
-            let battle_id = number(lua, &id)?.unwrap_or(0) as u32;
+            let battle_id = super::binding_abi::ftol(lua.coerce_number(id)?.unwrap_or(0.0)) as u32;
             push(lua, BattlefieldRequest::BfExit { battle_id });
             Ok(())
         })?,
@@ -745,257 +781,4 @@ pub(super) fn install_wrath(lua: &Lua) -> mlua::Result<()> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::script::UiScript;
-
-    fn vm() -> UiScript {
-        let mut s = UiScript::new().unwrap();
-        s.set_unit(
-            "player",
-            Some(crate::script::UnitState {
-                exists: true,
-                name: Some("Probe".into()),
-                ..Default::default()
-            }),
-        );
-        s
-    }
-
-    fn ty(id: u32, min_level: u32, instance_type: u32) -> BattlegroundTypeView {
-        BattlegroundTypeView {
-            id,
-            name: format!("Type {id}"),
-            instance_type,
-            groups_allowed: id != 7,
-            max_group_size: 5,
-            min_level,
-            can_enter: true,
-            is_holiday: false,
-            description: Some(format!("About {id}")),
-            has_map: true,
-        }
-    }
-
-    fn types() -> Vec<BattlegroundTypeView> {
-        vec![
-            ty(1, 51, 3),
-            ty(2, 10, 3),
-            ty(3, 20, 3),
-            ty(4, 10, 4),
-            ty(7, 61, 3),
-            ty(32, 80, 3),
-        ]
-    }
-
-    #[test]
-    fn the_type_list_sorts_random_first_then_holiday_then_level() {
-        let mut s = vm();
-        let mut t = types();
-        t[4].is_holiday = true;
-        s.set_battleground_types(t);
-        // The start-up sort ignores holidays: random, then minimum level, then id.
-        let names = |s: &UiScript| {
-            s.eval::<String>(
-                "local t = {} for i = 1, GetNumBattlegroundTypes() do \
-                 local n, _, h, r, id = GetBattlegroundInfo(i) t[#t+1] = id end \
-                 return table.concat(t, ',')",
-            )
-            .unwrap()
-        };
-        assert_eq!(names(&s), "32,2,3,1,7");
-        s.run("SortBGList()").unwrap();
-        assert_eq!(names(&s), "32,7,2,3,1");
-        let (n, enter, holiday, random, id): (String, Option<i64>, Option<i64>, Option<i64>, i64) =
-            s.eval("return GetBattlegroundInfo(2)").unwrap();
-        assert_eq!(
-            (n.as_str(), enter, holiday, random, id),
-            ("Type 7", Some(1), Some(1), None, 7)
-        );
-        assert_eq!(s.arity("GetBattlegroundInfo(9)").unwrap(), 0);
-    }
-
-    #[test]
-    fn the_listed_type_drives_info_arena_and_group_answers() {
-        let mut s = vm();
-        s.set_battleground_types(types());
-        assert_eq!(
-            s.arity("GetBattlefieldInfo()").unwrap(),
-            0,
-            "no listed type"
-        );
-        s.run("RequestBattlegroundInstanceInfo(4)").unwrap();
-        assert_eq!(
-            s.take_battlefield_requests(),
-            [BattlefieldRequest::List { bg_type: 1 }]
-        );
-        let got = s
-            .eval::<String>(
-                "local n, d, g, e, h, r = GetBattlefieldInfo() \
-                 return n .. '|' .. d .. '|' .. g .. '|' .. tostring(e) .. '|' .. tostring(r)",
-            )
-            .unwrap();
-        assert_eq!(got, "Type 1|About 1|5|1|nil");
-        assert!(
-            s.eval::<Option<i64>>("return CanJoinBattlefieldAsGroup()")
-                .unwrap()
-                == Some(1)
-        );
-        assert!(s
-            .eval::<Option<i64>>("return IsBattlefieldArena()")
-            .unwrap()
-            .is_none());
-        s.set_battlefield_list(BattlefieldListView {
-            bg_type: 4,
-            instances: vec![9, 3],
-            holiday: BattlegroundRewardsView {
-                has_win: true,
-                win_honor: 30,
-                win_arena: 25,
-                loss_honor: 5,
-            },
-            random: Default::default(),
-        });
-        assert_eq!(
-            s.eval::<Option<i64>>("return IsBattlefieldArena()")
-                .unwrap(),
-            Some(1)
-        );
-        let (w, h, a, l, z): (bool, i64, i64, i64, i64) =
-            s.eval("return GetHolidayBGHonorCurrencyBonuses()").unwrap();
-        assert_eq!((w, h, a, l, z), (true, 30, 25, 5, 0));
-        assert!(!s
-            .eval::<bool>("return (GetRandomBGHonorCurrencyBonuses())")
-            .unwrap());
-        s.run("SetSelectedBattlefield(2) JoinBattlefield(2, 1) JoinBattlefield(1, nil, true)")
-            .unwrap();
-        assert_eq!(s.eval::<i64>("return GetSelectedBattlefield()").unwrap(), 2);
-        assert_eq!(
-            s.eval::<i64>("return GetBattlefieldInstanceInfo(1)")
-                .unwrap(),
-            9
-        );
-        assert_eq!(
-            s.take_battlefield_requests(),
-            [
-                BattlefieldRequest::Join {
-                    index: 1,
-                    as_group: true,
-                    rated: false
-                },
-                BattlefieldRequest::Join {
-                    index: 0,
-                    as_group: false,
-                    rated: true
-                },
-            ]
-        );
-    }
-
-    #[test]
-    fn status_answers_seven_values_and_the_port_closes_the_listed_window() {
-        let mut s = vm();
-        let slot = BattlefieldQueueSlot {
-            status: 2,
-            bg_type: 3,
-            name: Some("Arathi Basin".into()),
-            instance_id: 12,
-            min_level: 20,
-            max_level: 29,
-            team_size: 0,
-            rated: false,
-            port_expiration_secs: 80,
-            estimated_wait_ms: 30_000,
-            time_waited_ms: 5_000,
-        };
-        s.set_battlefield_queue([slot, Default::default()], 0, false, false);
-        assert_eq!(s.arity("GetBattlefieldStatus(1)").unwrap(), 7);
-        assert_eq!(s.arity("GetBattlefieldStatus(3)").unwrap(), 7);
-        let got = s
-            .eval::<String>(
-                "local st, n, id, lo, hi, size, rated = GetBattlefieldStatus(1) \
-                 return st .. '|' .. n .. '|' .. id .. '|' .. lo .. '|' .. hi .. '|' .. size \
-                 .. '|' .. tostring(rated) .. '|' .. GetBattlefieldPortExpiration(1) \
-                 .. '|' .. GetBattlefieldEstimatedWaitTime(1) .. '|' .. GetBattlefieldTimeWaited(1)",
-            )
-            .unwrap();
-        assert_eq!(got, "confirm|Arathi Basin|12|20|29|0|nil|80|30000|5000");
-        assert_eq!(
-            s.eval::<String>("return (GetBattlefieldStatus(2))")
-                .unwrap(),
-            "none"
-        );
-        assert!(s
-            .eval::<Option<i64>>("return AcceptBattlefieldPort(3, 1)")
-            .unwrap()
-            .is_none());
-        s.set_battlefield_list(BattlefieldListView {
-            bg_type: 3,
-            ..Default::default()
-        });
-        assert_eq!(s.eval::<i64>("return AcceptBattlefieldPort(1)").unwrap(), 1);
-        assert_eq!(
-            s.take_battlefield_requests(),
-            [BattlefieldRequest::Port {
-                slot: 0,
-                accept: false
-            }]
-        );
-        let events: Vec<_> = s
-            .model_mut()
-            .pending_events
-            .drain(..)
-            .map(|(e, _)| e)
-            .filter(|e| e.starts_with("BATTLEFIELDS"))
-            .collect();
-        assert_eq!(events, ["BATTLEFIELDS_CLOSED"]);
-        assert!(s.run("GetBattlefieldStatus('x')").is_err());
-    }
-
-    #[test]
-    fn world_pvp_reads_the_pushed_queue_and_states() {
-        let mut s = vm();
-        assert_eq!(s.arity("GetWintergraspWaitTime()").unwrap(), 0);
-        s.set_wrath_server_time_offset(Some(0));
-        let now = s.wrath_server_now().unwrap() as i32;
-        s.set_world_pvp(WorldPvpView {
-            status: 1,
-            zone_name: Some("Wintergrasp".into()),
-            battle_id: 1,
-            deadline: 0,
-            can_queue_wintergrasp: true,
-            wintergrasp_waiting: true,
-            wintergrasp_next: now + 600,
-            arena_season: 8,
-            previous_arena_season: 7,
-            subzone_pvp_poi: true,
-        });
-        let got = s
-            .eval::<String>(
-                "local st, z, id, left = GetWorldPVPQueueStatus(1) \
-                 return st .. '|' .. z .. '|' .. id .. '|' .. left",
-            )
-            .unwrap();
-        assert_eq!(got, "queued|Wintergrasp|1|0");
-        assert_eq!(s.arity("GetWorldPVPQueueStatus(2)").unwrap(), 0);
-        let wait = s.eval::<i64>("return GetWintergraspWaitTime()").unwrap();
-        assert!((598..=600).contains(&wait), "{wait}");
-        assert_eq!(
-            s.eval::<String>(
-                "return tostring(CanQueueForWintergrasp()) .. GetCurrentArenaSeason() \
-                 .. GetPreviousArenaSeason() .. tostring(IsSubZonePVPPOI())"
-            )
-            .unwrap(),
-            "1871"
-        );
-        s.run("BattlefieldMgrQueueRequest(1) BattlefieldMgrExitRequest(1.6)")
-            .unwrap();
-        assert_eq!(
-            s.take_battlefield_requests(),
-            [
-                BattlefieldRequest::BfQueueRequest { battle_id: 1 },
-                BattlefieldRequest::BfExit { battle_id: 2 },
-            ]
-        );
-    }
-}
+mod tests;

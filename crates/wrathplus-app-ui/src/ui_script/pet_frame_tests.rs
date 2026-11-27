@@ -398,19 +398,11 @@ fn declare_happiness_strings(s: &UiScript) {
     .unwrap();
 }
 
-fn stats(
-    hunter: bool,
-    happiness: Option<u32>,
-    damage: f32,
-    rate: f32,
-) -> wrathplus_ui::script::PetStats {
+fn stats(hunter: bool, happiness: Option<u32>, damage: f32) -> wrathplus_ui::script::PetStats {
     wrathplus_ui::script::PetStats {
         hunter_pet: hunter,
         happiness,
         damage_percentage: damage,
-        loyalty_rate: rate,
-        loyalty: Some("(Loyalty Level 6) Best Friend".into()),
-        training_points: (170, 130),
         experience: (4200, 8000),
         // Family and diet stay default: the unit frame draws neither.
         ..wrathplus_ui::script::PetStats::default()
@@ -426,12 +418,8 @@ fn the_happiness_icon_shows_per_bucket_and_hides_for_a_non_hunter_pet() {
     s.set_unit("pet", Some(pet("Grimjaw", 72, 45, 80, 2)));
 
     // 3.3.5 has no loyalty line (PetFrame.lua:144-161).
-    for (bucket, tip, rate) in [
-        (3u32, "Happy", 20.0f32),
-        (2, "Content", 0.0),
-        (1, "Unhappy", -10.0),
-    ] {
-        s.set_pet_stats(true, stats(true, Some(bucket), 125.0, rate));
+    for (bucket, tip) in [(3u32, "Happy"), (2, "Content"), (1, "Unhappy")] {
+        s.set_pet_stats(true, stats(true, Some(bucket), 125.0));
         s.fire_event("UNIT_PET", vec![ScriptValue::Str("player".into())]);
         assert!(
             s.eval::<bool>("return PetFrameHappiness:IsVisible()")
@@ -452,32 +440,32 @@ fn the_happiness_icon_shows_per_bucket_and_hides_for_a_non_hunter_pet() {
     }
 
     // A warlock's imp: `HasPetUI`'s second return is nil, so the icon hides (PetFrame.lua:134-137).
-    s.set_pet_stats(true, stats(false, Some(3), 125.0, 20.0));
+    s.set_pet_stats(true, stats(false, Some(3), 125.0));
     s.fire_event("UNIT_HAPPINESS", vec![]);
     assert!(!s
         .eval::<bool>("return PetFrameHappiness:IsVisible()")
         .unwrap());
 }
 
-/// The frame hides on `not happiness`, and 0 is truthy in Lua: `GetPetHappiness` (`0x4be900`)
-/// answers bucket 0 as a number, not a nil.
+/// The frame hides on `not happiness` alone: `GetPetHappiness` (`0x5d3b00`) answers a bucket
+/// from 1 or a nil.
 #[test]
-fn happiness_bucket_zero_keeps_the_icon_showing() {
+fn the_happiness_icon_hides_only_on_nil() {
     wrathplus_formats::wow_data_or_skip!();
     let mut s = load_pet_frame();
     declare_happiness_strings(&s);
     s.set_unit("pet", Some(pet("Grimjaw", 72, 45, 80, 2)));
 
-    s.set_pet_stats(true, stats(true, Some(0), 100.0, 0.0));
+    s.set_pet_stats(true, stats(true, Some(1), 75.0));
     s.fire_event("UNIT_PET", vec![ScriptValue::Str("player".into())]);
     assert!(
         s.eval::<bool>("return PetFrameHappiness:IsVisible()")
             .unwrap(),
-        "bucket 0 is a number, not the hide case"
+        "the lowest bucket shows"
     );
 
     // A nil does hide it.
-    s.set_pet_stats(true, stats(true, None, 100.0, 0.0));
+    s.set_pet_stats(true, stats(true, None, 100.0));
     s.fire_event("UNIT_HAPPINESS", vec![]);
     assert!(!s
         .eval::<bool>("return PetFrameHappiness:IsVisible()")
@@ -491,7 +479,7 @@ fn unit_happiness_repaints_only_the_icon() {
     let mut s = load_pet_frame();
     declare_happiness_strings(&s);
     s.set_unit("pet", Some(pet("Grimjaw", 72, 45, 80, 2)));
-    s.set_pet_stats(true, stats(true, Some(1), 75.0, -10.0));
+    s.set_pet_stats(true, stats(true, Some(1), 75.0));
     s.fire_event("UNIT_PET", vec![ScriptValue::Str("player".into())]);
     assert_eq!(
         s.eval::<String>("return PetFrameHappiness.tooltip")
@@ -499,7 +487,7 @@ fn unit_happiness_repaints_only_the_icon() {
         "Unhappy"
     );
 
-    s.set_pet_stats(true, stats(true, Some(3), 125.0, 20.0));
+    s.set_pet_stats(true, stats(true, Some(3), 125.0));
     s.fire_event("UNIT_HAPPINESS", vec![]);
     assert_eq!(
         s.eval::<String>("return PetFrameHappiness.tooltip")

@@ -69,24 +69,18 @@ pub(crate) struct StoredPetAction {
     pub(crate) cooldown: Option<(f64, f64, bool)>,
 }
 
-/// The pet stat block: the four hunter stat bindings and `HasPetUI`'s second return
-/// (`0x4be670`), plus the family word, icon and diet. The stats share one hunter-pet gate
-/// (`0x6116e0`) and fail their own ways: loyalty to nil, the pairs to `(0, 0)`, happiness to
-/// `(nil, 100.0, 0.0)`. The family word has no gate (`0x51a310`); the diet shares the stats'.
+/// The pet stat block: `HasPetUI`'s second return (`0x5d3960`), the happiness and experience
+/// bindings, the family word, icon and diet. The stats share the hunter-pet test (`0x71b630`) and
+/// fail their own ways: the pair to `(0, 0)`, happiness to `(nil, 100.0)`. The family word has no
+/// gate; the icon and diet share the stats' (`0x5d3d1c`, `0x5d3bd0`).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PetStats {
     /// `HasPetUI`'s second return; false makes every gated binding answer its failure form.
     pub hunter_pet: bool,
-    /// `GetPetHappiness`'s first return, bucketed `0..=3` by the client; `Some(0)` is not nil.
+    /// `GetPetHappiness`'s first return, the bucket `1..=3` (`0x5d3b53`).
     pub happiness: Option<u32>,
     /// Return 2: the damage percentage, already scaled by 100.
     pub damage_percentage: f32,
-    /// Return 3: the loyalty rate, unscaled and possibly negative.
-    pub loyalty_rate: f32,
-    /// `GetPetLoyalty`: the `PetLoyalty.dbc` name verbatim, `"(Loyalty Level N) "` prefix included.
-    pub loyalty: Option<String>,
-    /// `GetPetTrainingPoints`: `(totalPoints, spent)`, high word first.
-    pub training_points: (u16, u16),
     /// `GetPetExperience`: `(currXP, nextXP)`.
     pub experience: (u32, u32),
     /// `UnitCreatureFamily("pet")`: the localized `CreatureFamily.dbc` word off the cached creature
@@ -94,8 +88,7 @@ pub struct PetStats {
     /// 18 and 22 have none). `PetPaperDollFrame.lua:68-70` guards its level line on it.
     pub family: Option<String>,
     /// `GetPetIcon()`: the family row's `CreatureFamily.dbc` icon, `None` on the family word's
-    /// misses. Ungated like the family word; whether the reference gates it (`0x4beb10`) is
-    /// untraced, and no warlock reaches its stock callers (`PetStable.lua:51`, `161-162`).
+    /// misses and for a pet the hunter-pet test refuses (`0x5d3d1c`), which the app applies.
     pub icon: Option<String>,
     /// `GetPetFoodTypes()`: the diet names the family's food mask selects, in record order
     /// (`0x4bea10`: bit `1 << (id - 1)` of `CreatureFamily` column 7, names from `ItemPetFood`).
@@ -111,8 +104,12 @@ pub struct PetStats {
 /// The pushed pet state: the bar's slots and bar-wide bits, the stat block, the menu predicates.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct PetBarState {
-    /// `PetHasActionBar()`: there is a bar, even one of ten empty slots.
+    /// A bar exists, even one of ten empty slots; `PetHasActionBar` also needs `!bar_hidden`.
     pub(crate) has_bar: bool,
+    /// `0x5d35b0`'s refusal of the pet's object ([`super::UiScript::set_pet_bar_hidden`]).
+    pub(crate) bar_hidden: bool,
+    /// The attack latch `[0xc234dc]`, `IsPetAttackActive()`'s answer.
+    pub(crate) attacking: bool,
     /// `GetPetActionsUsable()` (`0x4bcf70`): false desaturates the whole bar, and refuses the
     /// drag's bar writes with it (`0x4bc9d0`).
     pub(crate) actions_usable: bool,
@@ -179,6 +176,17 @@ impl super::UiScript {
     /// stores `OsTick() + duration` for each `SMSG_PET_SPELLS` whose duration is not 0, else 0.
     pub fn set_pet_expiry(&mut self, expiry: Option<f64>) {
         self.model_mut().pet_bar.expiry = expiry;
+    }
+
+    /// Push the attack latch `IsPetAttackActive` answers.
+    pub fn set_pet_attacking(&mut self, attacking: bool) {
+        self.model_mut().pet_bar.attacking = attacking;
+    }
+
+    /// Push whether `0x5d35b0` refuses the pet (dead, or a template without a pet bar), which
+    /// hides the bar from `PetHasActionBar` (`0x5d3742`) and from nothing else.
+    pub fn set_pet_bar_hidden(&mut self, hidden: bool) {
+        self.model_mut().pet_bar.bar_hidden = hidden;
     }
 
     /// Push the menu's two predicates, which move with the pet's `UNIT_FIELD_FLAGS`.
@@ -250,6 +258,16 @@ fn slot_at(model: &Model, i: u32) -> Option<&StoredPetAction> {
         .and_then(|n| model.pet_bar.slots.get(n))
 }
 
+/// A pet bar index as `CastPetAction` and `TogglePetAutocast` read it: `isnumber` or the usage,
+/// truncated (`fistp`), then `index - 1 <= 10` unsigned or the invalid-slot error (`0x5d6805`).
+fn pet_slot(lua: &Lua, v: Value, usage: &'static str, invalid: &'static str) -> mlua::Result<u32> {
+    let i = super::binding_abi::number_arg(lua, v, usage)?;
+    match i.wrapping_sub(1) as u32 {
+        0..=10 => Ok(i as u32),
+        _ => Err(mlua::Error::RuntimeError(invalid.into())),
+    }
+}
+
 /// The 1-based pet action slot whose action word holds `spell` (`0x5d3410`).
 pub(super) fn slot_index_by_spell(model: &Model, spell: u32) -> Option<u32> {
     model
@@ -299,7 +317,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         "PetHasActionBar",
         lua.create_function(move |lua, ()| {
             let model = lua.app_data_ref::<Model>().expect("model app_data");
-            Ok(flag(model.pet_bar.has_bar))
+            Ok(flag(model.pet_bar.has_bar && !model.pet_bar.bar_hidden))
         })?,
     )?;
 
@@ -369,33 +387,44 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // The one pet binding that answers a real boolean (`0x6f39f0`), `false` even out of range.
+    // IsPetAttackActive() (`0x5d3160`): no argument, the latch as a real boolean.
     g.set(
         "IsPetAttackActive",
-        lua.create_function(move |lua, i: u32| {
+        lua.create_function(move |lua, _: MultiValue| {
             let model = lua.app_data_ref::<Model>().expect("model app_data");
-            Ok(slot_at(&model, i).is_some_and(|s| s.view.attack_active))
+            Ok(model.pet_bar.attacking)
         })?,
     )?;
 
-    // An empty slot, whose button shows only under show-grid, queues nothing; the reference sends
-    // its zero word (`0x4bd230` falls to the send at `0x4bd444`), which vmangos ignores
-    // (`PetHandler.cpp:178`).
+    // CastPetAction(index[, unit]) (`0x5d67b0`): the unit goes through the resolver with flag 1
+    // (`0x5d68ca`), so an absent or empty one is the selection and one it rejects casts nothing.
+    // An empty slot queues nothing; the reference sends its zero word, which the server ignores.
     g.set(
         "CastPetAction",
-        lua.create_function(|lua, i: u32| {
+        lua.create_function(|lua, args: MultiValue| {
+            let arg = |i: usize| args.get(i).cloned().unwrap_or(Value::Nil);
+            const USAGE: &str = "Usage: CastPetAction(index, target)";
+            let i = pet_slot(lua, arg(0), USAGE, "Invalid slot in CastPetAction")?;
+            let unit = super::unit::token::token_text(lua, &arg(1)).filter(|t| !t.is_empty());
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
+            if unit.as_ref().is_some_and(|t| !model.resolve_token(t).ok) {
+                return Ok(());
+            }
             if slot_at(&model, i).is_some_and(|s| s.view.name.is_some()) {
-                model.script_calls.push(super::ScriptCall::PetAction(i));
+                let call = super::ScriptCall::PetAction(i).at_unit(unit);
+                model.script_calls.push(call);
             }
             Ok(())
         })?,
     )?;
 
-    // Only a slot that can autocast queues: the wire verb names a spell, and a token has none.
+    // TogglePetAutocast(index) (`0x5d66f0`): only a slot that can autocast queues, as the wire
+    // verb names a spell.
     g.set(
         "TogglePetAutocast",
-        lua.create_function(|lua, i: u32| {
+        lua.create_function(|lua, i: Value| {
+            const USAGE: &str = "Usage: TogglePetAutocast(index)";
+            let i = pet_slot(lua, i, USAGE, "Invalid slot in TogglePetAutocast")?;
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
             if slot_at(&model, i).is_some_and(|s| s.view.autocast_allowed) {
                 model.pet_autocast_toggles.push(i);
@@ -414,55 +443,17 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // The client buckets return 1 off `PetPersonality.dbc` (`0x4be900`), and bucket 0 is the
-    // number 0; only the gate failure is nil, and even then returns 2 and 3 are `(100.0, 0.0)`.
+    // Two returns on both paths (`0x5d3b90`, `0x5d3bb7`): the bucket and its damage percentage,
+    // else nil and 100.0. Build 12340 has no GetPetLoyalty or GetPetTrainingPoints.
     g.set(
         "GetPetHappiness",
         lua.create_function(move |lua, ()| {
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             let s = &model.pet_bar.stats;
-            let happiness = match s.happiness.filter(|_| s.hunter_pet) {
-                Some(b) => Value::Integer(i64::from(b)),
-                None => Value::Nil,
-            };
-            let (dmg, rate) = if happiness == Value::Nil {
-                (100.0, 0.0)
-            } else {
-                (s.damage_percentage, s.loyalty_rate)
-            };
-            Ok(MultiValue::from_vec(vec![
-                happiness,
-                Value::Number(f64::from(dmg)),
-                Value::Number(f64::from(rate)),
-            ]))
-        })?,
-    )?;
-
-    // The one stat binding that fails to nil, level 0 included.
-    g.set(
-        "GetPetLoyalty",
-        lua.create_function(move |lua, ()| {
-            let model = lua.app_data_ref::<Model>().expect("model app_data");
-            let s = &model.pet_bar.stats;
-            Ok(match s.loyalty.as_deref().filter(|_| s.hunter_pet) {
-                Some(name) => Value::String(lua.create_string(name)?),
-                None => Value::Nil,
+            Ok(match s.happiness.filter(|_| s.hunter_pet) {
+                Some(b) => (Value::Integer(i64::from(b)), f64::from(s.damage_percentage)),
+                None => (Value::Nil, 100.0),
             })
-        })?,
-    )?;
-
-    // The high then low word of one packed dword; a gate failure is (0, 0), not nil.
-    g.set(
-        "GetPetTrainingPoints",
-        lua.create_function(move |lua, ()| {
-            let model = lua.app_data_ref::<Model>().expect("model app_data");
-            let s = &model.pet_bar.stats;
-            let (total, spent) = if s.hunter_pet {
-                s.training_points
-            } else {
-                (0, 0)
-            };
-            Ok((f64::from(total), f64::from(spent)))
         })?,
     )?;
 
@@ -603,7 +594,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{PetActionView, PetStats};
+    use super::{PetActionView, PetStats, Value};
     use crate::script::UiScript;
 
     /// A charmed or possessed unit's time left in ms, nil for none, and the unsigned wrap once
@@ -763,12 +754,32 @@ mod tests {
         );
         assert!(s.take_pet_actions().is_empty(), "drain empties");
 
-        s.run("TogglePetAutocast(1) TogglePetAutocast(2)").unwrap();
+        s.run("TogglePetAutocast(1) TogglePetAutocast(2.9) TogglePetAutocast(11)")
+            .unwrap();
         assert_eq!(
             s.take_pet_autocast_toggles(),
             vec![2],
-            "only the autocastable slot"
+            "only the autocastable slot, the index truncated"
         );
+        // Slots 1..=11 pass `0x5d6805`; outside it, and without a number, the bindings raise.
+        for (call, err) in [
+            ("CastPetAction(0)", "Invalid slot in CastPetAction"),
+            ("CastPetAction(12)", "Invalid slot in CastPetAction"),
+            ("CastPetAction()", "Usage: CastPetAction(index, target)"),
+            ("TogglePetAutocast(-1)", "Invalid slot in TogglePetAutocast"),
+            ("TogglePetAutocast()", "Usage: TogglePetAutocast(index)"),
+        ] {
+            let e = s.run(call).unwrap_err().to_string();
+            assert!(e.contains(err), "{call}: {e}");
+        }
+        // A unit rides with the press; one the resolver rejects casts nothing.
+        s.run("CastPetAction(1, 'bogus'); CastPetAction(1, 'target')")
+            .unwrap();
+        assert!(matches!(
+            &s.take_script_calls()[..],
+            [super::super::ScriptCall::AtUnit { unit, call }]
+                if unit == "target" && **call == super::super::ScriptCall::PetAction(1)
+        ));
 
         assert_eq!(s.take_pet_stop_attacks(), 0);
         s.run("PetStopAttack() PetStopAttack()").unwrap();
@@ -776,15 +787,18 @@ mod tests {
         assert_eq!(s.take_pet_stop_attacks(), 0, "drain empties");
     }
 
+    /// `0x5d3160` takes no index: one latch for the bar, a real boolean either way.
     #[test]
-    fn attack_active_is_a_per_slot_boolean() {
+    fn attack_active_is_the_bars_one_latch() {
         let mut s = UiScript::new().unwrap();
-        s.set_pet_actions(true, true, true, slots());
-        assert!(s.eval::<bool>("return IsPetAttackActive(1)").unwrap());
-        assert!(!s.eval::<bool>("return IsPetAttackActive(2)").unwrap());
-        assert!(s
-            .eval::<bool>("return IsPetAttackActive(9) == false")
-            .unwrap());
+        let latch = |s: &UiScript| s.eval::<Value>("return IsPetAttackActive()").unwrap();
+        assert_eq!(latch(&s), Value::Boolean(false));
+        s.set_pet_attacking(true);
+        assert_eq!(latch(&s), Value::Boolean(true));
+        assert!(
+            s.eval::<bool>("return IsPetAttackActive(9)").unwrap(),
+            "an index is ignored"
+        );
     }
 
     /// The predicates are checked the way `UnitPopup.lua`'s row conditions read them.
@@ -857,6 +871,12 @@ mod tests {
         let mut s = UiScript::new().unwrap();
         s.set_pet_actions(true, false, true, slots());
         assert_eq!(s.eval::<i64>("return PetHasActionBar()").unwrap(), 1);
+        // A dead pet's bar: hidden from `PetHasActionBar` alone, so the orders still queue.
+        s.set_pet_bar_hidden(true);
+        assert!(s
+            .eval::<bool>("PetFollow() return PetHasActionBar() == nil")
+            .unwrap());
+        assert_eq!(s.take_pet_orders(), vec![0x0700_0001]);
         assert!(s
             .eval::<bool>("return GetPetActionsUsable() == nil")
             .unwrap());
@@ -890,16 +910,6 @@ mod tests {
     }
 
     #[test]
-    fn has_full_control_follows_the_hosts_flag() {
-        let mut s = UiScript::new().unwrap();
-        assert_eq!(s.eval::<i64>("return HasFullControl()").unwrap(), 1);
-        s.set_player_control(false);
-        assert!(s.eval::<bool>("return HasFullControl() == nil").unwrap());
-        s.set_player_control(true);
-        assert_eq!(s.eval::<i64>("return HasFullControl()").unwrap(), 1);
-    }
-
-    #[test]
     fn the_pet_icon_answers_a_path_or_a_real_nil() {
         let mut s = UiScript::new().unwrap();
         assert!(s.eval::<bool>("return GetPetIcon() == nil").unwrap());
@@ -919,9 +929,6 @@ mod tests {
             icon: Some("Interface\\Icons\\Ability_Hunter_Pet_Boar".into()),
             happiness: Some(3),
             damage_percentage: 125.0,
-            loyalty_rate: 20.0,
-            loyalty: Some("(Loyalty Level 6) Best Friend".into()),
-            training_points: (170, 130),
             experience: (4200, 8000),
             family: Some("Boar".into()),
             food_types: vec![
@@ -943,19 +950,14 @@ mod tests {
         s.set_pet_stats(true, hunter_stats());
 
         assert!(s
-            .eval::<bool>(
-                "local h, dmg, rate = GetPetHappiness() \
-                 return h == 3 and dmg == 125 and rate == 20"
-            )
+            .eval::<bool>("local h, dmg = GetPetHappiness() return h == 3 and dmg == 125")
             .unwrap());
-        assert_eq!(
-            s.eval::<String>("return GetPetLoyalty()").unwrap(),
-            "(Loyalty Level 6) Best Friend",
-            "the shipped prefix is pushed verbatim — the client does no stripping"
+        assert_eq!(s.arity("GetPetHappiness()").unwrap(), 2);
+        assert!(
+            s.eval::<bool>("return GetPetLoyalty == nil and GetPetTrainingPoints == nil")
+                .unwrap(),
+            "1.12 names, absent from 12340"
         );
-        assert!(s
-            .eval::<bool>("local t, sp = GetPetTrainingPoints() return t == 170 and sp == 130")
-            .unwrap());
         assert!(s
             .eval::<bool>("local c, n = GetPetExperience() return c == 4200 and n == 8000")
             .unwrap());
@@ -976,17 +978,11 @@ mod tests {
         );
 
         assert!(
-            s.eval::<bool>(
-                "local h, dmg, rate = GetPetHappiness() \
-                 return h == nil and dmg == 100 and rate == 0"
-            )
-            .unwrap(),
-            "happiness is nil but its two numbers are still numbers"
+            s.eval::<bool>("local h, dmg = GetPetHappiness() return h == nil and dmg == 100")
+                .unwrap(),
+            "happiness is nil but its damage is still a number"
         );
-        assert!(s.eval::<bool>("return GetPetLoyalty() == nil").unwrap());
-        assert!(s
-            .eval::<bool>("local t, sp = GetPetTrainingPoints() return t == 0 and sp == 0")
-            .unwrap());
+        assert_eq!(s.arity("GetPetHappiness()").unwrap(), 2);
         assert!(s
             .eval::<bool>("local c, n = GetPetExperience() return c == 0 and n == 0")
             .unwrap());
@@ -995,26 +991,21 @@ mod tests {
             .unwrap());
     }
 
+    /// The bucket is a number from 1 (`0x5d3b53` pushes the index plus one), never 0.
     #[test]
-    fn happiness_bucket_zero_is_not_the_failure_case() {
+    fn happiness_bucket_one_is_a_number() {
         let mut s = UiScript::new().unwrap();
         s.set_pet_stats(
             true,
             PetStats {
-                happiness: Some(0),
-                damage_percentage: 100.0,
-                loyalty_rate: 0.0,
+                happiness: Some(1),
+                damage_percentage: 75.0,
                 ..hunter_stats()
             },
         );
         assert!(s
-            .eval::<bool>("local h = GetPetHappiness() return h == 0 and h ~= nil")
+            .eval::<bool>("local h, dmg = GetPetHappiness() return h == 1 and dmg == 75")
             .unwrap());
-        assert!(
-            s.eval::<bool>("return not GetPetHappiness() == false")
-                .unwrap(),
-            "0 is truthy in Lua, so the reference's `not happiness` hide-test does NOT fire"
-        );
     }
 
     #[test]
@@ -1023,7 +1014,6 @@ mod tests {
         assert!(s
             .eval::<bool>("local ui, hunter = HasPetUI() return ui == nil and hunter == nil")
             .unwrap());
-        assert!(s.eval::<bool>("return GetPetLoyalty() == nil").unwrap());
         assert!(s
             .eval::<bool>("local h, dmg = GetPetHappiness() return h == nil and dmg == 100")
             .unwrap());
@@ -1139,7 +1129,6 @@ mod tests {
                 .unwrap(),
             "Imp"
         );
-        assert!(s.eval::<bool>("return GetPetLoyalty() == nil").unwrap());
         assert_eq!(s.arity("GetPetFoodTypes()").unwrap(), 0);
     }
 }

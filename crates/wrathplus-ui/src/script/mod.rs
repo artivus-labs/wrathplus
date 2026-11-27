@@ -48,6 +48,7 @@ mod wrath_friends_frame;
 mod wrath_guild_bank;
 mod wrath_macro_icons;
 mod wrath_override_bindings;
+mod wrath_player_names;
 mod wrath_session;
 mod wrath_static_popup;
 mod wrath_unit_casts;
@@ -79,6 +80,7 @@ pub use wrath_friends_frame::{
 };
 pub use wrath_guild_bank::{WrathGuildBankItemLog, WrathGuildBankMoneyLog, WrathGuildBankSlot};
 pub use wrath_petition_vendor::{WrathPetitionItem, WrathPetitionVendorRequest};
+pub use wrath_player_names::PlayerNameInfo;
 pub use wrath_quest_poi::{blob::QuestBlobDraw, WrathQuestPoi, WrathQuestPoiBlob};
 pub use wrath_static_popup::{WrathInstanceLock, WrathPopupRequest, WrathPopupState};
 pub use wrath_titles::WrathCharTitle;
@@ -238,6 +240,7 @@ mod wrath_gm_survey;
 mod wrath_inspect_talents;
 mod wrath_macro_options;
 mod wrath_modified_click;
+mod wrath_port_gates;
 mod wrath_quest_queries;
 mod wrath_quests_completed;
 mod wrath_ready_check;
@@ -245,10 +248,10 @@ mod wrath_saved_instances;
 mod wrath_state_queries;
 pub use wrath_char_state::{power_regen as wrath_power_regen, WrathCharState, WrathUnitExtra};
 mod wrath_tutorial;
-pub use wrath_inspect_talents::{WrathInspectGroup, WrathInspectTalents};
+pub use wrath_inspect_talents::{WrathInspectGroup, WrathInspectTalents, WrathTalentGroups};
 mod wrath_server_time;
 mod wrath_talent_preview;
-pub use wrath_currency::{WrathCurrencyEntry, WrathCurrencySnapshot};
+pub use wrath_currency::{WrathCurrencyCategory, WrathCurrencyEntry, WrathCurrencySnapshot};
 pub use wrath_tutorial::WrathTutorialRequest;
 mod wrath_achievement_format;
 mod wrath_achievement_listing;
@@ -470,8 +473,8 @@ pub use unit::{
 pub use weapon_enchant::WeaponEnchant;
 pub use who_sort::{WhoSortChain, WhoSortKey};
 pub use worldmap::{
-    DungeonFloorView, MapSelection, WorldMapAreaView, WorldMapContinentView, WorldMapLandmarkView,
-    WorldMapOverlayView, WorldMapState, WorldMapZoneView,
+    DungeonFloorView, MapPos, MapSelection, WorldMapAreaView, WorldMapContinentView,
+    WorldMapLandmarkView, WorldMapOverlayView, WorldMapState, WorldMapZoneView,
 };
 pub use worldstate::WorldStateUiView;
 pub use worn_display::WornDisplay;
@@ -838,6 +841,7 @@ impl UiScript {
             wrath_unit_casts::install(&lua)?;
             wrath_combat_log::install(&lua)?;
             wrath_chat_verbs::install(&lua)?;
+            wrath_player_names::install(&lua)?;
             wrath_inspect_talents::install(&lua)?;
             wrath_talent_preview::install(&lua)?;
             wrath_static_popup::install(&lua)?;

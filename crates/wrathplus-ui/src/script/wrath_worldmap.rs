@@ -191,6 +191,22 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
+    // GetCurrentMapZone (`0x544e80`): with no zone cell, an instance map answers its row's index
+    // among the zones of a continent carrying the row's map (Dalaran's floors; `0x544eee`-
+    // `0x544fa3`); otherwise the zone cell plus one.
+    g.set(
+        "GetCurrentMapZone",
+        lua.create_function(|lua, ()| {
+            let model = lua.app_data_ref::<Model>().expect("model app_data");
+            let wm = &model.worldmap;
+            let listed = direct_row(wm).and_then(|row| {
+                let mut on_map = wm.continents.iter().filter(|c| c.map_id == row.map_id);
+                on_map.find_map(|c| c.zones.iter().position(|z| z.wma_id == row.id))
+            });
+            Ok(listed.map_or(i64::from(wm.selection.1), |i| i as i64 + 1))
+        })?,
+    )?;
+
     // SetMapZoom(continent [, zone]) (`0x5469e0`): continent -1 is the cosmic sheet; one past the
     // list raises.
     g.set(
@@ -270,7 +286,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             let Some(link) = number(lua, &args, 0) else {
                 return Err(mlua::Error::runtime("Usage: ClickLandmark(mapLinkID)"));
             };
-            let link = link.round_ties_even() as i64;
+            // Truncated: fistp under a chopping control word (`0x546f26`-`0x546f40`).
+            let link = link as i64;
             let mut model = lua.app_data_mut::<Model>().expect("model app_data");
             let wm = &model.worldmap;
             let target = u32::try_from(link)
@@ -384,10 +401,11 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 return Err(mlua::Error::runtime("Usage: GetMapLandmarkInfo(index)"));
             };
             let landmark = {
-                let model = lua.app_data_ref::<Model>().expect("model app_data");
-                usize::try_from(i.round_ties_even() as i64 - 1)
+                let mut model = lua.app_data_mut::<Model>().expect("model app_data");
+                // Truncated as `0x545a68`-`0x545a7d` does.
+                usize::try_from(i as i64 - 1)
                     .ok()
-                    .and_then(|i| model.worldmap.landmarks.get(i).cloned())
+                    .and_then(|i| model.map_landmarks().get(i).cloned())
             };
             let Some(l) = landmark else {
                 return Ok(MultiValue::from_vec(vec![
@@ -581,12 +599,12 @@ mod tests {
         // The continent row.
         s.run("SetMapByID(485)").unwrap();
         assert_eq!(state(&s), (1, 0, 486, 0));
-        // Dalaran opens on its floor: the floor's continent, floor 1.
+        // Dalaran opens on its floor: the floor's continent, its zone index, floor 1.
         s.run("SetMapByID(504)").unwrap();
-        assert_eq!(state(&s), (1, 0, 505, 1));
+        assert_eq!(state(&s), (1, 2, 505, 1));
         assert_eq!(s.eval::<i64>("return GetNumDungeonMapLevels()").unwrap(), 2);
         s.run("SetDungeonMapLevel(2)").unwrap();
-        assert_eq!(state(&s), (1, 0, 505, 2));
+        assert_eq!(state(&s), (1, 2, 505, 2));
         s.run("SetDungeonMapLevel(9)").unwrap();
         assert_eq!(state(&s).3, 2);
         assert!(s.eval::<bool>("return IsZoomOutAvailable()").unwrap());
@@ -620,7 +638,7 @@ mod tests {
 
     #[test]
     fn the_cosmic_sheet_and_landmark_clicks() {
-        let s = script();
+        let mut s = script();
         s.run("SetMapZoom(-1)").unwrap();
         assert_eq!(state(&s), (-1, 0, 0, 0));
         assert!(!s.eval::<bool>("return IsZoomOutAvailable()").unwrap());
@@ -628,11 +646,23 @@ mod tests {
         assert!(s.run("SetMapZoom(3)").is_err());
         s.run("SetMapZoom(1, 2)").unwrap();
         // Zone 2 is Dalaran, which opens on its floor.
-        assert_eq!(state(&s), (1, 0, 505, 1));
+        assert_eq!(state(&s), (1, 2, 505, 1));
         s.run("ClickLandmark(57)").unwrap();
         assert_eq!(state(&s), (-1, 0, 536, 2));
         s.run("ClickLandmark(12345)").unwrap();
         assert_eq!(state(&s), (-1, 0, 536, 2));
+        s.run("ClickLandmark(56.9)").unwrap();
+        assert_eq!(state(&s), (-1, 0, 536, 1), "the link truncates");
+        let named = |name: &str| super::super::WorldMapLandmarkView {
+            name: name.into(),
+            ..Default::default()
+        };
+        s.set_world_map_landmarks(vec![named("A"), named("B")]);
+        let first = s
+            .eval::<String>("return (GetMapLandmarkInfo(1.9))")
+            .unwrap();
+        assert_eq!(first, "A", "the index truncates");
+        assert!(s.run("GetMapLandmarkInfo()").is_err());
         let (file, h, pow): (String, i64, i64) = s.eval("return GetMapInfo()").unwrap();
         assert_eq!((file.as_str(), h, pow), ("Map535", 501, 512));
         assert_eq!(

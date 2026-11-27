@@ -271,10 +271,11 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // InitiateTrade(unit): the unit menu's TRADE row.
+    // InitiateTrade(unit) (`0x522600`): the unit menu's TRADE row; the app holds its gates.
     g.set(
         "InitiateTrade",
-        lua.create_function(|lua, unit: String| {
+        lua.create_function(|lua, unit: Value| {
+            let unit = super::binding_abi::string_arg(lua, unit, "Usage: InitiateTrade(\"unit\")")?;
             lua.app_data_mut::<Model>()
                 .expect("model app_data")
                 .trade_initiates
@@ -523,6 +524,8 @@ mod tests {
         s.run("InitiateTrade('party2')").unwrap();
         assert_eq!(s.take_trade_initiates(), vec!["target", "party2"]);
         assert!(s.take_trade_initiates().is_empty(), "drained");
+        let err = s.run("InitiateTrade()").unwrap_err().to_string();
+        assert!(err.contains("Usage: InitiateTrade(\"unit\")"), "{err}");
 
         s.run("AcceptTrade()").unwrap();
         assert!(s.take_trade_accept());

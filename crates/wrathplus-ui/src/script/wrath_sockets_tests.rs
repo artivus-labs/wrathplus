@@ -65,12 +65,12 @@ fn a_published_session_opens_answers_and_its_end_closes() {
         assert(GetSocketTypes(1) == 'Meta' and GetSocketTypes(2) == 'Red')
         assert(select('#', GetSocketTypes(3)) == 0)
         local name, icon, matches = GetExistingSocketInfo(1)
-        assert(name == 'Old' and matches == true)
+        assert(name == 'Old' and matches == 1)
         assert(GetNewSocketInfo(1) == nil and select('#', GetNewSocketInfo(1)) == 3)
         name, icon, matches = GetNewSocketInfo(2)
         assert(name == 'Ruby' and matches == nil)
         assert(GetNewSocketLink(2):find('Ruby') and select('#', GetExistingSocketLink(2)) == 0)
-        assert(GetSocketItemBoundTradeable() == true and GetSocketItemRefundable() == nil)
+        assert(GetSocketItemBoundTradeable() == 1 and GetSocketItemRefundable() == nil)
     "#,
     )
     .unwrap();

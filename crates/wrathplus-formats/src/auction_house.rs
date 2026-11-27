@@ -31,6 +31,11 @@ pub struct AuctionHouseCatalog {
 }
 
 impl AuctionHouseCatalog {
+    /// Fixture constructor for tests; the live path reads `AuctionHouse.dbc`.
+    pub fn from_rows(houses: HashMap<u32, AuctionHouseInfo>) -> Self {
+        Self { houses }
+    }
+
     /// The row for `house_id`.
     pub fn get(&self, house_id: u32) -> Option<&AuctionHouseInfo> {
         self.houses.get(&house_id)

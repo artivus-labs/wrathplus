@@ -9,6 +9,7 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { AgentClient } from "../../mcp/src/client.ts";
+import { digestLines, flushNotices, NOTICED, NoticeBatch, passedLua } from "./notice.ts";
 import { type Frame, OmpRpc } from "./rpc.ts";
 import { ompCli, ompEnv, prepareWorkDir, type Settings, settingsFromEnv, trialRunning } from "./setup.ts";
 import { appendJsonl, totals, usageFromFrame } from "./usage.ts";
@@ -22,6 +23,9 @@ class Player {
   readonly inbox = new Inbox();
   readonly evidence = new Evidence();
   readonly repeats: Repeats;
+  readonly notices: NoticeBatch;
+  /** Notice.passed's cursor: where the next check-in's digest reads from. */
+  noticeCursor = 0;
   readonly usagePath: string;
   readonly logPath: string;
   rpc: OmpRpc | undefined;
@@ -41,6 +45,7 @@ class Player {
   constructor(readonly s: Settings) {
     this.client = new AgentClient(s.agentUrl, s.token);
     this.repeats = new Repeats(s.repeatMinutes * MINUTE);
+    this.notices = new NoticeBatch(s.noticeSeconds * 1000);
     this.usagePath = join(s.stateDir, "usage.jsonl");
     this.logPath = join(s.stateDir, "launcher.log");
     mkdirSync(s.stateDir, { recursive: true, mode: 0o700 });
@@ -174,7 +179,8 @@ class Player {
     } catch {
       // The client may be restarting; the planner will see that itself.
     }
-    const evidence = reason === "checkin" || reason === "reflect" ? [...this.repeats.take(), ...this.evidence.take()] : [];
+    const evidence =
+      reason === "checkin" || reason === "reflect" ? [...this.repeats.take(), ...this.evidence.take(), ...(await this.passed())] : [];
     return wakeMessage(reason, lines, status, this.s.checkinMinutes, evidence);
   }
 
@@ -198,6 +204,11 @@ class Player {
         since = read.next;
         for (const e of read.events) {
           this.evidence.add(e);
+          // What the character passed waits for its batch: one wake per window, not one each.
+          if (e.event === NOTICED) {
+            this.notices.add(e, Date.now());
+            continue;
+          }
           // A notable event repeating a recent wake (the same goal blocked again) is only counted.
           if (this.repeats.hold(e, classify(e, this.self), Date.now())) {
             this.log(`event ${e.event} (repeat, counted for the check-in)`);
@@ -211,6 +222,18 @@ class Player {
         this.log(`events: ${(error as Error).message.slice(0, 200)}`);
         await Bun.sleep(10_000);
       }
+    }
+  }
+
+  /** Every notice since the last check-in, muted or not, counted by kind (the client keeps them:
+   *  Notice.passed), for the check-in's evidence. */
+  async passed(): Promise<string[]> {
+    try {
+      const { lines, next } = digestLines(await this.client.lua(passedLua(this.noticeCursor)));
+      if (next !== undefined) this.noticeCursor = next;
+      return lines;
+    } catch {
+      return [];
     }
   }
 
@@ -249,6 +272,8 @@ class Player {
       }
       return;
     }
+    const noticed = flushNotices(this.notices, this.inbox, now);
+    if (noticed) this.log(`noticed ${noticed} (batched)`);
     if (this.pendingPrompt) {
       const message = this.pendingPrompt;
       this.pendingPrompt = undefined;

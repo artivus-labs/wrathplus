@@ -27,14 +27,15 @@ pub const BAG_SLOT_FIRST: u8 = 19;
 /// Equipped bag count (live-API bag ids 1..=4).
 pub const BAGS: u8 = 4;
 
-/// The bank's 24 generic slots, wire 39..62, streamed at login like the backpack.
-pub const BANK_SLOTS: u8 = 24;
+/// The bank's 28 generic slots, wire 39..66, streamed at login like the backpack
+/// ([`StorageSlots::GEOMETRY`]).
+pub const BANK_SLOTS: u8 = StorageSlots::GEOMETRY.bank_slots;
 
 /// The first bank generic slot in the player array (vmangos `BANK_SLOT_ITEM_START`).
 pub const BANK_SLOT_FIRST: u8 = 39;
 
-/// Bank bag count (live-API bag ids [`BANK_BAG_ID_FIRST`]..=10).
-pub const BANK_BAGS: u8 = 6;
+/// Bank bag count (live-API bag ids [`BANK_BAG_ID_FIRST`]..=11).
+pub const BANK_BAGS: u8 = StorageSlots::GEOMETRY.bank_bags;
 
 /// `BANK_CONTAINER` (`BankFrame.lua:1`).
 pub const BANK_CONTAINER: i64 = -1;

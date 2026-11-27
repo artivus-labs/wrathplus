@@ -1,11 +1,10 @@
-//! The hunter pet's paper-doll stat block (`GetPetHappiness`, `GetPetLoyalty`,
-//! `GetPetTrainingPoints`, `GetPetExperience`, `HasPetUI`) and the pet's family word and diet.
+//! The hunter pet's paper-doll stat block (`GetPetHappiness`, `GetPetExperience`, `HasPetUI`) and
+//! the pet's family word, icon and diet.
 //!
-//! The four stat bindings share one gate, `0x6116e0(pet)`: the pet resolves, has a
-//! `UNIT_FIELD_PETNUMBER`, is ours, and our class byte is Hunter, so a warlock's imp answers
-//! nothing. `UnitCreatureFamily("pet")` (`0x51a310`) has no class test, so the imp still shows
-//! "Imp", while `GetPetFoodTypes()` (`0x4bea10`) shares the `0x6116e0` gate, so a non-hunter's pet
-//! has no diet even when its family row has a food mask.
+//! The stat bindings share the hunter-pet test `0x71b630`: a `UNIT_FIELD_PETNUMBER` and a creator
+//! whose class byte is Hunter, taken here to be us, so a warlock's imp answers nothing.
+//! `UnitCreatureFamily("pet")` has no class test, so the imp still shows "Imp", while
+//! `GetPetFoodTypes()` (`0x5d3bd0`) and `GetPetIcon()` (`0x5d3d1c`) share the gate.
 
 use bevy::prelude::*;
 
@@ -100,41 +99,30 @@ fn stats_for(
         && self_store.map(|s| ((s.0.unit_bytes_0().unwrap_or(0) >> 8) & 0xff) as u8)
             == Some(CLASS_HUNTER);
     if !hunter {
-        // The family word passes the gate and the diet does not (module doc): a mind-controlled
-        // boar under a non-hunter (family 5, food mask 63) gets "Boar" and no diet.
+        // The family word passes the gate and the icon and diet do not (module doc): a
+        // mind-controlled boar under a non-hunter (family 5, food mask 63) gets "Boar" alone.
         return (
             has_ui,
             PetStats {
                 family,
-                // The icon passes with the word; whether the reference gates it is untraced.
-                icon,
                 ..PetStats::default()
             },
         );
     }
-    let (happiness, damage_percentage, loyalty_rate) = tables
+    let (happiness, damage_percentage) = tables
         .and_then(|t| t.personalities.for_pet(None))
         .map(|p| {
             let h = p.happiness(fields.unit_power(POWER_HAPPINESS).unwrap_or(0));
-            (Some(h.bucket), h.damage_percentage, h.loyalty_rate)
+            (Some(h.bucket), h.damage_percentage)
         })
         // No DBC: the binding's gate-failure numbers and a nil bucket.
-        .unwrap_or((None, 100.0, 0.0));
+        .unwrap_or((None, 100.0));
     (
         has_ui,
         PetStats {
             hunter_pet: true,
             happiness,
             damage_percentage,
-            loyalty_rate,
-            loyalty: tables.and_then(|t| {
-                t.loyalty
-                    // 12340 has no loyalty byte: level 0, the binding's nil.
-                    .name(0)
-                    .map(str::to_string)
-            }),
-            // 12340 has no training points.
-            training_points: (0, 0),
             experience: fields.unit_pet_experience(),
             family,
             icon,
@@ -198,26 +186,19 @@ fn feed_pet_stats(
         return;
     }
     // `UNIT_HAPPINESS`, the pet frame's icon repaint (`PetFrame.lua:63`). Deviation: fired when
-    // the bucket or its two tooltip figures change, not on every change of the happiness field as
+    // the bucket or its damage figure changes, not on every change of the happiness field as
     // in the reference, because no stock consumer reads the raw value.
-    let happiness_moved = last.as_ref().map(|(_, s)| {
-        (
-            s.happiness,
-            s.damage_percentage.to_bits(),
-            s.loyalty_rate.to_bits(),
-        )
-    }) != Some((
-        fresh.1.happiness,
-        fresh.1.damage_percentage.to_bits(),
-        fresh.1.loyalty_rate.to_bits(),
-    ));
+    let happiness_moved = last
+        .as_ref()
+        .map(|(_, s)| (s.happiness, s.damage_percentage.to_bits()))
+        != Some((fresh.1.happiness, fresh.1.damage_percentage.to_bits()));
     // The pet page's other repaint events (`PetPaperDollFrame.lua:9,21`), each fired off its own
     // values so happiness drift leaves them alone; `UNIT_PET_EXPERIENCE` repaints only the XP bar.
     let xp_moved = last.as_ref().map(|(_, s)| s.experience) != Some(fresh.1.experience);
     if happiness_moved {
         debug!(
-            "ui_pet_stats: happiness {:?} ({}% damage), loyalty {:?}",
-            fresh.1.happiness, fresh.1.damage_percentage, fresh.1.loyalty
+            "ui_pet_stats: happiness {:?} ({}% damage)",
+            fresh.1.happiness, fresh.1.damage_percentage
         );
     }
     // The family lands with the creature-query answer and fires nothing: the pet page registers no
@@ -377,8 +358,7 @@ mod tests {
         (NetCommands(tx), rx)
     }
 
-    /// On the real DBC data: a maxed pet's bucket with 125% damage; 12340 has no loyalty or
-    /// training points.
+    /// On the real DBC data: a maxed pet's bucket with 125% damage.
     #[test]
     fn a_hunters_boar_reads_every_field() {
         let Some(t) = tables() else { return };
@@ -386,9 +366,6 @@ mod tests {
         assert!(has_ui && s.hunter_pet);
         assert_eq!(s.happiness, Some(3));
         assert_eq!(s.damage_percentage, 125.0);
-        assert_eq!(s.loyalty_rate, 0.0, "12340 has no loyalty");
-        assert_eq!(s.loyalty, None);
-        assert_eq!(s.training_points, (0, 0));
         assert_eq!(s.experience, (4200, 8000));
     }
 
@@ -420,8 +397,6 @@ mod tests {
         );
         assert!(!s.hunter_pet);
         assert_eq!(s.happiness, None);
-        assert_eq!(s.loyalty, None);
-        assert_eq!(s.training_points, (0, 0));
         assert_eq!(s.experience, (0, 0));
     }
 
@@ -435,26 +410,12 @@ mod tests {
         assert!(!s.hunter_pet);
     }
 
-    /// Level 0 is nil, not "Rebellious": the client's own bound.
-    #[test]
-    fn loyalty_level_zero_is_nil() {
-        let Some(t) = tables() else { return };
-        let fresh = ObjectStore(ObjectFields::from_pairs(&[
-            (PETNUMBER, 42),
-            (BYTES_1, 0),
-            (POWER5, 1_000_000),
-        ]));
-        let (_, s) = stats_for(Some(&fresh), Some(&hunter()), Some(&t), no_family());
-        assert_eq!(s.loyalty, None);
-        assert_eq!(s.happiness, Some(3), "…but happiness still answers");
-    }
-
     #[test]
     fn absent_dbc_data_degrades_to_the_failure_numbers() {
         let (has_ui, s) = stats_for(Some(&boar()), Some(&hunter()), None, no_family());
         assert!(has_ui && s.hunter_pet);
         assert_eq!(s.happiness, None);
-        assert_eq!((s.damage_percentage, s.loyalty_rate), (100.0, 0.0));
+        assert_eq!(s.damage_percentage, 100.0);
     }
 
     /// A missing tooltip key is silent: `getglobal` answers nil and the tooltip loses a line.
@@ -565,19 +526,20 @@ mod tests {
         let boar_diet: Vec<String> = ["Meat", "Fish", "Cheese", "Bread", "Fungus", "Fruit"]
             .map(String::from)
             .to_vec();
+        let icon = || Some(r"Interface\Icons\Ability_Hunter_Pet_Boar".to_string());
         let (_, s) = stats_for(
             Some(&boar()),
             Some(&warlock()),
             Some(&t),
-            (Some("Boar".into()), None, boar_diet.clone()),
+            (Some("Boar".into()), icon(), boar_diet.clone()),
         );
         assert!(!s.hunter_pet);
         assert_eq!(s.family.as_deref(), Some("Boar"), "the word is ungated");
         assert!(
             s.food_types.is_empty(),
-            "…but the diet shares 0x6116e0 with the stats"
+            "…but the diet shares 0x71b630 with the stats"
         );
-        assert_eq!(s.loyalty, None, "…as does the hunter machinery");
+        assert_eq!(s.icon, None, "…as does GetPetIcon (0x5d3d1c)");
         assert_eq!(s.happiness, None);
 
         // Under a hunter it gets both.
@@ -585,9 +547,10 @@ mod tests {
             Some(&boar()),
             Some(&hunter()),
             Some(&t),
-            (Some("Boar".into()), None, boar_diet.clone()),
+            (Some("Boar".into()), icon(), boar_diet.clone()),
         );
         assert_eq!(s.family.as_deref(), Some("Boar"));
+        assert_eq!(s.icon, icon());
         assert_eq!(s.food_types, boar_diet);
     }
 

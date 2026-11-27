@@ -7,11 +7,13 @@ __azb_fire_event = nil
 
 local function none() end
 local function zero() return 0 end
+local function null() return nil end
 
 -- ── CVars ──────────────────────────────────────────────────────────────────────────────────────
 
 -- ── talents, titles, flags ─────────────────────────────────────────────────────────────────────
-IsStereoVideoAvailable = IsStereoVideoAvailable or none
+-- `0x54ef90`: 1 or nil, one value; the renderer has no stereo mode.
+IsStereoVideoAvailable = IsStereoVideoAvailable or function() return nil end
 
 -- ── Battle.net, voice chat ─────────────────────────────────────────────────────────────────────
 BNFeaturesEnabled, BNFeaturesEnabledAndConnected, BNConnected = none, none, none
@@ -21,10 +23,17 @@ BNGetMaxPlayersInConversation = zero
 BNGetNumConversationMembers = zero
 BNGetFriendInfo, BNGetFriendInfoByID, BNGetToonInfo, BNGetFriendInviteInfo = none, none, none, none
 BNGetConversationInfo, BNGetCustomMessageTable, BNGetInfo = none, none, none
-IsVoiceChatEnabled, IsVoiceChatAllowed, IsVoiceChatAllowedByServer = none, none, none
+-- Voice is off, and 12340's queries answer one nil for it (`0x4fcbf0`, `0x4fcc60`, `0x4fccb0`;
+-- `GetVoiceCurrentSessionID` `0x7db1f0` with no session).
+IsVoiceChatEnabled, IsVoiceChatAllowed, IsVoiceChatAllowedByServer = null, null, null
 VoiceIsDisabledByClient = function() return 1 end
 GetNumVoiceSessions = zero
-GetVoiceCurrentSessionID, GetVoiceStatus = none, none
+GetVoiceCurrentSessionID = null
+-- GetVoiceStatus(unit) (`0x7db8d0`): nil for a unit or name that resolves (`0x4fb580`), nothing for
+-- a non-string or one that names nobody. Labelled: the name-cache lookup by name is not modelled.
+function GetVoiceStatus(unit)
+    if (type(unit) == "string" or type(unit) == "number") and UnitGUID(unit) then return nil end
+end
 -- GetVoiceSessionInfo(index) (`0x7db0b0`): no voice session, so nil, one value.
 function GetVoiceSessionInfo() return nil end
 Sound_ChatSystem_GetNumInputDrivers, Sound_ChatSystem_GetNumOutputDrivers = zero, zero
@@ -34,7 +43,8 @@ Sound_GameSystem_GetNumOutputDrivers = Sound_GameSystem_GetNumOutputDrivers or z
 Sound_GameSystem_GetOutputDriverNameByIndex = none
 
 -- ── misc build-12340 queries ───────────────────────────────────────────────────────────────────
-GetActiveVoiceChannel, GetNumVoiceSessionMembersBySessionID = none, zero
+-- `0x4fbd40`: nil with no active channel.
+GetActiveVoiceChannel, GetNumVoiceSessionMembersBySessionID = null, zero
 
 -- ── the stock UI's CVars, at build 12340's defaults, for any the host has not registered ────────
 -- Audited against 12340's CVar::Register calls (2026-10-25); `locale` keeps the install's own.
@@ -90,6 +100,11 @@ do
     componentTextureLevel = "8",
     consolidateBuffs = "0",
     conversationMode = "popout",
+    -- `0x51f01a`-`0x51f08c`: the currency list's unused and backpack bits (wrath_currency.rs).
+    currencyTokensBackpack1 = "0",
+    currencyTokensBackpack2 = "0",
+    currencyTokensUnused1 = "0",
+    currencyTokensUnused2 = "0",
     deselectOnClick = "0",
     desktopGamma = "1",
     displayFreeBagSlots = "0",
@@ -102,7 +117,7 @@ do
     environmentDetail = "1",
     equipmentManager = "0",
     extShadowQuality = "0",
-    farclip = "1000",
+    farclip = "350",
     fctAuras = "0",
     fctCombatState = "0",
     fctComboPoints = "0",
@@ -308,7 +323,10 @@ end
 IsPlayerResolutionAvailable = IsPlayerResolutionAvailable or function() return 1 end
 
 -- ── vehicles, tutorials, guild log, friends ────────────────────────────────────────────────────
-UnitIsTalking = UnitIsTalking or none
+-- `0x7df0b0`: nil for a string with no voice session, nothing for a non-string.
+UnitIsTalking = UnitIsTalking or function(unit)
+    if type(unit) == "string" or type(unit) == "number" then return nil end
+end
 
 -- ── the engine's combat-log unit-flag constants (the store is native, wrath_combat_log.rs) ─────
 COMBATLOG_OBJECT_AFFILIATION_MINE, COMBATLOG_OBJECT_AFFILIATION_PARTY = 0x1, 0x2

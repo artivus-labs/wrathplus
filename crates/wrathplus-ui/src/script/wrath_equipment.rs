@@ -16,6 +16,8 @@ const ICON_PATH: &str = "Interface\\Icons\\";
 /// One saved set as the gear manager reads it.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct EquipmentSetView {
+    /// The record's id (`[rec+0x10]`), the server's set index: sparse after a delete.
+    pub id: u32,
     pub name: String,
     /// The icon's file name under `Interface\Icons`, as the server stores it.
     pub icon: String,
@@ -88,18 +90,19 @@ fn texture(icon: &str) -> String {
     format!("{ICON_PATH}{icon}")
 }
 
-fn find(lua: &Lua, name: &str) -> Option<(usize, EquipmentSetView)> {
+fn find(lua: &Lua, name: &str) -> Option<EquipmentSetView> {
     let state = lua.app_data_ref::<State>()?;
-    let i = state.sets.iter().position(|s| s.name == name)?;
-    Some((i, state.sets[i].clone()))
+    state.sets.iter().find(|s| s.name == name).cloned()
 }
 
-/// A 1-based equipment slot argument; none outside 1..19.
-fn slot_arg(lua: &Lua, slot: Value) -> Option<usize> {
-    let slot = binding_abi::coerced_number(lua, Some(slot)) as i64;
-    usize::try_from(slot - 1)
+/// A 1-based equipment slot argument through `lua_tonumber` and `__ftol2`, outside 1..19 the
+/// verb's usage line (`0x5ad78a`, `0x5ad7da`, `0x5ad84a`).
+fn slot_arg(lua: &Lua, slot: Value, usage: &'static str) -> mlua::Result<usize> {
+    let slot = binding_abi::ftol(binding_abi::coerced_number(lua, Some(slot)));
+    usize::try_from(slot.wrapping_sub(1))
         .ok()
         .filter(|&s| s < EQUIPMENT_SET_SLOTS)
+        .ok_or_else(|| mlua::Error::runtime(usage))
 }
 
 /// `SaveEquipmentSet`'s icon index (PaperDollFrame.lua:2491): `-slot` is the worn item's icon,
@@ -184,12 +187,12 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             let set = lua
                 .app_data_ref::<State>()
                 .and_then(|s| s.sets.get(index as usize - 1).cloned());
-            // name, texture and the 0-based index (`lessIndex`).
+            // name, texture and the record id (`[rec+0x10]`, `0x5af193`).
             match set {
                 Some(set) => Ok(MultiValue::from_vec(vec![
                     Value::String(lua.create_string(&set.name)?),
                     Value::String(lua.create_string(texture(&set.icon))?),
-                    Value::Integer(i64::from(index - 1)),
+                    Value::Integer(i64::from(set.id)),
                 ])),
                 None => Ok(MultiValue::new()),
             }
@@ -200,10 +203,11 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         lua.create_function(|lua, name: Value| {
             let usage = "Usage: GetEquipmentSetInfoByName(\"setName\")";
             let name = binding_abi::string_arg(lua, name, usage)?;
+            // The bare icon name (`[rec+0x14]`, `0x5af220`) and the record id.
             match find(lua, &name) {
-                Some((i, set)) => Ok(MultiValue::from_vec(vec![
-                    Value::String(lua.create_string(texture(&set.icon))?),
-                    Value::Integer(i as i64),
+                Some(set) => Ok(MultiValue::from_vec(vec![
+                    Value::String(lua.create_string(&set.icon)?),
+                    Value::Integer(i64::from(set.id)),
                 ])),
                 None => Ok(MultiValue::new()),
             }
@@ -215,7 +219,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             let usage = "Usage: GetEquipmentSetItemIDs(\"setName\" [, returnTable])";
             let name = binding_abi::string_arg(lua, name, usage)?;
             // A missing set must not touch a caller's table (0x5AEF90).
-            let Some((_, set)) = find(lua, &name) else {
+            let Some(set) = find(lua, &name) else {
                 return Ok(MultiValue::new());
             };
             let out = match out {
@@ -234,7 +238,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             let usage = "Usage: EquipmentSetContainsLockedItems(\"setName\")";
             let name = binding_abi::string_arg(lua, name, usage)?;
             Ok(match find(lua, &name) {
-                Some((_, set)) => MultiValue::from_vec(vec![Value::Boolean(set.locked)]),
+                Some(set) => MultiValue::from_vec(vec![Value::Boolean(set.locked)]),
                 None => MultiValue::new(),
             })
         })?,
@@ -288,29 +292,36 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             Ok(())
         })?,
     )?;
-    for (global, ignore) in [
-        ("EquipmentManagerIgnoreSlotForSave", true),
-        ("EquipmentManagerUnignoreSlotForSave", false),
+    // The un-ignore verb raises another verb's line (`0xa16ca8`), as 12340 does.
+    for (global, usage, ignore) in [
+        (
+            "EquipmentManagerIgnoreSlotForSave",
+            "Usage: EquipmentManagerIgnoreSlotForSave(slot)",
+            true,
+        ),
+        (
+            "EquipmentManagerUnignoreSlotForSave",
+            "Usage: UpdatePendingEquipmentSetSlot(slot)",
+            false,
+        ),
     ] {
         globals.set(
             global,
             lua.create_function(move |lua, slot: Value| {
-                let slot = slot_arg(lua, slot);
-                if let (Some(slot), Some(mut state)) = (slot, lua.app_data_mut::<State>()) {
+                let slot = slot_arg(lua, slot, usage)?;
+                if let Some(mut state) = lua.app_data_mut::<State>() {
                     state.ignored[slot] = ignore;
                 }
                 Ok(())
             })?,
         )?;
     }
-    // This and `EquipmentSetContainsLockedItems` push Lua booleans; whether build 12340 pushes
-    // 1/nil instead is untraced.
+    // A real boolean (`0x84e4d0` at `0x5ad7ef`); `EquipmentSetContainsLockedItems`'s is untraced.
     globals.set(
         "EquipmentManagerIsSlotIgnoredForSave",
         lua.create_function(|lua, slot: Value| {
-            let slot = slot_arg(lua, slot);
-            Ok(slot
-                .is_some_and(|slot| lua.app_data_ref::<State>().is_some_and(|s| s.ignored[slot])))
+            let slot = slot_arg(lua, slot, "Usage: EquipmentSetIsSlotIgnoredForSave(slot)")?;
+            Ok(lua.app_data_ref::<State>().is_some_and(|s| s.ignored[slot]))
         })?,
     )?;
     globals.set(
@@ -331,7 +342,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         lua.create_function(|lua, (this, name): (Table, Value)| {
             let usage = "Usage: GameTooltip:SetEquipmentSet(\"setName\")";
             let name = binding_abi::string_arg(lua, name, usage)?;
-            if let Some((_, set)) = find(lua, &name) {
+            if let Some(set) = find(lua, &name) {
                 this.call_method::<()>("SetText", set.name)?;
                 let id = super::object::decode_id(&this)?;
                 super::event::fire_widget_handler(lua, id, "OnTooltipSetEquipmentSet", vec![])?;
@@ -396,6 +407,7 @@ mod tests {
         items[0] = 40_000;
         items[4] = super::EQUIPMENT_SET_IGNORED_SLOT;
         super::EquipmentSetView {
+            id: 0,
             name: name.into(),
             icon: icon.into(),
             items,
@@ -416,10 +428,12 @@ mod tests {
         "#,
         )
         .unwrap();
-        let sets = vec![
-            view("Tank", "INV_Shield_06"),
-            view("Heal", "Spell_Holy_Heal"),
-        ];
+        // Record ids 0 and 2, as after set 1 was deleted.
+        let heal = super::EquipmentSetView {
+            id: 2,
+            ..view("Heal", "Spell_Holy_Heal")
+        };
+        let sets = vec![view("Tank", "INV_Shield_06"), heal];
         ui.set_equipment_sets(sets.clone());
         ui.set_equipment_sets(sets);
         ui.equipment_swap_finished(true, Some("Heal".into()));
@@ -430,10 +444,10 @@ mod tests {
             assert(seen[1][1] == 'EQUIPMENT_SETS_CHANGED')
             assert(seen[2][1] == 'EQUIPMENT_SWAP_FINISHED' and seen[2][2] == true and seen[2][3] == 'Heal')
             assert(GetNumEquipmentSets() == 2)
-            local name, tex, less = GetEquipmentSetInfo(2)
-            assert(name == 'Heal' and tex == 'Interface\\Icons\\Spell_Holy_Heal' and less == 1)
-            local tex, less = GetEquipmentSetInfoByName('Tank')
-            assert(tex == 'Interface\\Icons\\INV_Shield_06' and less == 0)
+            local name, tex, id = GetEquipmentSetInfo(2)
+            assert(name == 'Heal' and tex == 'Interface\\Icons\\Spell_Holy_Heal' and id == 2)
+            local icon, id = GetEquipmentSetInfoByName('Heal')
+            assert(icon == 'Spell_Holy_Heal' and id == 2, icon)
             local ids = GetEquipmentSetItemIDs('Tank')
             assert(#ids == 19 and ids[1] == 40000 and ids[5] == 1 and ids[2] == 0)
             local mine = {}
@@ -454,8 +468,18 @@ mod tests {
             r#"
             EquipmentManagerIgnoreSlotForSave(5)
             EquipmentManagerIgnoreSlotForSave(19)
-            EquipmentManagerIgnoreSlotForSave(20)
-            EquipmentManagerUnignoreSlotForSave(19)
+            EquipmentManagerUnignoreSlotForSave(19.9)
+            for verb, line in pairs({
+                EquipmentManagerIgnoreSlotForSave = 'EquipmentManagerIgnoreSlotForSave',
+                EquipmentManagerUnignoreSlotForSave = 'UpdatePendingEquipmentSetSlot',
+                EquipmentManagerIsSlotIgnoredForSave = 'EquipmentSetIsSlotIgnoredForSave',
+            }) do
+                for _, slot in ipairs({0, 20}) do
+                    local ok, err = pcall(_G[verb], slot)
+                    assert(not ok and err:find('Usage: ' .. line .. '(slot)', 1, true), err)
+                end
+                assert(not pcall(_G[verb]))
+            end
             assert(EquipmentManagerIsSlotIgnoredForSave(5) and not EquipmentManagerIsSlotIgnoredForSave(19))
             SaveEquipmentSet('PvP', 1)
             EquipmentManagerClearIgnoredSlotsForSave()

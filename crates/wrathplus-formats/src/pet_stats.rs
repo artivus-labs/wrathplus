@@ -1,8 +1,6 @@
-//! `PetPersonality.dbc` and `PetLoyalty.dbc`, behind a hunter pet's happiness and loyalty
-//! readouts. `GetPetHappiness` buckets on its own (`0x4be947`-`0x4be9c3`), counting the row's
-//! thresholds the happiness power (`UNIT_FIELD_POWER5`) meets. Its store, `[0xc0d9e0]`/`[0xc0d9e4]`
-//! (rows and max id), is `PetPersonality.dbc` (loader `0x54bce0`), whose `0x4c`-byte rows end in
-//! the three triples; `GetPetLoyalty` reads `PetLoyalty.dbc` at `[[0xc0d9f4][lvl] + 4*locale + 4]`.
+//! `PetPersonality.dbc` and `PetLoyalty.dbc`, behind a hunter pet's happiness. `GetPetHappiness`
+//! (`0x5d3b00`) buckets on its own (`0x71f400`), comparing the happiness power (`UNIT_FIELD_POWER5`)
+//! with row 1's thresholds (`0x71f390`). Build 12340 ships no `PetLoyalty.dbc`.
 
 use std::collections::HashMap;
 
@@ -41,34 +39,25 @@ pub struct PetPersonality {
     pub loyalty_rate: [f32; 3],
 }
 
-/// What `GetPetHappiness` answers: the bucket plus the two numbers it selects.
+/// What `GetPetHappiness` answers: the bucket and the damage it selects.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PetHappiness {
-    /// `0..=3`. `0` is a number, not the failure case: the client pushes `0` with the failure's
-    /// tail, and `PetFrame.lua`, with no branch for it, keeps the icon's old texcoords.
+    /// `1..=3`, the bucket index plus one (`0x5d3b53`).
     pub bucket: u32,
-    /// The damage percentage, times the client's `100.0f` (`[0x806b10]`); `100.0` for bucket 0.
+    /// The bucket's damage multiplier times `100.0f` (`0x9e8cc8`).
     pub damage_percentage: f32,
-    /// The loyalty rate, unscaled and possibly negative; `0.0` for bucket 0.
-    pub loyalty_rate: f32,
 }
 
 impl PetPersonality {
-    /// Bucket a raw happiness power and pick the row's two numbers (`0x4be981`).
+    /// Bucket a raw happiness power: `0x71f400` starts at the second threshold (`+0xc`), signed,
+    /// so the first is never read and every value lands in `1..=3`.
     pub fn happiness(&self, raw: u32) -> PetHappiness {
-        let bucket = self.thresholds.iter().take_while(|&&t| raw >= t).count();
-        // Bucket 0 takes the gate-failure tail (`0x4be9a8 je 0x4be9e9`) instead of indexing.
-        let Some(i) = bucket.checked_sub(1) else {
-            return PetHappiness {
-                bucket: 0,
-                damage_percentage: 100.0,
-                loyalty_rate: 0.0,
-            };
-        };
+        let i = (self.thresholds[1..].iter())
+            .take_while(|&&t| raw as i32 >= t as i32)
+            .count();
         PetHappiness {
-            bucket: bucket as u32,
+            bucket: i as u32 + 1,
             damage_percentage: self.damage[i] * 100.0,
-            loyalty_rate: self.loyalty_rate[i],
         }
     }
 }
@@ -236,17 +225,16 @@ mod tests {
         }
     }
 
-    /// Bucket 0 is reachable only through a row whose first threshold is above the raw value.
+    /// The first threshold is never read (`0x71f41c`): a value below it is still bucket 1.
     #[test]
-    fn bucket_zero_is_a_number_not_a_failure() {
+    fn a_value_below_the_first_threshold_is_bucket_one() {
         let p = PetPersonality {
             thresholds: [10, 20, 30],
             damage: [0.75, 1.0, 1.25],
             loyalty_rate: [-10.0, 5.0, 20.0],
         };
         let h = p.happiness(9);
-        assert_eq!(h.bucket, 0);
-        assert_eq!((h.damage_percentage, h.loyalty_rate), (100.0, 0.0));
+        assert_eq!((h.bucket, h.damage_percentage), (1, 75.0));
     }
 
     /// Build 12340 ships no `PetLoyalty.dbc`: the table loads empty and every level is nil.

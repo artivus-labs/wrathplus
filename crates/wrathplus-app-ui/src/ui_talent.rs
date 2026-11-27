@@ -16,6 +16,7 @@ use bevy::prelude::*;
 use wrathplus_formats::{Talent, TalentCatalog};
 use wrathplus_ui::script::{
     ScriptValue, TalentPrereqView, TalentTabView, TalentUiState, TalentView, UiScript,
+    WrathTalentGroups,
 };
 use wrathplus_ui::strings::{fill, Arg};
 
@@ -72,6 +73,7 @@ fn load_talents(mut commands: Commands, assets: Option<Res<WorldAssets>>) {
 #[derive(Default)]
 struct FeedMemory {
     pushed: TalentUiState,
+    groups: WrathTalentGroups,
     /// `None` until the first read, which gives zero deltas.
     points: Option<(u32, u32)>,
 }
@@ -120,76 +122,106 @@ fn feed_talents(
     if gate.skip() {
         return;
     }
-    let (Some(talents), Some(spells)) = (talents.as_deref(), spells.as_deref()) else {
-        return;
-    };
-    let Ok(store) = self_q.single() else {
-        return;
-    };
-    let race = store.0.unit_race().unwrap_or(0);
-    let class = store.0.unit_class().unwrap_or(0);
-    let points = (
-        player_talent_state(progress.as_deref()).map_or_else(
-            || store.0.player_talent_points().unwrap_or(0),
-            |(unspent, _)| unspent,
-        ),
-        store.0.player_free_professions().unwrap_or(0),
-    );
-    // Scoped: the `GlobalStrings.lua` lookup borrows the VM, which the push needs mutably.
-    let fresh = {
-        let get = |key: &str| {
-            script
-                .lua()
-                .globals()
-                .get::<String>(key)
-                .ok()
-                .filter(|t| !t.is_empty())
+    let mut groups = player_groups(progress.as_deref());
+    // `0x5c9ed7`: a packet that moves the active group fires (new, old), each 1-based or 0 without
+    // groups (`0x5c9edb`-`0x5c9ef2`); a reloaded VM is seeded silently.
+    let packet = progress
+        .as_ref()
+        .is_some_and(|p| p.talents.contains_key(&false));
+    let group_change = (packet && !vm_reset && groups.active != memory.groups.active).then(|| {
+        let n = |g: &WrathTalentGroups| (g.count > 0).then_some(i64::from(g.active) + 1);
+        (n(&groups).unwrap_or(0), n(&memory.groups).unwrap_or(0))
+    });
+    'pages: {
+        let (Some(talents), Some(spells)) = (talents.as_deref(), spells.as_deref()) else {
+            break 'pages;
         };
-        build_pages_by(
-            &talents.catalog,
-            &|t| player_rank(t, &actions.spells, progress.as_deref()),
-            &|spell| actions.spells.contains(&spell),
-            &spells.catalog,
-            race,
-            class,
-            points,
-            &get,
-        )
-    };
-    if fresh != memory.pushed {
-        gate.audit("feed_talents", "the talent pages");
-        debug!(
-            "ui_talent: fed {} tab(s), {} points",
-            fresh.tabs.len(),
-            points.0
-        );
-        script.set_talents(fresh.clone());
-        memory.pushed = fresh;
-        // Build-12340 PlayerTalentFrame repaints on this event, after its getters are updated.
-        script.fire_event("PLAYER_TALENT_UPDATE", vec![]);
-        // The talent and profession point deltas, as the reference's `SignalEvent2` sends them:
-        // `ChatFrame.lua:1326` tests `arg2 > 0` unguarded, so an argless fire raises.
-        // `memory.points` still holds the previous pair here.
-        let (talent_delta, profession_delta) = match memory.points {
-            Some((old_talent, old_professions)) => (
-                i64::from(points.0) - i64::from(old_talent),
-                i64::from(points.1) - i64::from(old_professions),
+        let Ok(store) = self_q.single() else {
+            break 'pages;
+        };
+        let race = store.0.unit_race().unwrap_or(0);
+        let class = store.0.unit_class().unwrap_or(0);
+        let points = (
+            player_talent_state(progress.as_deref()).map_or_else(
+                || store.0.player_talent_points().unwrap_or(0),
+                |(unspent, _)| unspent,
             ),
-            None => (0, 0),
-        };
-        script.fire_event(
-            "CHARACTER_POINTS_CHANGED",
-            vec![
-                ScriptValue::Int(talent_delta),
-                ScriptValue::Int(profession_delta),
-            ],
+            store.0.player_free_professions().unwrap_or(0),
         );
+        // Scoped: the `GlobalStrings.lua` lookup borrows the VM, which the push needs mutably.
+        let (fresh, inactive) = {
+            let get = |key: &str| {
+                script
+                    .lua()
+                    .globals()
+                    .get::<String>(key)
+                    .ok()
+                    .filter(|t| !t.is_empty())
+            };
+            let build = |rank: &dyn Fn(&Talent) -> u32, points| {
+                build_pages_by(
+                    &talents.catalog,
+                    rank,
+                    &|spell| actions.spells.contains(&spell),
+                    &spells.catalog,
+                    race,
+                    class,
+                    points,
+                    &get,
+                )
+            };
+            let fresh = build(
+                &|t| player_rank(t, &actions.spells, progress.as_deref()),
+                points,
+            );
+            let inactive = inactive_group(progress.as_deref(), &fresh, &build);
+            (fresh, inactive)
+        };
+        groups.inactive = inactive;
+        let regrouped = push_groups(&mut script, memory, &groups);
+        if fresh != memory.pushed || regrouped {
+            gate.audit("feed_talents", "the talent pages");
+            debug!(
+                "ui_talent: fed {} tab(s), {} points",
+                fresh.tabs.len(),
+                points.0
+            );
+            if fresh != memory.pushed {
+                script.set_talents(fresh.clone());
+            }
+            memory.pushed = fresh;
+            // Build-12340 PlayerTalentFrame repaints on this event, after its getters are updated.
+            script.fire_event("PLAYER_TALENT_UPDATE", vec![]);
+            // The talent and profession point deltas, as the reference's `SignalEvent2` sends them:
+            // `ChatFrame.lua:1326` tests `arg2 > 0` unguarded, so an argless fire raises.
+            // `memory.points` still holds the previous pair here.
+            let (talent_delta, profession_delta) = match memory.points {
+                Some((old_talent, old_professions)) => (
+                    i64::from(points.0) - i64::from(old_talent),
+                    i64::from(points.1) - i64::from(old_professions),
+                ),
+                None => (0, 0),
+            };
+            script.fire_event(
+                "CHARACTER_POINTS_CHANGED",
+                vec![
+                    ScriptValue::Int(talent_delta),
+                    ScriptValue::Int(profession_delta),
+                ],
+            );
+        }
+        // The free-professions line must not be composed here: the stock `ChatFrame_OnEvent` arm
+        // (`ChatFrame.lua:1324-1334`) prints `LEVEL_UP_SKILL_POINTS` itself on `arg2 > 0`.
+        if memory.points != Some(points) {
+            gate.audit("feed_talents", "the points memo");
+            memory.points = Some(points);
+        }
     }
-    // The free-professions line must not be composed here: the stock `ChatFrame_OnEvent` arm
-    // (`ChatFrame.lua:1324-1334`) prints `LEVEL_UP_SKILL_POINTS` itself on `arg2 > 0`.
-    if memory.points != Some(points) {
-        gate.audit("feed_talents", "the points memo");
-        memory.points = Some(points);
+    push_groups(&mut script, memory, &groups);
+    // After `PLAYER_TALENT_UPDATE`, as the handler signals `0x271` before `0x272`.
+    if let Some((new, old)) = group_change {
+        let args = vec![ScriptValue::Int(new), ScriptValue::Int(old)];
+        script.fire_event("ACTIVE_TALENT_GROUP_CHANGED", args);
     }
 }
 
@@ -201,13 +233,65 @@ fn player_talent_state(
     Some((*unspent, groups.get(usize::from(*active))?))
 }
 
+/// The player's group count and active group off the talents packet, zero without one.
+fn player_groups(progress: Option<&WrathProgress>) -> WrathTalentGroups {
+    progress.and_then(|p| p.talents.get(&false)).map_or_else(
+        Default::default,
+        |(_, active, groups)| WrathTalentGroups {
+            count: groups.len() as u32,
+            active: u32::from(*active),
+            inactive: None,
+        },
+    )
+}
+
+/// Push the group state when it moved; whether it did.
+fn push_groups(script: &mut UiScript, memory: &mut FeedMemory, groups: &WrathTalentGroups) -> bool {
+    if *groups == memory.groups {
+        return false;
+    }
+    script.set_talent_groups(groups.clone());
+    memory.groups = groups.clone();
+    true
+}
+
+/// A page build over a rank source and a points pair, as [`build_pages_by`] takes them.
+type PageBuild<'a> = dyn Fn(&dyn Fn(&Talent) -> u32, (u32, u32)) -> TalentUiState + 'a;
+
+/// The other group's pages as 12340's `0x5c9ca0` keeps them: its own ranks, and as unspent the
+/// active group's spent and unspent points less its own spent, at least 0 (`0x5c9d30`-`0x5c9d36`).
+fn inactive_group(
+    progress: Option<&WrathProgress>,
+    active: &TalentUiState,
+    build: &PageBuild<'_>,
+) -> Option<(u32, TalentUiState)> {
+    let (unspent, active_index, groups) = progress?.talents.get(&false)?;
+    let (index, group) = groups
+        .iter()
+        .enumerate()
+        .find(|&(i, _)| i != usize::from(*active_index))?;
+    let rank = |t: &Talent| group_rank(t, group);
+    let spent = |p: &TalentUiState| p.tabs.iter().map(|t| t.points_spent).sum::<u32>();
+    let mut pages = build(&rank, (0, active.points.1));
+    let free = (spent(active) + unspent).saturating_sub(spent(&pages));
+    if free > 0 {
+        pages = build(&rank, (free, active.points.1));
+    }
+    Some((index as u32, pages))
+}
+
+/// A talent's rank in a packet group: its 0-based rank plus one, capped.
+fn group_rank(t: &Talent, group: &wrathplus_protocol::events::TalentGroup) -> u32 {
+    group
+        .talents
+        .iter()
+        .find(|&&(id, _)| id == t.id)
+        .map_or(0, |&(_, rank)| (u32::from(rank) + 1).min(t.max_rank()))
+}
+
 fn player_rank(t: &Talent, known: &BTreeSet<u32>, progress: Option<&WrathProgress>) -> u32 {
     match player_talent_state(progress) {
-        Some((_, group)) => group
-            .talents
-            .iter()
-            .find(|&&(id, _)| id == t.id)
-            .map_or(0, |&(_, rank)| (u32::from(rank) + 1).min(t.max_rank())),
+        Some((_, group)) => group_rank(t, group),
         None => rank_of(t, known),
     }
 }

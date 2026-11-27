@@ -37,7 +37,7 @@ fn recipe(
 }
 
 /// One "Cloth" group: row 1 the header, then Simple Robe (tier 0) and Bolt of Linen Cloth (tier 3).
-fn two_recipe_state() -> TradeSkillState {
+pub(super) fn two_recipe_state() -> TradeSkillState {
     TradeSkillState {
         line: 197,
         line_name: "Tailoring".into(),
@@ -244,7 +244,7 @@ fn do_trade_skill_and_getters_no_op_on_a_header_index() {
     assert_eq!(
         s.eval::<(i64, i64)>("return GetTradeSkillNumMade(1)")
             .unwrap(),
-        (0, 0)
+        (1, 1)
     );
     assert!(s
         .eval::<bool>("return GetTradeSkillCooldown(1) == nil")
@@ -264,7 +264,7 @@ fn do_trade_skill_and_getters_no_op_on_a_header_index() {
         "a header index queues no craft"
     );
 
-    // A header index leaves the selection as it was.
+    // A header index clears the selection (`0x5da958`).
     s.run("SelectTradeSkill(2)").unwrap(); // "Alpha Bolt", row 2
     assert_eq!(
         s.eval::<i64>("return GetTradeSkillSelectionIndex()")
@@ -275,8 +275,7 @@ fn do_trade_skill_and_getters_no_op_on_a_header_index() {
     assert_eq!(
         s.eval::<i64>("return GetTradeSkillSelectionIndex()")
             .unwrap(),
-        2,
-        "a header index never clears or changes the selection"
+        0
     );
 }
 
@@ -463,9 +462,9 @@ fn do_trade_skill_drains_spell_id_and_count() {
     assert_eq!(s.take_trade_skill_dos(), vec![(2963, 5)]);
     assert!(s.take_trade_skill_dos().is_empty(), "drained");
 
-    // Row 2 = Simple Robe (spell 3919, numAvailable 0): a missing or zero count is 1 (`0x500280`).
+    // Row 2 = Simple Robe (spell 3919, numAvailable 0): the cap takes it to 0 (`0x5dac9c`).
     s.run("DoTradeSkill(2) DoTradeSkill(2, 0)").unwrap();
-    assert_eq!(s.take_trade_skill_dos(), vec![(3919, 1), (3919, 1)]);
+    assert_eq!(s.take_trade_skill_dos(), vec![(3919, 0), (3919, 0)]);
 
     s.run("DoTradeSkill(99)").unwrap();
     assert!(s.take_trade_skill_dos().is_empty());
@@ -494,7 +493,7 @@ fn no_snapshot_shapes_unknown_line_and_nil_info() {
     assert_eq!(
         s.eval::<(i64, i64)>("return GetTradeSkillNumMade(1)")
             .unwrap(),
-        (0, 0)
+        (1, 1)
     );
     assert!(s
         .eval::<bool>("return GetTradeSkillCooldown(1) == nil")
@@ -515,8 +514,9 @@ fn no_snapshot_shapes_unknown_line_and_nil_info() {
     s.run("DoTradeSkill(1, 1)").unwrap();
     assert!(s.take_trade_skill_dos().is_empty(), "no window, no intent");
 
-    s.run("CollapseTradeSkillSubClass(0) ExpandTradeSkillSubClass(1) SelectTradeSkill(1)")
+    s.run("CollapseTradeSkillSubClass(0) SelectTradeSkill(1)")
         .unwrap();
+    assert!(s.run("ExpandTradeSkillSubClass(1)").is_err());
     assert_eq!(s.eval::<i64>("return GetNumTradeSkills()").unwrap(), 0);
 }
 

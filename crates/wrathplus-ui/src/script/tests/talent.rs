@@ -68,6 +68,11 @@ fn one_tab_state() -> TalentUiState {
 fn bindings_read_the_pushed_snapshot() {
     let mut s = script();
     s.set_talents(one_tab_state());
+    s.set_unit_guids(&crate::script::UnitGuids {
+        player: 1,
+        party: [2, 0, 0, 0],
+        ..Default::default()
+    });
     s.run(
         r#"
         assert(GetNumTalentTabs() == 2)
@@ -90,6 +95,12 @@ fn bindings_read_the_pushed_snapshot() {
 
         local cp1, cp2 = UnitCharacterPoints("player")
         assert(cp1 == 2 and cp2 == 1)
+        -- `0x61101d`: the pair is the active player's alone.
+        cp1, cp2 = UnitCharacterPoints("party1")
+        assert(cp1 == 0 and cp2 == 0)
+        assert(not pcall(UnitCharacterPoints))
+        -- `0x51b740` pushes 1 or nil, never false.
+        assert(CheckTalentMasterDist() == nil)
     "#,
     )
     .unwrap();

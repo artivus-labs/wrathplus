@@ -11,8 +11,8 @@
 //! list (`0xadb970`); none admits everything, otherwise any filter that matches admits
 //! (`0x74f6c0` → `0x74e1a0`). Labelled: the destination mask test (`0x74d1a0`) is taken to be the
 //! source's IsA test; ResetFilter (`0x74fa60`) and ClearEntries (`0x751120`) were not decompiled
-//! and are taken to clear the filter list and the entries; retention is held here (default 300 s)
-//! rather than in the CVar `0x766940` writes, and entries age by their GetTime arrival.
+//! and are taken to clear the filter list and the entries. The retention is the CVar
+//! `combatLogRetentionTime` (`0x74d9e0`, `0x74d5f3`); entries age by their GetTime arrival.
 
 use std::collections::VecDeque;
 
@@ -127,26 +127,19 @@ struct Filter {
     spell: SpellSel,
 }
 
-/// The store, cursor, filters and retention.
-#[derive(Clone, Debug)]
+/// The store, cursor and filters.
+#[derive(Clone, Debug, Default)]
 pub(crate) struct State {
     entries: VecDeque<Stored>,
     next_seq: u64,
     cursor: Option<u64>,
     filters: Vec<Filter>,
-    retention: i32,
 }
 
-impl Default for State {
-    fn default() -> Self {
-        State {
-            entries: VecDeque::new(),
-            next_seq: 0,
-            cursor: None,
-            filters: Vec::new(),
-            retention: 300,
-        }
-    }
+/// `combatLogRetentionTime`'s integer value (`[cvar+0x30]`, registered "300" at `0x51eff2`).
+fn retention(model: &Model) -> i32 {
+    let cvar = model.cvars.get("combatlogretentiontime");
+    cvar.map_or(300, |c| super::cvars::sstr_to_int(&c.value))
 }
 
 /// `CombatLog_Object_IsA`'s test (`0x74d600`): any special bit, or a bit in each of affiliation,
@@ -191,9 +184,9 @@ impl State {
         self.filters.is_empty() || self.filters.iter().any(|f| f.admits(e))
     }
 
-    /// Drop entries older than the retention (`0x750400`/`0x750390`).
-    fn prune(&mut self, now: f64) {
-        let keep = f64::from(self.retention.max(0));
+    /// Drop entries older than `retention` seconds (`0x750400`/`0x750390`).
+    fn prune(&mut self, now: f64, retention: i32) {
+        let keep = f64::from(retention.max(0));
         while self.entries.front().is_some_and(|s| now - s.arrived > keep) {
             let gone = self.entries.pop_front().map(|s| s.seq);
             if gone.is_some() && gone == self.cursor {
@@ -255,9 +248,9 @@ impl super::UiScript {
     pub fn push_wrath_combat_log(&mut self, entry: WrathCombatLogEntry) {
         let (admitted, values) = {
             let mut model = self.model_mut();
-            let now = model.now;
+            let (now, keep) = (model.now, retention(&model));
             let state = &mut model.wrath_combat_log;
-            state.prune(now);
+            state.prune(now, keep);
             let admitted = state.admitted(&entry);
             let values = args(&entry);
             let seq = state.next_seq;
@@ -285,6 +278,15 @@ fn to_integer(lua: &Lua, v: &Value) -> i64 {
         .map_or(0, |n| n.round_ties_even() as i64)
 }
 
+/// A number argument through `fistp` under RC=11, truncated; 0 for anything else.
+fn truncated(lua: &Lua, v: &Value) -> i64 {
+    lua.coerce_number(v.clone())
+        .ok()
+        .flatten()
+        .filter(|n| n.is_finite())
+        .map_or(0, |n| n.trunc() as i64)
+}
+
 /// A GUID string as `0x74d120` parses it: an optional `0x`, then up to 16 hex digits.
 fn parse_guid(s: &str) -> u64 {
     let s = s
@@ -297,12 +299,12 @@ fn parse_guid(s: &str) -> u64 {
         .fold(0u64, |acc, d| acc << 4 | u64::from(d))
 }
 
-/// A mask argument of CombatLogAddFilter: a number (rounded, which must pass the IsA test), a GUID
-/// string, or anything else (every flag).
+/// A mask argument of CombatLogAddFilter: a number (truncated, `0x75002e`, which must pass the IsA
+/// test), a GUID string, or anything else (every flag).
 fn side_arg(lua: &Lua, v: &Value, which: &str) -> mlua::Result<Side> {
     match v {
         Value::Integer(_) | Value::Number(_) => {
-            let m = to_integer(lua, v) as u32;
+            let m = truncated(lua, v) as u32;
             if !is_a(m) {
                 return Err(mlua::Error::runtime(format!(
                     "CombatLogAddFilter(): incomplete filter for {which}"
@@ -360,8 +362,8 @@ fn walk_any(state: &State, start: usize, n: u64, forward: bool, ignore: bool) ->
 /// The model, with the store pruned to the retention first.
 fn with(lua: &Lua) -> mlua::AppDataRefMut<'_, Model> {
     let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-    let now = model.now;
-    model.wrath_combat_log.prune(now);
+    let (now, keep) = (model.now, retention(&model));
+    model.wrath_combat_log.prune(now, keep);
     model
 }
 
@@ -475,10 +477,10 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
-    // CombatLogAddFilter([events [, srcMask [, dstMask [, spell]]]]) (`0x74ff70`): events is a
-    // comma list of event names (nil admits all, unknown names are skipped); each mask is a number
-    // that must pass the IsA test, a GUID string, or anything else for every flag; spell is an id
-    // or a name.
+    // CombatLogAddFilter([events [, srcMask [, dstMask [, spell]]]]) (`0x74ff70`): events are
+    // names split on spaces and commas (`" ,"`, `0x9eb7ec`; nil admits all, unknown names are
+    // skipped); each mask is a number that must pass the IsA test, a GUID string, or anything else
+    // for every flag; spell is an id, truncated, where 0 is any spell (`0x74e155`), or a name.
     g.set(
         "CombatLogAddFilter",
         lua.create_function(|lua, args: MultiValue| {
@@ -487,8 +489,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 None => u64::MAX,
                 Some(list) => {
                     let list = list.to_string_lossy();
-                    list.split(',')
-                        .map(str::trim)
+                    list.split([' ', ','])
                         .filter_map(|t| {
                             WRATH_COMBAT_LOG_EVENTS
                                 .iter()
@@ -500,9 +501,10 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             let src = side_arg(lua, &arg(1), "srcMask")?;
             let dst = side_arg(lua, &arg(2), "dstMask")?;
             let spell = match arg(3) {
-                v @ (Value::Integer(_) | Value::Number(_)) => {
-                    SpellSel::Id(to_integer(lua, &v) as u32)
-                }
+                v @ (Value::Integer(_) | Value::Number(_)) => match truncated(lua, &v) as u32 {
+                    0 => SpellSel::Any,
+                    id => SpellSel::Id(id),
+                },
                 Value::String(s) => SpellSel::Name(s.to_string_lossy()),
                 _ => SpellSel::Any,
             };
@@ -518,8 +520,9 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
 
     g.set(
         "CombatLogGetRetentionTime",
-        lua.create_function(|lua, ()| Ok(i64::from(with(lua).wrath_combat_log.retention)))?,
+        lua.create_function(|lua, ()| Ok(i64::from(retention(&with(lua)))))?,
     )?;
+    // CombatLogSetRetentionTime(seconds) (`0x74d5b0`): `lua_tointeger`, which rounds, into the CVar.
     g.set(
         "CombatLogSetRetentionTime",
         lua.create_function(|lua, args: MultiValue| {
@@ -529,8 +532,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                     "Usage: CombatLogSetRetentionTime(seconds)",
                 ));
             }
-            let seconds = to_integer(lua, &first) as i32;
-            with(lua).wrath_combat_log.retention = seconds;
+            let seconds = (to_integer(lua, &first) as i32).to_string();
+            super::cvars::set_from_engine(&mut with(lua), "combatLogRetentionTime", seconds);
             Ok(())
         })?,
     )?;
@@ -689,12 +692,33 @@ mod tests {
         )
         .unwrap();
         assert_eq!(s.eval::<i64>("return CombatLogGetNumEntries()").unwrap(), 1);
+        // Names split on spaces too (`" ,"`), a mask truncates, and spell id 0 is any spell.
+        let num = "return CombatLogGetNumEntries()";
+        s.run("CombatLogResetFilter() CombatLogAddFilter('SPELL_HEAL  SWING_DAMAGE')")
+            .unwrap();
+        assert_eq!(s.eval::<i64>(num).unwrap(), 1, "the heal");
+        s.run(&format!(
+            "CombatLogResetFilter() CombatLogAddFilter(nil, {MINE_PLAYER}.9, nil, 0.5)"
+        ))
+        .unwrap();
+        assert_eq!(s.eval::<i64>(num).unwrap(), 2, "my two, whatever the spell");
     }
 
     #[test]
     fn retention_prunes_by_arrival_and_clear_empties() {
         let mut s = vm();
-        s.run("CombatLogSetRetentionTime(5)").unwrap();
+        let cvar =
+            "return GetCVar('combatLogRetentionTime'), GetCVarDefault('combatLogRetentionTime')";
+        assert_eq!(
+            s.eval::<(String, String)>(cvar).unwrap(),
+            ("300".into(), "300".into())
+        );
+        s.run("CombatLogSetRetentionTime(4.5)").unwrap();
+        assert_eq!(
+            s.eval::<(String, String)>(cvar).unwrap(),
+            ("4".into(), "300".into())
+        );
+        s.run("SetCVar('combatLogRetentionTime', 5)").unwrap();
         assert_eq!(
             s.eval::<i64>("return CombatLogGetRetentionTime()").unwrap(),
             5

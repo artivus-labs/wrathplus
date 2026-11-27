@@ -278,6 +278,7 @@ fn a_walk_someone_stops_short_ends_interrupted_and_one_that_gains_no_ground_ends
     script
         .run(
             "said = {} AgentSignal = function(name, ...) said[#said + 1] = name .. ' ' .. table.concat({ ... }, ' ') end \
+             Notice.on = false \
              UnitAffectingCombat = function() return false end UnitBuff = function() return nil end \
              AgentWalk = function() return { status = walking and 'walking' or 'stopped' } end",
         )

@@ -68,20 +68,31 @@ impl Gate {
         last: 0.0,
     };
 
-    /// One explicit call at OS time `now_ms`; true sends.
+    /// One explicit call at OS time `now_ms`, under the 10 s window (`0x9e30cc`); true sends.
     pub(super) fn request(&mut self, now_ms: u32) -> bool {
+        self.request_within(now_ms, 10.0)
+    }
+
+    /// [`Self::request`] under another window: the LFG comment's is 2 s (`0xa4040c`).
+    pub(super) fn request_within(&mut self, now_ms: u32, window: f64) -> bool {
         self.counter = self.counter.wrapping_add(1);
         if self.counter <= 2 {
             return true;
         }
         // `0x009e1134`: the f32 0.001 widened, applied to the unsigned millisecond count.
         let now = f64::from(now_ms) * f64::from(0.001f32);
-        if now - f64::from(self.last) < 10.0 {
+        if now - f64::from(self.last) < window {
             return false;
         }
         self.last = now as f32;
         self.counter = 0;
         true
+    }
+}
+
+impl Default for Gate {
+    fn default() -> Self {
+        Gate::INITIAL
     }
 }
 
@@ -92,7 +103,7 @@ fn clock_slot() -> &'static RwLock<Option<Clock>> {
     &CLOCK
 }
 
-fn now_ms() -> u32 {
+pub(super) fn now_ms() -> u32 {
     if let Some(clock) = clock_slot().read().ok().and_then(|c| c.clone()) {
         return clock();
     }
@@ -168,6 +179,13 @@ mod tests {
         assert!(g.request(12_002));
         assert!(!g.request(21_999));
         assert!(g.request(22_000), "exactly 10.0 elapsed accepts");
+        let mut comment = Gate::INITIAL;
+        assert!(comment.request_within(5_000, 2.0) && comment.request_within(5_000, 2.0));
+        assert!(comment.request_within(5_000, 2.0) && !comment.request_within(6_999, 2.0));
+        assert!(
+            comment.request_within(7_000, 2.0),
+            "the comment's window is 2 s"
+        );
     }
 
     #[test]
@@ -183,7 +201,8 @@ mod tests {
     #[test]
     fn independent_gates_answer_booleans_and_queue_requests() {
         use crate::script::UiScript;
-        // Process-wide state: this is the only test that touches the statics.
+        // Process-wide state: the only test that touches the gates; the queue tests install the
+        // same clock.
         set_wrath_lfg_request_clock(Arc::new(|| 1_000_000));
         let mut s = UiScript::new().unwrap();
         let mut seen = Vec::new();

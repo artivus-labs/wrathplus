@@ -243,24 +243,20 @@ pub(crate) struct Model {
     /// Each unit token's state as pushed this frame, keyed lowercased because 12340's base compares
     /// fold ASCII case (`0x76e780`): read it only through `unit`, where the fold lives.
     pub(crate) units_by_lower: HashMap<String, UnitState>,
-    /// The snapshot of each unit a `target` chain can end on, by guid, which the app pushes for
-    /// [`super::UnitGuids::chain_ends`]: a token with a hop that no push names reads its
-    /// resolved guid's entry here.
+    /// The snapshot of each unit a `target` chain can end on, by guid, pushed for
+    /// [`super::UnitGuids::chain_ends`]: a token with a hop no push names reads its guid's entry.
     pub(crate) units_by_guid: HashMap<u64, UnitState>,
-    /// The player's auras in the reference cache's insertion order (`0xbc6040`), durations joined:
-    /// the `GetPlayerBuff` family's list, and any token naming the player's.
+    /// Our own auras in 12340's cache order (`0xbc6040`), durations joined, whatever token is ours.
     pub(crate) player_auras: Vec<AuraState>,
     /// The last `FocusUnit`/`ClearFocus` this frame, a guid (0 clears) for the host to take.
     pub(crate) focus_request: Option<u64>,
     /// `CombatTextSetActiveUnit`'s guid (`0xca1380`), 0 for none.
     pub(crate) combat_text_unit: u64,
-    /// Every other unit's auras by guid, ascending aura slot: one list per unit, whatever token
-    /// names it.
+    /// Every other unit's auras by guid, ascending aura slot: one list per unit, any token.
     pub(crate) unit_auras: HashMap<u64, Vec<AuraState>>,
     /// The unit-token resolver's inputs (`0x60abf0`), which the aura bindings resolve through.
     pub(crate) unit_guids: super::UnitGuids,
-    /// Spell ids the cancel verbs queued (`CancelPlayerBuff`, `CancelTrackingBuff`, …), one
-    /// `CMSG_CANCEL_AURA` each.
+    /// Spell ids the cancel verbs queued, one `CMSG_CANCEL_AURA` each.
     pub(crate) cancel_aura_requests: Vec<u32>,
     /// The player's active tracking aura, behind `GetTrackingTexture`.
     pub(crate) tracking: Option<super::aura::TrackingState>,
@@ -296,16 +292,19 @@ pub(crate) struct Model {
     pub(crate) wrath_state: super::wrath_state_queries::State,
     pub(crate) wrath_quests: super::wrath_quest_queries::State,
     pub(crate) wrath_inspect_talents: Option<super::WrathInspectTalents>,
+    pub(crate) talent_groups: super::WrathTalentGroups,
+    pub(crate) player_names: std::sync::Arc<HashMap<u64, super::PlayerNameInfo>>,
     /// The player's talent preview ranks and queued `LearnPreviewTalents` lists.
     pub(crate) talent_preview: super::wrath_talent_preview::TalentPreview,
-    /// The six glyph sockets the app pushes; `None` without a player.
+    /// The six glyph sockets the app pushes, the active group's and the other's; `None` without.
     pub(crate) glyph_sockets: Option<[super::GlyphSocketView; 6]>,
+    pub(crate) inactive_glyph_sockets: Option<[super::GlyphSocketView; 6]>,
     /// The units whose vehicle seat has `VehicleSeat.dbc` `flagsB & 0x8` (`UnitTargetsVehicleInRaidUI`).
     pub(crate) raid_vehicle_units: HashSet<u64>,
     /// The server clock offset (`server - time()`) the host pushes; `None` until the first reply.
     pub(crate) wrath_server_time_offset: Option<i32>,
-    /// `SetRaidRosterSelection`'s raid row index, client-side only.
-    pub(crate) raid_selection: i64,
+    /// `SetRaidRosterSelection`'s member, by guid (`[0xbeb610]`), 0 for none.
+    pub(crate) raid_selection: u64,
     /// `GetTime()`'s session seconds, which only the host moves ([`super::UiScript::tick`],
     /// [`super::UiScript::set_now`]); off `_G`, as the reference's clock is the OS tick count.
     pub(crate) now: f64,
@@ -323,7 +322,6 @@ pub(crate) struct Model {
     pub(crate) social: social::SocialState,
     /// Social calls (`AddFriend`, `RemoveFriend`, `SendWho`, …) queued.
     pub(crate) social_requests: Vec<social::SocialRequest>,
-    /// The client-local LFG slot words (`[0xbc70a0]`) and comment (`[0xbc6e98]`, 0x80 bytes) that
     /// Guild roster, ranks, MOTD and info, sorted and filtered by the app, which holds the toggles.
     pub(crate) guild: guild::GuildState,
     /// The rank editor's unsaved edits, apart from `guild` so a push cannot discard them.
@@ -351,8 +349,7 @@ pub(crate) struct Model {
     pub(crate) language_table: Vec<(u32, String)>,
     pub(crate) zone_channel_catalog: Vec<super::channel::ZoneChannelRow>,
     pub(crate) channel_commands: Vec<super::channel::ChannelCommand>,
-    /// The recruitment auto-join latch, 12340's `[0xac7a3c]`: 0 `STANDARD`, 1 `AUTO`. Boots at 1,
-    /// as the reference writes `AUTO` for an untouched option; no Lua binding reads or sets it.
+    /// 12340's recruitment auto-join latch `[0xac7a3c]`: 0 `STANDARD`, 1 `AUTO`, the boot value.
     pub(crate) guild_recruitment_mode: u8,
     /// A manual join or leave changed the recruitment mode: the chat cache's dirty signal.
     pub(crate) guild_recruitment_changed: bool,
@@ -544,9 +541,9 @@ pub(crate) struct Model {
     pub(crate) battlefield_leave_requests: u32,
     /// The battleground queue slots, type list, instance list, selection and world-PvP queue.
     pub(crate) battlefield: super::battlefield_queue::QueueState,
-    /// Teammates' map positions, the flag carrier, the icon scale and position requests.
+    /// Teammates' map positions, the flag carriers, the icon scale and position requests.
     pub(crate) battlefield_positions: Vec<super::battlefield_positions::BattlefieldPositionView>,
-    pub(crate) battlefield_flag: Option<super::battlefield_positions::BattlefieldFlagView>,
+    pub(crate) battlefield_flags: Vec<super::battlefield_positions::BattlefieldFlagView>,
     pub(crate) battlefield_icon_scale: f32,
     pub(crate) battlefield_position_requests: u32,
     /// Acknowledged tutorials, `None` before `SMSG_TUTORIAL_FLAGS`; all `TutorialsEnabled()` reads.
@@ -567,7 +564,7 @@ pub(crate) struct Model {
     pub(crate) pet_autocast_toggles: Vec<u32>,
     /// `PetStopAttack()` calls.
     pub(crate) pet_stop_attacks: u32,
-    /// `HasFullControl`, the reference's `[0xb4b3e4]`: set by `SMSG_CLIENT_CONTROL_UPDATE` for the
+    /// `HasFullControl`, 12340's `[0xbcfb8c]`: set by `SMSG_CLIENT_CONTROL_UPDATE` for the
     /// player, boots 1, and every cast, item and cursor gate refuses at 0.
     pub(crate) player_control: bool,
     /// One `CMSG_PET_SET_ACTION` per entry, its one or two `(position, packed word)` pairs: the
@@ -652,8 +649,8 @@ pub(crate) struct Model {
 
     /// The open vendor's stock, the `BuyMerchantItem` calls and whether `CloseMerchant` ran.
     pub(crate) merchant: Option<merchant::MerchantState>,
-    /// `GetRepairAllCost`'s total; 0 unless a repairer is open.
-    pub(crate) repair_all_cost: u32,
+    /// `GetRepairAllCost`'s total and carried damage; 0 and false unless a repairer is open.
+    pub(crate) repair_all_cost: (u32, bool),
     /// The repair costs `SetInventoryItem` and `SetBagItem` return.
     pub(crate) repair_costs: merchant::RepairCosts,
     pub(crate) merchant_buys: Vec<(u32, u32)>,
@@ -670,8 +667,10 @@ pub(crate) struct Model {
     /// The stable window: snapshot, selection, drag and queued calls, reset together on close.
     pub(crate) stable: stable::StableModel,
 
-    /// The open bank's slot-purchase row and calls; its contents are bags -1 and 5..=10.
+    /// The open bank and its calls, and the purchase row, which outlives the window (`0x57bab0`);
+    /// its contents are bags -1 and 5..=11.
     pub(crate) bank: Option<bank::BankState>,
+    pub(crate) bank_slots: bank::BankState,
     pub(crate) bank_purchase: bool,
     pub(crate) bank_close: bool,
 
@@ -967,11 +966,9 @@ pub(crate) struct Model {
     /// The reputation pane's snapshot and the display tree built from it.
     pub(crate) reputation: reputation::ReputationState,
     pub(crate) reputation_groups: Vec<reputation::FactionGroup>,
-    /// Folded headers by key (a `Faction.dbc` id, 0 "Other", -1 "Inactive"), reset on every push
-    /// to all open but Inactive, as the client's rebuild does.
-    pub(crate) reputation_collapsed: HashSet<i64>,
-    /// The selection as a reputation-list slot, not a row.
-    pub(crate) reputation_selected: Option<u32>,
+    pub(crate) reputation_folds: reputation::Folds,
+    /// The selected row's id; `None` for none, apart from "Other"'s id 0 (`0xc2347c`, `0x5d150b`).
+    pub(crate) reputation_selected: Option<i64>,
     /// Reputation calls queued, applied locally first because none of the three sends is acked.
     pub(crate) reputation_sends: Vec<reputation::ReputationSend>,
 
@@ -1012,7 +1009,7 @@ pub(crate) struct Model {
     /// by `"player"` pushes that carry it: corrected, never blanked. A per-login rebuild is unseen,
     /// as its verbs exist only in game (`0x850438`), not at the glue screen (`0x46abb0`).
     pub(crate) player_record: super::PlayerRecord,
-    /// `GetBindLocation()`, the bind point's area name: `""` before it lands, never nil.
+    /// `GetBindLocation()`'s bind point area name, `""` until it lands (then `HOME_INN`).
     pub(crate) bind_location: String,
     /// `GMTicketCategory.dbc` `(id, name)` rows in file order; the ids are wire values.
     pub(crate) gm_ticket_categories: Vec<(u32, String)>,
@@ -1215,8 +1212,11 @@ impl Model {
             wrath_state: Default::default(),
             wrath_quests: Default::default(),
             wrath_inspect_talents: None,
+            talent_groups: Default::default(),
+            player_names: Default::default(),
             talent_preview: Default::default(),
             glyph_sockets: None,
+            inactive_glyph_sockets: None,
             raid_vehicle_units: HashSet::new(),
             wrath_server_time_offset: None,
             raid_selection: 0,
@@ -1332,7 +1332,7 @@ impl Model {
             battlefield_leave_requests: 0,
             battlefield: Default::default(),
             battlefield_positions: Vec::new(),
-            battlefield_flag: None,
+            battlefield_flags: Vec::new(),
             battlefield_icon_scale: 1.0,
             battlefield_position_requests: 0,
             tutorial_bank: None,
@@ -1382,7 +1382,7 @@ impl Model {
             gossip_close: false,
             gossip_quest_selects: Vec::new(),
             merchant: None,
-            repair_all_cost: 0,
+            repair_all_cost: (0, false),
             repair_costs: Default::default(),
             merchant_buys: Vec::new(),
             merchant_cursor_sells: Vec::new(),
@@ -1393,6 +1393,7 @@ impl Model {
             repair_mode: false,
             stable: Default::default(),
             bank: None,
+            bank_slots: bank::BankState::default(),
             bank_purchase: false,
             bank_close: false,
             trainer: None,
@@ -1590,7 +1591,7 @@ impl Model {
             skill_abandons: Vec::new(),
             reputation: reputation::ReputationState::default(),
             reputation_groups: Vec::new(),
-            reputation_collapsed: HashSet::new(),
+            reputation_folds: reputation::Folds::default(),
             reputation_selected: None,
             reputation_sends: Vec::new(),
         }

@@ -459,7 +459,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     })?;
     // GetCoinText(copper [, separator]) (`0x510c60`): the non-zero gold, silver and copper parts
     // through GOLD_AMOUNT/SILVER_AMOUNT/COPPER_AMOUNT, joined by the separator (", "). Labelled:
-    // the formatter `0x7e7d80` was not decompiled; zero answers "0 Copper".
+    // the formatter `0x7e7d80` was not decompiled; zero answers "0 Copper", and a negative amount,
+    // which it takes signed, answers as 0. The amount truncates (`0x510cbf`-`0x510ccd`).
     set(lua, "GetCoinText", |lua, args| {
         let Some(n) = number(lua, &arg(&args, 0)) else {
             return Err(mlua::Error::runtime(
@@ -467,7 +468,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             ));
         };
         let sep = text(lua, &arg(&args, 1))?.unwrap_or_else(|| ", ".to_string());
-        let copper = n.round_ties_even().max(0.0) as u64;
+        let copper = n.trunc().max(0.0) as u64;
         let mut parts = Vec::new();
         for (key, value) in [
             ("GOLD_AMOUNT", copper / 10_000),

@@ -3,7 +3,10 @@ use std::sync::Arc;
 
 use mlua::{Lua, MultiValue, Value};
 
-use super::{binding_abi::number_arg, Model, UiScript};
+use super::{
+    binding_abi::{number_arg, tointeger_arg},
+    Model, UiScript,
+};
 
 /// Localized native dungeon row. Raw ID/type remain distinct from a packed wire entry.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -83,7 +86,7 @@ pub use locks::{
 };
 
 mod queue;
-pub(crate) use queue::start_backfill;
+pub(crate) use queue::{boot_vote, start_backfill};
 
 /// The current map and difficulty's `index`-th DungeonEncounter row (0-based) under `mask`:
 /// name, icon, killed (`0x5538b0`, shared by the instance-lock popup).
@@ -134,8 +137,9 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     lua.globals().set(
         "GetLFGDungeonInfo",
         lua.create_function(|lua, id: Value| {
-            // 0x555590 -> 0x5553f0: numeric strings accepted, missing row returns zero values.
-            let id = number_arg(lua, id, "Usage: GetLFGDungeonInfo(dungeonID)")? as u32;
+            // 0x555590 -> 0x5553f0: numeric strings accepted and rounded (`lua_tointeger` at
+            // `0x5555bc`), missing row returns zero values.
+            let id = tointeger_arg(lua, id, "Usage: GetLFGDungeonInfo(dungeonID)")? as u32;
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             let state = &model.wrath_lfg;
             let Some(row) = state.catalog.dungeons.iter().find(|row| row.id == id) else {
@@ -253,7 +257,7 @@ mod tests {
             }),
             Some(2),
         );
-        assert!(script.eval::<bool>("local v={GetLFGDungeonInfo('42.9')} return #v==14 and v[1]=='Dungeon' and v[2]==1 and v[3]==30 and v[4]==40 and v[5]==15 and v[6]==32 and v[7]==38 and v[8]==1 and v[9]==-7 and v[10]=='Texture' and v[11]==2 and v[12]==5 and v[13]=='Description' and v[14]==true").unwrap());
+        assert!(script.eval::<bool>("local v={GetLFGDungeonInfo('41.5')} return #v==14 and v[1]=='Dungeon' and v[2]==1 and v[3]==30 and v[4]==40 and v[5]==15 and v[6]==32 and v[7]==38 and v[8]==1 and v[9]==-7 and v[10]=='Texture' and v[11]==2 and v[12]==5 and v[13]=='Description' and v[14]==true").unwrap());
         for args in ["", "nil", "false", "{}", "'bad'"] {
             assert!(script
                 .eval::<MultiValue>(&format!("return GetLFGDungeonInfo({args})"))

@@ -252,7 +252,9 @@ realm's `mod-agent-nav`; no extra port, no extra credentials).
   `horde` or `neutral` (Booty Bay, Gadgetzan, Everlook, which both sides share); the other side's
   auctioneers are not listed, as no hostile NPC is. Mailboxes are game objects, listed for either
   side. The `Services` module does not ask for those two by default. By default the realm
-  looks 2000 yards round and sends at most 20; the answer is reused for 120 seconds while you
+  looks 2000 yards round and sends at most 20, except that the nearest two of your class
+  trainers (and of the Cooking and First Aid trainers, when asked for) on the map are always
+  sent, however far; the answer is reused for 120 seconds while you
   stay within 100 yards of where you asked.
   The built-in `Services` module asks on arrival and in each new zone, and hands the places to the
   goal runner. An NPC the runner walks to and does not find goes into `Goals.missing` and is

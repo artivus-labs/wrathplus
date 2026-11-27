@@ -90,8 +90,10 @@ fn resurrect(name: &str, sickness: u8, timer: bool) -> Vec<u8> {
     b
 }
 
+/// Build 12340 reads the name's declared length, then two flag bytes (`0x6dbd00`): on
+/// AzerothCore's layout the first is its 0 and the second its caster-is-not-a-player byte.
 #[test]
-fn resurrect_request_frames_both_terminators_and_the_optional_delay() {
+fn resurrect_request_reads_two_flag_bytes_after_the_declared_name() {
     let SessionEvent::ResurrectRequest {
         caster,
         name,
@@ -106,18 +108,30 @@ fn resurrect_request_frames_both_terminators_and_the_optional_delay() {
     };
     assert_eq!(
         (caster, name.as_str(), sickness, has_timer),
-        (PET, "Spirit Healer", true, false)
+        (PET, "Spirit Healer", false, true)
     );
+    // The delay word is never read, so it changes nothing.
     let mut events = decode(SMSG_RESURRECT_REQUEST, &resurrect("", 0, true)).unwrap();
     assert!(matches!(
         events.remove(0),
         SessionEvent::ResurrectRequest {
             sickness: false,
+            has_timer: false,
+            ..
+        }
+    ));
+    // The first byte after the name is the sickness flag.
+    let mut sick = resurrect("Abc", 1, false);
+    sick[8 + 4 + 4] = 1;
+    assert!(matches!(
+        decode(SMSG_RESURRECT_REQUEST, &sick).unwrap().remove(0),
+        SessionEvent::ResurrectRequest {
+            sickness: true,
             has_timer: true,
             ..
         }
     ));
-    // A length that disagrees with the name, or a partial delay word, is rejected.
+    // A length past the body, or a partial delay word, is rejected.
     let mut bad = resurrect("Abc", 0, false);
     bad[8] = 9;
     assert!(decode(SMSG_RESURRECT_REQUEST, &bad).is_err());

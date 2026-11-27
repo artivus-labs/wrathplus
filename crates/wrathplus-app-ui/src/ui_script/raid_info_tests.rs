@@ -55,14 +55,18 @@ fn the_ready_check_popup_opens_and_answers() {
     push_raid(&mut s, twelve());
     assert!(!visible(&s, "ReadyCheckFrame"), "nothing to answer yet");
 
-    // `READY_CHECK(initiator, timeLeft)` (ReadyCheck.lua:11-22,29-32).
-    let ready_check = || {
-        vec![
-            wrathplus_ui::script::ScriptValue::Str("Member1".into()),
-            wrathplus_ui::script::ScriptValue::Int(30),
-        ]
+    // `READY_CHECK(initiator, timeLeft)` (ReadyCheck.lua:11-22,29-32), named, over a live check
+    // (`ConfirmReadyCheck` answers only inside one, `0x5740c0`).
+    let member1 = twelve()[1].guid;
+    let ready_check = |s: &mut UiScript| {
+        s.wrath_ready_check_start(member1);
+        let name = wrathplus_ui::script::ScriptValue::Str("Member1".into());
+        s.fire_event(
+            "READY_CHECK",
+            vec![name, wrathplus_ui::script::ScriptValue::Int(30)],
+        );
     };
-    s.fire_event("READY_CHECK", ready_check());
+    ready_check(&mut s);
     assert!(visible(&s, "ReadyCheckFrame"), "the check opens it");
     assert!(
         text_of(&s, "ReadyCheckFrameText").starts_with("Member1 has initiated a ready check."),
@@ -77,7 +81,7 @@ fn the_ready_check_popup_opens_and_answers() {
     );
     assert!(!visible(&s, "ReadyCheckFrame"));
 
-    s.fire_event("READY_CHECK", ready_check());
+    ready_check(&mut s);
     s.run("ReadyCheckFrameNoButton:Click()").unwrap();
     assert_eq!(
         s.take_party_requests(),
@@ -86,7 +90,7 @@ fn the_ready_check_popup_opens_and_answers() {
     );
 
     // The check's end closes it (READY_CHECK_FINISHED, ReadyCheck.lua:33-39).
-    s.fire_event("READY_CHECK", ready_check());
+    ready_check(&mut s);
     assert!(visible(&s, "ReadyCheckFrame"));
     s.fire_event("READY_CHECK_FINISHED", Vec::new());
     assert!(!visible(&s, "ReadyCheckFrame"));

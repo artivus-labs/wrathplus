@@ -92,7 +92,6 @@ pub(super) fn feed_petition(
             .to_string(),
             title: r.name.clone(),
             body_text: r.body_text.clone(),
-            max_signatures: r.required,
             max_named: r.maximum,
             min_signatures: r.required,
             // Nil until the name lands, and not waited for.
@@ -102,23 +101,12 @@ pub(super) fn feed_petition(
         })
     });
 
-    // `CanSignPetition` (`0x4f45e0`). With no record the reference runs only the signer scan, over
-    // the real signers: the close path zeroes the array, then `0x4f40b0` refills it (`0x5eef29`).
     let in_guild = self_q
         .iter()
         .next()
         .is_some_and(|s| s.0.player_guild_id() != 0);
-    let can_sign = match (open.as_ref(), record.as_ref()) {
-        (Some(o), Some(r)) => {
-            // The guild-member and full-list refusals apply only to a charter.
-            let charter_refusal = r.petition_type == PETITION_TYPE_CHARTER
-                && (in_guild || o.signers.len() as i32 >= r.max_signatures);
-            !charter_refusal && !r.is_originator && !o.signers.contains(&me)
-        }
-        // No record: only the signer scan runs.
-        (Some(o), None) => !o.signers.contains(&me),
-        (None, _) => true,
-    };
+    let signed = open.as_ref().map_or(&[][..], |o| o.signers.as_slice());
+    let can_sign = can_sign(record.as_ref(), signed, me, in_guild);
 
     script.set_petition(VmPetition {
         charter_cost: registrar.cost(),
@@ -316,6 +304,18 @@ fn tabard_vendor_activate(
     let _ = commands.0.send(ClientCommand::TabardVendorActivate { npc });
 }
 
+/// `CanSignPetition` (`0x5cf040`): a guild or arena charter refuses once its signers reach the
+/// record's cap (`[+0x1114]`, `0x5cf09d`) and a guild one a guilded player (`0x5cf08b`); the owner
+/// (`0x5cf0af`) and a listed signer are refused. With no record only the list is scanned.
+fn can_sign(record: Option<&PetitionRecordView>, signers: &[u64], me: u64, in_guild: bool) -> bool {
+    let refused = record.is_some_and(|r| {
+        let guild = r.petition_type == PETITION_TYPE_CHARTER;
+        let capped = guild || r.petition_type == wrathplus_ui::script::PETITION_TYPE_ARENA;
+        (guild && in_guild) || (capped && signers.len() as i32 >= r.max_named) || r.is_originator
+    });
+    !refused && !signers.contains(&me)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -363,6 +363,35 @@ mod tests {
         // With no registrar and no designer both guids are 0: equal, so nothing.
         let (sent, _) = run(0, 0, &player(49, 49));
         assert!(sent.is_empty());
+    }
+
+    #[test]
+    fn can_sign_petition_caps_guild_and_arena_charters_and_refuses_guild_members_a_guild_one() {
+        let arena = PetitionRecordView {
+            petition_type: wrathplus_ui::script::PETITION_TYPE_ARENA.into(),
+            max_named: 2,
+            ..Default::default()
+        };
+        assert!(
+            can_sign(Some(&arena), &[1], 9, true),
+            "a guild is no bar to an arena team"
+        );
+        assert!(
+            !can_sign(Some(&arena), &[1, 2], 9, false),
+            "full at the cap"
+        );
+        let guild = PetitionRecordView {
+            petition_type: PETITION_TYPE_CHARTER.into(),
+            max_named: 9,
+            min_signatures: 4,
+            ..Default::default()
+        };
+        assert!(
+            can_sign(Some(&guild), &[1, 2, 3, 4], 9, false),
+            "past the minimum, under the cap"
+        );
+        assert!(!can_sign(Some(&guild), &[1], 9, true));
+        assert!(!can_sign(None, &[9], 9, false) && can_sign(None, &[], 9, true));
     }
 
     #[test]
