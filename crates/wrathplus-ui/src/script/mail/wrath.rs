@@ -146,8 +146,8 @@ fn install_family(lua: &mlua::Lua) -> mlua::Result<()> {
     )?;
 
     // ComplainInboxItem(index): a sender already reported prints COMPLAINT_ADDED as a system
-    // line (`0x56fb97`, no catalog row); otherwise the sender is recorded, App sends the complaint, and CLOSE_INBOX_ITEM fires
-    // with the 1-based index.
+    // line (`0x56fb97`, no catalog row); otherwise the sender is recorded, App sends the
+    // complaint, and CLOSE_INBOX_ITEM fires with the 1-based index.
     g.set(
         "ComplainInboxItem",
         lua.create_function(|lua, args: MultiValue| {
