@@ -446,8 +446,8 @@ pub fn decode(opcode: u16, body: &[u8]) -> io::Result<Vec<SessionEvent>> {
 /// bytes (`0x47b6b0`), a byte into `[0xc9eac0]` (`ResurrectHasSickness`) and one into
 /// `[0xc9eac4]` (`ResurrectHasTimer`); what follows is never read. AzerothCore sends the name with
 /// its terminator, a 0, then its caster-is-not-a-player byte and an optional `u32` delay override
-/// (`Spell.cpp:5240-5250`), so there the first flag is always 0. A player caster's name is empty:
-/// the client looks it up.
+/// (`Spell::SendResurrectRequest`), so there the first flag is always 0. A player caster's name is
+/// empty: the client looks it up.
 fn resurrect_request(r: &mut Cursor<&[u8]>) -> io::Result<SessionEvent> {
     let caster = u64_le(r)?;
     let length = u32_le(r)? as usize;
