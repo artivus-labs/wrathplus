@@ -1104,6 +1104,9 @@ pub(super) fn drain_party(
                     let _ = commands.0.send(ClientCommand::GroupSetLeader { guid });
                 }
             }
+            PartyRequest::PromoteGuid(guid) => {
+                let _ = commands.0.send(ClientCommand::GroupSetLeader { guid });
+            }
             PartyRequest::AssistantLeader { name, grant } => {
                 if let Some(guid) = raid_guid_for_name(&group, self_guid, &names, &name) {
                     let _ = commands
@@ -1184,6 +1187,7 @@ fn test_apply_local(
             | PartyRequest::SwapSubgroup { .. }
             | PartyRequest::UninviteRaid(_)
             | PartyRequest::PromoteName(_)
+            | PartyRequest::PromoteGuid(_)
             | PartyRequest::AssistantLeader { .. }
     ) {
         group.count_list();
@@ -1328,6 +1332,12 @@ fn apply_test_intent(
                 .find(|m| m.name.eq_ignore_ascii_case(name))
             {
                 group.leader = m.guid;
+            }
+            true
+        }
+        PartyRequest::PromoteGuid(guid) => {
+            if group.members.iter().any(|m| m.guid == *guid) {
+                group.leader = *guid;
             }
             true
         }

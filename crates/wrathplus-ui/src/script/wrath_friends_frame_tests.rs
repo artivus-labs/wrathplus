@@ -148,8 +148,9 @@ fn guild_events_coin_text_mutes_and_battle_net() {
     s.run("GOLD_AMOUNT = '%d Gold' SILVER_AMOUNT = '%d Silver' COPPER_AMOUNT = '%d Copper'")
         .unwrap();
     assert_eq!(
-        s.eval::<String>("return GetCoinText(1020304)").unwrap(),
-        "102 Gold, 3 Silver, 4 Copper"
+        s.eval::<String>("return GetCoinText(1020304.9)").unwrap(),
+        "102 Gold, 3 Silver, 4 Copper",
+        "the amount truncates (`0x510ccd`)"
     );
     assert_eq!(
         s.eval::<String>("return GetCoinText(0, ' ')").unwrap(),

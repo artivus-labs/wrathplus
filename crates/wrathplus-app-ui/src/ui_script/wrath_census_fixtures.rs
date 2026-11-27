@@ -908,6 +908,7 @@ fn glyphs(s: &mut UiScript) {
         icon: Some(r"Interface\Icons\INV_Glyph_MajorWarrior".into()),
     });
     s.set_glyph_sockets(Some(sockets));
+    s.set_talent_groups(WrathTalentGroups::single());
 }
 
 /// The player tanks the target.

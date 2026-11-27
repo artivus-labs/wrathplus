@@ -4,6 +4,9 @@
 //! - `PLAYER_FIELD_GLYPHS_1 + i` is its `GlyphProperties.dbc` glyph;
 //! - `PLAYER_GLYPHS_ENABLED` holds the unlocked bits.
 //!
+//! The other talent group's sockets are the same slots holding that group's glyphs from
+//! `SMSG_TALENTS_INFO` (12340 reads a group's glyph off its record, `0x5c5770`).
+//!
 //! A glyph's name is its spell's, and its art is `GlyphProperties`' `SpellIcon.dbc` row. A socket
 //! fits the pending glyph cast ([`crate::spell::targeting::glyph`]'s wait) when the cast's first
 //! `APPLY_GLYPH` effect with both rows agrees on the type flags (`GlyphMatchesSocket` `0x5b7410`).
@@ -21,6 +24,7 @@ use wrathplus_ui::script::{GlyphSocketView, GlyphView, UiScript};
 use crate::app_core::session::ObjectStore;
 use crate::app_core::session::SelfPlayer;
 use crate::app_core::state::Spells;
+use crate::net::wrath_notices::WrathProgress;
 use crate::spell::targeting::glyph::GlyphTables;
 use crate::spell::targeting::SpellTargeting;
 
@@ -73,14 +77,7 @@ pub(crate) fn sockets(
         let slot_id = player.player_glyph_slot(i as u8).unwrap_or(0);
         let slot = tables.slot(slot_id);
         let glyph_id = player.player_glyph(i as u8).unwrap_or(0);
-        let glyph = tables.property(glyph_id).map(|g| GlyphView {
-            spell_id: g.spell_id,
-            name: spells
-                .and_then(|c| c.get(g.spell_id))
-                .map(|d| d.name.clone())
-                .unwrap_or_default(),
-            icon: icons.and_then(|m| m.get(&g.icon_id)).cloned(),
-        });
+        let glyph = glyph_view(tables, spells, icons, glyph_id);
         let matches_pending = pending.is_some_and(|spell| {
             (0..3)
                 .filter(|&k| spell.effects[k] == APPLY_GLYPH)
@@ -101,6 +98,51 @@ pub(crate) fn sockets(
     })
 }
 
+/// A `GlyphProperties.dbc` row resolved for the UI; `None` with no row.
+fn glyph_view(
+    tables: &GlyphCatalog,
+    spells: Option<&SpellCatalog>,
+    icons: Option<&HashMap<u32, String>>,
+    glyph_id: u32,
+) -> Option<GlyphView> {
+    tables.property(glyph_id).map(|g| GlyphView {
+        spell_id: g.spell_id,
+        name: spells
+            .and_then(|c| c.get(g.spell_id))
+            .map(|d| d.name.clone())
+            .unwrap_or_default(),
+        icon: icons.and_then(|m| m.get(&g.icon_id)).cloned(),
+    })
+}
+
+/// The other talent group's sockets: the active ones' slots, the group's own glyphs.
+pub(crate) fn inactive_sockets(
+    active: &[GlyphSocketView; 6],
+    progress: Option<&WrathProgress>,
+    tables: &GlyphCatalog,
+    spells: Option<&SpellCatalog>,
+    icons: Option<&HashMap<u32, String>>,
+) -> Option<[GlyphSocketView; 6]> {
+    let (_, active_index, groups) = progress?.talents.get(&false)?;
+    let (_, group) = groups
+        .iter()
+        .enumerate()
+        .find(|&(i, _)| i != usize::from(*active_index))?;
+    Some(std::array::from_fn(|i| {
+        let glyph_id = group.glyphs.get(i).copied().map_or(0, u32::from);
+        GlyphSocketView {
+            glyph_id,
+            glyph: glyph_view(tables, spells, icons, glyph_id),
+            matches_pending: false,
+            ..active[i].clone()
+        }
+    }))
+}
+
+/// The sockets last pushed: the active group's and the other's.
+type Pushed = Option<(Option<[GlyphSocketView; 6]>, Option<[GlyphSocketView; 6]>)>;
+
+#[allow(clippy::too_many_arguments)]
 fn feed_glyphs(
     script: Option<NonSendMut<UiScript>>,
     self_q: Query<&ObjectStore, With<SelfPlayer>>,
@@ -108,7 +150,8 @@ fn feed_glyphs(
     spells: Option<Res<Spells>>,
     icons: Option<Res<GlyphIcons>>,
     targeting: Option<Res<SpellTargeting>>,
-    mut memory: Local<crate::app_core::vm_memo::VmMemo<Option<Option<[GlyphSocketView; 6]>>>>,
+    progress: Option<Res<WrathProgress>>,
+    mut memory: Local<crate::app_core::vm_memo::VmMemo<Pushed>>,
 ) {
     let (Some(mut script), Some(tables)) = (script, tables) else {
         return;
@@ -125,10 +168,17 @@ fn feed_glyphs(
                 .map(|(id, _)| id),
         )
     });
+    let spells = spells.as_deref().map(|s| &s.catalog);
+    let icons = icons.as_deref().map(|m| &m.0);
+    let other = fresh
+        .as_ref()
+        .and_then(|active| inactive_sockets(active, progress.as_deref(), &tables.0, spells, icons));
+    let fresh = (fresh, other);
     let pushed = memory.get(&script);
     if pushed.as_ref() != Some(&fresh) {
         *pushed = Some(fresh.clone());
-        script.set_glyph_sockets(fresh);
+        script.set_glyph_sockets(fresh.0);
+        script.set_inactive_glyph_sockets(fresh.1);
     }
 }
 
@@ -205,5 +255,21 @@ mod tests {
         assert!(s[0].matches_pending && !s[1].matches_pending);
         let minor = sockets(&player, &tables, Some(&spells), None, Some(2));
         assert!(!minor[0].matches_pending);
+
+        // The other group: the same slots, its own glyphs off the talents packet.
+        use wrathplus_protocol::events::TalentGroup;
+        let mut progress = WrathProgress::default();
+        let group = |glyphs: Vec<u16>| TalentGroup {
+            talents: vec![],
+            glyphs,
+        };
+        let groups = vec![group(vec![182]), group(vec![183])];
+        progress.talents.insert(false, (0, 0, groups));
+        let other = inactive_sockets(&s, Some(&progress), &tables, Some(&spells), None).unwrap();
+        assert_eq!((other[0].slot_id, other[0].glyph_id), (21, 183));
+        assert_eq!(other[0].glyph.as_ref().map(|g| g.spell_id), Some(54816));
+        assert!(other[0].enabled && !other[0].matches_pending);
+        progress.talents.get_mut(&false).unwrap().2.pop();
+        assert!(inactive_sockets(&s, Some(&progress), &tables, None, None).is_none());
     }
 }

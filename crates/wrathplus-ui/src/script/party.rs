@@ -142,6 +142,9 @@ pub enum PartyRequest {
     SwapSubgroup { index: u32, other: u32 },
     /// `PromoteByName(name)` (`CMSG_GROUP_SET_LEADER`, whose guid the app resolves).
     PromoteName(String),
+    /// Build 12340's `PromoteToLeader(unitOrName)` (`0x573e10`) with the guid its resolver found:
+    /// `CMSG_GROUP_SET_LEADER` with it (`0x573e7b`-`0x573eb0`).
+    PromoteGuid(u64),
     /// `PromoteToAssistant(name)` / `DemoteAssistant(name)` (`CMSG_GROUP_ASSISTANT_LEADER`).
     AssistantLeader { name: String, grant: bool },
     /// `UninviteFromRaid(index)`: a 1-based raid row the app resolves to the name

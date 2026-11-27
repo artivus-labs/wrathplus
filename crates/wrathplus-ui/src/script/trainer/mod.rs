@@ -8,6 +8,7 @@ use mlua::{Lua, MultiValue, Value};
 
 use super::binding_abi;
 use super::Model;
+use crate::strings::collate;
 
 mod filter;
 mod selection;
@@ -201,41 +202,6 @@ impl super::UiScript {
 enum Row {
     Header(usize),
     Service(usize),
-}
-
-/// 12340's `0x76ec80`, the row and group comparators' compare: per code point, upper-cased
-/// (`0x76e7a0`) and folded to its base letter (`0x76eab0`), Æ, ß and Œ matching AE, SS and OE
-/// (`0x76eb80`); the first raw difference breaks a tie.
-fn collate(a: &str, b: &str) -> std::cmp::Ordering {
-    fold(a).cmp(&fold(b)).then_with(|| a.cmp(b))
-}
-
-fn fold(s: &str) -> Vec<u32> {
-    let mut out = Vec::with_capacity(s.len());
-    for c in s.chars() {
-        let c = c as u32;
-        let upper = match c {
-            0x61..=0x7a | 0xe0..=0xfe | 0x430..=0x44f => c - 0x20,
-            0x153 => 0x152,
-            0x451 => 0x401,
-            _ => c,
-        };
-        match upper {
-            0xc6 => out.extend([0x41, 0x45]),
-            0xdf => out.extend([0x53, 0x53]),
-            0x152 => out.extend([0x4f, 0x45]),
-            0xc0..=0xc5 => out.push(0x41),
-            0xc7 => out.push(0x43),
-            0xc8..=0xcb => out.push(0x45),
-            0xcc..=0xcf => out.push(0x49),
-            0xd1 => out.push(0x4e),
-            0xd2..=0xd6 => out.push(0x4f),
-            0xd9..=0xdc => out.push(0x55),
-            0x401 => out.push(0x415),
-            other => out.push(other),
-        }
-    }
-    out
 }
 
 const TRAINER_TYPE_TRADESKILL: u32 = 2;
