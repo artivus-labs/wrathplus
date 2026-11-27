@@ -4,6 +4,7 @@
 use mlua::{Lua, MultiValue, Value};
 
 mod dates;
+mod sends;
 
 use super::{
     Open, Opened, State, WrathCalendarDate, WrathCalendarEntry, WrathCalendarFields,
@@ -144,11 +145,17 @@ fn pend_if(lua: &Lua, on: bool) {
 /// `0x5b9960`: `CALENDAR_UPDATE_ERROR` with the key's line, then the pending bit cleared and
 /// announced (`0x5b99d0`).
 fn update_error(lua: &Lua, key: &str) {
-    fire(
-        lua,
-        "CALENDAR_UPDATE_ERROR",
-        vec![ScriptValue::Str(gs(lua, key))],
-    );
+    update_error_with(lua, key, "");
+}
+
+/// [`update_error`] with the line's `%s` or `%d` filled (`0x5b9960`'s argument).
+fn update_error_with(lua: &Lua, key: &str, arg: &str) {
+    let line = gs(lua, key);
+    let line = match ["%s", "%d"].iter().find(|p| line.contains(**p)) {
+        Some(p) if !arg.is_empty() => line.replacen(p, arg, 1),
+        _ => line,
+    };
+    fire(lua, "CALENDAR_UPDATE_ERROR", vec![ScriptValue::Str(line)]);
     write(lua, |st, _| st.action_pending = false);
     fire(
         lua,
@@ -759,67 +766,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             many(vec![])
         })?;
     }
-    // CalendarAddEvent and CalendarUpdateEvent send the edited fields; both set the pending bit
-    // (`0x5bbe40`, `0x5bc345`).
-    set(lua, "CalendarAddEvent", |lua, _| {
-        let sent = write(lua, |st, now| {
-            let Some(open) = st.open.as_ref().filter(|o| o.what == Opened::Draft) else {
-                return false;
-            };
-            let fields = open.fields.clone();
-            st.push(R::AddEvent(fields));
-            st.last_add = Some(now);
-            true
-        });
-        pend_if(lua, sent);
-        many(vec![])
-    })?;
-    set(lua, "CalendarUpdateEvent", |lua, _| {
-        let sent = write(lua, |st, _| {
-            let Some(Open {
-                what:
-                    Opened::Event {
-                        event_id,
-                        invite_id,
-                    },
-                fields,
-                ..
-            }) = st.open.clone()
-            else {
-                return false;
-            };
-            let invite_id = st.my_invitee().map_or(invite_id, |m| m.invite_id);
-            st.push(R::UpdateEvent {
-                event_id,
-                invite_id,
-                fields,
-            });
-            if let Some(open) = st.open.as_mut() {
-                open.changed = false;
-            }
-            true
-        });
-        pend_if(lua, sent);
-        many(vec![])
-    })?;
-    // CalendarRemoveEvent (`0x5ba5a0` → `0x5b96a0`): sets the pending bit at `0x5b96d5`/`0x5b96f6`.
-    set(lua, "CalendarRemoveEvent", |lua, _| {
-        let sent = write(lua, |st, _| {
-            let Some((event_id, invite_id)) = open_ids(st).filter(|(e, _)| *e != 0) else {
-                return false;
-            };
-            let flags = st.open.as_ref().map_or(0, |o| o.fields.flags);
-            let invite_id = st.my_invitee().map_or(invite_id, |m| m.invite_id);
-            st.push(R::RemoveEvent {
-                event_id,
-                invite_id,
-                flags,
-            });
-            true
-        });
-        pend_if(lua, sent);
-        many(vec![])
-    })?;
+    sends::install(lua)?;
 
     // ── the option lists ──────────────────────────────────────────────────────────────────────
     set(lua, "CalendarEventGetTypes", |lua, _| {
@@ -1344,9 +1291,11 @@ fn new_draft(lua: &Lua, flags: u32, arena_slot: Option<u8>) {
     write(lua, |st, _| {
         let today = st.today();
         let date = WrathCalendarDate::new(today.year, today.month, today.day, today.hour, 0);
+        // The constructor's size is 100 (`0x5f108b`).
         let fields = WrathCalendarFields {
             event_type: 4,
             dungeon: -1,
+            max_invites: 100,
             date,
             lockout: date,
             flags,

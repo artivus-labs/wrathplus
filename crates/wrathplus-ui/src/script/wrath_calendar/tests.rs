@@ -347,7 +347,7 @@ fn an_opened_event_edits_and_updates() {
         ("Naxx".into(), "Me".into(), 1)
     );
     assert!(s.eval::<bool>("return CalendarEventCanEdit()").unwrap());
-    s.run("CalendarEventSetTitle('Naxx 25') CalendarEventSetTime(20, 15)")
+    s.run("CalendarEventSetTitle('Naxx 25') CalendarEventSetTime(21, 15)")
         .unwrap();
     assert!(s
         .eval::<bool>("return CalendarEventHaveSettingsChanged()")
@@ -367,9 +367,16 @@ fn an_opened_event_edits_and_updates() {
     };
     assert_eq!(
         (fields.title.as_str(), fields.date.hour, fields.date.minute),
-        ("Naxx 25", 20, 15)
+        ("Naxx 25", 21, 15)
     );
     assert!(s.eval::<bool>("return CalendarIsActionPending()").unwrap());
+    // `0x5f1ef0` sends only changed settings.
+    s.set_wrath_calendar_action_pending(false);
+    s.run("CalendarUpdateEvent()").unwrap();
+    assert_eq!(s.take_wrath_calendar_requests(), []);
+    s.run("CalendarEventSetTitle('Naxx 10') CalendarUpdateEvent()")
+        .unwrap();
+    assert_eq!(s.take_wrath_calendar_requests().len(), 1);
     // Nothing opens while an action is pending.
     s.run("CalendarOpenEvent(0, 15, 1)").unwrap();
     assert_eq!(s.take_wrath_calendar_requests(), []);
@@ -398,7 +405,7 @@ fn an_opened_event_edits_and_updates() {
     );
     assert_eq!(
         s.eval::<String>("return (CalendarGetEventInfo())").unwrap(),
-        "Naxx 25"
+        "Naxx 10"
     );
 }
 
@@ -406,6 +413,25 @@ fn an_opened_event_edits_and_updates() {
 #[test]
 fn a_draft_is_added_with_its_fields() {
     let mut s = vm(base());
+    // `0x5f1ba9`: a draft without a title is refused (`0x5b9960` also clears the bit).
+    s.run(
+        "local e = CreateFrame('Frame')
+         e:RegisterEvent('CALENDAR_UPDATE_ERROR')
+         e:SetScript('OnEvent', function(_, _, msg) err = msg end)
+         CalendarNewEvent() CalendarAddEvent()",
+    )
+    .unwrap();
+    let refused =
+        |s: &UiScript, key: &str| s.eval::<bool>(&format!("return err == {key}")).unwrap();
+    assert!(refused(
+        &s,
+        "(CALENDAR_ERROR_NEEDS_TITLE or 'CALENDAR_ERROR_NEEDS_TITLE')"
+    ));
+    s.take_wrath_calendar_requests();
+    s.set_guild(crate::script::GuildState {
+        in_guild: true,
+        ..Default::default()
+    });
     s.run(
         "pending = {}
          local f = CreateFrame('Frame')
@@ -446,6 +472,13 @@ fn a_draft_is_added_with_its_fields() {
             .unwrap(),
         "true false"
     );
+    // A second add within 5 s is throttled (`0x5bbdf4`).
+    s.run("CalendarAddEvent()").unwrap();
+    assert!(refused(
+        &s,
+        "(CALENDAR_ERROR_EVENT_THROTTLED or 'CALENDAR_ERROR_EVENT_THROTTLED')"
+    ));
+    assert_eq!(s.take_wrath_calendar_requests(), []);
     // `0x5b8a50`: an announcement needs the guild right, even as a draft.
     s.run("CalendarNewGuildAnnouncement()").unwrap();
     assert!(!s.eval::<bool>("return CalendarEventCanEdit()").unwrap());
@@ -536,4 +569,11 @@ fn invites_sort_and_status_options_need_a_moderator() {
         .unwrap());
     // `0x5b9960` clears the pending bit after the error line and announces it.
     assert_eq!(s.eval::<i64>("return cleared").unwrap(), 1);
+    // `0x5b96de`: without the edit right, removing the event removes the player's own invite.
+    s.take_wrath_calendar_requests();
+    s.run("CalendarRemoveEvent()").unwrap();
+    assert!(matches!(
+        s.take_wrath_calendar_requests().as_slice(),
+        [WrathCalendarRequest::RemoveInvite { invitee: ME, .. }]
+    ));
 }

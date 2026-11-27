@@ -47,7 +47,7 @@ fn abs(st: &State, month: i64, year: Option<i64>) -> (i32, u8) {
 
 /// `CalendarGetMaxCreateDate`'s day (`0x5b7a80`): the first of the month thirteen months on, less a
 /// day, so the last day of this month next year; a year past 2031 is held there, weekday kept.
-fn max_create(t: WrathCalendarDate) -> WrathCalendarDate {
+pub(super) fn max_create(t: WrathCalendarDate) -> WrathCalendarDate {
     let m0 = i32::from(t.month) - 1 + 13;
     let first = WrathCalendarDate::new(t.year + m0 / 12, (m0 % 12) as u8 + 1, 1, 23, 59);
     let last = WrathCalendarDate::from_seconds(first.seconds() - 86_400);
