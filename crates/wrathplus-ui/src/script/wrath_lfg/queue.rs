@@ -237,7 +237,13 @@ impl UiScript {
         let mut model = self.model_mut();
         let queue = &mut model.wrath_lfg.queue;
         queue.proposal = snapshot.proposal.clone();
-        if queue.snapshot.boot != snapshot.boot {
+        // Only a boot packet replaces `0xbea860`: a republish that resolves a name keeps it.
+        let packet = |b: &WrathLfgBoot| WrathLfgBoot {
+            victim_name: None,
+            victim_realm: None,
+            ..b.clone()
+        };
+        if queue.snapshot.boot.as_ref().map(packet) != snapshot.boot.as_ref().map(packet) {
             queue.my_vote = None;
         }
         queue.snapshot = snapshot;
@@ -443,7 +449,9 @@ fn can_backfill(m: &Model) -> bool {
 pub(crate) fn start_backfill(lua: &Lua) -> bool {
     {
         let mut m = lua.app_data_mut::<Model>().expect("model app_data");
-        if roles_cvar(&m).is_some_and(|r| r & 0xfe != 0) {
+        // The role test reads the whole int (`& 0xfffffffe`); the join send masks a byte.
+        let roles = m.cvars.get("lfgselectedroles");
+        if roles.is_some_and(|c| c.value.trim().parse::<i64>().unwrap_or(0) & !1 != 0) {
             if !can_backfill(&m) {
                 return false;
             }

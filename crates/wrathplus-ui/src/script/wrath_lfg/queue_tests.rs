@@ -242,6 +242,13 @@ fn getters_read_the_snapshot_in_native_shapes() {
     assert!(s
         .eval::<bool>("return select(3, GetLFGBootProposal())")
         .unwrap());
+    // The victim's name resolving republishes without a packet, and keeps it.
+    let mut named = snapshot();
+    named.boot.as_mut().unwrap().victim_name = Some("Resolved".into());
+    s.set_wrath_lfg_queue(Arc::new(named));
+    assert!(s
+        .eval::<bool>("return select(3, GetLFGBootProposal())")
+        .unwrap());
     let mut update = snapshot();
     update.boot.as_mut().unwrap().time_left = 30;
     s.set_wrath_lfg_queue(Arc::new(update));
@@ -501,4 +508,8 @@ fn selection_roles_and_verbs_follow_the_native_gates() {
     s.run("SetLFGRoles(true) assert(select('#', PartyLFGStartBackfill())==0)")
         .unwrap();
     assert_eq!(s.take_ui_errors(), vec!["ERR_LFG_NO_ROLES_SELECTED"]);
+    // A role bit past the byte still passes the role test; the join send then masks it away.
+    s.run("SetCVar('lfgSelectedRoles', '256') assert(PartyLFGStartBackfill()==true)")
+        .unwrap();
+    assert!(s.take_ui_errors().is_empty() && s.take_wrath_lfg_queue_requests().is_empty());
 }
