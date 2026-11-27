@@ -94,7 +94,8 @@ fn stats_for(
     // possessed creature has a bar and no pet number, so no paper doll.
     let has_ui = fields.unit_is_pet_or_charm();
     // Its second return is our class; the owner leg always holds, as the server gives us a bar
-    // only for a pet we control.
+    // only for a pet we control. Labelled: 12340 (`0x71b630`) reads the creator's class, which for
+    // our own pet is ours.
     let hunter = has_ui
         && self_store.map(|s| ((s.0.unit_bytes_0().unwrap_or(0) >> 8) & 0xff) as u8)
             == Some(CLASS_HUNTER);

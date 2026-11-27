@@ -1,7 +1,7 @@
 //! The `Unit*` global registrations, over the per-token [`UnitState`](super::UnitState) snapshots.
 //! Every predicate answers the number 1 or nil through [`super::unit_predicate`] or
 //! [`flag`](super::super::binding_abi::flag): no binding in the reference's unit table (`0x850438`)
-//! calls `lua_pushboolean` (`0x6f39f0`), though `IsPetAttackActive` (`0x4be0e0`) outside it does.
+//! calls `lua_pushboolean` (`0x6f39f0`), though `IsPetAttackActive` (`0x5d3160`) outside it does.
 
 use mlua::{Lua, Value};
 

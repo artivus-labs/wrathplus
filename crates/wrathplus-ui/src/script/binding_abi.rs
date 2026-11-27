@@ -248,7 +248,7 @@ pub(crate) fn bool_or_default(v: Option<&Value>, default: bool) -> bool {
 /// The 1.12 predicate return: `1` for true, nil for false, never a Lua boolean. The widget and
 /// `Unit*` predicates push the number 1 (`0x6f3810`) or nil (`0x6f37f0`); outside the base library
 /// (`rawequal`, `pcall`, `xpcall`), the one binding that calls `lua_pushboolean` (`0x6f39f0`) is
-/// `IsPetAttackActive` (`0x4be0e0`). Direct comparisons see it: stock `UIOptionsFrame.xml:310`
+/// `IsPetAttackActive` (`0x5d3160`). Direct comparisons see it: stock `UIOptionsFrame.xml:310`
 /// saves `tostring(this:GetChecked())` and `BuffFrame.lua:71` compares it with `"1"`. The false
 /// leg is per binding: `IsEnabled` (`0x7800b0`) and numeric getters such as `UnitLevel`
 /// (`0x518144`) answer 0 and do not use this.
