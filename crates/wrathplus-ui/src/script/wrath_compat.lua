@@ -100,6 +100,11 @@ do
     componentTextureLevel = "8",
     consolidateBuffs = "0",
     conversationMode = "popout",
+    -- `0x51f01a`-`0x51f08c`: the currency list's unused and backpack bits (wrath_currency.rs).
+    currencyTokensBackpack1 = "0",
+    currencyTokensBackpack2 = "0",
+    currencyTokensUnused1 = "0",
+    currencyTokensUnused2 = "0",
     deselectOnClick = "0",
     desktopGamma = "1",
     displayFreeBagSlots = "0",

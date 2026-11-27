@@ -244,6 +244,7 @@ fn member(m: &Member) -> ArenaMemberView {
         season_games: m.season_games,
         season_wins: m.season_wins,
         rating: m.personal_rating,
+        gdf: m.extra_bits.map_or([0.0; 2], |w| w.map(f32::from_bits)),
     }
 }
 

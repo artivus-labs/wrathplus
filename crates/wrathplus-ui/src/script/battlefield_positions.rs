@@ -1,5 +1,5 @@
 //! The battleground position verbs `WorldMapFrame.lua` and `Blizzard_BattlefieldMinimap.lua` poll
-//! to place teammates and the flag carrier (opcode `0x2E9`, handler `0x4aad40`). The reference
+//! to place teammates and the flag carriers (opcode `0x2E9`, handler `0x54b3f0`). The reference
 //! drops itself, its party and its raid, prefers a live object's position and projects onto the
 //! active slot's map; the app does all that and pushes the finished list here.
 
@@ -15,8 +15,7 @@ pub struct BattlefieldPositionView {
     pub name: Option<String>,
 }
 
-/// The flag carrier: the position and the token the viewer's faction picks, `"HordeFlag"` for an
-/// Alliance viewer and `"AllianceFlag"` for a Horde one.
+/// A flag carrier: the position and the flag's token (`0x54d010`), the app's to resolve.
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct BattlefieldFlagView {
     pub uv: (f32, f32),
@@ -33,8 +32,13 @@ impl super::UiScript {
     ) {
         let mut model = self.model_mut();
         model.battlefield_positions = players;
-        model.battlefield_flag = flag;
+        model.battlefield_flags = flag.into_iter().collect();
         model.battlefield_icon_scale = icon_scale;
+    }
+
+    /// Both carrier slots (`0xbea170`) in Lua index order; at most two.
+    pub fn set_battlefield_flag_carriers(&mut self, carriers: Vec<BattlefieldFlagView>) {
+        self.model_mut().battlefield_flags = carriers;
     }
 
     /// `RequestBattlefieldPositions()` calls since the last drain; the app sends at most every
@@ -83,11 +87,12 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
+    // 2 with the second slot set, 1 with the first only (`0x54a0e0`).
     g.set(
         "GetNumBattlefieldFlagPositions",
         lua.create_function(|lua, ()| {
             let model = lua.app_data_ref::<Model>().expect("model app_data");
-            Ok(i64::from(model.battlefield_flag.is_some()))
+            Ok(model.battlefield_flags.len().min(2) as i64)
         })?,
     )?;
 
@@ -96,7 +101,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         lua.create_function(|lua, index: Value| {
             let index = number_arg(lua, index, "Usage: GetBattlefieldFlagPosition(index)")?;
             let model = lua.app_data_ref::<Model>().expect("model app_data");
-            match model.battlefield_flag.as_ref().filter(|_| index == 1) {
+            let slot = usize::try_from(index).ok().and_then(|i| i.checked_sub(1));
+            match slot.and_then(|i| model.battlefield_flags.get(i)) {
                 Some(f) => three(lua, f.uv, f.token.as_deref()),
                 None => three(lua, (0.0, 0.0), None),
             }
@@ -219,6 +225,19 @@ mod tests {
             err.contains("Usage: GetBattlefieldFlagPosition(index)"),
             "{err}"
         );
+        // `0x54a0e0`: the second slot counts 2, and index 2 is its own.
+        let flag = |token: &str| BattlefieldFlagView {
+            uv: (0.5, 0.25),
+            token: Some(token.into()),
+        };
+        s.set_battlefield_flag_carriers(vec![flag("AllianceFlag"), flag("HordeFlag")]);
+        let got = s
+            .eval::<String>(
+                "local _, _, t = GetBattlefieldFlagPosition(2) \
+                 return GetNumBattlefieldFlagPositions() .. '|' .. t",
+            )
+            .unwrap();
+        assert_eq!(got, "2|HordeFlag");
         assert!(
             (s.eval::<f64>("return GetBattlefieldMapIconScale()")
                 .unwrap()

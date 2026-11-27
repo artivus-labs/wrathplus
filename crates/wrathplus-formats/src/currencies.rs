@@ -28,21 +28,24 @@ impl CurrencyType {
     }
 }
 
+/// The rows in file order, which is not id order: 12340 walks the table as loaded (`0x5b0340`).
 #[derive(Debug, Default)]
 pub struct CurrencyCatalog {
-    rows: BTreeMap<u32, CurrencyType>,
-    item_ids: BTreeMap<u32, u32>,
+    rows: Vec<CurrencyType>,
+    ids: BTreeMap<u32, usize>,
+    item_ids: BTreeMap<u32, usize>,
 }
 
 impl CurrencyCatalog {
     pub fn get(&self, id: u32) -> Option<&CurrencyType> {
-        self.rows.get(&id)
+        self.rows.get(*self.ids.get(&id)?)
     }
+    /// The first row naming the item, as `0x5affd0` finds it.
     pub fn get_by_item(&self, item_id: u32) -> Option<&CurrencyType> {
-        self.get(*self.item_ids.get(&item_id)?)
+        self.rows.get(*self.item_ids.get(&item_id)?)
     }
     pub fn iter(&self) -> impl Iterator<Item = &CurrencyType> {
-        self.rows.values()
+        self.rows.iter()
     }
     pub fn len(&self) -> usize {
         self.rows.len()
@@ -103,8 +106,10 @@ fn currencies(bytes: &[u8]) -> Result<CurrencyCatalog> {
             category_id: u32_at(r, 2).context("currency category")?,
             bit_index: u32_at(r, 3).context("currency bit index")?,
         };
-        catalog.item_ids.insert(row.item_id, row.id);
-        catalog.rows.insert(row.id, row);
+        let at = catalog.rows.len();
+        catalog.item_ids.entry(row.item_id).or_insert(at);
+        catalog.ids.insert(row.id, at);
+        catalog.rows.push(row);
     }
     Ok(catalog)
 }
@@ -191,7 +196,8 @@ mod tests {
         assert_eq!(frost.category_id, 22);
         assert_eq!(frost.known_mask(), Some(1 << 28));
         assert_eq!(c.get(141).unwrap().category_id, 2089878896);
-        assert_eq!(c.iter().count(), 2);
+        let order: Vec<u32> = c.iter().map(|row| row.id).collect();
+        assert_eq!(order, [341, 141], "file order, not id order");
     }
 
     #[test]
