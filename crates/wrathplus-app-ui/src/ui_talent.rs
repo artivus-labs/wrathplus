@@ -78,8 +78,13 @@ fn load_talents(mut commands: Commands, assets: Option<Res<WorldAssets>>) {
 #[derive(Resource, Default)]
 pub(crate) struct LastTalentGroups(u32, u32);
 
-fn on_session_end(In(_): In<SessionEvent>, mut last: ResMut<LastTalentGroups>) {
-    *last = LastTalentGroups::default();
+fn on_session_end(In(event): In<SessionEvent>, mut last: ResMut<LastTalentGroups>) {
+    if matches!(
+        event,
+        SessionEvent::Disconnected { .. } | SessionEvent::LoggedOut
+    ) {
+        *last = LastTalentGroups::default();
+    }
 }
 
 /// The last pushed snapshot, and the points pair `CHARACTER_POINTS_CHANGED`'s deltas come from.
