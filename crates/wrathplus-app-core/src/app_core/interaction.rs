@@ -589,6 +589,7 @@ impl SocialState {
                     self.friends.push(FriendEntry {
                         guid: update.guid,
                         status: online.map_or(friend_status::OFFLINE, |o| o.status),
+                        online: online.is_some(),
                         area: online.map_or(0, |o| o.area),
                         level: online.map_or(0, |o| o.level),
                         class: online.map_or(0, |o| o.class),
@@ -607,6 +608,7 @@ impl SocialState {
             friend_result::ONLINE => {
                 if let (Some(entry), Some(online)) = (self.friend_mut(update.guid), update.online) {
                     entry.status = online.status;
+                    entry.online = true;
                     entry.area = online.area;
                     entry.level = online.level;
                     entry.class = online.class;
@@ -615,9 +617,9 @@ impl SocialState {
             }
             friend_result::OFFLINE => {
                 if let Some(entry) = self.friend_mut(update.guid) {
-                    // 12340 writes only the online byte (`0x6b761a` → `0x6b3d10`); the level,
-                    // class and zone stay as last sent.
-                    entry.status = friend_status::OFFLINE;
+                    // 12340 writes only the online byte (`0x6b761a` → `0x6b3d10`); the status
+                    // byte, level, class and zone stay as last sent.
+                    entry.online = false;
                 }
                 self.friends_dirty = true;
             }

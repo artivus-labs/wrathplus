@@ -5,8 +5,8 @@
 //!
 //! One `SMSG_CONTACT_LIST` becomes the shared friend list and ignore list, split by the contact
 //! flag bits (1 friend, 2 ignored), each only when the header's flags carry its bit, and the
-//! friends' notes ride `WrathContactNotes`; the mute bit has no place there. The duel countdown is AC's milliseconds (3000) as the shared whole
-//! seconds; a winner mode of 1 is a retreat.
+//! friends' notes ride `WrathContactNotes`; the mute bit has no place there. The duel countdown is
+//! AC's milliseconds (3000) as the shared whole seconds; a winner mode of 1 is a retreat.
 use crate::types::{FriendEntry, FriendOnline, FriendStatusUpdate};
 use crate::SessionEvent;
 use std::io;
@@ -39,6 +39,7 @@ pub fn decode(opcode: u16, body: &[u8]) -> io::Result<Vec<SessionEvent>> {
                         Some(FriendEntry {
                             guid: c.guid,
                             status: friend.status,
+                            online: friend.status != 0,
                             area: presence.map_or(0, |p| p.area),
                             level: presence.map_or(0, |p| p.level),
                             class: presence.map_or(0, |p| p.class),

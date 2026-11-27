@@ -65,6 +65,9 @@ pub struct FriendEntry {
     pub guid: u64,
     /// A [`friend_status`]; when `OFFLINE`, the fields below were not sent and read as zero.
     pub status: u8,
+    /// 12340's online byte, apart from `status`: the list sets it from a nonzero status
+    /// (`0x6b7f33`), and a logout clears it alone (`0x6b3d51`), so the RAF bit outlives it.
+    pub online: bool,
     /// The friend's zone id (`AreaTable.dbc`).
     pub area: u32,
     pub level: u32,
@@ -72,9 +75,9 @@ pub struct FriendEntry {
 }
 
 impl FriendEntry {
-    /// Any of ONLINE/AFK/DND: the wire's own test for whether the area/level/class tail is sent.
+    /// The online byte `GetFriendInfo`'s fifth value reads (`0x6b42de`).
     pub fn is_online(&self) -> bool {
-        self.status != friend_status::OFFLINE
+        self.online
     }
 }
 

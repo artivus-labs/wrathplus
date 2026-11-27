@@ -41,6 +41,7 @@ fn contacts_split_into_friends_and_ignores_and_statuses_keep_their_tail() {
                 FriendEntry {
                     guid: 1,
                     status: 1,
+                    online: true,
                     area: 12,
                     level: 80,
                     class: 5,
@@ -48,6 +49,7 @@ fn contacts_split_into_friends_and_ignores_and_statuses_keep_their_tail() {
                 FriendEntry {
                     guid: 2,
                     status: 0,
+                    online: false,
                     area: 0,
                     level: 0,
                     class: 0,
