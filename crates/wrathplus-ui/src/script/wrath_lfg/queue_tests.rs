@@ -150,6 +150,7 @@ fn snapshot() -> WrathLfgQueueSnapshot {
 
 #[test]
 fn getters_read_the_snapshot_in_native_shapes() {
+    let _throttles = super::throttle_test_lock();
     let mut s = vm();
     assert_eq!(
         s.eval::<u32>("return select('#', GetLFGQueueStats())")
@@ -267,6 +268,7 @@ fn getters_read_the_snapshot_in_native_shapes() {
 
 #[test]
 fn group_lfg_state_backfill_and_deserter() {
+    let _throttles = super::throttle_test_lock();
     let mut s = vm();
     assert!(s
         .eval::<bool>("return IsPartyLFG()==nil and select('#', IsInLFGDungeon())==0 and HasLFGRestrictions()==false and CanPartyLFGBackfill()==false")
@@ -314,6 +316,7 @@ fn group_lfg_state_backfill_and_deserter() {
 
 #[test]
 fn selection_roles_and_verbs_follow_the_native_gates() {
+    let _throttles = super::throttle_test_lock();
     let mut s = vm();
     s.set_now(100.0);
     s.run("JoinLFG()").unwrap();
@@ -410,6 +413,10 @@ fn selection_roles_and_verbs_follow_the_native_gates() {
     assert_eq!(answers.len(), 3);
     assert_eq!(answers[1], R::RoleCheckAnswer { roles: 0 });
     assert_eq!(answers[2], R::RoleCheckAnswer { roles: 3 });
+    // A `/reload` keeps the counters, process globals: a new VM is still inside the window.
+    assert!(vm()
+        .eval::<bool>("return CompleteLFGRoleCheck(true) == nil")
+        .unwrap());
 
     // Proposal: accept marks our row; reject drops it.
     s.set_wrath_lfg_queue(Arc::new(snapshot()));
@@ -444,7 +451,7 @@ fn selection_roles_and_verbs_follow_the_native_gates() {
     s.run("assert(LFGTeleport(false)==false)").unwrap();
     s.set_unit("player", Some(player(0)));
     // Three calls a window: the next two start a fresh one.
-    s.model_mut().wrath_lfg.queue.teleport = Gate::INITIAL;
+    super::edit_throttles(|t| t.teleport = Gate::INITIAL);
     s.model_mut().current_spells = vec![6603];
     s.run("assert(LFGTeleport(false)==false)").unwrap();
     s.model_mut().current_spells.clear();

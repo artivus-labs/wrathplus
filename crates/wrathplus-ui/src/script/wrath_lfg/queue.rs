@@ -200,20 +200,6 @@ pub(crate) struct Queue {
     sent: bool,
     /// `0xacd883`: the selection or the comment changed, so the next join resends.
     pending: bool,
-    // The verb throttles (`0xacdd50`-`0xacdd6c`), each seeded 2 and on the OS clock. Labelled: per
-    // VM, where 12340's counters are process globals that a reload keeps.
-    /// `0xacdd6c`.
-    join: Gate,
-    /// `0xacdd50`, 2 s (`0xa4040c`).
-    comment_throttle: Gate,
-    /// `0xacdd54`.
-    role_check: Gate,
-    /// `0xacdd58`.
-    answer: Gate,
-    /// `0xacdd68`.
-    teleport: Gate,
-    /// `0xacdd5c`.
-    boot_gate: Gate,
     /// `0xbea860`, written by `SetLFGBootVote` until a boot update replaces it.
     my_vote: Option<bool>,
     requests: Vec<WrathLfgQueueRequest>,
@@ -361,6 +347,56 @@ fn now() -> u32 {
     super::requests::now_ms()
 }
 
+/// The verb throttles (`0xacdd50`-`0xacdd6c`), each seeded 2 and on the OS clock: process globals,
+/// as `requests.rs`'s lock gates are, so a `/reload` keeps them.
+struct Throttles {
+    /// `0xacdd6c`.
+    join: Gate,
+    /// `0xacdd50`, 2 s (`0xa4040c`).
+    comment: Gate,
+    /// `0xacdd54`.
+    role_check: Gate,
+    /// `0xacdd58`.
+    answer: Gate,
+    /// `0xacdd68`.
+    teleport: Gate,
+    /// `0xacdd5c`.
+    boot: Gate,
+}
+
+static THROTTLES: std::sync::Mutex<Throttles> = std::sync::Mutex::new(Throttles::INITIAL);
+
+impl Throttles {
+    const INITIAL: Self = Self {
+        join: Gate::INITIAL,
+        comment: Gate::INITIAL,
+        role_check: Gate::INITIAL,
+        answer: Gate::INITIAL,
+        teleport: Gate::INITIAL,
+        boot: Gate::INITIAL,
+    };
+}
+
+/// One call through the throttle `pick` names at OS time `t`, under `window` seconds.
+fn throttle(pick: fn(&mut Throttles) -> &mut Gate, t: u32, window: f64) -> bool {
+    let mut all = THROTTLES.lock().unwrap_or_else(|e| e.into_inner());
+    pick(&mut all).request_within(t, window)
+}
+
+/// Hold the throttles for one test, seeded afresh: the tests share the statics in parallel.
+#[cfg(test)]
+fn throttle_test_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let held = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    edit_throttles(|t| *t = Throttles::INITIAL);
+    held
+}
+
+#[cfg(test)]
+fn edit_throttles(f: impl FnOnce(&mut Throttles)) {
+    f(&mut THROTTLES.lock().unwrap_or_else(|e| e.into_inner()));
+}
+
 fn set(
     lua: &Lua,
     name: &str,
@@ -415,7 +451,7 @@ fn send_join(lua: &Lua) {
     if m.wrath_lfg.queue.sent && !m.wrath_lfg.queue.pending {
         return;
     }
-    if !m.wrath_lfg.queue.join.request(t) {
+    if !throttle(|g| &mut g.join, t, 10.0) {
         return;
     }
     let roles = roles & class_mask(&m);
@@ -474,7 +510,9 @@ pub(crate) fn start_backfill(lua: &Lua) -> bool {
 pub(crate) fn boot_vote(lua: &Lua, yes: bool) -> bool {
     let mut m = lua.app_data_mut::<Model>().expect("model app_data");
     let q = &mut m.wrath_lfg.queue;
-    if !q.snapshot.boot.as_ref().is_some_and(|b| b.in_progress) || !q.boot_gate.request(now()) {
+    if !q.snapshot.boot.as_ref().is_some_and(|b| b.in_progress)
+        || !throttle(|g| &mut g.boot, now(), 10.0)
+    {
         return false;
     }
     q.my_vote = Some(yes);
@@ -927,7 +965,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         q.comment = comment.clone();
         if !q.sent {
             q.pending = true;
-        } else if q.comment_throttle.request_within(t, 2.0) {
+        } else if throttle(|g| &mut g.comment, t, 2.0) {
             q.requests.push(R::SetComment { text: comment });
         }
         Ok(MultiValue::new())
@@ -1022,8 +1060,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         let t = now();
         let accept = bool_or_default(args.front(), false);
         let roles = {
-            let mut m = lua.app_data_mut::<Model>().expect("model app_data");
-            if !m.wrath_lfg.queue.role_check.request(t) {
+            let m = lua.app_data_ref::<Model>().expect("model app_data");
+            if !throttle(|g| &mut g.role_check, t, 10.0) {
                 return Ok(MultiValue::new());
             }
             let Some(roles) = roles_cvar(&m) else {
@@ -1055,7 +1093,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 let Some(id) = q.proposal.as_ref().filter(|p| p.dungeon != 0).map(|p| p.id) else {
                     return Ok(MultiValue::new());
                 };
-                if !q.answer.request(t) {
+                if !throttle(|g| &mut g.answer, t, 10.0) {
                     return Ok(MultiValue::new());
                 }
                 q.requests.push(R::Proposal { id, accept });
@@ -1084,11 +1122,11 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         use crate::script::wrath_port_gates::{CombatTest, PortGates};
         let t = now();
         let refusal = {
-            let mut m = lua.app_data_mut::<Model>().expect("model app_data");
+            let m = lua.app_data_ref::<Model>().expect("model app_data");
             if m.unit("player").is_none_or(|p| !p.exists) {
                 return Ok(MultiValue::new());
             }
-            if !m.wrath_lfg.queue.teleport.request(t) {
+            if !throttle(|g| &mut g.teleport, t, 10.0) {
                 return Ok(MultiValue::from_vec(vec![Value::Boolean(false)]));
             }
             let mut gates = PortGates::of(&m);
