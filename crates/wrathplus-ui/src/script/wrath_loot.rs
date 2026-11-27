@@ -59,8 +59,13 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         "GetNumLootItems",
         lua.create_function(|lua, ()| {
             let model = lua.app_data_ref::<Model>().expect("model app_data");
-            let rows = model.loot.as_ref().map_or(&[][..], |l| &l.rows[..]);
-            Ok(rows.iter().rposition(Option::is_some).map_or(0, |i| i + 1) as i64)
+            let Some(loot) = model.loot.as_ref() else {
+                return Ok(0);
+            };
+            Ok(match loot.rows.iter().rposition(Option::is_some) {
+                Some(i) => i as i64 + 1,
+                None => i64::from(loot.coin_slot),
+            })
         })?,
     )?;
     // LootSlotIsItem(slot) / LootSlotIsCoin(slot) (`0x588750`, `0x588810`): 1 or nil.
@@ -200,6 +205,16 @@ mod tests {
         middle.rows[2] = None;
         s.set_loot(Some(middle));
         assert_eq!(s.eval::<i64>("return GetNumLootItems()").unwrap(), 1);
+        s.set_loot(Some(LootState {
+            rows: vec![None, None],
+            coin_slot: true,
+            ..LootState::default()
+        }));
+        assert_eq!(
+            s.eval::<i64>("return GetNumLootItems()").unwrap(),
+            1,
+            "a taken coin still counts its slot"
+        );
         for verb in ["LootSlotIsItem", "LootSlotIsCoin"] {
             let err = s.run(&format!("{verb}()")).unwrap_err().to_string();
             assert!(err.contains(&format!("Usage: {verb}(slot)")), "{err}");

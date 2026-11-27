@@ -237,14 +237,12 @@ fn snapshot(
             locked: false,
         }));
     }
-    for it in &loot.items {
-        rows.push(
-            (!loot.taken.contains(&it.slot))
-                .then(|| resolve_item(it, items, icons, commands, rolls)),
-        );
-    }
+    rows.extend(loot.items.iter().map(|it| {
+        (!loot.taken.contains(&it.slot)).then(|| resolve_item(it, items, icons, commands, rolls))
+    }));
     Some(LootSnapshot {
         rows,
+        coin_slot: loot.coin_slot,
         fishing: loot.fishing,
         master_candidates: who.names_for(loot),
         // The feed's, which holds the object manager.

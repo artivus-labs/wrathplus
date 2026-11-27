@@ -57,6 +57,7 @@ fn escape_closes_bag_and_panel_releases_loot_and_keeps_the_held_item() {
         source_unit: false,
         fishing: false,
         master_candidates: Vec::new(),
+        coin_slot: false,
         rows: vec![Some(LootRow {
             item_id: 0,
             name: Some("Wool Cloth".into()),
