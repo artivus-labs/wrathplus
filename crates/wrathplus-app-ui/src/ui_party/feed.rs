@@ -1126,12 +1126,10 @@ pub(super) fn drain_party(
             PartyRequest::PromoteGuid(guid) => {
                 let _ = commands.0.send(ClientCommand::GroupSetLeader { guid });
             }
-            PartyRequest::AssistantLeader { name, grant } => {
-                if let Some(guid) = raid_guid_for_name(&group, self_guid, &names, &name) {
-                    let _ = commands
-                        .0
-                        .send(ClientCommand::GroupAssistantLeader { guid, grant });
-                }
+            PartyRequest::AssistantLeader { guid, grant } => {
+                let _ = commands
+                    .0
+                    .send(ClientCommand::GroupAssistantLeader { guid, grant });
             }
             PartyRequest::UninviteRaid(index) => {
                 // Sent by name. The reference's `UninviteFromRaid` and `UninviteFromParty` share
@@ -1360,12 +1358,8 @@ fn apply_test_intent(
             }
             true
         }
-        PartyRequest::AssistantLeader { name, grant } => {
-            if let Some(m) = group
-                .members
-                .iter_mut()
-                .find(|m| m.name.eq_ignore_ascii_case(name))
-            {
+        PartyRequest::AssistantLeader { guid, grant } => {
+            if let Some(m) = group.members.iter_mut().find(|m| m.guid == *guid) {
                 if *grant {
                     m.flags |= GROUP_MEMBER_ASSISTANT;
                 } else {

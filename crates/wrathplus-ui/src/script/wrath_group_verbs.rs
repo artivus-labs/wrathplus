@@ -195,6 +195,35 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             Ok(())
         })?,
     )?;
+    // PromoteToAssistant(name [, exactMatch]) (`0x573ef0`) and DemoteAssistant (`0x573fd0`):
+    // `lua_isstring(1)` else the usage line; the text through `0x520190` (players, filter 6, exact
+    // by `0x815500(L, 2, 0)`), and a guid found sends CMSG_GROUP_ASSISTANT_LEADER (`0x28f`) with
+    // the flag 1 or 0. A miss prints nothing.
+    for (verb, grant, usage) in [
+        (
+            "PromoteToAssistant",
+            true,
+            "Usage: PromoteToAssistant(name)",
+        ),
+        ("DemoteAssistant", false, "Usage: DemoteAssistant(name)"),
+    ] {
+        g.set(
+            verb,
+            lua.create_function(move |lua, args: MultiValue| {
+                let who = args.front().cloned().unwrap_or(Value::Nil);
+                let who = crate::script::binding_abi::string_arg(lua, who, usage)?;
+                let exact = bool_or_default(args.get(1), false);
+                let mut m = lua.app_data_mut::<Model>().expect("model");
+                if let Some(guid) =
+                    super::wrath_party_assignment::resolve_member(&m, &who, true, exact)
+                {
+                    m.party_requests
+                        .push(PartyRequest::AssistantLeader { guid, grant });
+                }
+                Ok(())
+            })?,
+        )?;
+    }
     // SetRaidRosterSelection(index) (`0x572bc0`): truncated; the guid of raid row `index`, or 0
     // past the roster (`0x572c3e`). GetRaidRosterSelection (`0x572c50`): that guid's row now, or 0.
     g.set(

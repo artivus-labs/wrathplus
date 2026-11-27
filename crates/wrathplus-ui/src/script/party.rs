@@ -161,8 +161,9 @@ pub enum PartyRequest {
     /// Build 12340's `PromoteToLeader(unitOrName)` (`0x573e10`) with the guid its resolver found:
     /// `CMSG_GROUP_SET_LEADER` with it (`0x573e7b`-`0x573eb0`).
     PromoteGuid(u64),
-    /// `PromoteToAssistant(name)` / `DemoteAssistant(name)` (`CMSG_GROUP_ASSISTANT_LEADER`).
-    AssistantLeader { name: String, grant: bool },
+    /// Build 12340's `PromoteToAssistant` / `DemoteAssistant` (`0x573ef0`, `0x573fd0`) with the
+    /// guid `0x520190` found: `CMSG_GROUP_ASSISTANT_LEADER` with it and the flag.
+    AssistantLeader { guid: u64, grant: bool },
     /// `UninviteFromRaid(index)`: a 1-based raid row the app resolves to the name
     /// `CMSG_GROUP_UNINVITE` takes.
     UninviteRaid(u32),
@@ -433,8 +434,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
 
     // ── The raid-management verbs ────────────────────────────────────────────
     // Each only marshals its arguments into a client call or a send (`SetRaidSubgroup 0x4bb990`,
-    // `SwapRaidSubgroup 0x4bbb00`, `PromoteToAssistant 0x4bbd20`, `UninviteFromRaid 0x48a580`,
-    // `SetRaidRosterSelection 0x4bb820`), so the verbs here queue a request.
+    // `SwapRaidSubgroup 0x4bbb00`, `UninviteFromRaid 0x48a580`, `SetRaidRosterSelection
+    // 0x4bb820`), so the verbs here queue a request.
     // SetRaidSubgroup(index, group) / SwapRaidSubgroup(index, other), the drag's two drops: a
     // non-number raises the usage error rather than queueing a zero.
     g.set(
@@ -471,18 +472,6 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             Ok(())
         })?,
     )?;
-    for (binding, grant) in [("PromoteToAssistant", true), ("DemoteAssistant", false)] {
-        g.set(
-            binding,
-            lua.create_function(move |lua, name: String| {
-                let mut model = lua.app_data_mut::<Model>().expect("model app_data");
-                model
-                    .party_requests
-                    .push(PartyRequest::AssistantLeader { name, grant });
-                Ok(())
-            })?,
-        )?;
-    }
     g.set(
         "UninviteFromRaid",
         lua.create_function(|lua, index: Value| {
@@ -1235,7 +1224,9 @@ mod tests {
             SwapRaidSubgroup(7, 12)
             PromoteByName("Alice")
             PromoteToAssistant("Bob")
-            DemoteAssistant("Bob")
+            DemoteAssistant("bo")
+            PromoteToAssistant("bo", true)
+            DemoteAssistant("Zed")
             UninviteFromRaid(9)
             DoReadyCheck()
             "#,
@@ -1251,12 +1242,13 @@ mod tests {
                     other: 12
                 },
                 PartyRequest::PromoteName("Alice".into()),
+                // `0x520190`: a prefix unless exactMatch; a miss sends nothing.
                 PartyRequest::AssistantLeader {
-                    name: "Bob".into(),
+                    guid: 0xB0B,
                     grant: true
                 },
                 PartyRequest::AssistantLeader {
-                    name: "Bob".into(),
+                    guid: 0xB0B,
                     grant: false
                 },
                 PartyRequest::UninviteRaid(9),
@@ -1264,6 +1256,10 @@ mod tests {
             ]
         );
         assert!(s.take_party_requests().is_empty(), "the drain empties");
+        for verb in ["PromoteToAssistant", "DemoteAssistant"] {
+            let err = s.run(&format!("{verb}()")).unwrap_err().to_string();
+            assert!(err.contains(&format!("Usage: {verb}(name)")), "{err}");
+        }
         // `0x574a59`: below level 10 ConvertToRaid sends nothing.
         s.model_mut().player_req.level = 9;
         s.run("ConvertToRaid()").unwrap();
