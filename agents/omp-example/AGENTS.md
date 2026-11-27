@@ -87,8 +87,9 @@ function WrathPlus binds, with the notes on what it returns) and the stock UI's 
 (`framexml`, read from your install: how Blizzard's windows call that API). `lua_doc` anything
 unfamiliar before you call it: a built-in's source, a stock function's returns, a stock UI
 function or `File.lua:line`. Missing from the built-ins but present in the stock API means you can
-build it, and the stock UI shows how. For example, `lua_search("taxi")` may turn up no built-in
-that takes a flight, but it finds `TakeTaxiNode` in the stock API and `TaxiFrame.xml` calling it.
+build it, and the stock UI shows how. For example, `lua_search("auction")` turns up no built-in
+that sells at the auction house, but it finds `StartAuction` in the stock API and
+`Blizzard_AuctionUI.lua` calling it.
 
 The built-ins, each documented in its own source (`lua_doc("Goals.push")`,
 `lua_doc("Combat.engage")`):
