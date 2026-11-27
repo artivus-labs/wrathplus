@@ -828,9 +828,8 @@ impl GameTime {
     }
 
     /// The packed login date as `(years since 2000, month 1..=12, day 1..=31)`, decoded from
-    /// [`Self::base_day`]'s `year·372 + month·31 + day`. No day rollover is applied.
+    /// [`Self::base_day`]'s `year·372 + month·31 + day` (1-based: a year is 32..=403; no rollover).
     pub fn date(&self) -> (u32, u32, u32) {
-        // Month and day are 1-based, so a year's serials run from 32 (1 January) to 403.
         let x = self.base_day.saturating_sub(32);
         (x / 372, x % 372 / 31 + 1, x % 31 + 1)
     }
