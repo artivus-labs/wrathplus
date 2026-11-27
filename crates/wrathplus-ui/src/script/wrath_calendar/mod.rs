@@ -643,7 +643,8 @@ impl State {
         let fresh = self
             .event()
             .map(|e| (e.event_id, e.revision, WrathCalendarFields::of(e)));
-        let Some(open) = self.open.as_mut() else {
+        // A draft's fields are its constructor's and its setters': App's copy holds its invitees.
+        let Some(open) = self.open.as_mut().filter(|o| o.what != Opened::Draft) else {
             return;
         };
         if let Some((id, revision, fields)) = fresh {

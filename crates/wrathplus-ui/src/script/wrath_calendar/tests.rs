@@ -638,6 +638,16 @@ fn a_draft_is_added_with_its_fields() {
             arena_slot: None
         }]
     );
+    // App's echo of the draft carries no fields; the draft keeps its own (size 100, `0x5f108b`).
+    let mut echo = base();
+    echo.event = Some(WrathCalendarEvent {
+        creator: ME,
+        flags: 1,
+        ..Default::default()
+    });
+    s.set_wrath_calendar(Arc::new(echo));
+    let size = "return (select(6, CalendarGetEventInfo()))";
+    assert_eq!(s.eval::<i64>(size).unwrap(), 100);
 }
 
 /// The invite list sorts locally and fires its update; a non-moderator is refused the status
