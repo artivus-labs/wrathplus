@@ -36,9 +36,6 @@ const REPEAT_KEYS: [&str; 4] = [
     "CALENDAR_REPEAT_BIWEEKLY",
     "CALENDAR_REPEAT_MONTHLY",
 ];
-/// Labelled (`0x5f26f0` untraced): the statuses a moderator may set, by invite kind.
-const NORMAL_STATUSES: [u8; 7] = [0, 1, 2, 3, 4, 5, 8];
-const SIGNUP_STATUSES: [u8; 6] = [6, 3, 4, 5, 8, 7];
 /// Wire statuses.
 const INVITED: u8 = 0;
 const ACCEPTED: u8 = 1;
@@ -867,13 +864,20 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         many(v)
     })?;
     // CalendarEventGetStatusOptions(index) (`0x5bb130`): (status, name) pairs a moderator may
-    // set; anyone else is refused with `CALENDAR_ERROR_PERMISSIONS`.
+    // set, filtered by `0x5f26f0`: an invitee in the list, statuses 1..8 but not SIGNEDUP or
+    // NOT_SIGNEDUP, not ACCEPTED or DECLINED on a guild event, and not the invitee's own; anyone
+    // else is refused with `CALENDAR_ERROR_PERMISSIONS`.
     set(lua, "CalendarEventGetStatusOptions", |lua, args| {
         let Some(index) = int_arg(lua, &args, 0) else {
             return usage("Usage: CalendarEventGetStatusOptions(index)");
         };
         let (open, can, invitee) = read(lua, |st| {
-            (st.open.is_some(), st.can_edit(), invite_at(st, Some(index)))
+            let guild = st
+                .open
+                .as_ref()
+                .is_some_and(|o| o.fields.flags & GUILD_EVENT != 0);
+            let invitee = invite_at(st, Some(index)).map(|i| (i.status, guild));
+            (st.open.is_some(), st.can_edit(), invitee)
         });
         if !open {
             return many(vec![]);
@@ -882,13 +886,14 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             update_error(lua, "CALENDAR_ERROR_PERMISSIONS");
             return many(vec![]);
         }
-        let statuses: &[u8] = if invitee.is_some_and(|i| i.signup) {
-            &SIGNUP_STATUSES
-        } else {
-            &NORMAL_STATUSES
+        let Some((own, guild)) = invitee else {
+            return many(vec![]);
+        };
+        let shown = |st: &u8| {
+            !matches!(*st, 6 | 7) && *st != own && !(guild && matches!(*st, ACCEPTED | DECLINED))
         };
         let mut v = Vec::new();
-        for &st in statuses {
+        for st in (1..=8).filter(shown) {
             v.push(i(st + 1));
             v.push(s(lua, &gs(lua, STATUS_KEYS[usize::from(st)]))?);
         }

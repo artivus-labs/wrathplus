@@ -307,6 +307,16 @@ fn an_opened_event_edits_and_updates() {
     });
     s.set_wrath_calendar(Arc::new(view.clone()));
     assert_eq!(index(&s), (0, 15, 1));
+    // `0x5f26f0`: statuses 1..8, less SIGNEDUP, NOT_SIGNEDUP and the invitee's own (OUT).
+    assert_eq!(
+        s.eval::<String>(
+            "local t, o = {CalendarEventGetStatusOptions(2)}, {}
+             for k = 1, #t, 2 do o[#o + 1] = t[k] end
+             return table.concat(o, ' ')"
+        )
+        .unwrap(),
+        "2 3 4 6 9"
+    );
     // `0x5ba2c4`: an uncached name is ""; `0x5b8ae0` rounds half to even and keeps a selection
     // past the list's end out.
     assert_eq!(
