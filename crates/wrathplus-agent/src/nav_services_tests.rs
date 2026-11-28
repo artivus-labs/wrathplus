@@ -46,8 +46,8 @@ fn agent_services_asks_the_realm_once_and_the_next_call_reads_the_answer() {
     rig.later(1.0);
     assert!(rig.realm(&[]).is_empty());
     rig.realm(&[
-        "s 1 1 2 vendor 1 110.0 200.0 30.0 1 - - - Brother Danil",
-        "s 1 2 2 trainer_first_aid 41 120.0 200.0 30.0 1 First_Aid - - Medic",
+        "s 1 1 2 vendor 1 110.0 200.0 30.0 1 - - - - - - - Brother Danil",
+        "s 1 2 2 trainer_first_aid 41 120.0 200.0 30.0 1 First_Aid - - - - - - Medic",
     ]);
     assert_eq!(
         rig.events().last().unwrap(),
@@ -103,8 +103,8 @@ fn places_come_nearest_first_with_their_distance_from_where_you_stand() {
     assert_eq!(services(&rig, call), Ok(None));
     rig.realm(&[]);
     rig.realm(&[
-        "s 1 1 2 vendor 1 110.0 200.0 30.0 1 - - - Brother Danil",
-        "s 1 2 2 vendor 2 70.0 240.0 30.0 1 - - - Janos Hammerknuckle",
+        "s 1 1 2 vendor 1 110.0 200.0 30.0 1 - - - - - - - Brother Danil",
+        "s 1 2 2 vendor 2 70.0 240.0 30.0 1 - - - - - - - Janos Hammerknuckle",
     ]);
     let read = |rig: &Rig| -> Vec<(String, f64)> {
         let list: Table = rig.lua.load(format!("return {call}")).eval().unwrap();
@@ -142,9 +142,9 @@ fn event_spawns_carry_event_and_event_active() {
     assert_eq!(services(&rig, call), Ok(None));
     rig.realm(&[]);
     rig.realm(&[
-        "s 1 1 3 trainer 26326 110.0 200.0 30.0 1 - off - Mage Trainer",
-        "s 1 2 3 trainer 26330 115.0 200.0 30.0 1 - on - Paladin Trainer",
-        "s 1 3 3 trainer 944 120.0 200.0 30.0 1 - - - Marryk Nurribit",
+        "s 1 1 3 trainer 26326 110.0 200.0 30.0 1 - off - - - - - Mage Trainer",
+        "s 1 2 3 trainer 26330 115.0 200.0 30.0 1 - on - - - - - Paladin Trainer",
+        "s 1 3 3 trainer 944 120.0 200.0 30.0 1 - - - - - - - Marryk Nurribit",
     ]);
     let fields: Vec<String> = rig
         .lua
@@ -173,9 +173,9 @@ fn auctioneers_carry_their_house_and_mailboxes_come_too() {
     assert_eq!(services(&rig, call), Ok(None));
     assert_eq!(rig.realm(&[]), ["S 1 auctioneer,mailbox"]);
     rig.realm(&[
-        "s 1 1 3 mailbox 143981 105.0 200.0 30.0 1 - - - Mailbox",
-        "s 1 2 3 auctioneer 8719 110.0 200.0 30.0 1 - - alliance Auctioneer Fitch",
-        "s 1 3 3 auctioneer 2622 115.0 200.0 30.0 1 - - neutral Auctioneer Kresky",
+        "s 1 1 3 mailbox 143981 105.0 200.0 30.0 1 - - - - - - - Mailbox",
+        "s 1 2 3 auctioneer 8719 110.0 200.0 30.0 1 - - alliance - - - - Auctioneer Fitch",
+        "s 1 3 3 auctioneer 2622 115.0 200.0 30.0 1 - - neutral - - - - Auctioneer Kresky",
     ]);
     let fields: Vec<String> = rig
         .lua
@@ -194,4 +194,51 @@ fn auctioneers_carry_their_house_and_mailboxes_come_too() {
             "auctioneer 2622 neutral"
         ]
     );
+}
+
+/// A portal comes with its volume, where it leads and what it asks; and a question of other kinds
+/// asked meanwhile (wp.services' town while wp.notice asks for portals) goes out after it, each
+/// answer kept for its own kinds.
+#[test]
+fn portals_carry_where_they_lead_and_two_questions_are_answered_apart() {
+    let rig = Rig::in_world();
+    let portals = "AgentServices('portal')";
+    let vendors = "AgentServices('vendor')";
+    assert_eq!(services(&rig, portals), Ok(None));
+    assert_eq!(services(&rig, vendors), Ok(None));
+    assert_eq!(rig.realm(&[]), ["S 1 portal"]);
+    rig.realm(&[
+        "s 1 1 2 portal 2175 110.0 200.0 30.0 1 - - - 10.0 369,69.3,10.3,-4.3 - - Deeprun Tram",
+        "s 1 2 2 portal 2848 120.0 200.0 30.0 1 - - - 9.4x19.0x20.6@1.57 249,29.1,-71.1,-8.2 80 raid,item:30635 Onyxia's Lair",
+    ]);
+    rig.later(1.0);
+    assert_eq!(rig.realm(&[]), ["S 2 vendor"]);
+    rig.realm(&["s 2 1 1 vendor 1 110.0 200.0 30.0 1 - - - - - - - Brother Danil"]);
+    assert_eq!(
+        services(&rig, vendors),
+        Ok(Some(vec!["vendor Brother Danil - -".to_string()]))
+    );
+    let fields: Vec<String> = rig
+        .lua
+        .load(format!(
+            "local out = {{}} for _, p in ipairs({portals}) do \
+               out[#out + 1] = table.concat({{ p.kind, p.entry, p.name, tostring(p.radius), \
+                 p.box and (p.box.length .. 'x' .. p.box.width .. '@' .. p.box.yaw) or '-', \
+                 p.to_map, p.to_x, tostring(p.level), \
+                 p.needs and table.concat(p.needs, ',') or '-' }}, ' ') \
+             end return out"
+        ))
+        .eval()
+        .unwrap();
+    assert_eq!(
+        fields,
+        [
+            "portal 2175 Deeprun Tram 10 - 369 69.300003051758 nil -",
+            "portal 2848 Onyxia's Lair nil 9.3999996185303x19@1.5700000524521 249 29.10000038147 80 raid,item:30635"
+        ]
+    );
+    // Asking for the vendors again does not unsettle the portals' answer.
+    assert!(services(&rig, vendors).unwrap().is_some());
+    assert!(services(&rig, portals).unwrap().is_some());
+    assert!(rig.realm(&[]).is_empty());
 }

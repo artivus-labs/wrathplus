@@ -36,10 +36,10 @@ fn the_module_reads_a_services_request_as_the_client_wrote_it() {
     let all = request(3, &[], None).unwrap();
     assert_eq!(
         all,
-        "S 3 vendor,repair,trainer,flightmaster,innkeeper,banker,questgiver-hub,trainer_cooking,trainer_first_aid,trainer_profession,auctioneer,mailbox"
+        "S 3 vendor,repair,trainer,flightmaster,innkeeper,banker,questgiver-hub,trainer_cooking,trainer_first_aid,trainer_profession,auctioneer,mailbox,portal"
     );
     assert!(all.len() <= crate::remote::MAX_PAYLOAD);
-    assert_eq!(parsed(&all), "services 3 4095 0.000");
+    assert_eq!(parsed(&all), "services 3 8191 0.000");
     let some = request(4, &words(&["repair", "trainer"]), Some(800)).unwrap();
     assert_eq!(some, "S 4 repair,trainer 800");
     assert_eq!(parsed(&some), "services 4 6 800.000");
@@ -207,27 +207,40 @@ fn answer_lines_out_of_turn_or_unreadable_are_errors() {
     };
     let mut collect = Collect::default();
     assert_eq!(
-        collect.push(line("s 2 1 3 vendor 1 10.0 0.0 0.0 1 - - - A")),
+        collect.push(line("s 2 1 3 vendor 1 10.0 0.0 0.0 1 - - - - - - - A")),
         Ok(None)
     );
     assert!(collect
-        .push(line("s 2 3 3 vendor 1 10.0 0.0 0.0 1 - - - C"))
+        .push(line("s 2 3 3 vendor 1 10.0 0.0 0.0 1 - - - - - - - C"))
         .unwrap_err()
         .contains("came apart"));
     assert_eq!(collect.push(line("s 2 0 0")), Ok(Some(Vec::new())));
     for bad in [
-        "s 2 1 1 armorer 1 1 2 3 1 - - - X",
-        "s 2 2 1 vendor 1 1 2 3 1 - - - X",
-        "s 2 1 1 vendor 1 1 nan 3 1 - - - X",
+        "s 2 1 1 armorer 1 1 2 3 1 - - - - - - - X",
+        "s 2 2 1 vendor 1 1 2 3 1 - - - - - - - X",
+        "s 2 1 1 vendor 1 1 nan 3 1 - - - - - - - X",
         // The event field is "-", "on" or "off"; an older realm's line has a name word there.
-        "s 2 1 1 vendor 1 1 2 3 1 - maybe - X",
+        "s 2 1 1 vendor 1 1 2 3 1 - maybe - - - - - X",
         "s 2 1 1 vendor 1 1 2 3 1 - Brother_Danil",
         "s 2 1 1 vendor 1 1 2 3 1 -",
         // The house field is "-", "alliance", "horde" or "neutral"; the last realm's line (before
         // auctioneers) has a name word there, or nothing.
-        "s 2 1 1 auctioneer 1 1 2 3 1 - - goblin X",
+        "s 2 1 1 auctioneer 1 1 2 3 1 - - goblin - - - - X",
         "s 2 1 1 vendor 1 1 2 3 1 - - Brother_Danil",
         "s 2 1 1 vendor 1 1 2 3 1 - -",
+        // The portal fields (area, to, level, needs) are "-" for any other kind and read for a
+        // portal; the last realm's line (before portals) has the name there.
+        "s 2 1 1 vendor 1 1 2 3 1 - - - Brother Danil",
+        "s 2 1 1 mailbox 1 1 2 3 1 - - - Mailbox",
+        "s 2 1 1 vendor 1 1 2 3 1 - - - 10.0 - - - X",
+        "s 2 1 1 portal 2173 1 2 3 1 - - - - - - - Deeprun Tram",
+        "s 2 1 1 portal 2173 1 2 3 1 - - - ten 369,68.3,2490.9,-4.3 - - Deeprun Tram",
+        "s 2 1 1 portal 2173 1 2 3 1 - - - 10.0 369,68.3,2490.9 - - Deeprun Tram",
+        "s 2 1 1 portal 2173 1 2 3 1 - - - 10.0 369,68.3,2490.9,-4.3,1 - - Deeprun Tram",
+        "s 2 1 1 portal 2173 1 2 3 1 - - - 1x2@0 369,68.3,2490.9,-4.3 - - Deeprun Tram",
+        "s 2 1 1 portal 2173 1 2 3 1 - - - 10.0 369,68.3,2490.9,-4.3 low - Deeprun Tram",
+        "s 2 1 1 portal 2173 1 2 3 1 - - - 10.0 369,68.3,2490.9,-4.3 - raid,, Deeprun Tram",
+        "s 2 1 1 portal 2173 1 2 3 1 - - - 10.0 369,68.3,2490.9,-4.3 -",
         "s 2 0 0 extra",
         "s 2 1 1 vendor",
     ] {
@@ -312,7 +325,7 @@ fn event_spawns_are_told_with_whether_their_event_has_them_out() {
     assert_eq!(told("@9")[2], "26328 Some(true)");
     // On the wire: "-", "on" or "off" before the name.
     let Ok(Reply::Service(line)) =
-        decode("s 3 1 1 trainer 26326 10.0 0.0 0.0 1 - off - Mage Trainer")
+        decode("s 3 1 1 trainer 26326 10.0 0.0 0.0 1 - off - - - - - Mage Trainer")
     else {
         panic!("decodes");
     };
@@ -366,7 +379,7 @@ fn auctioneers_are_told_with_the_house_they_serve() {
     );
     // On the wire: the house before the name.
     let Ok(Reply::Service(line)) =
-        decode("s 3 1 1 auctioneer 2622 20.0 0.0 0.0 1 - - neutral Auctioneer Kresky")
+        decode("s 3 1 1 auctioneer 2622 20.0 0.0 0.0 1 - - neutral - - - - Auctioneer Kresky")
     else {
         panic!("decodes");
     };
@@ -477,4 +490,115 @@ fn the_nearest_class_trainers_are_told_beyond_the_radius_and_the_cap() {
     // On the wire nothing new: a far trainer is a place like any other.
     let far = over(&ironforge, &format!("trainer 0 1 0 0 2000 8 20 {HUMAN}"));
     assert_eq!((far[0].pos[0], far[0].name.as_str()), (2500.0, "Bink"));
+}
+
+/// Every phase: an area trigger has none.
+const ALL_PHASES: &str = "4294967295";
+
+#[test]
+fn portals_are_told_with_their_volume_destination_and_requirement() {
+    // The Deeprun Tram's entrances (AzerothCore's areatrigger and areatrigger_teleport rows):
+    // Ironforge's in Tinker Town and Stormwind's, 3500 yards apart on map 0; the tram's own ways
+    // out (map 369, one a box); then instance doors with access requirements: Onyxia's Lair (a
+    // raid), the Black Morass (a quest, and a key on heroic) and the Pit of Saron (a quest per
+    // side), and a vendor beside the Ironforge entrance.
+    let spawns = [
+        format!("2175 0 {ALL_PHASES} -4840.26 -1330.46 508.172 0 0 0 0 0 0 0 +sphere=10 +to=369,69.2542,10.257,-4.29664 Deeprun_Tram"),
+        format!("2173 0 {ALL_PHASES} -8346.46 514.031 96.5989 0 0 0 0 0 0 0 +sphere=10 +to=369,68.3006,2490.91,-4.29647 Deeprun_Tram"),
+        format!("2166 369 {ALL_PHASES} 76.027 10.5043 -4.29659 0 0 0 0 0 0 0 +box=9.417,19,20.64,0 +to=0,-4838.95,-1318.46,501.868 Eastern_Kingdoms"),
+        format!("2848 0 {ALL_PHASES} -4800 -1300 500 0 0 0 0 0 0 0 +sphere=5 +to=249,29.1,-71.1,-8.2 +raidmap +raidgroup +access=0,80,0,0 +access=1,80,0,0 Onyxia's_Lair"),
+        format!("4321 0 {ALL_PHASES} -4810 -1300 500 0 0 0 0 0 0 0 +sphere=5 +to=269,-1496.7,7033.5,32.3 +access=0,66,0,0 +need=0,1,10285,2 +access=1,70,0,0 +need=1,1,10285,2 +need=1,2,30635,2 Black_Morass"),
+        format!("5633 0 {ALL_PHASES} -4820 -1300 500 0 0 0 0 0 0 0 +sphere=5 +to=658,435.7,212.4,528.7 +access=0,0,0,200 +need=0,1,24499,0 +need=0,1,24511,1 Pit_of_Saron"),
+        format!("5175 0 1 -4835 -1310 508 0x80 0 0 {ALLIANCE} Gnome_Vendor"),
+    ]
+    .join("\n");
+    let told = |query: &str| over(&spawns, query);
+    let tinker_town = |kinds: &str, marks: &str| {
+        told(&format!(
+            "{kinds} 0 1 -4830 -1300 2000 1 20 {HUMAN} {marks}"
+        ))
+    };
+    // Only on the asker's map, within the radius, nearest first; asked for, or not at all.
+    let near = tinker_town("portal", "+team=0");
+    let entries: Vec<u32> = near.iter().map(|p| p.entry).collect();
+    assert_eq!(entries, [5633, 4321, 2848, 2175]);
+    assert_eq!(
+        tinker_town("vendor", "")
+            .iter()
+            .map(|p| p.kind.as_str())
+            .collect::<Vec<_>>(),
+        ["vendor"]
+    );
+    assert!(tinker_town("vendor", "")[0].portal.is_none());
+    // The tram: a 10 yard sphere, to map 369 and where on it, named for the map.
+    let tram = &near[3];
+    assert_eq!(
+        (tram.kind.as_str(), tram.name.as_str()),
+        ("portal", "Deeprun Tram")
+    );
+    assert_eq!(tram.pos, [-4840.3, -1330.5, 508.2]);
+    let portal = tram.portal.as_ref().unwrap();
+    assert_eq!(portal.area, Area::Sphere { radius: 10.0 });
+    assert_eq!((portal.to_map, portal.to), (369, [69.3, 10.3, -4.3]));
+    assert_eq!((portal.level_min, portal.level_max), (None, None));
+    assert!(portal.needs.is_empty());
+    // A raid: its level and a raid group, told and not filtered (the asker is no level 80).
+    let onyxia = near[2].portal.as_ref().unwrap();
+    assert_eq!(
+        (onyxia.level_min, onyxia.needs.as_slice()),
+        (Some(80), ["raid".to_string()].as_slice())
+    );
+    // At the asker's difficulty: the Black Morass's normal and heroic requirements.
+    let morass = |marks: &str| {
+        let place = tinker_town("portal", marks).remove(1);
+        let p = place.portal.unwrap();
+        (p.level_min, p.needs)
+    };
+    assert_eq!(morass(""), (Some(66), vec!["quest:10285".to_string()]));
+    assert_eq!(
+        morass("+dungeon=1"),
+        (
+            Some(70),
+            vec!["quest:10285".to_string(), "item:30635".to_string()]
+        )
+    );
+    // The raid difficulty is for raids, not dungeons.
+    assert_eq!(morass("+raid=1").0, Some(66));
+    // Each side is told its own quest; an average item level is a need too.
+    let saron = |team: &str| tinker_town("portal", team).remove(0).portal.unwrap().needs;
+    assert_eq!(saron("+team=0"), ["quest:24499", "item_level:200"]);
+    assert_eq!(saron("+team=1"), ["quest:24511", "item_level:200"]);
+    // Inside the tram: its ways out, a box among them.
+    let inside = told(&format!("portal 369 1 70 10 2000 1 20 {HUMAN}"));
+    let way_out = inside[0].portal.as_ref().unwrap();
+    assert_eq!(
+        (inside.len(), way_out.area, way_out.to_map),
+        (
+            1,
+            Area::Box {
+                size: [9.4, 19.0, 20.6],
+                yaw: 0.0
+            },
+            0
+        )
+    );
+    // On the wire: the four fields before the name.
+    let Ok(Reply::Service(line)) = decode(
+        "s 3 1 1 portal 4321 -4810.0 -1300.0 500.0 1 - - - 5.0 269,-1496.7,7033.5,32.3 70-72 quest:10285,item:30635 Caverns of Time",
+    ) else {
+        panic!("decodes");
+    };
+    let place = line.place.unwrap();
+    let p = place.portal.unwrap();
+    assert_eq!(
+        (place.name.as_str(), p.level_min, p.level_max, p.needs.len()),
+        ("Caverns of Time", Some(70), Some(72), 2)
+    );
+    let Ok(Reply::Service(line)) =
+        decode("s 3 1 1 portal 1 0.0 0.0 0.0 1 - - - 5.0 1,0.0,0.0,0.0 -60 - X")
+    else {
+        panic!("decodes");
+    };
+    let p = line.place.unwrap().portal.unwrap();
+    assert_eq!((p.level_min, p.level_max), (None, Some(60)));
 }

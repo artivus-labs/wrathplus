@@ -276,3 +276,70 @@ fn the_goals_scan_is_shared() {
     script.tick(1.1);
     assert_eq!(int(&script, "return scans"), after_facts + 1);
 }
+
+#[test]
+fn a_portal_the_realm_told_of_is_noticed_in_reach() {
+    let mut script = notice();
+    script
+        .run(
+            r#"asks, portal_answer = 0, nil
+            AgentServices = function(kinds)
+              assert(kinds == "portal", kinds)
+              asks = asks + 1
+              return portal_answer or { pending = true }
+            end"#,
+        )
+        .unwrap();
+    // Asked of the realm on arrival: nothing to notice while the answer is out.
+    script.tick(1.1);
+    assert_eq!(said(&script), "subzone Northshire Abbey Elwynn Forest");
+    assert_eq!(int(&script, "return asks"), 1);
+    script
+        .run(
+            r#"portal_answer = {
+              { kind = "portal", entry = 2175, name = "Deeprun Tram", x = 50, y = 20, z = 0, map = 0,
+                radius = 10, to_map = 369 },
+              { kind = "portal", entry = 2848, name = "Onyxia's Lair", x = 200, y = 20, z = 0, map = 0,
+                radius = 5, to_map = 249, level = 80, needs = { "raid" } },
+              { kind = "portal", entry = 2166, name = "Eastern Kingdoms", x = 60, y = 20, z = 0,
+                map = 369, to_map = 0, to_zone = "Ironforge" },
+            }"#,
+        )
+        .unwrap();
+    // Within the radius (60 yd) on our map, once; the far one and another map's are not.
+    script.tick(1.1);
+    assert_eq!(said(&script), "portal Deeprun Tram nil");
+    let (distance, entry): (f64, i64) = script
+        .eval("return Notice.recent[#Notice.recent].distance, Notice.recent[#Notice.recent].entry")
+        .unwrap();
+    assert_eq!((distance, entry), (40.0, 2175));
+    script.tick(1.1);
+    assert_eq!(said(&script), "");
+    // Walking on: the answer serves until we are far from where it was asked.
+    script
+        .run("AgentPosition = function() return { x = 190, y = 20, z = 0, map = 0 } end")
+        .unwrap();
+    script.tick(1.1);
+    assert_eq!(said(&script), "portal Onyxia's Lair level 80, raid");
+    assert_eq!(int(&script, "return asks"), 2);
+    // A new map asks again; a way out is named for where it leads.
+    script
+        .run("AgentPosition = function() return { x = 30, y = 20, z = 0, map = 369 } end")
+        .unwrap();
+    script.tick(1.1);
+    assert_eq!(int(&script, "return asks"), 3);
+    assert_eq!(said(&script), "portal Ironforge nil");
+    // Muted like any kind; still recorded.
+    script
+        .run(r#"Notice.mute("portal") Notice.forget("portal")"#)
+        .unwrap();
+    script.tick(1.1);
+    assert_eq!(said(&script), "");
+    assert_eq!(
+        int(
+            &script,
+            "return Notice.recent[#Notice.recent].muted and 1 or 0"
+        ),
+        1
+    );
+}

@@ -96,7 +96,9 @@ The built-ins, each documented in its own source (`lua_doc("Goals.push")`,
 
 - **`Agent*`** (Rust): `AgentNearby`, `AgentPosition`, `AgentTarget`, `AgentInteract` (walks there
   itself), `AgentMoveTo` / `AgentWalk` (navmesh walks, ending as `AGENT_WALK_DONE`),
-  `AgentServices` / `AgentFindNpc` (vendors, trainers, flight masters, mailboxes...).
+  `AgentServices` / `AgentFindNpc` (vendors, trainers, flight masters, mailboxes...); portals
+  (the Deeprun Tram, instance doors: area triggers, never in `AgentNearby`) via
+  `AgentServices({"portal"})`, used by walking in (`AgentMoveTo` to its `x, y, z`).
 - **`Combat`** (chase, fight, loot; `AGENT_COMBAT_DONE`), **`Rotation`** (what Combat casts; nil
   until you set your own list), **`Quests`**, **`Move`**, **`Goals`** (the planner and runner:
   `Goals.on = true` levels by itself; push goals, teach facts and actions, hold it), **`Upkeep`**,
@@ -237,8 +239,8 @@ Every turn of yours costs money; the Lua runs for free.
 - **What you pass.** `wp.notice` (`Notice`) signals `AGENT_NOTICED(kind, name, guid, distance, x,
   y, extra)` the first time this character comes within 60 yd of a quest giver ("!", or a grey "!"
   with `trivial`), a hand-in, a trainer, vendor, repairer, flight master, innkeeper, banker,
-  auctioneer or mailbox, a rare or elite, a herb or vein, a chest, another player, or enters a new
-  subzone. The launcher batches them into one wake per `WRATHPLUS_OMP_NOTICE_SECONDS` (15), nearest
+  auctioneer or mailbox, a portal (from the realm: "portal to Deeprun Tram"), a rare or elite, a
+  herb or vein, a chest, another player, or enters a new subzone. The launcher batches them into one wake per `WRATHPLUS_OMP_NOTICE_SECONDS` (15), nearest
   first, and every check-in lists all that was passed since the last. Mute what your goal has no use
   for: `Notice.mute("player")`, or with a filter, `Notice.mute("quest_available", "n.trivial")`
   (muted notices are still in `Notice.recent` and the check-in digest); `Notice.unmute(kind)`. A

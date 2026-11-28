@@ -241,7 +241,7 @@ realm's `mod-agent-nav`; no extra port, no extra credentials).
 - `AgentServices([kinds [, radius]])` asks the realm where services are on your map, nearest
   first: `vendor`, `repair`, `trainer` (your class trainer), `flightmaster`, `innkeeper`,
   `banker`, `questgiver-hub`, `trainer_cooking`, `trainer_first_aid`, `trainer_profession`,
-  `auctioneer`, `mailbox`. Like
+  `auctioneer`, `mailbox`, `portal`. Like
   `AgentPath` it returns `{pending = true}` first; `AGENT_SERVICES_READY` fires when the answer
   is in, and the next call returns
   `{ { kind, name, x, y, z, map, zone, distance, members, profession, event, event_active, house }, ... }`,
@@ -251,7 +251,14 @@ realm's `mod-agent-nav`; no extra port, no extra credentials).
   most likely not there. `house` says which auction house an auctioneer serves: `alliance`,
   `horde` or `neutral` (Booty Bay, Gadgetzan, Everlook, which both sides share); the other side's
   auctioneers are not listed, as no hostile NPC is. Mailboxes are game objects, listed for either
-  side. The `Services` module does not ask for those two by default. By default the realm
+  side. A `portal` is an area trigger that teleports (the Deeprun Tram's entrances, an
+  instance's door and its way out), which nothing in sight shows: its `name` is the destination
+  map, and it adds `radius` or `box`, `to_map`, `to_x`, `to_y`, `to_z`, `to_zone`, `level`,
+  `level_max` and `needs` (`raid`, `quest:<id>`, `item:<id>`, `achievement:<id>`,
+  `item_level:<n>`: told, not filtered). Walk into it to use it (`AgentMoveTo(x, y, z)` to its
+  centre): the client sends the trigger on entering, and the realm teleports you if you meet the
+  requirement. `Notice` asks for portals itself and signals one within 60 yards (kind
+  `portal`). The `Services` module does not ask for those three by default. By default the realm
   looks 2000 yards round and sends at most 20, except that the nearest two of your class
   trainers (and of the Cooking and First Aid trainers, when asked for) on the map are always
   sent, however far; the answer is reused for 120 seconds while you

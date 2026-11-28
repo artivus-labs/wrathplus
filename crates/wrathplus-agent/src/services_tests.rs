@@ -13,6 +13,8 @@ AgentWalk = function() return { status = "idle" } end
 AgentAvoid = function() return {} end
 GetRealZoneText = function() return zone end
 AgentServices = function(kinds)
+  -- wp.notice asks for portals on its own; only wp.services' questions are counted here.
+  if kinds == "portal" then return {} end
   asks = asks + 1
   local a = table.remove(answers, 1)
   if a == nil then return { pending = true } end

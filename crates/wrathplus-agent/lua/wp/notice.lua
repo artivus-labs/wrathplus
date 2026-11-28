@@ -31,6 +31,15 @@
 --                    extra its level.
 --   subzone          a subzone entered for the first time (name, distance 0, where we stand);
 --                    extra the zone.
+--   portal           a portal (an area trigger that teleports: the Deeprun Tram, an instance's
+--                    door) the realm told of (AgentServices "portal"), within `radius` of where we
+--                    stand: name the destination (its zone when the client knows it, else its
+--                    map: "Deeprun Tram", "The Deadmines"), guid nil, entry the trigger id; extra
+--                    what it asks ("level 15", "raid", "quest:10285"), nil for nothing. Nothing in
+--                    sight shows one, so it is asked of the realm: on a new map or zone, every
+--                    `portal_every` seconds, and after `portal_moved` yards (Notice.portals, the
+--                    last answer; Notice.portals_why when it cannot be asked). Walk into it to use
+--                    it (AgentMoveTo to its x, y, z).
 -- An NPC offering several services is one notice per kind (one guid): mute one kind, not the NPC.
 -- Novelty is per character: units and players by guid, game objects by entry and place, subzones
 -- by zone and name. It lasts the session (the Lua VM): a relog or a client restart notices the
@@ -61,11 +70,13 @@ local N = {
   log = {}, log_max = 1000, seq = 0,
   digest_names = 6,
   muted_by = {}, listeners = {}, listen_errors = {},
+  -- Portals, asked of the realm: the last answer, and when to ask again.
+  portals = {}, portals_why = nil, portal_every = 300, portal_moved = 1000,
 }
 
 local KINDS = { "quest_available", "quest_turnin", "trainer", "vendor", "repair", "flightmaster",
   "innkeeper", "banker", "mailbox", "auctioneer", "rare", "elite", "node", "chest", "player",
-  "subzone" }
+  "subzone", "portal" }
 N.kinds = KINDS
 local KNOWN = {}
 for _, k in ipairs(KINDS) do KNOWN[k] = true end
@@ -242,6 +253,54 @@ local function look_at_subzone()
     z = pos and pos.z, extra = zone, zone = zone, subzone = sub, at = now() })
 end
 
+-- What a portal asks, as a notice's extra: "level 15-20, raid, quest:10285"; nil for nothing.
+local function portal_extra(p)
+  local parts = {}
+  if p.level or p.level_max then
+    parts[1] = "level " .. (p.level and tostring(p.level) or "")
+      .. (p.level_max and ("-" .. p.level_max) or "")
+  end
+  for _, n in ipairs(p.needs or {}) do parts[#parts + 1] = n end
+  return #parts > 0 and table.concat(parts, ", ") or nil
+end
+
+-- The realm's portals: asked again on a new map or zone, after `portal_every` seconds, or once we
+-- are `portal_moved` yards from where it was asked (its radius is 2000). A refusal waits for the
+-- next zone, or `portal_every`.
+local portal_ask = { waiting = false }
+
+local function ask_portals(pos, zone, t)
+  local a = portal_ask
+  local due = a.waiting or a.at == nil or a.map ~= pos.map or a.zone ~= zone
+    or t - a.at >= N.portal_every
+    or (N.portals_why == nil and math.sqrt((pos.x - a.x) ^ 2 + (pos.y - a.y) ^ 2) >= N.portal_moved)
+  if not due then return end
+  local answer, why = AgentServices("portal")
+  if answer and answer.pending then
+    a.waiting = true
+    return
+  end
+  a.waiting, a.at, a.map, a.zone, a.x, a.y = false, t, pos.map, zone, pos.x, pos.y
+  N.portals, N.portals_why = answer or {}, why
+end
+
+local function look_at_portals()
+  if not AgentServices or not AgentPosition then return end
+  local pos = AgentPosition()
+  if not pos then return end
+  local zone, sub = zone_names()
+  ask_portals(pos, zone, now())
+  for _, p in ipairs(N.portals) do
+    local d = math.sqrt((p.x - pos.x) ^ 2 + (p.y - pos.y) ^ 2)
+    local key = "portal|" .. tostring(p.map) .. ":" .. tostring(p.entry)
+    if p.map == pos.map and d <= N.radius and not N.seen[key] then
+      record(key, { kind = "portal", name = p.to_zone or p.name or "?", entry = p.entry,
+        distance = math.floor(d * 10 + 0.5) / 10, x = p.x, y = p.y, z = p.z,
+        extra = portal_extra(p), level = p.level, zone = zone, subzone = sub, at = now() })
+    end
+  end
+end
+
 -- Goals handed its scan in since the last pass: no need to read the world again.
 local fed = false
 
@@ -257,6 +316,7 @@ end
 local function pass()
   if not N.on then return end
   look_at_subzone()
+  look_at_portals()
   if fed then
     fed = false
     return

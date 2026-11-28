@@ -19,7 +19,8 @@
 // is read from what ObjectMgr loaded, once, on the world thread at startup, and handed to the
 // search thread, which answers from it; no database query per request. The faction check uses
 // the faction templates alone (reputation is not looked at). Mailboxes are gameobjects, read from
-// ObjectMgr's gameobject spawns the same way. A spawn a game event brings out is told as such,
+// ObjectMgr's gameobject spawns the same way, and portals (area triggers that teleport,
+// AgentNavPortals.h) from its area trigger tables. A spawn a game event brings out is told as such,
 // with whether its event has it out at the question (the active events are copied into each
 // request on the world thread): told, not left out, as the asker decides.
 
@@ -76,6 +77,10 @@ static_assert(AgentNav::kUnitFlagNotSelectable == UNIT_FLAG_NOT_SELECTABLE &&
 static_assert(AgentNav::kGameObjectTypeMailbox == GAMEOBJECT_TYPE_MAILBOX &&
     AgentNav::kGoFlagNotSelectable == GO_FLAG_NOT_SELECTABLE, "mailboxes");
 static_assert(std::tuple_size_v<decltype(AgentNav::Faction::enemies)> == MAX_FACTION_RELATIONS, "faction relations");
+static_assert(AgentNav::kTeamAlliance == TEAM_ALLIANCE && AgentNav::kTeamHorde == TEAM_HORDE &&
+    AgentNav::kTeamNeutral == TEAM_NEUTRAL, "teams");
+static_assert(AgentNav::kDifficulties == MAX_DIFFICULTY && DUNGEON_DIFFICULTY_HEROIC == 1 &&
+    RAID_DIFFICULTY_25MAN_HEROIC == 3, "difficulties: a portal's requirement is kept per difficulty");
 static_assert(AgentNav::kGround == NAV_GROUND && AgentNav::kMagma == NAV_MAGMA && AgentNav::kSlime == NAV_SLIME &&
     AgentNav::kWater == NAV_WATER && AgentNav::kSteep == NAV_GROUND_STEEP, "terrain flags");
 
@@ -282,6 +287,11 @@ AgentNav::ServiceQuery Asking(Player* player, AgentNav::Message const& message, 
     // changes the list on this (the world) thread; the search thread gets a copy, sorted (a set).
     auto const& active = sGameEventMgr->GetActiveEventList();
     q.activeEvents.assign(active.begin(), active.end());
+    // Which of a portal's requirements this asker meets them by: its race's side (as
+    // Player::Satisfy) and the difficulties it has set (as MapMgr::PlayerCannotEnter).
+    q.team = uint8(player->GetTeamId(true));
+    q.dungeonDifficulty = uint8(player->GetDungeonDifficulty());
+    q.raidDifficulty = uint8(player->GetRaidDifficulty());
     return q;
 }
 
@@ -381,6 +391,77 @@ void MailboxSpawns(std::vector<AgentNav::Spawn>& out)
     }
 }
 
+// An instance's requirement, as ObjectMgr loaded it (dungeon_access_template and
+// dungeon_access_requirements), the levels dropped when the realm ignores them
+// (Instance.IgnoreLevel), as Player::Satisfy does.
+AgentNav::Access AccessOf(DungeonProgressionRequirements const* ar, bool ignoreLevel)
+{
+    AgentNav::Access out;
+    if (!ar)
+        return out;
+    if (!ignoreLevel)
+    {
+        out.levelMin = ar->levelMin;
+        out.levelMax = ar->levelMax;
+    }
+    out.itemLevel = ar->reqItemLevel;
+    auto const add = [&](std::vector<ProgressionRequirement*> const& list, AgentNav::Need::Type type) {
+        for (ProgressionRequirement const* r : list)
+            if (r)
+                out.needs.push_back(AgentNav::Need{type, r->id, uint8(r->faction)});
+    };
+    add(ar->quests, AgentNav::Need::Type::Quest);
+    add(ar->items, AgentNav::Need::Type::Item);
+    add(ar->achievements, AgentNav::Need::Type::Achievement);
+    return out;
+}
+
+// The portals: every area trigger that teleports (areatrigger_teleport, as ObjectMgr loaded it,
+// each with a trigger volume in its areatrigger table), at the trigger's own map and centre, named
+// for the destination map (Map.dbc), with the destination's requirement at each difficulty the
+// asker may have set, after the core's downscaling (MapMgr::PlayerCannotEnter). Added to `out`.
+void PortalSpawns(std::vector<AgentNav::Spawn>& out)
+{
+    bool const ignoreLevel = sWorld->getBoolConfig(CONFIG_INSTANCE_IGNORE_LEVEL);
+    bool const ignoreRaid = sWorld->getBoolConfig(CONFIG_INSTANCE_IGNORE_RAID);
+    for (auto const& [triggerId, teleport] : sObjectMgr->GetAllAreaTriggerTeleports())
+    {
+        AreaTrigger const* trigger = sObjectMgr->GetAreaTrigger(triggerId);
+        MapEntry const* to = sMapStore.LookupEntry(teleport.target_mapId);
+        if (!trigger || !to)
+            continue;
+        AgentNav::Teleport t;
+        t.radius = trigger->radius;
+        t.length = trigger->length;
+        t.width = trigger->width;
+        t.height = trigger->height;
+        t.orientation = trigger->orientation;
+        t.toMap = teleport.target_mapId;
+        t.toX = teleport.target_X;
+        t.toY = teleport.target_Y;
+        t.toZ = teleport.target_Z;
+        t.raidMap = to->IsRaid();
+        t.raidGroup = to->IsRaid() && !ignoreRaid;
+        for (std::size_t d = 0; d < t.access.size(); ++d)
+        {
+            Difficulty difficulty = Difficulty(d);
+            if (!GetDownscaledMapDifficultyData(t.toMap, difficulty))
+                continue;
+            t.access[d] = AccessOf(sObjectMgr->GetAccessRequirement(t.toMap, difficulty), ignoreLevel);
+        }
+        AgentNav::Spawn s;
+        s.entry = triggerId;
+        s.map = trigger->map;
+        s.phaseMask = 0xFFFFFFFF;
+        s.x = trigger->x;
+        s.y = trigger->y;
+        s.z = trigger->z;
+        s.name = to->name[LOCALE_enUS] ? to->name[LOCALE_enUS] : "";
+        s.portal = std::move(t);
+        out.push_back(std::move(s));
+    }
+}
+
 // The auction house an auctioneer of this faction template serves, as the core picks it when the
 // asker opens it (AllowTwoSide.Interaction.Auction included, as configured at startup).
 AgentNav::House HouseOf(uint32 factionTemplate)
@@ -403,7 +484,8 @@ AgentNav::House HouseOf(uint32 factionTemplate)
 // The creature spawns that offer a service, from the world database ObjectMgr has loaded: the
 // spawn's own NPC flags or its template's (ObjectMgr::ChooseCreatureFlags), the template's faction
 // and name, the class its default trainer teaches, the auction house an auctioneer serves, and the
-// game events that spawn it (none for a standing spawn). Then the mailboxes (MailboxSpawns). Read
+// game events that spawn it (none for a standing spawn). Then the mailboxes (MailboxSpawns) and
+// the portals (PortalSpawns). Read
 // once, on the world thread at startup.
 std::vector<AgentNav::Spawn> ServiceSpawns()
 {
@@ -443,6 +525,7 @@ std::vector<AgentNav::Spawn> ServiceSpawns()
         out.push_back(std::move(s));
     }
     MailboxSpawns(out);
+    PortalSpawns(out);
     return out;
 }
 
@@ -580,11 +663,13 @@ public:
             [](AgentNav::Spawn const& s) { return !s.events.empty(); });
         std::size_t const mailboxes = std::count_if(spawns.begin(), spawns.end(),
             [](AgentNav::Spawn const& s) { return s.mailbox; });
+        std::size_t const portals = std::count_if(spawns.begin(), spawns.end(),
+            [](AgentNav::Spawn const& s) { return s.portal.has_value(); });
         gService.Start(mmaps, settings, std::move(spawns));
         LOG_INFO("server.loading",
-            ">> mod-agent-nav: answering route requests from {} ({} a second and {} a minute per character, {} yd, {} corners); {} service spawns ({} of them mailboxes, {} game event spawns)",
+            ">> mod-agent-nav: answering route requests from {} ({} a second and {} a minute per character, {} yd, {} corners); {} service places ({} of them mailboxes, {} portals, {} game event spawns)",
             mmaps, settings.limits.perSecond, settings.limits.perMinute, uint32(settings.limits.maxDistance),
-            settings.limits.maxWaypoints, places, mailboxes, evented);
+            settings.limits.maxWaypoints, places, mailboxes, portals, evented);
     }
 
     void OnShutdown() override { gService.Stop(); }

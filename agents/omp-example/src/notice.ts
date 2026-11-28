@@ -48,6 +48,7 @@ const KIND_WORDS: Record<string, string> = {
   chest: "chest",
   player: "player",
   subzone: "subzone",
+  portal: "portal to",
 };
 
 /** A kind's word, and what the notice adds about it: quest giver "!", flight master "path not

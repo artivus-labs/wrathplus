@@ -116,7 +116,7 @@ pub(crate) struct Remote {
     in_world: bool,
     next_id: u16,
     flight: Option<Flight>,
-    /// Asks not sent yet: at most one per kind of purpose.
+    /// Asks not sent yet: at most one per kind of purpose (services: per kinds asked).
     waiting: Vec<Ask>,
     last_sent: f64,
 }
@@ -180,11 +180,14 @@ impl Remote {
         format!("no navmesh: {realm}, and {local}")
     }
 
-    /// Queue a route request, replacing one of the same kind still waiting.
+    /// Queue a route request, replacing one of the same kind still waiting (a services question:
+    /// one for the same kinds, so `wp.services`' and `wp.notice`'s portal questions both go out).
     pub(crate) fn ask(&mut self, ask: Ask, now: f64) {
         let kind = std::mem::discriminant(&ask.purpose);
-        self.waiting
-            .retain(|w| std::mem::discriminant(&w.purpose) != kind);
+        self.waiting.retain(|w| {
+            std::mem::discriminant(&w.purpose) != kind
+                || (ask.purpose == Purpose::Services && w.kinds != ask.kinds)
+        });
         self.waiting.push(ask);
         self.flush(now);
     }
