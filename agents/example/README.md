@@ -101,11 +101,13 @@ On the public beta realm, see [Play on the WrathPlus open beta](../../docs/BETA.
   `note_change` and `rollback_module` are its tools.
 - **Rules it sets itself** (`src/notes.ts`, `agents/mcp/src/rules.ts`): a limit the planner puts
   on its own play (a road it will not take, a zone it skips, a fact it overrides to hold the
-  runner back) is recorded with `rule_set` (what, why, what carries it out) in
-  `<notes>/rules.json`, or as a `-- rule: what | why: reason | set: YYYY-MM-DD HH:MM` line in the
-  header of the module that enforces it. Every reflection lists each rule with what has happened
-  since it was set (XP, quests, deaths, new places; from the MCP server's scorecard samples, else
-  the reflection windows). When XP has been flat for three reviews in a row, or no quest handed in
+  runner back) is recorded with `rule_set` (what, why, what carries it out, and `since`: when it
+  was first made, for a rule recorded later) in `<notes>/rules.json`, or as a
+  `-- rule: what | why: reason | set: YYYY-MM-DD HH:MM` line in the header of the module that
+  enforces it. Every reflection lists each rule with what has happened since it was made (XP,
+  quests, deaths, new places; from the MCP server's scorecard samples, else the reflection
+  windows). Without `since` the cost counts from the record and the line says "since recorded";
+  at a stall the review asks the planner to re-record an older rule with `since`. When XP has been flat for three reviews in a row, or no quest handed in
   for four hours (`WRATHPLUS_AGENT_STALL_XP_REVIEWS`, `WRATHPLUS_AGENT_STALL_QUEST_HOURS`; `0`
   turns one off), the review says so and asks for a decision: a concrete change, which may be to
   revise (`rule_set` with `replaces`) or drop (`rule_drop`) one of its rules, or a recorded reason

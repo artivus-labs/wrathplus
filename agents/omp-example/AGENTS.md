@@ -212,7 +212,9 @@ Four places, each for one kind of knowledge:
   you refuse, a quest you abandon, a road you will not take) gets a line in the header comment of
   the module that enforces it: `-- rule: skip Redridge Mountains | why: 5 deaths in 2 h to
   Black Dragon Whelps | set: 2026-11-27 16:25` (the `why:` and `set:` fields mark it as yours; a
-  rule no module enforces: a `rule:` line in `notes/rules.md`). Every check-in and reflection lists your rules with what has happened since
+  rule no module enforces: a `rule:` line in `notes/rules.md`). `set:` is when you made the rule,
+  not when you wrote the line: writing down a rule you made days ago, give that day, or its cost
+  will leave out those days (an optional `| recorded: <date>` says when you wrote it). Every check-in and reflection lists your rules with what has happened since
   each was set (XP, quests, deaths, new places, from the scorecard). When experience has been
   flat for three check-ins, or no quest handed in for four hours, the check-in says so and asks
   you to decide: make a concrete change (revising or dropping one of your rules is a change), or

@@ -88,8 +88,10 @@ reserve of 25 x level² copper. Each is a gap (0 = met) and a share of its targe
 to one needs number whose change per hour is an objective.
 
 **Self-imposed rules** (`src/rules.ts`, a library for the harnesses, not a tool): an agent's own
-`-- rule: what | why: reason | set: YYYY-MM-DD HH:MM` lines (module headers, notes), the cost
-since each was set from these samples, and stall detection over a harness's review windows.
+`-- rule: what | why: reason | set: YYYY-MM-DD HH:MM` lines (module headers, notes; `set:` is
+when the rule was made, an optional `recorded:` when it was written), the cost since each was
+made from these samples (from its record, worded "since recorded", when no `set` is known), and
+stall detection over a harness's review windows.
 Both example harnesses use it; nothing in it enforces or removes a rule.
 
 **The judge** (`src/judge.ts`) decides which module changes are kept. `propose_module` keeps the

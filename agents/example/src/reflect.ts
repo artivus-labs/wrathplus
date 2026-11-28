@@ -17,7 +17,16 @@ import { line as changeLine } from "./modules.ts";
 import type { Decision, HoldDecision, TimeShares } from "./policy.ts";
 import { shares } from "./policy.ts";
 import type { GameEvent } from "./watch.ts";
-import { type Cost, decisionRequest, type Rule, ruleLine, StallWatch, type StallOptions } from "../../mcp/src/rules.ts";
+import {
+  type Cost,
+  costStart,
+  decisionRequest,
+  fromRecordOnly,
+  type Rule,
+  ruleLine,
+  StallWatch,
+  type StallOptions,
+} from "../../mcp/src/rules.ts";
 
 /** The character's experience at a moment, read from the client (`XP_LUA`). */
 export interface XpSample {
@@ -402,7 +411,11 @@ export class Reflection {
     const text = digest(reasons, w, score, this.options.fast?.(), this.options.versions?.changelog(undefined, 200) ?? [], {
       memory: this.options.memory?.() ?? "",
       ...(this.#facts ? { facts: this.#facts } : {}),
-      rules: rules.map((r) => ruleLine(r, r.setAt === undefined ? undefined : measure?.(r.setAt))),
+      rules: rules.map((r) => {
+        const from = costStart(r);
+        return ruleLine(r, from === undefined ? undefined : measure?.(from));
+      }),
+      ...(stall && rules.some(fromRecordOnly) ? { rulesNote: OLDER_THAN_RECORD } : {}),
       ...(stall ? { decision: decisionRequest(stall, KEEP, rules.length) } : {}),
     });
     this.reviews++;
@@ -433,7 +446,7 @@ export function digest(
   score: Score,
   fast: FastTier | undefined,
   changes: Change[],
-  notes: { memory?: string; facts?: Record<string, unknown>; rules?: string[]; decision?: string } = {},
+  notes: { memory?: string; facts?: Record<string, unknown>; rules?: string[]; rulesNote?: string; decision?: string } = {},
 ): string {
   const out: string[] = [];
   out.push(`Reflection (${reasons.join("; ")}). Since your last review, ${score.window_minutes} min ago:`);
@@ -451,7 +464,9 @@ export function digest(
       `- Failed actions: ${score.action_failures}`,
     ].join("\n"),
   );
-  if (notes.rules?.length) out.push(`${RULES_HEAD}\n${notes.rules.map((r) => `- ${r}`).join("\n")}`);
+  if (notes.rules?.length) {
+    out.push(`${RULES_HEAD}\n${notes.rules.map((r) => `- ${r}`).join("\n")}${notes.rulesNote ? `\n${notes.rulesNote}` : ""}`);
+  }
   if (w.deaths.length) out.push(`Deaths:\n${w.deaths.map((d) => `- ${clock(d.at)} ${d.cause ?? "cause not reported (no fight review)"}`).join("\n")}`);
   if (w.levels.length) out.push(`Levels reached: ${w.levels.join(", ")}.`);
   const trade = unusedTrade(w);
@@ -503,6 +518,10 @@ export function digest(
 }
 
 export const RULES_HEAD = "Rules you set yourself, and what has happened since each was set:";
+
+/** Under the rules at a stall, when a rule's cost counts only from its record. */
+export const OLDER_THAN_RECORD =
+  "\"since recorded\" counts from when you recorded the rule. If you made it earlier, re-record it: rule_set with replaces (its id) and since (when you made it).";
 
 /** How a reasoned keep is recorded here, for the decision a stall asks for. */
 export const KEEP =

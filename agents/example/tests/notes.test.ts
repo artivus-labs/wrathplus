@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Notes, notesServer, sharedRule } from "../src/notes.ts";
@@ -66,8 +66,9 @@ test("rules the agent sets itself round-trip with why, when and what carries the
     id: "1",
     rule: "no walk south of y -1000",
     why: "2 deaths on the Rockjaw road",
-    set: "2026-11-26 14:10Z",
-    setAt: set.getTime(),
+    // No `since`: its cost counts from the record, and says so.
+    recorded: "2026-11-26 14:10Z",
+    recordedAt: set.getTime(),
     where: "paladin.zonehold (zone_fit forced ok)",
   });
   expect(notes.keepRule(1, "Rockjaw still kills at level 14", new Date("2026-11-28T08:00:00Z"))).toContain("Kept rule #1");
@@ -90,9 +91,45 @@ test("rules the agent sets itself round-trip with why, when and what carries the
   expect((await call("rule_set", { rule: "skip Rockjaw quests", why: "objectives in the camp", enforced_by: "paladin.skipquest" })).text).toBe(
     "Rule #3 recorded: skip Rockjaw quests.",
   );
-  expect((await call("rules")).text).toMatch(/^#3 skip Rockjaw quests \(set .*Z; why: objectives in the camp; in paladin.skipquest\)$/);
+  expect((await call("rules")).text).toMatch(/^#3 skip Rockjaw quests \(recorded .*Z; why: objectives in the camp; in paladin.skipquest\)$/);
   expect((await call("rule_keep", { id: 3, because: "still lethal" })).text).toContain("Kept rule #3");
   expect(notes.briefing()).toContain("Rules you set yourself");
   expect((await call("rule_drop", { id: 3, why: "done" })).text).toBe("Dropped rule #3: skip Rockjaw quests. Undo what carries it out too: paladin.skipquest.");
+  rmSync(home, { recursive: true });
+});
+
+test("a rule made before it was recorded keeps when it was made (since), apart from the record", async () => {
+  const home = scratch();
+  const notes = new Notes(home);
+  const recorded = new Date("2026-11-28T01:22:10.223Z");
+  // Bad dates and future dates are refused, and nothing is written.
+  expect(notes.setRule({ rule: "x", why: "y", since: "Nov 25" }, recorded)).toContain('since "Nov 25" is not a date');
+  expect(notes.setRule({ rule: "x", why: "y", since: "2026-12-01" }, recorded)).toContain("is in the future");
+  expect(notes.ruleRecords()).toEqual([]);
+  const r = notes.setRule({ rule: "no walk south of y -1000", why: "2 deaths at Rockjaw (Nov 25)", since: " 2026-11-25T19:00Z " }, recorded);
+  expect(r).toEqual({ id: 1, rule: "no walk south of y -1000", why: "2 deaths at Rockjaw (Nov 25)", set_at: recorded.toISOString(), since: "2026-11-25T19:00Z" });
+  expect(sharedRule(notes.rules()[0]!)).toEqual({
+    id: "1",
+    rule: "no walk south of y -1000",
+    why: "2 deaths at Rockjaw (Nov 25)",
+    set: "2026-11-25T19:00Z",
+    setAt: Date.UTC(2026, 10, 25, 19),
+    recorded: "2026-11-28 01:22Z",
+    recordedAt: recorded.getTime(),
+  });
+  expect(notes.describeRules()).toBe("#1 no walk south of y -1000 (set 2026-11-25T19:00Z; recorded 2026-11-28 01:22Z; why: 2 deaths at Rockjaw (Nov 25))");
+  // An older record (no since) still reads, its cost from the record.
+  writeFileSync(
+    join(home, "rules.json"),
+    JSON.stringify([{ id: 1, rule: "old", why: "w", set_at: "2026-11-27T12:00:00.000Z" }]),
+  );
+  expect(sharedRule(new Notes(home).rules()[0]!)).toMatchObject({ recordedAt: Date.UTC(2026, 10, 27, 12) });
+  expect(sharedRule(new Notes(home).rules()[0]!).setAt).toBeUndefined();
+  // Through the tool, local date and time.
+  const call = await connect(notesServer(notes));
+  expect((await call("rule_set", { rule: "skip Redridge", why: "whelps", since: "2026-11-27 16:25", replaces: 1 })).text).toBe(
+    "Rule #2 recorded: skip Redridge (made 2026-11-27 16:25).",
+  );
+  expect(sharedRule(notes.rules()[0]!).setAt).toBe(new Date(2026, 10, 27, 16, 25).getTime());
   rmSync(home, { recursive: true });
 });

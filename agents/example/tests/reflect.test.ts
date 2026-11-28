@@ -3,8 +3,9 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ModuleVersions } from "../src/modules.ts";
+import { sharedRule } from "../src/notes.ts";
 import type { Decision, HoldDecision, TimeShares } from "../src/policy.ts";
-import { costFromReflections, GUIDANCE, KEEP, NO_RULES, Reflection, STALL_GUIDANCE, stalled, unusedTrade, type ReflectOptions, type Score } from "../src/reflect.ts";
+import { costFromReflections, GUIDANCE, KEEP, NO_RULES, OLDER_THAN_RECORD, Reflection, STALL_GUIDANCE, stalled, unusedTrade, type ReflectOptions, type Score } from "../src/reflect.ts";
 
 const event = (name: string, args: unknown[] = []) => ({ seq: 1, time: 0, event: name, args });
 const MIN = 60_000;
@@ -288,6 +289,31 @@ test("experience flat for three reviews asks for a decision, naming the rules; e
   // It is asked again while the stall lasts, and the count grows.
   expect(window(clock, r)).toContain("STALL: no experience in your last 4 reviews (2.0 h).");
   expect(window(clock, r, 500)).not.toContain("STALL:");
+});
+
+test("a rule's cost counts from when it was made (since), else from its record, which the line and a stall say", () => {
+  const made = Date.parse("2026-11-25T19:00:00Z");
+  const recorded = Date.parse("2026-11-28T01:22:10.223Z");
+  const record = { id: 1, rule: "no walk south of y -1000", why: "2 deaths at Rockjaw (Nov 25)", set_at: new Date(recorded).toISOString() };
+  // 0 XP from the 25th; the hours depend only on where the window starts.
+  const measure = () => (from: number) => ({ hours: (Date.parse("2026-11-28T08:00:00Z") - from) / 3_600_000, xp: 0, quests: 0, deaths: 0 });
+  let rules = [sharedRule(record)];
+  const { clock, r } = setup({ rules: () => rules, measure, stall: { xpWindows: 2 } });
+  const first = window(clock, r);
+  expect(first).toContain(
+    '- #1 rule "no walk south of y -1000" (recorded 2026-11-28 01:22Z; why: 2 deaths at Rockjaw (Nov 25)) · since recorded: 0 XP over 6.6 h, 0 quests, 0 deaths',
+  );
+  // No stall yet: no nudge.
+  expect(first).not.toContain(OLDER_THAN_RECORD);
+  const second = window(clock, r);
+  expect(second).toContain(`since recorded: 0 XP over 6.6 h, 0 quests, 0 deaths\n${OLDER_THAN_RECORD}`);
+  // Re-recorded with since: the window starts on the 25th, and the nudge goes.
+  rules = [sharedRule({ ...record, since: "2026-11-25T19:00Z" })];
+  expect(made).toBe(rules[0]!.setAt!);
+  const third = window(clock, r);
+  expect(third).toContain('(set 2026-11-25T19:00Z; why: 2 deaths at Rockjaw (Nov 25)) · since: 0 XP over 61.0 h, 0 quests, 0 deaths');
+  expect(third).toContain("STALL:");
+  expect(third).not.toContain(OLDER_THAN_RECORD);
 });
 
 test("a stall with no rules recorded says how to record one; windows out of the world do not count", () => {

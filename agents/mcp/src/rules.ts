@@ -9,8 +9,15 @@
 // - in a Lua module's header comment, the module that enforces it:
 //     -- rule: skip Redridge Mountains | why: 5 deaths in 2 h to Black Dragon Whelps | set: 2026-11-27 16:25
 // - or a line of its notes, in the same form: `rule: ... | why: ... | set: ...`.
-// Optional fields: `applies: <what it covers>`, `kept: <date> because <reason>` (the last time the
-// agent looked at its cost and chose to keep it).
+// `set:` is when the rule was made, not when the line was written: a rule recorded a day after it
+// was made gets the day it was made, so its cost covers all the time it has stood.
+// Optional fields: `recorded: <date>` (when the line was written, if later), `applies: <what it
+// covers>`, `kept: <date> because <reason>` (the last time the agent looked at its cost and chose
+// to keep it).
+//
+// A rule's cost counts from `set` when known, else from when it was recorded (agents/example's
+// rule_set without `since`): the cost line then says "since recorded", so a rule made before
+// its record does not look cheaper than it was.
 //
 // Both example harnesses use this: agents/example (its rule tools, and module headers) and
 // agents/omp-example (module headers and notes/rules.md).
@@ -24,10 +31,14 @@ export interface Rule {
   id?: string;
   rule: string;
   why?: string;
-  /** When it was set, as written. */
+  /** When it was made, as written. */
   set?: string;
   /** `set`, parsed (ms since the epoch), when it parses. */
   setAt?: number;
+  /** When it was written down, as written (when that is known and may differ from `set`). */
+  recorded?: string;
+  /** `recorded`, parsed. */
+  recordedAt?: number;
   /** What it covers (an area, a mob family, a quest), when the agent said. */
   applies?: string;
   /** Where it lives: the module that enforces it, or the notes it is written in. */
@@ -36,14 +47,16 @@ export interface Rule {
   kept?: { at?: string; because: string };
 }
 
-/** `2026-11-27 16:25`, `2026-11-27T16:25Z`, `2026-11-27`: ms since the epoch, or undefined. A
- *  date and time with no zone is the machine's local time (how an agent writes the time it sees). */
+/** `2026-11-27 16:25`, `2026-11-27T16:25Z`, `2026-11-27`, `2026-11-27T16:25:10.223+10:00`: ms
+ *  since the epoch, or undefined. A date and time with no zone is the machine's local time (how an
+ *  agent writes the time it sees). */
 export function parseWhen(text: string | undefined): number | undefined {
   const t = text?.trim();
   if (!t) return undefined;
-  const m = /^(\d{4}-\d{2}-\d{2})(?:[ T](\d{1,2}:\d{2}(?::\d{2})?))?\s*(Z|UTC)?$/i.exec(t);
+  const m = /^(\d{4}-\d{2}-\d{2})(?:[ T](\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?))?\s*(Z|UTC|[+-]\d{2}:?\d{2})?$/i.exec(t);
   if (!m) return undefined;
-  const iso = `${m[1]}T${m[2] ? (m[2].length === 4 ? `0${m[2]}` : m[2]) : "00:00"}${m[3] ? "Z" : ""}`;
+  const zone = !m[3] ? "" : /^[+-]/.test(m[3]) ? m[3].replace(/^([+-]\d{2}):?(\d{2})$/, "$1:$2") : "Z";
+  const iso = `${m[1]}T${m[2] ? (/^\d:/.test(m[2]) ? `0${m[2]}` : m[2]) : "00:00"}${zone}`;
   const at = Date.parse(iso);
   return Number.isFinite(at) ? at : undefined;
 }
@@ -58,12 +71,13 @@ export function parseRuleLine(line: string, where?: string): Rule | undefined {
   const rule: Rule = { rule: head.trim() };
   if (!rule.rule) return undefined;
   for (const field of fields) {
-    const f = /^\s*(why|set|applies(?: to)?|kept)\s*:\s*(.*)$/i.exec(field);
+    const f = /^\s*(why|set|recorded|applies(?: to)?|kept)\s*:\s*(.*)$/i.exec(field);
     if (!f?.[1]) continue;
     const key = f[1].toLowerCase();
     const value = (f[2] ?? "").trim();
     if (key === "why") rule.why = value;
     else if (key === "set") rule.set = value;
+    else if (key === "recorded") rule.recorded = value;
     else if (key.startsWith("applies")) rule.applies = value;
     else if (key === "kept") {
       const k = /^(.*?)\s*\bbecause\b:?\s*(.*)$/i.exec(value);
@@ -72,8 +86,20 @@ export function parseRuleLine(line: string, where?: string): Rule | undefined {
   }
   const at = parseWhen(rule.set);
   if (at !== undefined) rule.setAt = at;
+  const recordedAt = parseWhen(rule.recorded);
+  if (recordedAt !== undefined) rule.recordedAt = recordedAt;
   if (where) rule.where = where;
   return rule;
+}
+
+/** When a rule's cost counts from: when it was made, else when it was recorded. */
+export function costStart(rule: Rule): number | undefined {
+  return rule.setAt ?? rule.recordedAt;
+}
+
+/** True when a rule's cost counts only from its record (no `set` date: it may be older). */
+export function fromRecordOnly(rule: Rule): boolean {
+  return rule.setAt === undefined && rule.recordedAt !== undefined;
 }
 
 /** The rule lines of a Lua module's header: the comment block at its top. A header line counts
@@ -86,7 +112,7 @@ export function rulesInModule(source: string, module: string): Rule[] {
     if (t === "") continue;
     if (!t.startsWith("--")) break;
     const rule = parseRuleLine(t, module);
-    if (rule && (rule.why !== undefined || rule.set !== undefined)) out.push(rule);
+    if (rule && (rule.why !== undefined || rule.set !== undefined || rule.recorded !== undefined)) out.push(rule);
   }
   return out;
 }
@@ -196,23 +222,27 @@ export function costText(cost: Cost): string {
   return parts.join(", ");
 }
 
-/** One line for a rule and its cost since it was set:
- *  `rule "no walk south of y -1000" (set 2026-11-26 14:10, why: 2 deaths on the Rockjaw road; in paladin.zonehold) · since: 0 XP over 9.0 h, 0 quests, 0 deaths`. */
+/** One line for a rule and its cost (`cost`: measured from `costStart(rule)`):
+ *  `rule "no walk south of y -1000" (set 2026-11-26 14:10, why: 2 deaths on the Rockjaw road; in paladin.zonehold) · since: 0 XP over 9.0 h, 0 quests, 0 deaths`.
+ *  With no set date but a record date it reads `(recorded 2026-11-28 01:22Z; ...) · since recorded: ...`. */
 export function ruleLine(rule: Rule, cost: Cost | undefined): string {
   const label = rule.id ? `#${rule.id}` : "";
+  const recordOnly = fromRecordOnly(rule);
   const about = [
     rule.set ? `set ${rule.set}` : "",
+    !rule.set && rule.recorded ? `recorded ${rule.recorded}` : "",
     rule.why ? `why: ${clip(rule.why, 140)}` : "",
     rule.applies ? `applies to ${clip(rule.applies, 80)}` : "",
     rule.where ? `in ${rule.where}` : "",
   ].filter(Boolean);
   const head = `${label ? `${label} ` : ""}rule "${clip(rule.rule, 140)}"${about.length ? ` (${about.join("; ")})` : ""}`;
+  const sinceWord = recordOnly ? "since recorded" : "since";
   const since =
-    rule.setAt === undefined
+    costStart(rule) === undefined
       ? "since: not known (no set date)"
       : cost
-        ? `since: ${costText(cost)}`
-        : "since: no measurements";
+        ? `${sinceWord}: ${costText(cost)}`
+        : `${sinceWord}: no measurements`;
   const kept = rule.kept ? ` · kept${rule.kept.at ? ` ${rule.kept.at}` : ""} because ${clip(rule.kept.because, 140)}` : "";
   return `${head} · ${since}${kept}`;
 }
