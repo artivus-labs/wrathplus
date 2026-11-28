@@ -1,12 +1,12 @@
 //! Where services are, asked of the realm (`mod-agent-nav`): the vendors, repairers, the
 //! character's class trainer, profession trainers, flight masters, innkeepers, bankers,
-//! auctioneers, mailboxes and quest hubs on its map, nearest first, as a player knows a town. Not
-//! a route, so it works with local mmaps too, as long as the realm runs the module.
+//! auctioneers, mailboxes, quest hubs and portals on its map, nearest first, as a player knows a
+//! town. Not a route, so it works with local mmaps too, as long as the realm runs the module.
 //!
 //! Lua: `AgentServices([kinds [, radius]])` (kinds: a list or comma string of
 //! [`services::KINDS`]: vendor, repair, trainer, flightmaster, innkeeper, banker,
-//! questgiver-hub, trainer_cooking, trainer_first_aid, trainer_profession, auctioneer, mailbox;
-//! none for all; radius in yards, none for the realm's) → `{pending = true}` while the realm is
+//! questgiver-hub, trainer_cooking, trainer_first_aid, trainer_profession, auctioneer, mailbox,
+//! portal; none for all; radius in yards, none for the realm's) → `{pending = true}` while the realm is
 //! asked; `AGENT_SERVICES_READY` (`true, count` or `false, why`) fires when it answers, and the
 //! next call for the same kinds returns the places,
 //! `{ { kind, entry, name, x, y, z, map, zone, distance, members, profession, event,
@@ -22,6 +22,24 @@
 //! with a higher cut; every house is neutral on a realm that lets both sides trade). The other
 //! side's auctioneers are not told, as no hostile NPC is. A mailbox is a game object: its `entry`
 //! is the gameobject's, and it has no faction. `nil, why` when it cannot be asked.
+//!
+//! A `portal` is an area trigger that teleports (the Deeprun Tram's entrances, an instance's door
+//! and its way out, the Rut'theran portal to Darnassus): not a unit nor a game object, so
+//! `AgentNearby` never shows one. Its `entry` is the `AreaTrigger.dbc` id, `x, y, z` the volume's
+//! centre, `name` the destination map's ("Deeprun Tram", "The Deadmines", "Eastern Kingdoms" for a
+//! way out). It adds `radius` (a sphere, yards) or `box = { length, width, height, yaw }` (full
+//! extents, yaw in radians), `to_map, to_x, to_y, to_z` (where it puts you), `to_zone` (the
+//! destination's zone, from the client's own world map, when it knows that map), `level` and
+//! `level_max` (the levels the realm asks for, nil for none) and `needs` (nil, or a list of
+//! `"raid"` for a raid group, `"quest:<id>"`, `"item:<id>"`, `"achievement:<id>"`,
+//! `"item_level:<n>"`: of your side, at your dungeon or raid difficulty). Portals are told
+//! whatever their level and needs. **To use one, walk into it**: `AgentMoveTo(x, y, z)` to its
+//! centre (or `Move.to`); the client sends `CMSG_AREATRIGGER` on entering the volume, once per
+//! entry, and the realm teleports you when you meet its requirement (a loading screen, then
+//! another map). Leaving the volume re-arms it.
+//!
+//! Several questions of different kinds may be out at once (`wp.services`' town and
+//! `wp.notice`'s portals), each answered and kept for its own kinds.
 //!
 //! The realm's defaults: every place within 2000 yards, at most 20 (its `AgentNav.ServiceRadius`
 //! and `AgentNav.MaxServices`; a smaller radius may be asked for). Trainers are the exception:
@@ -51,11 +69,16 @@ struct Answer {
     result: Result<Vec<Place>, String>,
 }
 
-/// The question out (its kinds and map), and the last answer.
+/// The most questions of different kinds out at once, and answers kept: `wp.services`' towns and
+/// `wp.notice`'s portals, and the planner's own.
+const MAX_ASKED: usize = 4;
+const MAX_ANSWERS: usize = 4;
+
+/// The questions out (their kinds and map), and the last answer for each kinds.
 #[derive(Default)]
 pub(super) struct State {
-    asked: Option<(Vec<String>, u32)>,
-    answer: Option<Answer>,
+    asked: Vec<(Vec<String>, u32)>,
+    answers: Vec<Answer>,
 }
 
 /// The kinds from Lua: nil (all), a comma string, or a list of strings; sorted, without repeats,
@@ -104,23 +127,27 @@ fn ask(
     let fits = |a: &Answer| {
         a.kinds == kinds && a.map == me.map && now - a.at < FRESH && level(a.from, me.pos) < NEAR
     };
-    // A refusal is told once; the next call asks again.
-    if let Some(Answer {
-        result: Err(why), ..
-    }) = state.answer.take_if(|a| fits(a) && a.result.is_err())
-    {
-        return Err(why);
+    if let Some(at) = state.answers.iter().position(fits) {
+        match &state.answers[at].result {
+            Ok(places) => return Ok(Some(places.clone())),
+            // A refusal is told once; the next call asks again.
+            Err(_) => {
+                state.answers.remove(at).result?;
+            }
+        }
     }
-    if let Some(Answer {
-        result: Ok(places), ..
-    }) = state.answer.as_ref().filter(|a| fits(a))
-    {
-        return Ok(Some(places.clone()));
-    }
-    if state.asked.as_ref() == Some(&(kinds.clone(), me.map)) {
+    if state.asked.contains(&(kinds.clone(), me.map)) {
         return Ok(None);
     }
-    state.asked = Some((kinds.clone(), me.map));
+    // One out for these kinds from elsewhere (another map) is replaced, as the realm's queue
+    // replaces it.
+    state.asked.retain(|(k, _)| *k != kinds);
+    if state.asked.len() >= MAX_ASKED {
+        return Err(format!(
+            "{MAX_ASKED} services questions of other kinds are out; wait for AGENT_SERVICES_READY"
+        ));
+    }
+    state.asked.push((kinds.clone(), me.map));
     mesh.remote.ask(
         Ask {
             purpose: Purpose::Services,
@@ -143,8 +170,17 @@ pub(super) fn answered(nav: &Handles, ask: Ask, result: Result<Vec<Place>, Strin
         Err(note) => serde_json::json!([false, note]),
     };
     if let Ok(mut mesh) = nav.mesh.lock() {
-        let map = mesh.services.asked.take().map_or(0, |(_, map)| map);
-        mesh.services.answer = Some(Answer {
+        let state = &mut mesh.services;
+        let map = state
+            .asked
+            .iter()
+            .position(|(k, _)| *k == ask.kinds)
+            .map_or(0, |at| state.asked.remove(at).1);
+        state.answers.retain(|a| a.kinds != ask.kinds);
+        if state.answers.len() >= MAX_ANSWERS {
+            state.answers.remove(0);
+        }
+        state.answers.push(Answer {
             kinds: ask.kinds,
             from: ask.from,
             map,
@@ -190,7 +226,45 @@ fn place_table(
     t.set("event", p.event.is_some())?;
     t.set("event_active", p.event)?;
     t.set("house", p.house.as_deref())?;
+    if let Some(portal) = &p.portal {
+        portal_fields(lua, &t, portal, zones)?;
+    }
     Ok(t)
+}
+
+/// A portal's own fields on its place table (see the module docs).
+fn portal_fields(
+    lua: &Lua,
+    t: &Table,
+    portal: &services::Portal,
+    zones: &zones::Handles,
+) -> mlua::Result<()> {
+    match portal.area {
+        services::Area::Sphere { radius } => t.set("radius", radius)?,
+        services::Area::Box { size, yaw } => {
+            let b = lua.create_table()?;
+            b.set("length", size[0])?;
+            b.set("width", size[1])?;
+            b.set("height", size[2])?;
+            b.set("yaw", yaw)?;
+            t.set("box", b)?;
+        }
+    }
+    let [x, y, z] = portal.to;
+    t.set("to_map", portal.to_map)?;
+    t.set("to_x", x)?;
+    t.set("to_y", y)?;
+    t.set("to_z", z)?;
+    t.set("to_zone", zones.name_at(portal.to_map, x, y))?;
+    t.set("level", portal.level_min)?;
+    t.set("level_max", portal.level_max)?;
+    if !portal.needs.is_empty() {
+        t.set(
+            "needs",
+            lua.create_sequence_from(portal.needs.iter().map(String::as_str))?,
+        )?;
+    }
+    Ok(())
 }
 
 pub(crate) fn install(

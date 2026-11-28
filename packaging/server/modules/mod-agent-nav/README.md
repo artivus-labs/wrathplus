@@ -74,8 +74,8 @@ has seen.
 
 | Line | Meaning |
 | --- | --- |
-| `S <id> <kinds> [radius]` | Kinds, a comma list: `vendor`, `repair`, `trainer` (the asker's own class trainer), `flightmaster`, `innkeeper`, `banker`, `questgiver-hub`, `trainer_cooking`, `trainer_first_aid`, `trainer_profession` (any profession trainer), `auctioneer`, `mailbox`. Radius in yards; none (and at most) `AgentNav.ServiceRadius`. |
-| `s <id> <i> <n> <kind> <entry> <x> <y> <z> <members> <profession> <event> <house> <name>` | The `i`-th of `n` places, nearest first. `entry`: the creature's template entry, a mailbox's gameobject entry. `members`: the quest givers in a hub (1 otherwise). `profession`: the skill a profession trainer teaches, spaces as underscores (`First_Aid`), `-` otherwise. `event`: `-` for a standing spawn; `on` or `off` for one a game event spawns, whether it is out as the events stand when the question is asked. `house`: the auction house an auctioneer serves, `alliance`, `horde` or `neutral`; `-` otherwise. The name is the rest of the line. |
+| `S <id> <kinds> [radius]` | Kinds, a comma list: `vendor`, `repair`, `trainer` (the asker's own class trainer), `flightmaster`, `innkeeper`, `banker`, `questgiver-hub`, `trainer_cooking`, `trainer_first_aid`, `trainer_profession` (any profession trainer), `auctioneer`, `mailbox`, `portal` (an area trigger that teleports). Radius in yards; none (and at most) `AgentNav.ServiceRadius`. |
+| `s <id> <i> <n> <kind> <entry> <x> <y> <z> <members> <profession> <event> <house> <area> <to> <level> <needs> <name>` | The `i`-th of `n` places, nearest first. `entry`: the creature's template entry, a mailbox's gameobject entry, a portal's area trigger id. `area`, `to`, `level`, `needs`: a portal's (below), `-` each otherwise. `members`: the quest givers in a hub (1 otherwise). `profession`: the skill a profession trainer teaches, spaces as underscores (`First_Aid`), `-` otherwise. `event`: `-` for a standing spawn; `on` or `off` for one a game event spawns, whether it is out as the events stand when the question is asked. `house`: the auction house an auctioneer serves, `alliance`, `horde` or `neutral`; `-` otherwise. The name is the rest of the line (a portal's: its destination map's). |
 | `s <id> 0 0` | Nothing of those kinds within the radius. |
 
 How places are chosen (`src/AgentNavServices.h`, tested against a fixture by the client's tests):
@@ -94,6 +94,19 @@ How places are chosen (`src/AgentNavServices.h`, tested against a fixture by the
   phase, within the radius, except one that cannot be selected (`GO_FLAG_NOT_SELECTABLE` in its
   `gameobject_template_addon`) or has the "Point" icon (the core refuses those). No faction check:
   anyone may use a mailbox.
+- `portal` (`src/AgentNavPortals.h`): every `areatrigger_teleport` row with its volume from the
+  `areatrigger` table (ObjectMgr's copy of AreaTrigger.dbc), at the trigger's map and centre, in
+  every phase, no faction. `area`: a sphere's radius (`10.0`) or a box
+  `<length>x<width>x<height>@<yaw>`. `to`: `<map>,<x>,<y>,<z>`. The name is the destination map's
+  (Map.dbc). `level`: the destination's `dungeon_access_template` levels, `<min>`, `<min>-<max>`,
+  `-<max>` or `-` (none, also when `Instance.IgnoreLevel` is on). `needs`: a comma list or `-`:
+  `raid` (a raid group, unless `Instance.IgnoreRaid`), `quest:<id>`, `item:<id>`,
+  `achievement:<id>` (`dungeon_access_requirements` of the asker's side, as `Player::Satisfy`
+  checks them) and `item_level:<n>`, read at the asker's dungeon or raid difficulty after the
+  core's downscaling. Told, never filtered by level or need. A client uses one by walking into
+  the volume (`CMSG_AREATRIGGER`). Area trigger scripts that take a trigger over first, and
+  per-instance locks, are not looked at. The base world database has 276 (42 on Eastern Kingdoms,
+  24 on Kalimdor).
 - `trainer`: a trainer whose default trainer (`creature_default_trainer`) is of type Class for the
   asker's class.
 - Profession trainers: AzerothCore's `trainer` rows of type Tradeskill carry no requirement and

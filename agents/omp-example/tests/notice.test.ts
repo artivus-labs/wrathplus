@@ -43,6 +43,15 @@ describe("NoticeBatch", () => {
     expect(lines[1]).toContain("trainer Granis Swiftaxe (class: Warrior Trainer) 12 yd");
   });
 
+  test("a portal reads as where it leads, with what it asks", () => {
+    const batch = new NoticeBatch(0);
+    batch.add(noticed("portal", "Deeprun Tram", null, 40.2), 0);
+    batch.add(noticed("portal", "Onyxia's Lair", null, 52, "level 80, raid"), 0);
+    expect(batch.take()).toStartWith(
+      "Noticed: portal to Deeprun Tram 40 yd; portal to Onyxia's Lair (level 80, raid) 52 yd.",
+    );
+  });
+
   test("a long batch is cut, the rest counted; a window of 0 hands over at once", () => {
     const batch = new NoticeBatch(0, 3);
     for (let i = 0; i < 5; i++) batch.add(noticed("player", `P${i}`, `0x${i}`, 10 + i), 0);

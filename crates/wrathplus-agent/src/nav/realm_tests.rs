@@ -248,9 +248,12 @@ fn a_services_question_goes_out_and_its_places_come_back_in_order() {
     remote.tick(1.0 + SPACING);
     assert_eq!(remote.outbox[1], "S 2 repair,vendor 500");
     assert!(remote
-        .receive("s 2 1 2 vendor 1 10.0 0.0 0.0 1 - - - Brother Danil", 1.3)
+        .receive(
+            "s 2 1 2 vendor 1 10.0 0.0 0.0 1 - - - - - - - Brother Danil",
+            1.3
+        )
         .is_empty());
-    let out = remote.receive("s 2 2 2 repair 2 20.0 0.0 0.0 1 - - - Godric", 1.4);
+    let out = remote.receive("s 2 2 2 repair 2 20.0 0.0 0.0 1 - - - - - - - Godric", 1.4);
     let [Outcome::Services { ask, places }] = &out[..] else {
         panic!("{out:?}");
     };

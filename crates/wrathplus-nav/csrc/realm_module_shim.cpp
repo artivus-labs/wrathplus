@@ -219,8 +219,72 @@ std::vector<long> Events(std::vector<std::string_view>& w)
     return out;
 }
 
+// The comma-separated numbers of a mark's value ("1,2.5,3").
+std::vector<float> Numbers(std::string_view text)
+{
+    std::vector<float> out;
+    while (!text.empty())
+    {
+        std::size_t const comma = text.find(',');
+        out.push_back(F(text.substr(0, comma)));
+        text = comma == std::string_view::npos ? std::string_view() : text.substr(comma + 1);
+    }
+    return out;
+}
+
+// A portal mark ("+sphere=r", "+box=l,w,h,yaw", "+to=map,x,y,z", "+raidmap", "+raidgroup",
+// "+access=difficulty,min,max,itemLevel", "+need=difficulty,type,id,team"; type 0 achievement, 1
+// quest, 2 item): makes the spawn a portal; false for any other mark.
+bool PortalMark(std::string_view mark, AgentNav::Spawn& s)
+{
+    std::size_t const eq = mark.find('=');
+    std::string_view const key = mark.substr(0, eq);
+    std::vector<float> const v = Numbers(eq == std::string_view::npos ? std::string_view() : mark.substr(eq + 1));
+    auto const n = [&](std::size_t i) { return i < v.size() ? v[i] : 0.0f; };
+    if (key != "sphere" && key != "box" && key != "to" && key != "raidmap" && key != "raidgroup" && key != "access" &&
+        key != "need")
+        return false;
+    if (!s.portal)
+        s.portal = AgentNav::Teleport{};
+    AgentNav::Teleport& t = *s.portal;
+    if (key == "sphere")
+        t.radius = n(0);
+    else if (key == "box")
+    {
+        t.length = n(0);
+        t.width = n(1);
+        t.height = n(2);
+        t.orientation = n(3);
+    }
+    else if (key == "to")
+    {
+        t.toMap = static_cast<std::uint32_t>(n(0));
+        t.toX = n(1);
+        t.toY = n(2);
+        t.toZ = n(3);
+    }
+    else if (key == "raidmap")
+        t.raidMap = true;
+    else if (key == "raidgroup")
+        t.raidGroup = true;
+    else
+    {
+        AgentNav::Access& a = t.access[static_cast<std::size_t>(n(0)) % AgentNav::kDifficulties];
+        if (key == "access")
+        {
+            a.levelMin = static_cast<std::uint8_t>(n(1));
+            a.levelMax = static_cast<std::uint8_t>(n(2));
+            a.itemLevel = static_cast<std::uint16_t>(n(3));
+        }
+        else
+            a.needs.push_back(AgentNav::Need{static_cast<AgentNav::Need::Type>(static_cast<int>(n(1))),
+                static_cast<std::uint32_t>(n(2)), static_cast<std::uint8_t>(n(3))});
+    }
+    return true;
+}
+
 // Takes the "+word" words out of `w`: a spawn's marks ("+mailbox", "+alliance", "+horde",
-// "+neutral": the auction house an auctioneer serves).
+// "+neutral": the auction house an auctioneer serves; PortalMark's).
 void Marks(std::vector<std::string_view>& w, AgentNav::Spawn& s)
 {
     for (auto at = w.begin(); at != w.end();)
@@ -239,6 +303,34 @@ void Marks(std::vector<std::string_view>& w, AgentNav::Spawn& s)
             s.house = AgentNav::House::Horde;
         else if (mark == "neutral")
             s.house = AgentNav::House::Neutral;
+        else
+            PortalMark(mark, s);
+        at = w.erase(at);
+    }
+}
+
+// Takes the query's "+word=n" words out of `w`: "+team=" (TeamId), "+dungeon=", "+raid=" (the
+// asker's difficulties).
+void QueryMarks(std::vector<std::string_view>& w, AgentNav::ServiceQuery& q)
+{
+    for (auto at = w.begin(); at != w.end();)
+    {
+        if (at->empty() || (*at)[0] != '+')
+        {
+            ++at;
+            continue;
+        }
+        std::string_view const mark = at->substr(1);
+        std::size_t const eq = mark.find('=');
+        std::uint8_t const value =
+            static_cast<std::uint8_t>(eq == std::string_view::npos ? 0 : U(mark.substr(eq + 1)));
+        std::string_view const key = mark.substr(0, eq);
+        if (key == "team")
+            q.team = value;
+        else if (key == "dungeon")
+            q.dungeonDifficulty = value;
+        else if (key == "raid")
+            q.raidDifficulty = value;
         at = w.erase(at);
     }
 }
@@ -253,7 +345,8 @@ extern "C" {
 // faction our friendly hostile [enemy...]", kinds a comma list as on the wire. Either may hold an
 // "@e,e,..." word anywhere: a spawn's game events (negative: out while the event is not), the
 // query's active events. A spawn may hold "+word" marks anywhere (Marks): a mailbox, an
-// auctioneer's house.
+// auctioneer's house, a portal's volume, destination and requirements (PortalMark); the query
+// "+team=", "+dungeon=", "+raid=" (QueryMarks).
 int realm_services(const char* spawns, const char* query, char* out, int out_len)
 {
     std::vector<AgentNav::Spawn> table;
@@ -297,6 +390,7 @@ int realm_services(const char* spawns, const char* query, char* out, int out_len
     }
     std::vector<std::string_view> w = Words(query);
     AgentNav::ServiceQuery q;
+    QueryMarks(w, q);
     for (long const e : Events(w))
         q.activeEvents.push_back(static_cast<std::uint16_t>(e));
     std::sort(q.activeEvents.begin(), q.activeEvents.end());

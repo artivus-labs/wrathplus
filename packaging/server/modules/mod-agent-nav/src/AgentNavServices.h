@@ -1,30 +1,36 @@
 // mod-agent-nav: where services are. The realm tells an agent where the vendors, repairers, its
-// class trainer, flight masters, innkeepers, bankers, auctioneers, mailboxes and quest hubs on its
-// map are, as a player knows a town and as Playerbots knows the world: from the creature and
-// gameobject spawns the world database holds, read once at startup (mod_agent_nav.cpp), never per
-// request. Standard library only, so the WrathPlus client's tests compile this file and check the
-// selection against a fixture.
+// class trainer, flight masters, innkeepers, bankers, auctioneers, mailboxes, quest hubs and
+// portals on its map are, as a player knows a town and as Playerbots knows the world: from the
+// creature and gameobject spawns and the teleporting area triggers the world database holds, read
+// once at startup (mod_agent_nav.cpp), never per request. Standard library only, so the WrathPlus
+// client's tests compile this file and check the selection against a fixture.
 //
 //   S <id> <kinds> [radius]        kinds: a comma list of vendor, repair, trainer (the asker's
 //                                  class trainer), flightmaster, innkeeper, banker,
 //                                  questgiver-hub, trainer_cooking, trainer_first_aid,
 //                                  trainer_profession (any profession trainer), auctioneer,
-//                                  mailbox; radius in yards (default and most:
+//                                  mailbox, portal (a teleporting area trigger,
+//                                  AgentNavPortals.h); radius in yards (default and most:
 //                                  AgentNav.ServiceRadius); the nearest two of the asker's
 //                                  class trainers, Cooking and First Aid trainers (those asked
 //                                  for) are told however far, on its map (SelectServices)
-//   s <id> <i> <n> <kind> <entry> <x> <y> <z> <members> <profession> <event> <house> <name>
+//   s <id> <i> <n> <kind> <entry> <x> <y> <z> <members> <profession> <event> <house> <area> <to>
+//     <level> <needs> <name>
 //                                  the i-th of n places, nearest first; entry: the creature's
-//                                  template entry, a mailbox's gameobject entry; members: the quest
-//                                  givers in a hub (1 for anything else); profession: the skill a
-//                                  profession trainer teaches, spaces as underscores ("First_Aid"),
-//                                  "-" for anything else; event: "-" for a standing spawn, "on" or
+//                                  template entry, a mailbox's gameobject entry, a portal's area
+//                                  trigger id; area, to, level, needs: a portal's volume, where it
+//                                  leads and what it asks (AgentNavPortals.h), "-" each for any
+//                                  other kind; members: the quest givers in a hub (1 for anything
+//                                  else); profession: the skill a profession trainer teaches,
+//                                  spaces as underscores ("First_Aid"), "-" for anything else;
+//                                  event: "-" for a standing spawn, "on" or
 //                                  "off" for one a game event spawns (game_event_creature,
 //                                  game_event_gameobject), as its events stand when the question
 //                                  was asked; house: the auction house an auctioneer serves,
 //                                  "alliance", "horde" or "neutral" (Booty Bay, Gadgetzan,
 //                                  Everlook; every one when the realm lets both sides trade), "-"
-//                                  for anything else; the name is the rest of the line
+//                                  for anything else; the name is the rest of the line (a portal's:
+//                                  its destination map's)
 //   s <id> 0 0                     none
 #ifndef MOD_AGENT_NAV_SERVICES_H
 #define MOD_AGENT_NAV_SERVICES_H
@@ -34,9 +40,12 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
+
+#include "AgentNavPortals.h"
 
 namespace AgentNav
 {
@@ -135,6 +144,7 @@ enum Kind : std::uint16_t
     KindProfessionTrainer = 1 << 9,
     KindAuctioneer = 1 << 10,
     KindMailbox = 1 << 11,
+    KindPortal = 1 << 12,
 };
 
 struct KindName
@@ -143,7 +153,7 @@ struct KindName
     std::string_view name;
 };
 
-constexpr std::array<KindName, 12> kKindNames{{
+constexpr std::array<KindName, 13> kKindNames{{
     {KindVendor, "vendor"},
     {KindRepair, "repair"},
     {KindTrainer, "trainer"},
@@ -156,6 +166,7 @@ constexpr std::array<KindName, 12> kKindNames{{
     {KindProfessionTrainer, "trainer_profession"},
     {KindAuctioneer, "auctioneer"},
     {KindMailbox, "mailbox"},
+    {KindPortal, "portal"},
 }};
 
 // A comma list of kind names as a mask; 0 for an empty list or an unknown name.
@@ -211,13 +222,17 @@ inline bool HostileTo(Faction const& a, Faction const& b)
     return (a.hostileMask & b.ourMask) != 0;
 }
 
-// One creature spawn that offers a service, or a mailbox (a gameobject spawn).
+// One creature spawn that offers a service, a mailbox (a gameobject spawn), or a portal (an area
+// trigger that teleports).
 struct Spawn
 {
-    // The creature's template entry, or the mailbox's gameobject entry.
+    // The creature's template entry, the mailbox's gameobject entry, or the portal's area trigger.
     std::uint32_t entry = 0;
     // A mailbox: a gameobject, with no NPC flags and no faction (Faction{}: hostile to nobody).
     bool mailbox = false;
+    // A portal: where it leads and its volume (x, y, z: its centre). No NPC flags, no faction, in
+    // every phase (phaseMask all ones); its name is the destination map's.
+    std::optional<Teleport> portal;
     // The auction house an auctioneer serves; None for anything else.
     House house = House::None;
     std::uint32_t map = 0;
@@ -277,6 +292,11 @@ struct ServiceQuery
     // The game events active when the question was asked (GameEventMgr's list, read on the world
     // thread then), sorted.
     std::vector<std::uint16_t> activeEvents;
+    // The asker's side (TeamId, as Player::Satisfy reads it: the race's) and its dungeon and raid
+    // difficulties: which of a portal's requirements are told.
+    std::uint8_t team = kTeamNeutral;
+    std::uint8_t dungeonDifficulty = 0;
+    std::uint8_t raidDifficulty = 0;
 };
 
 struct Place
@@ -290,12 +310,17 @@ struct Place
     // One of the nearest trainers told at any distance (kKindsToldAnyDistance): kept whatever the
     // radius and the cap.
     bool kept = false;
+    // A portal's area, to, level and needs fields for this asker (PortalFields); "- - - -" for
+    // any other kind.
+    std::string portal = "- - - -";
 };
 
 // The kinds a spawn offers to this asker (the hub kind aside: that takes its neighbours).
 inline std::uint16_t KindsOf(Spawn const& s, ServiceQuery const& q)
 {
     std::uint16_t out = 0;
+    if (s.portal)
+        return KindPortal & q.kinds;
     if (s.mailbox)
         return KindMailbox & q.kinds;
     if (s.npcFlags & kFlagAuctioneer)
@@ -336,7 +361,8 @@ constexpr std::size_t kTrainersTold = 2;
 
 // The places for a query: each kind asked for that a spawn on the asker's map and phase, within
 // the radius and not hostile either way, offers (so the other side's auctioneers are left out, as
-// the core would not deal with the asker; mailboxes have no faction); a spawn offering several
+// the core would not deal with the asker; mailboxes and portals have no faction, and a portal is
+// told whatever its level and needs, which its fields say); a spawn offering several
 // kinds is one place per kind. Quest hubs are quest givers with at least kHubMembers within
 // kHubRadius, one place per hub (its nearest member). Nearest first, at most `cap`; the nearest
 // trainers (kKindsToldAnyDistance) are kept whatever the radius and the cap.
@@ -385,7 +411,11 @@ inline std::vector<Place> SelectServices(std::vector<Spawn> const& spawns, Servi
         out.push_back(*h);
     std::sort(out.begin(), out.end(), nearest);
     for (Place& p : out)
+    {
         p.event = EventText(*p.spawn, q.activeEvents);
+        if (p.spawn->portal)
+            p.portal = PortalFields(*p.spawn->portal, q.team, q.dungeonDifficulty, q.raidDifficulty);
+    }
     // The nearest trainers of each kind told at any distance (those whose event has them off
     // aside) are kept; the rest of those beyond the radius go.
     for (KindName const& k : kKindNames)
@@ -453,7 +483,8 @@ inline std::vector<std::string> ServiceReply(std::uint16_t id, std::vector<Place
             std::to_string(places.size()) + " " + std::string(KindText(p.kind)) + " " +
             std::to_string(p.spawn->entry) + " " + numbers + " " + std::to_string(p.members) + " " +
             Word(p.spawn->professionName) + " " + std::string(p.event) + " " +
-            std::string(p.kind == KindAuctioneer ? HouseText(p.spawn->house) : HouseText(House::None)) + " ";
+            std::string(p.kind == KindAuctioneer ? HouseText(p.spawn->house) : HouseText(House::None)) + " " +
+            p.portal + " ";
         for (char const c : p.spawn->name)
             line += (static_cast<unsigned char>(c) < 0x20 || c == 0x7f) ? ' ' : c;
         if (line.size() > max)
