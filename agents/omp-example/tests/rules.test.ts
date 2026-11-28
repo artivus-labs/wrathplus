@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Sample } from "../../mcp/src/scorecard.ts";
 import { sample } from "../../mcp/tests/fixtures.ts";
-import { KEEP, NO_RULES, readRules, Reviewer } from "../src/rules.ts";
+import { KEEP, NO_RULES, OLDER_THAN_RECORD, readRules, Reviewer } from "../src/rules.ts";
 import { wakeMessage } from "../src/wake.ts";
 
 const MIN = 60_000;
@@ -79,4 +79,22 @@ test("the review rides on check-ins and reflections only; a reflection passes it
   expect(wakeMessage("reflect", [], "s", 20, [], review)).toContain("Give the reflector the rules and any stall above in its task.");
   expect(wakeMessage("events", ["You died."], "s", 20, [], review)).not.toContain("Rules you set yourself");
   expect(wakeMessage("checkin", [], "s", 20, [], { rules: [] })).not.toContain("Rules you set yourself");
+});
+
+test("a rule line counts from set: (when made), else from recorded:, and a stall says how to give set:", () => {
+  // Made at T0, written down an hour later: the cost covers both hours.
+  const made = { rule: "skip Westfall", set: "2026-11-27T12:00Z", setAt: T0, recorded: "2026-11-27T13:00Z", recordedAt: T0 + 60 * MIN };
+  const only = { rule: "skip Duskwood", recorded: "2026-11-27T13:00Z", recordedAt: T0 + 60 * MIN };
+  const reviewer = new Reviewer({ xpWindows: 1 }, T0 + 100 * MIN);
+  const review = reviewer.review(play(T0, 120, 0, 100), [made, only], T0 + 120 * MIN);
+  expect(review.rules).toEqual([
+    'rule "skip Westfall" (set 2026-11-27T12:00Z) · since: 0 XP over 2.0 h, 0 quests, 0 deaths, 0 new places',
+    'rule "skip Duskwood" (recorded 2026-11-27T13:00Z) · since recorded: 0 XP over 1.0 h, 0 quests, 0 deaths, 0 new places',
+  ]);
+  expect(review.note).toBe(OLDER_THAN_RECORD);
+  const message = wakeMessage("checkin", [], "s", 20, [], review);
+  expect(message).toContain(`since recorded: 0 XP over 1.0 h, 0 quests, 0 deaths, 0 new places\n${OLDER_THAN_RECORD}\n\nSTALL:`);
+  // No stall: no note; no record-only rule: no note.
+  expect(new Reviewer({}, T0 + 100 * MIN).review(play(T0, 120, 0, 100), [only], T0 + 120 * MIN).note).toBeUndefined();
+  expect(new Reviewer({ xpWindows: 1 }, T0 + 100 * MIN).review(play(T0, 120, 0, 100), [made], T0 + 120 * MIN).note).toBeUndefined();
 });

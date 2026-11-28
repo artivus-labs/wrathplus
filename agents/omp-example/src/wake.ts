@@ -305,7 +305,7 @@ export function wakeMessage(
   const seen = reviewed
     ? `\n\nEvidence since the last check-in:\n${evidence.length ? evidence.map((l) => `- ${l}`).join("\n") : "- (nothing failed, and no fights ended)"}`
     : "";
-  const rules = reviewed && review.rules.length ? `\n\n${RULES_HEAD}\n${review.rules.map((l) => `- ${l}`).join("\n")}` : "";
+  const rules = reviewed && review.rules.length ? `\n\n${RULES_HEAD}\n${review.rules.map((l) => `- ${l}`).join("\n")}${review.note ? `\n${review.note}` : ""}` : "";
   const decision = reviewed && review.decision ? `\n\n${review.decision}` : "";
   const pass = reason === "reflect" && (rules || decision) ? "\n\nGive the reflector the rules and any stall above in its task." : "";
   return `[launcher ${new Date().toISOString()}] ${head[reason]}\n${status}${body}${seen}${rules}${decision}${pass}`;

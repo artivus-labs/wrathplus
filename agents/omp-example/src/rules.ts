@@ -8,7 +8,9 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   costFromSamples,
+  costStart,
   decisionRequest,
+  fromRecordOnly,
   type Rule,
   ruleLine,
   rulesInFolder,
@@ -26,7 +28,11 @@ export const KEEP =
 
 /** Said with a stall when no rule is recorded. */
 export const NO_RULES =
-  "You have no rules recorded: if one of your modules or notes holds a limit you set yourself (a zone you skip, a mob family you refuse, a quest you abandon), add a `-- rule: what | why: reason | set: YYYY-MM-DD HH:MM` line to its header comment (or a `rule:` line in notes/rules.md) so its cost is shown here.";
+  "You have no rules recorded: if one of your modules or notes holds a limit you set yourself (a zone you skip, a mob family you refuse, a quest you abandon), add a `-- rule: what | why: reason | set: YYYY-MM-DD HH:MM` line to its header comment (or a `rule:` line in notes/rules.md) so its cost is shown here; `set:` is when you made the rule, not today.";
+
+/** Under the rules at a stall, when a rule has `recorded:` but no `set:`. */
+export const OLDER_THAN_RECORD =
+  "\"since recorded\" counts from when you wrote the rule down. If you made it earlier, add `| set: <when you made it>` to its line.";
 
 /** Every rule: module headers under the modules folder, then notes/rules.md in the working dir. */
 export function readRules(modulesFolder: string | undefined, workDir: string): Rule[] {
@@ -40,6 +46,8 @@ export function readRules(modulesFolder: string | undefined, workDir: string): R
 /** What a check-in or reflection message adds: each rule with its cost, and a stall's decision. */
 export interface Review {
   rules: string[];
+  /** Under the rules at a stall: a rule whose cost counts only from its record. */
+  note?: string;
   decision?: string;
 }
 
@@ -72,9 +80,16 @@ export class Reviewer {
       quests: window?.quests ?? 0,
       counted: window !== undefined && minutes * 2 >= wallMinutes,
     });
-    const lines = rules.map((r) => ruleLine(r, r.setAt === undefined ? undefined : costFromSamples(samples, r.setAt, this.maxGapMs)));
+    const lines = rules.map((r) => {
+      const from = costStart(r);
+      return ruleLine(r, from === undefined ? undefined : costFromSamples(samples, from, this.maxGapMs));
+    });
     if (!stall) return { rules: lines };
     const decision = decisionRequest(stall, KEEP, rules.length, "check-ins");
-    return { rules: lines, decision: rules.length ? decision : `${decision} ${NO_RULES}` };
+    return {
+      rules: lines,
+      ...(rules.some(fromRecordOnly) ? { note: OLDER_THAN_RECORD } : {}),
+      decision: rules.length ? decision : `${decision} ${NO_RULES}`,
+    };
   }
 }

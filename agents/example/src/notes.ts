@@ -6,13 +6,14 @@
 //   <home>/MEMORY.md            free-form notes
 //   <home>/todo.json            [{ id, text, status: pending | in_progress | done, note? }]
 //   <home>/sessions/*.jsonl     one line per message: { at, session, kind, text }
-//   <home>/rules.json           rules it set itself: [{ id, rule, why, set_at, enforced_by?, kept?, dropped? }]
+//   <home>/rules.json           rules it set itself: [{ id, rule, why, set_at, since?, enforced_by?, kept?, dropped? }]
+//                               (set_at: when recorded; since: when the agent says it made it)
 
 import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
-import type { Rule } from "../../mcp/src/rules.ts";
+import { parseWhen, type Rule } from "../../mcp/src/rules.ts";
 
 export interface Todo {
   id: number;
@@ -27,8 +28,11 @@ export interface RuleRecord {
   id: number;
   rule: string;
   why: string;
-  /** ISO time it was set. */
+  /** ISO time it was recorded (rule_set was called). */
   set_at: string;
+  /** When the agent says it first made the rule, as it gave it (rule_set's `since`): its cost
+   *  counts from here. Absent on rules recorded as they were made, and on older records. */
+  since?: string;
   applies?: string;
   /** What carries it out: a module, a fact override, a note in MEMORY.md, a habit. */
   enforced_by?: string;
@@ -45,13 +49,14 @@ const minute = (iso: string) => `${iso.slice(0, 16).replace("T", " ")}Z`;
 
 /** A record as the shared rule shape (agents/mcp/src/rules.ts), for the reflection's cost lines. */
 export function sharedRule(r: RuleRecord): Rule {
-  const set = minute(r.set_at);
+  const sinceAt = parseWhen(r.since);
   return {
     id: String(r.id),
     rule: r.rule,
     why: r.why,
-    set,
-    ...(Number.isFinite(Date.parse(r.set_at)) ? { setAt: Date.parse(r.set_at) } : {}),
+    ...(r.since && sinceAt !== undefined ? { set: r.since, setAt: sinceAt } : {}),
+    recorded: minute(r.set_at),
+    ...(Number.isFinite(Date.parse(r.set_at)) ? { recordedAt: Date.parse(r.set_at) } : {}),
     ...(r.applies ? { applies: r.applies } : {}),
     ...(r.enforced_by ? { where: r.enforced_by } : {}),
     ...(r.kept ? { kept: { at: minute(r.kept.at), because: r.kept.because } } : {}),
@@ -124,9 +129,18 @@ export class Notes {
   }
 
   /** Record a rule (and drop the one it revises). */
-  setRule(input: { rule: string; why: string; applies?: string; enforced_by?: string; replaces?: number }, now = new Date()): RuleRecord | string {
+  setRule(
+    input: { rule: string; why: string; since?: string; applies?: string; enforced_by?: string; replaces?: number },
+    now = new Date(),
+  ): RuleRecord | string {
     const all = this.ruleRecords();
     const at = now.toISOString();
+    const since = input.since?.trim();
+    if (since) {
+      const sinceAt = parseWhen(since);
+      if (sinceAt === undefined) return `Not recorded: since "${since}" is not a date (YYYY-MM-DD, YYYY-MM-DD HH:MM, or an ISO time).`;
+      if (sinceAt > now.getTime() + 60_000) return `Not recorded: since ${since} is in the future; give when you first made the rule.`;
+    }
     if (input.replaces !== undefined) {
       const old = all.find((r) => r.id === input.replaces && !r.dropped);
       if (!old) return `No rule #${input.replaces} in force to revise (rules lists them).`;
@@ -137,6 +151,7 @@ export class Notes {
       rule: input.rule.trim(),
       why: input.why.trim(),
       set_at: at,
+      ...(since ? { since } : {}),
       ...(input.applies?.trim() ? { applies: input.applies.trim() } : {}),
       ...(input.enforced_by?.trim() ? { enforced_by: input.enforced_by.trim() } : {}),
       ...(input.replaces !== undefined ? { replaces: input.replaces } : {}),
@@ -174,7 +189,8 @@ export class Notes {
     return rules
       .map((r) => {
         const s = sharedRule(r);
-        return `#${r.id} ${r.rule} (set ${s.set}; why: ${r.why}${r.applies ? `; applies to ${r.applies}` : ""}${r.enforced_by ? `; in ${r.enforced_by}` : ""})${r.kept ? ` · kept ${minute(r.kept.at)} because ${r.kept.because}` : ""}`;
+        const when = s.set ? `set ${s.set}; recorded ${s.recorded}` : `recorded ${s.recorded}`;
+        return `#${r.id} ${r.rule} (${when}; why: ${r.why}${r.applies ? `; applies to ${r.applies}` : ""}${r.enforced_by ? `; in ${r.enforced_by}` : ""})${r.kept ? ` · kept ${minute(r.kept.at)} because ${r.kept.because}` : ""}`;
       })
       .join("\n");
   }
@@ -348,17 +364,18 @@ export function notesServer(notes: Notes) {
       ),
       tool(
         "rule_set",
-        "Record a rule you set yourself: a limit on your own play (a road or area you will not enter, a zone you skip, a mob you refuse, a quest you abandon, a fact you override, a hold you keep), with why and what carries it out (a module, a fact override, a MEMORY.md note). Every reflection lists your rules with what playing under each has cost since it was set. Revising a rule: give replaces (its id). A rule a module enforces can instead be a header line in that module: `-- rule: what | why: reason | set: YYYY-MM-DD HH:MM` (the why or set field is required there).",
+        "Record a rule you set yourself: a limit on your own play (a road or area you will not enter, a zone you skip, a mob you refuse, a quest you abandon, a fact you override, a hold you keep), with why and what carries it out (a module, a fact override, a MEMORY.md note). Every reflection lists your rules with what playing under each has cost since it was set. Recording a rule you made earlier (it is in your notes or memory): give since, when you first made it (YYYY-MM-DD or YYYY-MM-DD HH:MM, your local time), so its cost counts from then and not from now. Revising a rule: give replaces (its id). A rule a module enforces can instead be a header line in that module: `-- rule: what | why: reason | set: YYYY-MM-DD HH:MM` (the why or set field is required there).",
         {
           rule: z.string().min(1),
           why: z.string().min(1),
+          since: z.string().optional(),
           applies: z.string().optional(),
           enforced_by: z.string().optional(),
           replaces: z.number().int().optional(),
         },
         async (input) => {
           const r = notes.setRule(input);
-          return text(typeof r === "string" ? r : `Rule #${r.id} recorded: ${r.rule}.`);
+          return text(typeof r === "string" ? r : `Rule #${r.id} recorded: ${r.rule}${r.since ? ` (made ${r.since})` : ""}.`);
         },
       ),
       tool(

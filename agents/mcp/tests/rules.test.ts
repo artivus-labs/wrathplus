@@ -3,8 +3,10 @@ import { mkdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   costFromSamples,
+  costStart,
   costText,
   decisionRequest,
+  fromRecordOnly,
   latestSamplesFile,
   parseRuleLine,
   parseWhen,
@@ -45,8 +47,26 @@ describe("rule lines", () => {
     expect(parseWhen("2026-11-26 14:10 UTC")).toBe(Date.UTC(2026, 10, 26, 14, 10));
     expect(parseWhen("2026-11-26 9:05")).toBe(new Date(2026, 10, 26, 9, 5).getTime());
     expect(parseWhen("2026-11-26")).toBe(new Date(2026, 10, 26).getTime());
+    // Full ISO times (what rules.json keeps), with seconds, fractions and offsets.
+    expect(parseWhen("2026-11-28T01:22:10.223Z")).toBe(Date.UTC(2026, 10, 28, 1, 22, 10, 223));
+    expect(parseWhen("2026-11-25T19:00:00+10:00")).toBe(Date.UTC(2026, 10, 25, 9));
+    expect(parseWhen("2026-11-25 19:00 +1000")).toBe(Date.UTC(2026, 10, 25, 9));
     expect(parseWhen("last Tuesday")).toBeUndefined();
+    expect(parseWhen("Nov 25")).toBeUndefined();
     expect(parseWhen(undefined)).toBeUndefined();
+  });
+
+  test("set: is when the rule was made; recorded: when it was written", () => {
+    const both = parseRuleLine("rule: no walk south of y -1000 | why: 2 deaths (Nov 25) | set: 2026-11-25 19:00Z | recorded: 2026-11-28 01:22Z")!;
+    expect(both).toMatchObject({ set: "2026-11-25 19:00Z", recorded: "2026-11-28 01:22Z", recordedAt: Date.UTC(2026, 10, 28, 1, 22) });
+    expect(costStart(both)).toBe(Date.UTC(2026, 10, 25, 19));
+    expect(fromRecordOnly(both)).toBe(false);
+    const recorded = parseRuleLine("rule: x | recorded: 2026-11-28 01:22Z")!;
+    expect(costStart(recorded)).toBe(Date.UTC(2026, 10, 28, 1, 22));
+    expect(fromRecordOnly(recorded)).toBe(true);
+    expect(costStart({ rule: "x" })).toBeUndefined();
+    // A `recorded:` field marks a module header line as the agent's own, as `why:` and `set:` do.
+    expect(rulesInModule("-- rule: skip Redridge | recorded: 2026-11-28\n", "zone.exclude")).toHaveLength(1);
   });
 
   test("only the header comment of a module is read; notes are read throughout", () => {
@@ -87,12 +107,31 @@ describe("cost", () => {
     expect(costFromSamples(samples, t0 + 10 * HOUR, 3 * HOUR)).toBeUndefined();
   });
 
+  test("the cost window starts when the rule was made, not when it was recorded", () => {
+    const made = Date.UTC(2026, 10, 25, 19);
+    // Five hours under the rule before it was written down, one after: all 0 XP.
+    const samples = [sample(made - HOUR, { xp: 0 }), ...[0, 1, 2, 3, 4, 5, 6].map((i) => sample(made + i * HOUR, { xp: 500 }))];
+    const rule = parseRuleLine(`rule: x | set: 2026-11-25 19:00Z | recorded: 2026-11-26 00:00Z`)!;
+    expect(costFromSamples(samples, costStart(rule)!, 2 * HOUR)).toMatchObject({ hours: 6, xp: 0 });
+    expect(costFromSamples(samples, rule.recordedAt!, 2 * HOUR)).toMatchObject({ hours: 1, xp: 0 });
+  });
+
   test("a rule's line: what, when, why, where, and what it cost since", () => {
     const rule = parseRuleLine("rule: no walk south of y -1000 | why: 2 deaths on the Rockjaw road | set: 2026-11-26 14:10Z", "MEMORY.md")!;
     expect(ruleLine(rule, { hours: 9, xp: 0, quests: 0, deaths: 0 })).toBe(
       'rule "no walk south of y -1000" (set 2026-11-26 14:10Z; why: 2 deaths on the Rockjaw road; in MEMORY.md) · since: 0 XP over 9.0 h, 0 quests, 0 deaths',
     );
     expect(ruleLine({ rule: "x" }, undefined)).toBe('rule "x" · since: not known (no set date)');
+    // Known only from its record: the line says the cost counts from there.
+    const recorded = { rule: "no walk south of y -1000", recorded: "2026-11-28 01:22Z", recordedAt: 1 };
+    expect(ruleLine(recorded, { hours: 6.6, xp: 0, quests: 0, deaths: 0 })).toBe(
+      'rule "no walk south of y -1000" (recorded 2026-11-28 01:22Z) · since recorded: 0 XP over 6.6 h, 0 quests, 0 deaths',
+    );
+    expect(ruleLine(recorded, undefined)).toBe('rule "no walk south of y -1000" (recorded 2026-11-28 01:22Z) · since recorded: no measurements');
+    // With when it was made, that is what is shown and counted from.
+    expect(ruleLine({ ...recorded, set: "2026-11-25 19:00Z", setAt: 0 }, { hours: 61, xp: 0, quests: 0, deaths: 0 })).toBe(
+      'rule "no walk south of y -1000" (set 2026-11-25 19:00Z) · since: 0 XP over 61.0 h, 0 quests, 0 deaths',
+    );
     expect(ruleLine({ ...rule, id: "2", kept: { at: "11-28", because: "the road kills" } }, undefined)).toContain(
       '#2 rule "no walk south of y -1000"',
     );
